@@ -1,8 +1,8 @@
-#![doc = include_str!("loop_waker.doc/_module.md")]
+//! Waking a UI loop from a thread that is not running it.
 
-#[doc = include_str!("loop_waker.doc/LoopWaker.md")]
+#[doc = include_str!("../../docs/api/port/loop_waker.doc/LoopWaker.md")]
 pub trait LoopWaker: Send + Sync {
-    #[doc = include_str!("loop_waker.doc/wake.md")]
+    #[doc = include_str!("../../docs/api/port/loop_waker.doc/wake.md")]
     fn wake(&self);
 }
 

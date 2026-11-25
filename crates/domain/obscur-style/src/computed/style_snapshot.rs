@@ -1,10 +1,10 @@
-#![doc = include_str!("style_snapshot.doc/_module.md")]
+#![doc = include_str!("../../docs/api/computed/style_snapshot.doc/_module.md")]
 
 use crate::computed::{ComputedStyle, ComputedValue};
 use crate::property::PropertyId;
 use obscur_identity::VersionStamp;
 
-#[doc = include_str!("style_snapshot.doc/StyleSnapshot.md")]
+#[doc = include_str!("../../docs/api/computed/style_snapshot.doc/StyleSnapshot.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct StyleSnapshot {
     style: ComputedStyle,
@@ -12,25 +12,26 @@ pub struct StyleSnapshot {
 }
 
 impl StyleSnapshot {
-    #[doc = include_str!("style_snapshot.doc/new.md")]
+    /// Creates a snapshot of `style` stamped with `version`.
     #[must_use]
     pub fn new(style: ComputedStyle, version: VersionStamp) -> Self {
         Self { style, version }
     }
 
-    #[doc = include_str!("style_snapshot.doc/style.md")]
+    /// Returns the snapshotted computed style.
     #[must_use]
     pub fn style(&self) -> &ComputedStyle {
         &self.style
     }
 
-    #[doc = include_str!("style_snapshot.doc/version.md")]
+    /// Returns the version stamp this snapshot was produced at.
     #[must_use]
     pub fn version(&self) -> VersionStamp {
         self.version
     }
 
-    #[doc = include_str!("style_snapshot.doc/get.md")]
+    /// Returns the computed value for `property`, delegating to the wrapped
+    /// [`ComputedStyle`].
     #[must_use]
     pub fn get(&self, property: PropertyId) -> Option<&ComputedValue> {
         self.style.get(property)

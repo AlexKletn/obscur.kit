@@ -1,45 +1,45 @@
-#![doc = include_str!("selector_specificity.doc/_module.md")]
+//! CSS selector specificity: the ordered `(a, b, c)` triple.
 
-#[doc = include_str!("selector_specificity.doc/SelectorSpecificity.md")]
+#[doc = include_str!("../../docs/api/selector/selector_specificity.doc/SelectorSpecificity.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SelectorSpecificity {
-    #[doc = include_str!("selector_specificity.doc/a.md")]
+    /// Number of ID selectors (most significant component).
     a: u16,
-    #[doc = include_str!("selector_specificity.doc/b.md")]
+    /// Number of class / attribute / pseudo-class selectors.
     b: u16,
-    #[doc = include_str!("selector_specificity.doc/c.md")]
+    /// Number of type / pseudo-element selectors (least significant component).
     c: u16,
 }
 
 impl SelectorSpecificity {
-    #[doc = include_str!("selector_specificity.doc/ZERO.md")]
+    #[doc = include_str!("../../docs/api/selector/selector_specificity.doc/ZERO.md")]
     pub const ZERO: Self = Self { a: 0, b: 0, c: 0 };
 
-    #[doc = include_str!("selector_specificity.doc/new.md")]
+    /// Creates a specificity from its three components `(a, b, c)`.
     #[must_use]
     pub const fn new(a: u16, b: u16, c: u16) -> Self {
         Self { a, b, c }
     }
 
-    #[doc = include_str!("selector_specificity.doc/a_2.md")]
+    /// Returns the `a` component: the number of ID selectors.
     #[must_use]
     pub const fn a(self) -> u16 {
         self.a
     }
 
-    #[doc = include_str!("selector_specificity.doc/b_2.md")]
+    /// Returns the `b` component: class / attribute / pseudo-class count.
     #[must_use]
     pub const fn b(self) -> u16 {
         self.b
     }
 
-    #[doc = include_str!("selector_specificity.doc/c_2.md")]
+    /// Returns the `c` component: type / pseudo-element count.
     #[must_use]
     pub const fn c(self) -> u16 {
         self.c
     }
 
-    #[doc = include_str!("selector_specificity.doc/add.md")]
+    #[doc = include_str!("../../docs/api/selector/selector_specificity.doc/add.md")]
     #[must_use]
     pub const fn add(self, other: Self) -> Self {
         Self {

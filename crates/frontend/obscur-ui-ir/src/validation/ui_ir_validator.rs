@@ -1,20 +1,21 @@
-#![doc = include_str!("ui_ir_validator.doc/_module.md")]
+//! `UiIrValidator`: checks a UI IR document for structural well-formedness
+//! (spec §2.5 validation).
 
 use crate::document::{UiIrDocument, UiIrExpression, UiIrNode, UiIrNodeKind};
 use crate::validation::{UiIrValidationError, UiIrValidationResult, ValidationContext};
 
-#[doc = include_str!("ui_ir_validator.doc/UiIrValidator.md")]
+#[doc = include_str!("../../docs/api/validation/ui_ir_validator.doc/UiIrValidator.md")]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct UiIrValidator;
 
 impl UiIrValidator {
-    #[doc = include_str!("ui_ir_validator.doc/new.md")]
+    /// Creates a validator.
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    #[doc = include_str!("ui_ir_validator.doc/validate.md")]
+    /// Validates `doc`, returning the accumulated [`UiIrValidationResult`].
     #[must_use]
     pub fn validate(&self, doc: &UiIrDocument) -> UiIrValidationResult {
         let mut result = UiIrValidationResult::new();
@@ -30,7 +31,7 @@ impl UiIrValidator {
         result
     }
 
-    #[doc = include_str!("ui_ir_validator.doc/validate_node.md")]
+    /// Recursively checks `node` and its subtree, recording faults on `result`.
     fn validate_node(
         &self,
         node: &UiIrNode,

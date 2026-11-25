@@ -1,33 +1,13 @@
-#![doc = include_str!("layout_observer.doc/_module.md")]
+#![doc = include_str!("../../docs/api/observer/layout_observer.doc/_module.md")]
 
 use obscur_identity::NodeId;
 
 use crate::model::LayoutBox;
 
-#[doc = include_str!("layout_observer.doc/LayoutChange.md")]
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct LayoutChange {
-    #[doc = include_str!("layout_observer.doc/node.md")]
-    pub node: NodeId,
-    #[doc = include_str!("layout_observer.doc/previous.md")]
-    pub previous: Option<LayoutBox>,
-    #[doc = include_str!("layout_observer.doc/current.md")]
-    pub current: LayoutBox,
-}
+use super::LayoutChange;
 
-impl LayoutChange {
-    #[doc = include_str!("layout_observer.doc/new.md")]
-    #[must_use]
-    pub const fn new(node: NodeId, previous: Option<LayoutBox>, current: LayoutBox) -> Self {
-        Self {
-            node,
-            previous,
-            current,
-        }
-    }
-}
-
-#[doc = include_str!("layout_observer.doc/LayoutObserver.md")]
+/// Watches one node's full layout [`LayoutBox`] — position *and* size — and
+/// fires on any change (spec §4.4).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LayoutObserver {
     node: NodeId,
@@ -35,25 +15,26 @@ pub struct LayoutObserver {
 }
 
 impl LayoutObserver {
-    #[doc = include_str!("layout_observer.doc/new_2.md")]
+    /// Creates an observer for `node`. It has not yet observed any box, so the
+    /// first [`observe`](Self::observe) fires with the initial value.
     #[must_use]
     pub const fn new(node: NodeId) -> Self {
         Self { node, last: None }
     }
 
-    #[doc = include_str!("layout_observer.doc/node_2.md")]
+    /// The observed node.
     #[must_use]
     pub const fn node(self) -> NodeId {
         self.node
     }
 
-    #[doc = include_str!("layout_observer.doc/last.md")]
+    /// The last observed box, or `None` before the first observation.
     #[must_use]
     pub const fn last(self) -> Option<LayoutBox> {
         self.last
     }
 
-    #[doc = include_str!("layout_observer.doc/observe.md")]
+    #[doc = include_str!("../../docs/api/observer/layout_observer.doc/observe.md")]
     #[must_use]
     pub fn observe(&mut self, current: LayoutBox) -> Option<LayoutChange> {
         if self.last == Some(current) {
@@ -64,7 +45,7 @@ impl LayoutObserver {
         Some(LayoutChange::new(self.node, previous, current))
     }
 
-    #[doc = include_str!("layout_observer.doc/reset.md")]
+    /// Forgets the last observed box, so the next observation fires afresh.
     pub const fn reset(&mut self) {
         self.last = None;
     }

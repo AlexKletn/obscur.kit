@@ -1,23 +1,41 @@
-#![doc = include_str!("pointer_dispatch.doc/_module.md")]
+#![doc = include_str!("../../../docs/api/runtime/ui_runtime/pointer_dispatch.doc/_module.md")]
 
 use obscur_geometry::Point;
 use obscur_identity::{InternedSymbol, NodeId};
 use obscur_interaction::event::UiEvent;
 use obscur_interaction::hover::HoverTransition;
-use obscur_interaction::pointer::{PointerButton, PointerEvent, PointerEventKind};
+use obscur_interaction::pointer::{
+    PointerButton, PointerButtons, PointerEvent, PointerEventKind, PointerId,
+};
 use obscur_view::view::{EVENT_CONTEXT_MENU, EVENT_POINTER_ENTER, EVENT_POINTER_LEAVE};
 
 use crate::frame::FrameReason;
 use crate::runtime::{
-    CommandDispatch, EditableField, HoverUpdate, PointerCompletion, PointerDispatch,
-    PointerEventBindings, PointerLandingResolver, PointerRelease, StructuralStates,
+    CommandDispatch, HoverUpdate, PointerCompletion, PointerDispatch, PointerEventBindings,
+    PointerLandingResolver, PointerRelease, StructuralStates,
 };
 
 use super::UiRuntime;
 
 impl UiRuntime {
-    #[doc = include_str!("pointer_dispatch.doc/handle_pointer.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/pointer_dispatch.doc/handle_pointer.md")]
     pub fn handle_pointer(&mut self, mut event: PointerEvent) -> PointerDispatch {
+        if event.pointer() == PointerId::MOUSE {
+            self.pointers.mouse_buttons = if event.kind() == PointerEventKind::Cancel {
+                PointerButtons::new()
+            } else {
+                event.buttons()
+            };
+        }
+        self.hover_correction_pending = false;
+        self.hover_pointer = (event.device().hovers_by_default()
+            && !matches!(
+                event.kind(),
+                PointerEventKind::Leave | PointerEventKind::Cancel
+            )
+            && event.position.x.is_finite()
+            && event.position.y.is_finite())
+        .then_some((event.pointer(), event.position));
         // 0–1. Where the event landed: the host's physical position mapped to
         //      content space, folded through the scroll containers it lies within,
         //      and resolved to a target through capture-else-hit-test. All three
@@ -38,6 +56,50 @@ impl UiRuntime {
         event.position = landing.folded;
         let mut target = landing.target;
 
+        if let Some(drag) = self.scrollbar_drags.get(&event.pointer()).copied() {
+            if self.pointers.capture_target(event.pointer()) == Some(drag.node)
+                && self.tree.contains(drag.node)
+            {
+                let prevented = self.dispatch_raw_pointer(&event, Some(drag.node));
+                if self.pointers.capture_target(event.pointer()) != Some(drag.node)
+                    || self.drag.is_active()
+                {
+                    self.finish_scrollbar_drag(event.pointer());
+                } else if event.kind() != PointerEventKind::Up
+                    || (engages_controls(&event)
+                        && !(event.button().is_none()
+                            && event.buttons().contains(PointerButton::Primary)))
+                {
+                    self.move_scrollbar_drag(&event, screen_point, drag, prevented);
+                }
+                return PointerDispatch::new(
+                    Some(drag.node),
+                    false,
+                    false,
+                    None,
+                    None,
+                    event.trust(),
+                )
+                .with_default_prevented(prevented);
+            }
+            self.finish_scrollbar_drag(event.pointer());
+        }
+        let thumb = if event.kind() == PointerEventKind::Down
+            && engages_controls(&event)
+            && (event.button().is_some()
+                || event.buttons().is_empty()
+                || event.buttons().contains(PointerButton::Primary))
+            && !self.drag.is_active()
+            && self.pointers.capture_target(event.pointer()).is_none()
+        {
+            target.and_then(|target| self.horizontal_thumb_at(target, screen_point))
+        } else {
+            None
+        };
+        if let Some(thumb) = thumb {
+            target = Some(thumb.node);
+        }
+
         // 1b. Pan: a begun drag scrolls its container one-to-one with the finger
         //     and takes the sequence away from the click and the drag-selection
         //     that would otherwise be reading the same moves.
@@ -55,7 +117,10 @@ impl UiRuntime {
         if event.kind() == PointerEventKind::Move {
             self.pointers.hold_moved(event.pointer(), screen_point);
         }
-        let panning = self.update_pan(&event, screen_point, &mut press_changed);
+        let mut candidate = event;
+        candidate.position = screen_point;
+        let gesture_claimed = self.update_touch_gesture(candidate, target, &mut press_changed);
+        let panning = !gesture_claimed && self.update_pan(&event, screen_point, &mut press_changed);
         if panning && let Some(captor) = self.pointers.capture_target(event.pointer()) {
             target = Some(captor);
         }
@@ -116,7 +181,27 @@ impl UiRuntime {
         //     menu*, and an application that draws one wants to hear the right
         //     click either way.
         let menu_prevented = self.dispatch_context_menu(&event, target);
-        let prevented = raw_prevented || menu_prevented;
+        let prevented = gesture_claimed || raw_prevented || menu_prevented;
+
+        if let Some(thumb) = thumb
+            && !prevented
+            && self.tree.contains(thumb.node)
+            && self.pointers.capture_target(event.pointer()).is_none()
+        {
+            self.begin_scrollbar_drag(event.pointer(), thumb);
+            if hover_changed {
+                self.recompute_pseudo_states();
+                self.request_frame(FrameReason::Input);
+            }
+            return PointerDispatch::new(
+                Some(thumb.node),
+                hover_changed,
+                false,
+                None,
+                None,
+                event.trust(),
+            );
+        }
 
         // 3. Focus: only a press moves focus. A press also anchors click
         //    detection on the pressed node.
@@ -166,8 +251,16 @@ impl UiRuntime {
         //    dragging the list, not sweeping over text.
         //    A refused `pointermove` is not one either — that is the default
         //    action a `pointermove` listener has to refuse.
-        if event.kind() == PointerEventKind::Move && !panning && !prevented {
-            self.update_text_drag(event.position());
+        if event.kind() == PointerEventKind::Move {
+            self.selection_scroll_point = None;
+            if !panning
+                && !prevented
+                && !self.drag.is_active()
+                && self.pointers.text_drag().is_some()
+            {
+                self.update_text_drag(event.position());
+                self.arm_selection_autoscroll(screen_point);
+            }
         }
 
         // 3a-dnd. A data drag ([`begin_drag`]) consumes pointer input while it is
@@ -178,7 +271,9 @@ impl UiRuntime {
         //    alongside. Hover and focus are equally suppressed: mid-drag, the
         //    pointer is carrying something, not pointing at things.
         if self.drag.is_active() {
-            return self.drag_in_flight(&event, target);
+            return self
+                .drag_in_flight(&event, screen_point, target)
+                .with_default_prevented(raw_prevented || menu_prevented);
         }
 
         // 3b. Click: a release on the *same* node the press landed on is a click
@@ -235,9 +330,10 @@ impl UiRuntime {
             current_target,
             event.trust(),
         )
+        .with_default_prevented(raw_prevented || menu_prevented)
     }
 
-    #[doc = include_str!("pointer_dispatch.doc/press_landed.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/pointer_dispatch.doc/press_landed.md")]
     fn press_landed(
         &mut self,
         event: &PointerEvent,
@@ -321,7 +417,7 @@ impl UiRuntime {
         focus_changed
     }
 
-    #[doc = include_str!("pointer_dispatch.doc/dispatch_context_menu.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/pointer_dispatch.doc/dispatch_context_menu.md")]
     fn dispatch_context_menu(&mut self, event: &PointerEvent, target: Option<NodeId>) -> bool {
         if event.kind() != PointerEventKind::Down
             || event.button() != Some(PointerButton::Secondary)
@@ -342,7 +438,7 @@ impl UiRuntime {
             .default_prevented
     }
 
-    #[doc = include_str!("pointer_dispatch.doc/dispatch_raw_pointer.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/pointer_dispatch.doc/dispatch_raw_pointer.md")]
     fn dispatch_raw_pointer(&mut self, event: &PointerEvent, target: Option<NodeId>) -> bool {
         // The crossing KINDS are dispatched under no name here. `pointerenter` /
         // `pointerleave` describe a node the hover chain crossed, not a kind of
@@ -374,7 +470,7 @@ impl UiRuntime {
             .default_prevented
     }
 
-    #[doc = include_str!("pointer_dispatch.doc/dispatch_hover_crossings.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/pointer_dispatch.doc/dispatch_hover_crossings.md")]
     fn dispatch_hover_crossings(&mut self, event: &PointerEvent, crossed: &HoverTransition) {
         // Cost, and the same gate `dispatch_raw_pointer` uses. A crossing is
         // already rarer than a move — the lists below are empty unless the chain
@@ -406,7 +502,7 @@ impl UiRuntime {
         }
     }
 
-    #[doc = include_str!("pointer_dispatch.doc/dispatch_crossing.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/pointer_dispatch.doc/dispatch_crossing.md")]
     fn dispatch_crossing(&mut self, node: NodeId, name: InternedSymbol, event: &PointerEvent) {
         // The node's OWN binding, with no ancestor walk — unlike every other
         // event here. The crossing set is already the whole chain, so resolving
@@ -424,15 +520,22 @@ impl UiRuntime {
         self.dispatch_command_outcome(Some(node), command, UiEvent::from_pointer(*event));
     }
 
-    #[doc = include_str!("pointer_dispatch.doc/drag_in_flight.md")]
-    fn drag_in_flight(&mut self, event: &PointerEvent, target: Option<NodeId>) -> PointerDispatch {
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/pointer_dispatch.doc/drag_in_flight.md")]
+    fn drag_in_flight(
+        &mut self,
+        event: &PointerEvent,
+        screen_point: Point,
+        target: Option<NodeId>,
+    ) -> PointerDispatch {
         match event.kind() {
             PointerEventKind::Move => {
+                self.arm_drag_autoscroll(screen_point);
                 if self.drag.pointer_moved(event.position(), target) {
                     self.request_frame(FrameReason::Input);
                 }
             }
             PointerEventKind::Up => {
+                self.drag_scroll_point = None;
                 // The release carries a position, and it is the one that
                 // decides where the payload landed — a pointer that moves and
                 // lets go inside one event must still drop on what it is over.
@@ -440,6 +543,7 @@ impl UiRuntime {
                 self.finish_drag();
             }
             PointerEventKind::Cancel | PointerEventKind::Leave => {
+                self.drag_scroll_point = None;
                 if self.drag.cancel() {
                     self.request_frame(FrameReason::Input);
                 }
@@ -449,7 +553,7 @@ impl UiRuntime {
         PointerDispatch::new(target, false, false, None, None, event.trust())
     }
 
-    #[doc = include_str!("pointer_dispatch.doc/release_landed.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/pointer_dispatch.doc/release_landed.md")]
     fn release_landed(
         &mut self,
         event: &PointerEvent,
@@ -465,18 +569,12 @@ impl UiRuntime {
         // [`PointerRelease`]'s. It consumes the press either way.
         let release = PointerRelease::take(&mut self.pointers, event, target);
         if let Some(pressed) = release.clicked().filter(|_| !prevented) {
-            if let Some((bound, resolved)) = CommandDispatch::activation_command_for(
-                &self.tree,
-                pressed,
-                EditableField::editable_ancestor(&self.tree, pressed).is_some(),
-            ) {
+            if let Some((bound, resolved, _)) =
+                self.dispatch_activation(pressed, UiEvent::from_pointer(*event))
+            {
                 command = Some(resolved);
                 current_target = Some(bound);
             }
-            // The activating event travels with the command: §2.4's payload
-            // (pointer id, device, buttons, position, pressure) and §2.3's
-            // trust reach the handler because this envelope carries them.
-            self.activate(pressed, UiEvent::from_pointer(*event));
             // A click on a virtualized row: resolve it to the model index and run
             // the list's row-click handler. This is independent of command
             // activation — the row carries no per-row binding, since one symbol
@@ -505,7 +603,7 @@ impl UiRuntime {
         (command, current_target)
     }
 
-    #[doc = include_str!("pointer_dispatch.doc/cancel_landed.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/pointer_dispatch.doc/cancel_landed.md")]
     fn cancel_landed(&mut self, event: &PointerEvent) -> bool {
         // The press is discarded *without* a click: an interrupted gesture must
         // not activate the control the pointer was resting on, which is the one
@@ -525,7 +623,7 @@ impl UiRuntime {
     }
 }
 
-#[doc = include_str!("pointer_dispatch.doc/engages_controls.md")]
+#[doc = include_str!("../../../docs/api/runtime/ui_runtime/pointer_dispatch.doc/engages_controls.md")]
 const fn engages_controls(event: &PointerEvent) -> bool {
     matches!(event.button(), None | Some(PointerButton::Primary))
 }

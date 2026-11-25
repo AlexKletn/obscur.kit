@@ -1,18 +1,18 @@
-#![doc = include_str!("linux_shell_provider.doc/_module.md")]
+#![doc = include_str!("../../docs/api/provider/linux_shell_provider.doc/_module.md")]
 
 use std::process::Command;
 
 use obscur_system::shell::{ShellProvider, ShellResult, ShellTarget};
 
-#[doc = include_str!("linux_shell_provider.doc/LinuxShellProvider.md")]
+#[doc = include_str!("../../docs/api/provider/linux_shell_provider.doc/LinuxShellProvider.md")]
 #[derive(Debug, Clone)]
 pub struct LinuxShellProvider {
-    #[doc = include_str!("linux_shell_provider.doc/opener.md")]
+    /// The opener executable to invoke, e.g. `"xdg-open"`.
     opener: Box<str>,
 }
 
 impl LinuxShellProvider {
-    #[doc = include_str!("linux_shell_provider.doc/new.md")]
+    /// Creates a provider that opens targets with `xdg-open` (spec §6.11).
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -20,7 +20,8 @@ impl LinuxShellProvider {
         }
     }
 
-    #[doc = include_str!("linux_shell_provider.doc/with_opener.md")]
+    /// Creates a provider that opens targets with a custom `opener` command
+    /// (spec §6.11).
     #[must_use]
     pub fn with_opener(opener: impl Into<Box<str>>) -> Self {
         Self {
@@ -28,7 +29,7 @@ impl LinuxShellProvider {
         }
     }
 
-    #[doc = include_str!("linux_shell_provider.doc/opener_2.md")]
+    /// Returns the opener command this provider invokes (spec §6.11).
     #[must_use]
     pub fn opener(&self) -> &str {
         &self.opener
@@ -36,7 +37,7 @@ impl LinuxShellProvider {
 }
 
 impl Default for LinuxShellProvider {
-    #[doc = include_str!("linux_shell_provider.doc/default.md")]
+    /// The default provider opens targets with `xdg-open`.
     fn default() -> Self {
         Self::new()
     }
@@ -65,7 +66,7 @@ impl ShellProvider for LinuxShellProvider {
     }
 }
 
-#[doc = include_str!("linux_shell_provider.doc/target_arg.md")]
+#[doc = include_str!("../../docs/api/provider/linux_shell_provider.doc/target_arg.md")]
 fn target_arg(target: &ShellTarget) -> String {
     match target {
         ShellTarget::Uri(uri) => uri.to_string(),
@@ -77,7 +78,7 @@ fn target_arg(target: &ShellTarget) -> String {
     }
 }
 
-#[doc = include_str!("linux_shell_provider.doc/tool_available.md")]
+#[doc = include_str!("../../docs/api/provider/linux_shell_provider.doc/tool_available.md")]
 fn tool_available(cmd: &str) -> bool {
     let Some(path) = std::env::var_os("PATH") else {
         return false;

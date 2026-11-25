@@ -1,21 +1,21 @@
-#![doc = include_str!("transition_track.doc/_module.md")]
+//! The [`TransitionTrack`] single from→to eased track (spec §4.17).
 
 use crate::track::{Easing, MotionTrack};
 use crate::value::MotionValue;
 
-#[doc = include_str!("transition_track.doc/TransitionTrack.md")]
+#[doc = include_str!("../../docs/api/track/transition_track.doc/TransitionTrack.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TransitionTrack {
-    #[doc = include_str!("transition_track.doc/from.md")]
+    /// The value at `t == 0`.
     from: MotionValue,
-    #[doc = include_str!("transition_track.doc/to.md")]
+    /// The value at `t == 1`.
     to: MotionValue,
-    #[doc = include_str!("transition_track.doc/easing.md")]
+    /// The easing curve applied to progress before interpolating.
     easing: Easing,
 }
 
 impl TransitionTrack {
-    #[doc = include_str!("transition_track.doc/new.md")]
+    /// Creates a transition from `from` to `to` with [`Easing::Linear`].
     #[must_use]
     pub const fn new(from: MotionValue, to: MotionValue) -> Self {
         Self {
@@ -25,26 +25,26 @@ impl TransitionTrack {
         }
     }
 
-    #[doc = include_str!("transition_track.doc/with_easing.md")]
+    /// Returns this transition with `easing` applied (fluent setter).
     #[must_use]
     pub const fn with_easing(mut self, easing: Easing) -> Self {
         self.easing = easing;
         self
     }
 
-    #[doc = include_str!("transition_track.doc/from_2.md")]
+    /// Returns the start (`t == 0`) value.
     #[must_use]
     pub const fn from(&self) -> MotionValue {
         self.from
     }
 
-    #[doc = include_str!("transition_track.doc/to_2.md")]
+    /// Returns the end (`t == 1`) value.
     #[must_use]
     pub const fn to(&self) -> MotionValue {
         self.to
     }
 
-    #[doc = include_str!("transition_track.doc/easing_2.md")]
+    /// Returns the easing curve applied before interpolation.
     #[must_use]
     pub const fn easing(&self) -> Easing {
         self.easing
@@ -52,7 +52,7 @@ impl TransitionTrack {
 }
 
 impl MotionTrack for TransitionTrack {
-    #[doc = include_str!("transition_track.doc/sample.md")]
+    #[doc = include_str!("../../docs/api/track/transition_track.doc/sample.md")]
     fn sample(&self, t: f32) -> MotionValue {
         self.from
             .interpolate_checked(&self.to, self.easing.apply(t))

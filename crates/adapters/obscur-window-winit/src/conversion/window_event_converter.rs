@@ -1,20 +1,21 @@
-#![doc = include_str!("window_event_converter.doc/_module.md")]
+//! The [`WindowEventConverter`] pure winit→domain window-event converter
+//! (spec §6.1 windowing; §2.7 "преобразует native events в доменные события").
 
 use obscur_geometry::{Point, ScaleFactor, Size};
 use obscur_windowing::window::WindowEvent;
 
-#[doc = include_str!("window_event_converter.doc/WindowEventConverter.md")]
+#[doc = include_str!("../../docs/api/conversion/window_event_converter.doc/WindowEventConverter.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct WindowEventConverter;
 
 impl WindowEventConverter {
-    #[doc = include_str!("window_event_converter.doc/new.md")]
+    /// Creates a converter.
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    #[doc = include_str!("window_event_converter.doc/convert.md")]
+    #[doc = include_str!("../../docs/api/conversion/window_event_converter.doc/convert.md")]
     #[must_use]
     #[allow(clippy::cast_precision_loss, clippy::cast_possible_truncation)]
     pub fn convert(&self, event: &winit::event::WindowEvent) -> Option<WindowEvent> {

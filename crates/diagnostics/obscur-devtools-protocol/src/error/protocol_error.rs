@@ -1,31 +1,31 @@
-#![doc = include_str!("protocol_error.doc/_module.md")]
+//! `ProtocolError`: typed protocol-level failures (spec §7.7).
 
 use core::fmt;
 
 use crate::message::PermissionScope;
 
-#[doc = include_str!("protocol_error.doc/ProtocolError.md")]
+#[doc = include_str!("../../docs/api/error/protocol_error.doc/ProtocolError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProtocolError {
-    #[doc = include_str!("protocol_error.doc/VersionUnsupported.md")]
+    /// No mutually supported protocol version could be negotiated.
     VersionUnsupported,
-    #[doc = include_str!("protocol_error.doc/Unauthorized.md")]
+    /// The endpoint lacks the scope required for the attempted operation.
     Unauthorized {
-        #[doc = include_str!("protocol_error.doc/required.md")]
+        /// The scope that would have been required.
         required: PermissionScope,
     },
-    #[doc = include_str!("protocol_error.doc/LimitExceeded.md")]
+    /// A message, subscription, or rate limit was exceeded.
     LimitExceeded {
-        #[doc = include_str!("protocol_error.doc/limit.md")]
+        /// The limit value that was exceeded.
         limit: usize,
     },
-    #[doc = include_str!("protocol_error.doc/UnknownCommand.md")]
+    /// The command referenced an unknown/unsupported operation.
     UnknownCommand,
-    #[doc = include_str!("protocol_error.doc/MalformedMessage.md")]
+    /// A message could not be decoded into a well-formed command.
     MalformedMessage,
-    #[doc = include_str!("protocol_error.doc/ControlDisabled.md")]
+    /// Control operations are disabled in this (production) build (spec §7.7).
     ControlDisabled,
-    #[doc = include_str!("protocol_error.doc/InjectionUnavailable.md")]
+    #[doc = include_str!("../../docs/api/error/protocol_error.doc/InjectionUnavailable.md")]
     InjectionUnavailable,
 }
 

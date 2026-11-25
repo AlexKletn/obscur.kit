@@ -1,26 +1,28 @@
-#![doc = include_str!("message_value.doc/_module.md")]
+//! `MessageValue`: one argument bound into a message (spec §7.2 parameters).
 
 use crate::message::{GrammaticalCase, GrammaticalGender};
 use crate::plural::PluralOperands;
 
-#[doc = include_str!("message_value.doc/MessageValue.md")]
+#[doc = include_str!("../../docs/api/message/message_value.doc/MessageValue.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum MessageValue {
-    #[doc = include_str!("message_value.doc/Text.md")]
+    /// A literal string, interpolated as-is.
     Text(Box<str>),
-    #[doc = include_str!("message_value.doc/Number.md")]
+    /// A number: the digits to interpolate, plus the operands its category is
+    /// selected from.
     Number {
-        #[doc = include_str!("message_value.doc/literal.md")]
+        /// How the number is written, and what `{name}` or `#` interpolates.
         literal: Box<str>,
-        #[doc = include_str!("message_value.doc/operands.md")]
+        /// The CLDR operands `literal` denotes, which a `plural` arm selects on.
         operands: PluralOperands,
     },
-    #[doc = include_str!("message_value.doc/Selector.md")]
+    /// A selector matched against `select` arm names — a gender, a case, or any
+    /// other closed-by-the-catalogue choice.
     Selector(Box<str>),
 }
 
 impl MessageValue {
-    #[doc = include_str!("message_value.doc/integer.md")]
+    #[doc = include_str!("../../docs/api/message/message_value.doc/integer.md")]
     #[must_use]
     pub fn integer(count: i64) -> Self {
         Self::Number {
@@ -29,7 +31,7 @@ impl MessageValue {
         }
     }
 
-    #[doc = include_str!("message_value.doc/decimal.md")]
+    #[doc = include_str!("../../docs/api/message/message_value.doc/decimal.md")]
     #[must_use]
     pub fn decimal(decimal: &str) -> Option<Self> {
         Some(Self::Number {
@@ -38,31 +40,31 @@ impl MessageValue {
         })
     }
 
-    #[doc = include_str!("message_value.doc/text.md")]
+    /// Binds a literal string.
     #[must_use]
     pub fn text(text: impl Into<Box<str>>) -> Self {
         Self::Text(text.into())
     }
 
-    #[doc = include_str!("message_value.doc/selector.md")]
+    /// Binds a bare selector value.
     #[must_use]
     pub fn selector(value: impl Into<Box<str>>) -> Self {
         Self::Selector(value.into())
     }
 
-    #[doc = include_str!("message_value.doc/gender.md")]
+    /// Binds a grammatical gender as a selector (spec §7.2 gender).
     #[must_use]
     pub fn gender(gender: &GrammaticalGender) -> Self {
         Self::Selector(gender.as_str().into())
     }
 
-    #[doc = include_str!("message_value.doc/grammatical_case.md")]
+    /// Binds a grammatical case as a selector (spec §7.2 case variants).
     #[must_use]
     pub fn grammatical_case(case: &GrammaticalCase) -> Self {
         Self::Selector(case.as_str().into())
     }
 
-    #[doc = include_str!("message_value.doc/literal_2.md")]
+    #[doc = include_str!("../../docs/api/message/message_value.doc/literal_2.md")]
     #[must_use]
     pub fn literal(&self) -> &str {
         match self {
@@ -71,7 +73,7 @@ impl MessageValue {
         }
     }
 
-    #[doc = include_str!("message_value.doc/operands_2.md")]
+    #[doc = include_str!("../../docs/api/message/message_value.doc/operands_2.md")]
     #[must_use]
     pub const fn operands(&self) -> Option<&PluralOperands> {
         match self {
@@ -80,7 +82,7 @@ impl MessageValue {
         }
     }
 
-    #[doc = include_str!("message_value.doc/selector_name.md")]
+    #[doc = include_str!("../../docs/api/message/message_value.doc/selector_name.md")]
     #[must_use]
     pub fn selector_name(&self) -> &str {
         self.literal()

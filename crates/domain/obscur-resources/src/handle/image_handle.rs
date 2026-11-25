@@ -1,39 +1,40 @@
-#![doc = include_str!("image_handle.doc/_module.md")]
+//! A type-safe handle denoting an image resource (spec §5.15).
 
 use obscur_identity::ResourceId;
 
 use crate::handle::{ResourceHandle, ResourceKind};
 
-#[doc = include_str!("image_handle.doc/ImageHandle.md")]
+#[doc = include_str!("../../docs/api/handle/image_handle.doc/ImageHandle.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[must_use]
 pub struct ImageHandle(ResourceId);
 
 impl ImageHandle {
-    #[doc = include_str!("image_handle.doc/new.md")]
+    /// Creates an image handle for the given resource id.
     pub const fn new(id: ResourceId) -> Self {
         Self(id)
     }
 
-    #[doc = include_str!("image_handle.doc/id.md")]
+    /// Returns the resource identity this handle refers to.
     #[must_use]
     pub const fn id(self) -> ResourceId {
         self.0
     }
 
-    #[doc = include_str!("image_handle.doc/kind.md")]
+    /// Returns the [`ResourceKind`] this handle type denotes ([`ResourceKind::Image`]).
     #[must_use]
     pub const fn kind() -> ResourceKind {
         ResourceKind::Image
     }
 
-    #[doc = include_str!("image_handle.doc/into_handle.md")]
+    /// Converts this typed handle into a generic [`ResourceHandle`].
     #[must_use]
     pub const fn into_handle(self) -> ResourceHandle {
         ResourceHandle::new(self.0, ResourceKind::Image)
     }
 
-    #[doc = include_str!("image_handle.doc/from_handle.md")]
+    /// Recovers an `ImageHandle` from a generic [`ResourceHandle`], or `None` if
+    /// the handle does not denote an image.
     #[must_use]
     pub const fn from_handle(handle: ResourceHandle) -> Option<Self> {
         match handle.kind() {

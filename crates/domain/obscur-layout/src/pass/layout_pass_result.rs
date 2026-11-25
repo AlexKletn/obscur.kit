@@ -1,18 +1,19 @@
-#![doc = include_str!("layout_pass_result.doc/_module.md")]
+//! The result of running measure + arrange for a node or subtree.
 
 use crate::model::LayoutBox;
 
-#[doc = include_str!("layout_pass_result.doc/LayoutPassResult.md")]
+#[doc = include_str!("../../docs/api/pass/layout_pass_result.doc/LayoutPassResult.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LayoutPassResult {
-    #[doc = include_str!("layout_pass_result.doc/layout_box.md")]
+    /// The arranged box produced by this pass.
     layout_box: LayoutBox,
-    #[doc = include_str!("layout_pass_result.doc/geometry_changed.md")]
+    /// Whether the produced geometry differs from the previous pass.
     geometry_changed: bool,
 }
 
 impl LayoutPassResult {
-    #[doc = include_str!("layout_pass_result.doc/new.md")]
+    /// Creates a result carrying the arranged `layout_box` and whether the
+    /// geometry changed from the previous pass.
     #[must_use]
     pub const fn new(layout_box: LayoutBox, geometry_changed: bool) -> Self {
         Self {
@@ -21,31 +22,32 @@ impl LayoutPassResult {
         }
     }
 
-    #[doc = include_str!("layout_pass_result.doc/unchanged.md")]
+    /// A result whose geometry is unchanged from the previous pass.
     #[must_use]
     pub const fn unchanged(layout_box: LayoutBox) -> Self {
         Self::new(layout_box, false)
     }
 
-    #[doc = include_str!("layout_pass_result.doc/changed.md")]
+    /// A result whose geometry changed from the previous pass.
     #[must_use]
     pub const fn changed(layout_box: LayoutBox) -> Self {
         Self::new(layout_box, true)
     }
 
-    #[doc = include_str!("layout_pass_result.doc/layout_box_2.md")]
+    /// The arranged box produced by this pass.
     #[must_use]
     pub const fn layout_box(self) -> LayoutBox {
         self.layout_box
     }
 
-    #[doc = include_str!("layout_pass_result.doc/geometry_changed_2.md")]
+    /// Whether the produced geometry differs from the previous pass.
     #[must_use]
     pub const fn geometry_changed(self) -> bool {
         self.geometry_changed
     }
 
-    #[doc = include_str!("layout_pass_result.doc/propagates_upward.md")]
+    /// Whether this result should propagate invalidation **upward** to
+    /// ancestors (spec §4.3: propagate up only when output geometry changes).
     #[must_use]
     pub const fn propagates_upward(self) -> bool {
         self.geometry_changed

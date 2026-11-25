@@ -6,7 +6,7 @@
 //   * `composite_vs`/`composite_fs` — draw the blurred texture as a quad at a
 //                      target-space NDC rect, sampling it 0..1, premultiplied-over.
 //
-// All textures are premultiplied RGBA8 (Vello's output encoding); the blur is a
+// Blur outputs and the compositor target are premultiplied RGBA8. The blur is a
 // normalized weighted sum of premultiplied texels, which stays premultiplied, and
 // the composite blends premultiplied-over (`src * 1 + dst * (1 - src.a)`).
 //
@@ -45,7 +45,8 @@ struct BlurParams {
     direction: vec2<f32>,
     // Blur radius in texels; also the gaussian standard deviation (CSS `blur()`).
     radius: f32,
-    _pad: f32,
+    transparent_edges: f32,
+    straight_input: f32,
 };
 
 @group(0) @binding(0) var src_tex: texture_2d<f32>;
@@ -84,7 +85,9 @@ fn blur_fs(in: VsOut) -> @location(0) vec4<f32> {
         // Premultiplied gamma texel t = (rgb', a). The sRGB transfer is defined on
         // UN-premultiplied color, so un-premultiply → decode → re-premultiply in
         // linear before summing.
-        let t = textureSampleLevel(src_tex, src_smp, uv, 0.0);
+        let outside = any(uv < vec2(0.0)) || any(uv > vec2(1.0));
+        let t = select(textureSampleLevel(src_tex, src_smp, uv, 0.0),
+                       vec4(0.0), blur.transparent_edges > 0.0 && outside);
         var lin_pm = vec3<f32>(0.0);
         if (t.a > 0.0) {
             // A valid premultiplied texel has rgb' <= a, so the un-premultiplied
@@ -93,7 +96,8 @@ fn blur_fs(in: VsOut) -> @location(0) vec4<f32> {
             // blows that up — `srgb_to_linear` amplifies it into a bright colored
             // speck at rounded corners. Clamp to [0,1] before the transfer: a no-op
             // for valid pixels, and it kills the divide-by-small-alpha artifact.
-            let straight = clamp(t.rgb / t.a, vec3<f32>(0.0), vec3<f32>(1.0));
+            let rgb = select(t.rgb / t.a, t.rgb, blur.straight_input > 0.0);
+            let straight = clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0));
             lin_pm = srgb_to_linear(straight) * t.a;
         }
         accum = accum + vec4<f32>(lin_pm, t.a) * w;
@@ -196,4 +200,15 @@ fn composite_fs(in: VsOut) -> @location(0) vec4<f32> {
         color = color * cov;
     }
     return color;
+}
+
+@group(0) @binding(3) var backdrop_original: texture_2d<f32>;
+@group(0) @binding(4) var backdrop_coverage: texture_2d<f32>;
+
+@fragment
+fn backdrop_fs(in: VsOut) -> @location(0) vec4<f32> {
+    let original = textureSampleLevel(backdrop_original, comp_smp, in.uv, 0.0);
+    let blurred = textureSampleLevel(comp_tex, comp_smp, in.uv, 0.0);
+    let coverage = textureLoad(backdrop_coverage, vec2<i32>(in.pos.xy), 0).a;
+    return mix(original, blurred, coverage);
 }

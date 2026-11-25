@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Generation module.
 mod generation;
 mod version_stamp;
 

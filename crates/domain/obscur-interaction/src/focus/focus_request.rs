@@ -1,81 +1,69 @@
-#![doc = include_str!("focus_request.doc/_module.md")]
+//! The [`FocusRequest`] describing a requested focus move (spec §7.1 focus).
 
 use obscur_identity::NodeId;
 
-#[doc = include_str!("focus_request.doc/FocusReason.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum FocusReason {
-    #[doc = include_str!("focus_request.doc/Programmatic.md")]
-    Programmatic,
-    #[doc = include_str!("focus_request.doc/Pointer.md")]
-    Pointer,
-    #[doc = include_str!("focus_request.doc/Keyboard.md")]
-    Keyboard,
-    #[doc = include_str!("focus_request.doc/Restore.md")]
-    Restore,
-}
-
-#[doc = include_str!("focus_request.doc/FocusRequest.md")]
+#[doc = include_str!("../../docs/api/focus/focus_request.doc/FocusRequest.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FocusRequest {
-    #[doc = include_str!("focus_request.doc/Node.md")]
+    /// Focus the identified node.
     Node(NodeId),
-    #[doc = include_str!("focus_request.doc/Next.md")]
+    /// Move focus to the next node in tab order.
     Next,
-    #[doc = include_str!("focus_request.doc/Previous.md")]
+    /// Move focus to the previous node in tab order.
     Previous,
-    #[doc = include_str!("focus_request.doc/First.md")]
+    /// Move focus to the first node in tab order.
     First,
-    #[doc = include_str!("focus_request.doc/Last.md")]
+    /// Move focus to the last node in tab order.
     Last,
-    #[doc = include_str!("focus_request.doc/Clear.md")]
+    /// Clear focus (blur), leaving nothing focused.
     Clear,
 }
 
 impl FocusRequest {
-    #[doc = include_str!("focus_request.doc/node.md")]
+    /// Requests focus of the specific node `node`.
     #[must_use]
     pub const fn node(node: NodeId) -> Self {
         Self::Node(node)
     }
 
-    #[doc = include_str!("focus_request.doc/next.md")]
+    /// Requests focus of the next node in tab order.
     #[must_use]
     pub const fn next() -> Self {
         Self::Next
     }
 
-    #[doc = include_str!("focus_request.doc/previous.md")]
+    /// Requests focus of the previous node in tab order.
     #[must_use]
     pub const fn previous() -> Self {
         Self::Previous
     }
 
-    #[doc = include_str!("focus_request.doc/first.md")]
+    /// Requests focus of the first node in tab order.
     #[must_use]
     pub const fn first() -> Self {
         Self::First
     }
 
-    #[doc = include_str!("focus_request.doc/last.md")]
+    /// Requests focus of the last node in tab order.
     #[must_use]
     pub const fn last() -> Self {
         Self::Last
     }
 
-    #[doc = include_str!("focus_request.doc/clear.md")]
+    /// Requests clearing focus (blur).
     #[must_use]
     pub const fn clear() -> Self {
         Self::Clear
     }
 
-    #[doc = include_str!("focus_request.doc/is_directional.md")]
+    /// Returns whether this is a directional tab step ([`Next`](Self::Next) or
+    /// [`Previous`](Self::Previous)).
     #[must_use]
     pub const fn is_directional(self) -> bool {
         matches!(self, Self::Next | Self::Previous)
     }
 
-    #[doc = include_str!("focus_request.doc/target_node.md")]
+    /// Returns the target node for a [`Node`](Self::Node) request, else `None`.
     #[must_use]
     pub const fn target_node(self) -> Option<NodeId> {
         match self {
@@ -118,11 +106,5 @@ mod tests {
         assert_eq!(FocusRequest::node(node(9)).target_node(), Some(node(9)));
         assert_eq!(FocusRequest::next().target_node(), None);
         assert_eq!(FocusRequest::clear().target_node(), None);
-    }
-
-    #[test]
-    fn focus_reason_variants_are_distinct() {
-        assert_ne!(FocusReason::Programmatic, FocusReason::Keyboard);
-        assert_ne!(FocusReason::Pointer, FocusReason::Restore);
     }
 }

@@ -1,18 +1,20 @@
-#![doc = include_str!("file_size.doc/_module.md")]
+//! Rule: one file holds one entity, and an entity that outgrows a file is a
+//! design fault (spec §3.1).
 
 use std::path::Path;
 
-use crate::violation::{Violation, collect_rs};
+use crate::violation::{Violation, collect_rs, read_text};
 
 const RULE: &str = "file-size";
 
-#[doc = include_str!("file_size.doc/MAX_NON_TEST_LINES.md")]
+#[doc = include_str!("../../docs/api/rule/file_size.doc/MAX_NON_TEST_LINES.md")]
 const MAX_NON_TEST_LINES: usize = 1_000;
 
-#[doc = include_str!("file_size.doc/KNOWN.md")]
+#[doc = include_str!("../../docs/api/rule/file_size.doc/KNOWN.md")]
 const KNOWN: &[(&str, &str)] = &[];
 
-#[doc = include_str!("file_size.doc/check.md")]
+/// Checks that no source file exceeds [`MAX_NON_TEST_LINES`] without being on
+/// the ledger, and that no ledger entry has become stale.
 pub(crate) fn check(root: &Path) -> Vec<Violation> {
     let mut files = Vec::new();
     collect_rs(root, &mut files);
@@ -25,8 +27,12 @@ pub(crate) fn check(root: &Path) -> Vec<Violation> {
             continue;
         };
         let relative = relative.to_string_lossy().replace('\\', "/");
-        let Ok(text) = std::fs::read_to_string(&file) else {
-            continue;
+        let text = match read_text(RULE, &file) {
+            Ok(text) => text,
+            Err(violation) => {
+                out.push(violation);
+                continue;
+            }
         };
         let lines = non_test_lines(&text);
         let known = KNOWN.iter().position(|(path, _)| *path == relative);
@@ -74,18 +80,26 @@ pub(crate) fn check(root: &Path) -> Vec<Violation> {
     out
 }
 
-#[doc = include_str!("file_size.doc/non_test_lines.md")]
+#[doc = include_str!("../../docs/api/rule/file_size.doc/non_test_lines.md")]
 fn non_test_lines(text: &str) -> usize {
     let lines: Vec<&str> = text.lines().collect();
-    for (index, line) in lines.iter().enumerate().skip(1) {
-        if lines[index - 1].trim() == "#[cfg(test)]" && opens_test_module(line.trim()) {
-            return index - 1;
-        }
-    }
-    lines.len()
+    let end = lines
+        .windows(2)
+        .position(|lines| lines[0].trim() == "#[cfg(test)]" && opens_test_module(lines[1].trim()))
+        .unwrap_or(lines.len());
+    lines[..end]
+        .iter()
+        .filter(|line| {
+            let line = line.trim_start();
+            match line.strip_prefix("///") {
+                Some(suffix) => suffix.starts_with('/'),
+                None => !line.starts_with("//!"),
+            }
+        })
+        .count()
 }
 
-#[doc = include_str!("file_size.doc/opens_test_module.md")]
+/// Whether `line` opens a `mod tests` block, with or without a visibility.
 fn opens_test_module(line: &str) -> bool {
     let rest = match line.strip_prefix("pub") {
         Some(rest) => match rest.strip_prefix('(') {
@@ -113,6 +127,11 @@ mod tests {
     #[test]
     fn a_file_without_tests_counts_whole() {
         assert_eq!(non_test_lines("a\nb\nc\n"), 3);
+    }
+
+    #[test]
+    fn rustdoc_prose_does_not_count_as_code() {
+        assert_eq!(non_test_lines("//! Module.\n/// Item.\nfn item() {}\n"), 1);
     }
 
     #[test]

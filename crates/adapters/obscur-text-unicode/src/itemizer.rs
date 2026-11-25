@@ -1,4 +1,9 @@
-#![doc = include_str!("itemizer.doc/_module.md")]
+//! The [`UnicodeTextItemizer`] adapter implementing [`TextItemizer`] over real
+//! Unicode script and bidi tables (spec §5.10).
+
+mod pending_run;
+
+use pending_run::PendingRun;
 
 use obscur_text::shaping::{ScriptTag, TextDirection, TextItem, TextItemizer};
 use obscur_text::span::TextRange;
@@ -6,42 +11,15 @@ use unicode_bidi::{BidiInfo, Level};
 
 use crate::script_mapping::script_tag_for;
 
-#[doc = include_str!("itemizer.doc/UnicodeTextItemizer.md")]
+#[doc = include_str!("../docs/api/itemizer.doc/UnicodeTextItemizer.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct UnicodeTextItemizer;
 
 impl UnicodeTextItemizer {
-    #[doc = include_str!("itemizer.doc/new.md")]
+    /// Creates a `UnicodeTextItemizer`.
     #[must_use]
     pub const fn new() -> Self {
         Self
-    }
-}
-
-#[doc = include_str!("itemizer.doc/PendingRun.md")]
-struct PendingRun {
-    #[doc = include_str!("itemizer.doc/start.md")]
-    start: usize,
-    #[doc = include_str!("itemizer.doc/level.md")]
-    level: u8,
-    #[doc = include_str!("itemizer.doc/script.md")]
-    script: Option<ScriptTag>,
-}
-
-impl PendingRun {
-    #[doc = include_str!("itemizer.doc/finish.md")]
-    fn finish(&self, end: usize) -> TextItem {
-        let direction = if self.level.is_multiple_of(2) {
-            TextDirection::LeftToRight
-        } else {
-            TextDirection::RightToLeft
-        };
-        TextItem::new(
-            TextRange::new(self.start, end),
-            self.script.unwrap_or(ScriptTag::COMMON),
-            direction,
-            self.level,
-        )
     }
 }
 

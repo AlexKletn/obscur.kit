@@ -1,14 +1,15 @@
-#![doc = include_str!("diagnostic_context.doc/_module.md")]
+//! Contextual anchors for a diagnostic.
 
 use obscur_identity::{NodeId, ResourceId, WindowId};
 
-#[doc = include_str!("diagnostic_context.doc/DiagnosticContext.md")]
+/// Optional identity context attached to a diagnostic so tools can point at the
+/// exact node/resource/window involved (spec §1.6).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct DiagnosticContext {
-    #[doc = include_str!("diagnostic_context.doc/node.md")]
+    /// Node the diagnostic concerns, if any.
     pub node: Option<NodeId>,
-    #[doc = include_str!("diagnostic_context.doc/window.md")]
+    /// Window the diagnostic concerns, if any.
     pub window: Option<WindowId>,
-    #[doc = include_str!("diagnostic_context.doc/resource.md")]
+    /// Resource the diagnostic concerns, if any.
     pub resource: Option<ResourceId>,
 }

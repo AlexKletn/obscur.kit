@@ -1,4 +1,5 @@
-#![doc = include_str!("shadow_approximation.doc/_module.md")]
+//! Software rasterization of outset and inset shadows with rounded geometry,
+//! spread, offset and Gaussian blur.
 
 use obscur_geometry::{CornerRadii, Point, Rect, Size};
 use obscur_scene::color::Color;
@@ -6,10 +7,13 @@ use obscur_scene::path::Path;
 
 use crate::renderer::skia_lowering::{solid_paint, to_sk_fill_rule, to_sk_path};
 
-#[doc = include_str!("shadow_approximation.doc/SHADOW_APPROX_ALPHA.md")]
-const SHADOW_APPROX_ALPHA: f32 = 0.5;
+use super::gaussian_blur::{MAX_SIGMA, blur_layer};
 
-#[doc = include_str!("shadow_approximation.doc/draw_shadow_approx.md")]
+/// Rasterizes a rounded shadow. Positive `blur` is the Gaussian sigma in device
+/// pixels. The outset silhouette is blurred before the enclosing clip is applied.
+/// The inset shadow fills the box with the complement of a blurred hole. Zero
+/// sigma uses the direct fill and ring paths.
+/// The scratch surface covers the visible shadow bounds and its kernel halo.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn draw_shadow_approx(
     pixmap: &mut tiny_skia::Pixmap,
@@ -23,42 +27,22 @@ pub(crate) fn draw_shadow_approx(
     clip: Option<&tiny_skia::Mask>,
     transform: tiny_skia::Transform,
 ) {
+    if blur > 0.0
+        && draw_blurred_shadow(
+            pixmap, rect, radii, color, blur, spread, offset, inset, clip, transform,
+        )
+    {
+        return;
+    }
     // An inset shadow is an inner frame confined to the box, not an offset rect.
     if inset {
         draw_inset_shadow_approx(pixmap, rect, radii, color, spread, offset, clip, transform);
         return;
     }
-    // Drop shadows inflate by `spread`.
-    let inflate = spread;
-    let (ox, oy) = offset;
-    let x = rect.origin.x + ox - inflate;
-    let y = rect.origin.y + oy - inflate;
-    let w = 2.0f32.mul_add(inflate, rect.size.width);
-    let h = 2.0f32.mul_add(inflate, rect.size.height);
-    if w <= 0.0 || h <= 0.0 {
-        return;
-    }
-    let shadow_rect = Rect::new(Point::new(x, y), Size::new(w, h));
-    // CSS Backgrounds 3 §6.1.1: an outset shadow's corner radii are the box radii
-    // grown by `+spread` (a sharp corner stays sharp), so the rounded corners on
-    // the spread-inflated rect stay concentric with the box's corners — with
-    // §6.1.1's easing where a radius is smaller than the spread, which is why this
-    // is `spread_offset` and not the raw `offset` primitive §4.2 uses.
-    let path = Path::rounded_rect(shadow_rect, radii.spread_offset(spread));
-    let Some(sk_path) = to_sk_path(&path) else {
+    let Some(sk_path) = shadow_shape(rect, radii, spread, offset) else {
         return;
     };
-    // The alpha fade fakes the softness a real gaussian blur would give. A shadow
-    // with **no blur** (`blur == 0`) has a crisp, fully-opaque edge — there is no
-    // softness to fake — so it keeps the color's own alpha, exactly as the inset
-    // path does for its exact ring. Only a blurred shadow is faded.
-    let alpha = if blur > 0.0 {
-        color.a * SHADOW_APPROX_ALPHA
-    } else {
-        color.a
-    };
-    let faded = Color::rgba(color.r, color.g, color.b, alpha);
-    let Some(sk_paint) = solid_paint(faded) else {
+    let Some(sk_paint) = solid_paint(color) else {
         return;
     };
     pixmap.fill_path(
@@ -70,7 +54,119 @@ pub(crate) fn draw_shadow_approx(
     );
 }
 
-#[doc = include_str!("shadow_approximation.doc/draw_inset_shadow_approx.md")]
+/// Constructs the spread-adjusted outline used for an outset shadow or an inset hole.
+fn shadow_shape(
+    rect: Rect,
+    radii: CornerRadii,
+    spread: f32,
+    (ox, oy): (f32, f32),
+) -> Option<tiny_skia::Path> {
+    let x = rect.origin.x + ox - spread;
+    let y = rect.origin.y + oy - spread;
+    let w = 2.0f32.mul_add(spread, rect.size.width);
+    let h = 2.0f32.mul_add(spread, rect.size.height);
+    if w <= 0.0 || h <= 0.0 {
+        return None;
+    }
+    let bounds = Rect::new(Point::new(x, y), Size::new(w, h));
+    to_sk_path(&Path::rounded_rect(bounds, radii.spread_offset(spread)))
+}
+
+/// Blurs the rounded silhouette, or the hole punched out of an inset shadow.
+#[allow(clippy::too_many_arguments)]
+fn draw_blurred_shadow(
+    target: &mut tiny_skia::Pixmap,
+    rect: Rect,
+    radii: CornerRadii,
+    color: Color,
+    sigma: f32,
+    spread: f32,
+    offset: (f32, f32),
+    inset: bool,
+    clip: Option<&tiny_skia::Mask>,
+    transform: tiny_skia::Transform,
+) -> bool {
+    let color_paint = match solid_paint(color) {
+        Some(paint) => paint,
+        None => return true,
+    };
+    let silhouette = shadow_shape(rect, radii, if inset { -spread } else { spread }, offset);
+    let outer = inset
+        .then(|| to_sk_path(&Path::rounded_rect(rect, radii)))
+        .flatten();
+    let Some(outline) = (if inset {
+        outer.as_ref()
+    } else {
+        silhouette.as_ref()
+    }) else {
+        return true;
+    };
+    let Some(device_outline) = outline.clone().transform(transform) else {
+        return true;
+    };
+    let bounds = device_outline.bounds();
+    let margin = (3.0 * sigma.min(MAX_SIGMA)).ceil() as i32;
+    let spread = if inset { 0 } else { margin };
+    let left = (bounds.left().floor() as i32).saturating_sub(spread).max(0);
+    let top = (bounds.top().floor() as i32).saturating_sub(spread).max(0);
+    let right = (bounds.right().ceil() as i32)
+        .saturating_add(spread)
+        .min(target.width() as i32);
+    let bottom = (bounds.bottom().ceil() as i32)
+        .saturating_add(spread)
+        .min(target.height() as i32);
+    if right <= left || bottom <= top {
+        return true;
+    }
+
+    // Preserve the filter input just beyond the visible result, including
+    // source geometry that lies outside the viewport.
+    let x = left - margin;
+    let y = top - margin;
+    let width = (right - left) as u32 + 2 * margin as u32;
+    let height = (bottom - top) as u32 + 2 * margin as u32;
+    let Some(mut scratch) = tiny_skia::Pixmap::new(width, height) else {
+        return false;
+    };
+    let local = transform.post_translate(-(x as f32), -(y as f32));
+    if let Some(silhouette) = silhouette {
+        let mut coverage = tiny_skia::Paint::default();
+        coverage.set_color_rgba8(255, 255, 255, 255);
+        let paint = if inset { &coverage } else { &color_paint };
+        scratch.fill_path(
+            &silhouette,
+            paint,
+            tiny_skia::FillRule::Winding,
+            local,
+            None,
+        );
+        blur_layer(&mut scratch, sigma);
+    }
+
+    if let Some(outer) = outer {
+        let mut mask = tiny_skia::Mask::from_pixmap(scratch.as_ref(), tiny_skia::MaskType::Alpha);
+        mask.invert();
+        scratch.fill(tiny_skia::Color::TRANSPARENT);
+        scratch.fill_path(
+            &outer,
+            &color_paint,
+            tiny_skia::FillRule::Winding,
+            local,
+            Some(&mask),
+        );
+    }
+    target.draw_pixmap(
+        x,
+        y,
+        scratch.as_ref(),
+        &tiny_skia::PixmapPaint::default(),
+        tiny_skia::Transform::identity(),
+        clip,
+    );
+    true
+}
+
+#[doc = include_str!("../../docs/api/renderer/shadow_approximation.doc/draw_inset_shadow_approx.md")]
 #[allow(clippy::too_many_arguments)]
 fn draw_inset_shadow_approx(
     pixmap: &mut tiny_skia::Pixmap,
@@ -138,7 +234,7 @@ mod tests {
     }
 
     #[test]
-    fn a_blurred_shadow_is_faded_and_an_unblurred_one_keeps_its_alpha() {
+    fn a_blurred_shadow_softens_its_edge() {
         let identity = tiny_skia::Transform::identity();
         let mut blurred = pixmap();
         draw_shadow_approx(
@@ -146,7 +242,7 @@ mod tests {
             box_rect(),
             CornerRadii::uniform(0.0),
             black(),
-            4.0,
+            2.0,
             0.0,
             (0.0, 0.0),
             false,
@@ -166,13 +262,32 @@ mod tests {
             None,
             identity,
         );
-        let faded_alpha = blurred.pixel(10, 10).expect("pixel").alpha();
+        let faded_alpha = blurred.pixel(4, 10).expect("pixel").alpha();
         let full_alpha = crisp.pixel(10, 10).expect("pixel").alpha();
         assert_eq!(full_alpha, 255, "no blur means no softness to fake");
         assert!(
             faded_alpha < full_alpha,
             "a blurred shadow fades: {faded_alpha} vs {full_alpha}"
         );
+    }
+
+    #[test]
+    fn a_shadow_outside_the_viewport_can_still_blur_into_it() {
+        let mut target = pixmap();
+        draw_shadow_approx(
+            &mut target,
+            box_rect(),
+            CornerRadii::uniform(0.0),
+            black(),
+            2.0,
+            0.0,
+            (0.0, 0.0),
+            false,
+            None,
+            tiny_skia::Transform::from_translate(-17.0, 0.0),
+        );
+        assert!(target.pixel(0, 10).unwrap().alpha() > 0);
+        assert_eq!(target.pixel(7, 10).unwrap().alpha(), 0);
     }
 
     #[test]

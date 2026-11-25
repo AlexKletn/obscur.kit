@@ -1,21 +1,28 @@
-#![doc = include_str!("layout_invalidation_reason.doc/_module.md")]
+//! The typed reason a layout context must be recomputed.
 
-#[doc = include_str!("layout_invalidation_reason.doc/LayoutInvalidationReason.md")]
+#[doc = include_str!("../../docs/api/invalidation/layout_invalidation_reason.doc/LayoutInvalidationReason.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LayoutInvalidationReason {
-    #[doc = include_str!("layout_invalidation_reason.doc/StyleChanged.md")]
+    /// A layout-affecting style on the node itself changed (e.g. size, margins,
+    /// flex parameters). The node's own layout must be recomputed.
     StyleChanged,
-    #[doc = include_str!("layout_invalidation_reason.doc/TreeChanged.md")]
+    /// The tree structure under the node changed: children were added or
+    /// removed.
     TreeChanged,
-    #[doc = include_str!("layout_invalidation_reason.doc/ChildSizeChanged.md")]
+    /// A depended-on child's output geometry changed, so this context — whose
+    /// measure consumes that child's size — must be recomputed. This is the
+    /// carrier of **upward** propagation.
     ChildSizeChanged,
-    #[doc = include_str!("layout_invalidation_reason.doc/ConstraintsChanged.md")]
+    /// The incoming constraints for this context changed, and its size depends
+    /// on them. This is the carrier of **downward** propagation.
     ConstraintsChanged,
-    #[doc = include_str!("layout_invalidation_reason.doc/ContentChanged.md")]
+    /// The node's intrinsic/text content changed (e.g. a text run relayout),
+    /// which can change its measured size without a style or constraint change.
     ContentChanged,
-    #[doc = include_str!("layout_invalidation_reason.doc/Requested.md")]
+    #[doc = include_str!("../../docs/api/invalidation/layout_invalidation_reason.doc/Requested.md")]
     Requested,
-    #[doc = include_str!("layout_invalidation_reason.doc/EnvironmentChanged.md")]
+    /// The window environment changed: viewport size, DPI/scale factor, or other
+    /// global layout inputs.
     EnvironmentChanged,
 }
 

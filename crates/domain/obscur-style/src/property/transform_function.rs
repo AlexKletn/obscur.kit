@@ -1,18 +1,21 @@
-#![doc = include_str!("transform_function.doc/_module.md")]
+//! One entry of a specified `transform` function list, before its lengths are known
+//! (spec §4.13).
 
-use crate::property::{LengthContext, LengthExpr};
+use crate::property::{Length, LengthContext, LengthExpr};
 
-#[doc = include_str!("transform_function.doc/TransformFunction.md")]
+#[doc = include_str!("../../docs/api/property/transform_function.doc/TransformFunction.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum TransformFunction {
-    #[doc = include_str!("transform_function.doc/Matrix.md")]
+    /// A function already reduced to its 2D affine coefficients `[a, b, c, d, e, f]`.
     Matrix([f32; 6]),
-    #[doc = include_str!("transform_function.doc/Translate.md")]
+    /// A `translate(x, y)` whose distances are still expressions: the x offset, then
+    /// the y offset (`translateX`/`translateY` fill the unused axis with `0`).
     Translate(LengthExpr, LengthExpr),
 }
 
 impl TransformFunction {
-    #[doc = include_str!("transform_function.doc/uses_ch.md")]
+    /// Whether either distance is written in `ch`, which needs a measured `0` advance
+    /// and so defers the whole computed value until the font is measured.
     #[must_use]
     pub fn uses_ch(&self) -> bool {
         match self {
@@ -21,7 +24,8 @@ impl TransformFunction {
         }
     }
 
-    #[doc = include_str!("transform_function.doc/absolutize.md")]
+    /// Folds every distance that this length context can resolve, and keeps the rest
+    /// symbolic — the same contract as [`Length::absolutize`](crate::property::Length::absolutize).
     #[must_use]
     pub fn absolutize(&self, ctx: &LengthContext) -> Self {
         match self {
@@ -30,12 +34,39 @@ impl TransformFunction {
         }
     }
 
-    #[doc = include_str!("transform_function.doc/resolve.md")]
+    #[doc = include_str!("../../docs/api/property/transform_function.doc/resolve.md")]
     #[must_use]
     pub fn resolve(&self, ctx: &LengthContext) -> Option<[f32; 6]> {
         match self {
             Self::Matrix(coeffs) => Some(*coeffs),
-            Self::Translate(x, y) => Some([1.0, 0.0, 0.0, 1.0, x.resolve(ctx)?, y.resolve(ctx)?]),
+            Self::Translate(x, y) => {
+                let resolve = |expression: &LengthExpr| {
+                    let value = expression.resolve(ctx)?;
+                    (!value.is_nan()).then(|| obscur_geometry::saturating_f32(f64::from(value)))
+                };
+                Some([1.0, 0.0, 0.0, 1.0, resolve(x)?, resolve(y)?])
+            }
+        }
+    }
+
+    /// Resolves already-computed translation terms using the border box width and height.
+    #[must_use]
+    pub fn resolve_in_box(&self, width: f32, height: f32) -> Option<[f32; 6]> {
+        let resolve = |expression: &LengthExpr, basis: f32| {
+            let value = expression.resolve_with(&|length| match length {
+                Length::Px(px) => Some(px.0),
+                Length::Percent(percent) => Some(obscur_geometry::saturating_f32(
+                    f64::from(percent) * f64::from(basis) / 100.0,
+                )),
+                _ => None,
+            })?;
+            (!value.is_nan()).then(|| obscur_geometry::saturating_f32(f64::from(value)))
+        };
+        match self {
+            Self::Matrix(coeffs) => Some(*coeffs),
+            Self::Translate(x, y) => {
+                Some([1.0, 0.0, 0.0, 1.0, resolve(x, width)?, resolve(y, height)?])
+            }
         }
     }
 }

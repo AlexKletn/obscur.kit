@@ -1,1 +1,0 @@
-Subsequent-sibling combinator (`~`).

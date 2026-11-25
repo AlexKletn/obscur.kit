@@ -1,58 +1,20 @@
-#![doc = include_str!("protocol_event.doc/_module.md")]
+//! Server→subscriber pushed events (spec §7.6/§7.8).
 
-use super::{SubscriptionId, Topic};
+use super::{EventKind, SubscriptionId, Topic};
 
-#[doc = include_str!("protocol_event.doc/EventSeverity.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum EventSeverity {
-    #[doc = include_str!("protocol_event.doc/Trace.md")]
-    Trace,
-    #[doc = include_str!("protocol_event.doc/Info.md")]
-    Info,
-    #[doc = include_str!("protocol_event.doc/Warning.md")]
-    Warning,
-    #[doc = include_str!("protocol_event.doc/Error.md")]
-    Error,
-    #[doc = include_str!("protocol_event.doc/Critical.md")]
-    Critical,
-}
-
-#[doc = include_str!("protocol_event.doc/EventKind.md")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum EventKind {
-    #[doc = include_str!("protocol_event.doc/Diagnostic.md")]
-    Diagnostic {
-        #[doc = include_str!("protocol_event.doc/severity.md")]
-        severity: EventSeverity,
-        #[doc = include_str!("protocol_event.doc/code.md")]
-        code: Box<str>,
-        #[doc = include_str!("protocol_event.doc/message.md")]
-        message: Box<str>,
-    },
-    #[doc = include_str!("protocol_event.doc/FrameCommitted.md")]
-    FrameCommitted {
-        #[doc = include_str!("protocol_event.doc/id.md")]
-        id: u64,
-    },
-    #[doc = include_str!("protocol_event.doc/FocusChanged.md")]
-    FocusChanged,
-    #[doc = include_str!("protocol_event.doc/LifecycleChanged.md")]
-    LifecycleChanged,
-}
-
-#[doc = include_str!("protocol_event.doc/ProtocolEvent.md")]
+/// An event pushed to a subscriber over an active subscription.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProtocolEvent {
-    #[doc = include_str!("protocol_event.doc/subscription.md")]
+    /// The subscription this event is delivered on.
     pub subscription: SubscriptionId,
-    #[doc = include_str!("protocol_event.doc/topic.md")]
+    /// The topic the event belongs to.
     pub topic: Topic,
-    #[doc = include_str!("protocol_event.doc/kind.md")]
+    /// The typed event body.
     pub kind: EventKind,
 }
 
 impl ProtocolEvent {
-    #[doc = include_str!("protocol_event.doc/new.md")]
+    /// Creates a protocol event.
     #[must_use]
     pub fn new(subscription: SubscriptionId, topic: Topic, kind: EventKind) -> Self {
         Self {
@@ -65,6 +27,7 @@ impl ProtocolEvent {
 
 #[cfg(test)]
 mod tests {
+    use super::super::EventSeverity;
     use super::*;
 
     #[test]

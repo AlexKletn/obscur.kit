@@ -1,20 +1,12 @@
-#![doc = include_str!("into_command_handler.doc/_module.md")]
+//! The marker-generic conversion that lets a handler take the event, or nothing.
 
 use obscur_interaction::event::UiEvent;
 
-use super::CommandHandler;
+use super::{CommandHandler, WithEvent, WithoutEvent};
 
-#[doc = include_str!("into_command_handler.doc/WithoutEvent.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct WithoutEvent;
-
-#[doc = include_str!("into_command_handler.doc/WithEvent.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct WithEvent;
-
-#[doc = include_str!("into_command_handler.doc/IntoCommandHandler.md")]
+#[doc = include_str!("../../docs/api/runtime/into_command_handler.doc/IntoCommandHandler.md")]
 pub trait IntoCommandHandler<M> {
-    #[doc = include_str!("into_command_handler.doc/into_command_handler.md")]
+    /// Normalizes this handler into the runtime's stored shape.
     fn into_command_handler(self) -> CommandHandler;
 }
 
@@ -22,7 +14,7 @@ impl<F> IntoCommandHandler<WithoutEvent> for F
 where
     F: FnMut() + 'static,
 {
-    #[doc = include_str!("into_command_handler.doc/into_command_handler_2.md")]
+    #[doc = include_str!("../../docs/api/runtime/into_command_handler.doc/into_command_handler_2.md")]
     fn into_command_handler(mut self) -> CommandHandler {
         CommandHandler::new(Box::new(move |_event: &mut UiEvent| self()))
     }
@@ -32,7 +24,7 @@ impl<F> IntoCommandHandler<WithEvent> for F
 where
     F: FnMut(&mut UiEvent) + 'static,
 {
-    #[doc = include_str!("into_command_handler.doc/into_command_handler_3.md")]
+    /// Stores an event-taking handler as-is.
     fn into_command_handler(self) -> CommandHandler {
         CommandHandler::new(Box::new(self))
     }

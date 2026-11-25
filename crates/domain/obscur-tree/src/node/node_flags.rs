@@ -1,59 +1,60 @@
-#![doc = include_str!("node_flags.doc/_module.md")]
+//! Structural / behavioural flags for a retained node.
 
-#[doc = include_str!("node_flags.doc/NodeFlags.md")]
+#[doc = include_str!("../../docs/api/node/node_flags.doc/NodeFlags.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct NodeFlags(u32);
 
 impl NodeFlags {
-    #[doc = include_str!("node_flags.doc/HIDDEN.md")]
+    /// Present in the tree but not visible / not painted.
     pub const HIDDEN: Self = Self(1 << 0);
-    #[doc = include_str!("node_flags.doc/PORTAL_HOST.md")]
+    /// Hosts a portal: descendants may be painted under a different visual
+    /// parent (spec §4.14).
     pub const PORTAL_HOST: Self = Self(1 << 1);
-    #[doc = include_str!("node_flags.doc/LAYER_ROOT.md")]
+    /// Establishes a stacking context / compositing layer.
     pub const LAYER_ROOT: Self = Self(1 << 2);
-    #[doc = include_str!("node_flags.doc/SYNTHETIC.md")]
+    /// System-generated node, hidden from the component tree (spec §4.16).
     pub const SYNTHETIC: Self = Self(1 << 3);
-    #[doc = include_str!("node_flags.doc/COMPONENT_HOST.md")]
+    #[doc = include_str!("../../docs/api/node/node_flags.doc/COMPONENT_HOST.md")]
     pub const COMPONENT_HOST: Self = Self(1 << 4);
-    #[doc = include_str!("node_flags.doc/OPEN_STYLE_SCOPE.md")]
+    #[doc = include_str!("../../docs/api/node/node_flags.doc/OPEN_STYLE_SCOPE.md")]
     pub const OPEN_STYLE_SCOPE: Self = Self(1 << 5);
 
-    #[doc = include_str!("node_flags.doc/empty.md")]
+    /// Returns an empty flag set.
     #[must_use]
     pub const fn empty() -> Self {
         Self(0)
     }
 
-    #[doc = include_str!("node_flags.doc/bits.md")]
+    /// Returns the raw bit pattern.
     #[must_use]
     pub const fn bits(self) -> u32 {
         self.0
     }
 
-    #[doc = include_str!("node_flags.doc/is_empty.md")]
+    /// Returns `true` if no flags are set.
     #[must_use]
     pub const fn is_empty(self) -> bool {
         self.0 == 0
     }
 
-    #[doc = include_str!("node_flags.doc/contains.md")]
+    /// Returns `true` if every flag in `other` is set in `self`.
     #[must_use]
     pub const fn contains(self, other: Self) -> bool {
         self.0 & other.0 == other.0
     }
 
-    #[doc = include_str!("node_flags.doc/union.md")]
+    /// Returns the union of `self` and `other`.
     #[must_use]
     pub const fn union(self, other: Self) -> Self {
         Self(self.0 | other.0)
     }
 
-    #[doc = include_str!("node_flags.doc/insert.md")]
+    /// Adds every flag in `other` to `self`.
     pub fn insert(&mut self, other: Self) {
         self.0 |= other.0;
     }
 
-    #[doc = include_str!("node_flags.doc/remove.md")]
+    /// Removes every flag in `other` from `self`.
     pub fn remove(&mut self, other: Self) {
         self.0 &= !other.0;
     }

@@ -1,12 +1,11 @@
-#![doc = include_str!("scene_converter.doc/_module.md")]
+#![doc = include_str!("../../docs/api/conversion/scene_converter.doc/_module.md")]
 
-use std::collections::HashMap;
-
+use obscur_identity::FastMap;
 use obscur_scene::clip::Clip;
 use obscur_scene::command::{DisplayList, PaintCommand};
 use obscur_scene::layer::{CompositionMode, LayerEffect, SceneLayer};
 use obscur_scene::paint::{BlendMode, Brush, Paint};
-use obscur_scene::text::GlyphRun;
+use obscur_scene::text::{GlyphRun, SYNTHETIC_BOLD_OUTSET_FRACTION};
 use vello::kurbo::{Affine, Diagonal2};
 use vello::peniko::{self, FontData};
 use vello::{FontEmbolden, Scene};
@@ -18,29 +17,51 @@ use super::color_converter::ColorConverter;
 use super::image_blobs::ImageBlobs;
 use super::image_painter::draw_image;
 use super::path_converter::PathConverter;
+use super::scene_scope::SceneScope;
 use super::scene_segment::SceneSegment;
 use super::shadow_painter::draw_shadow;
 
-#[doc = include_str!("scene_converter.doc/FAUX_ITALIC_SKEW.md")]
-const FAUX_ITALIC_SKEW: f64 = 0.25;
+type FilterSink<'a> = dyn FnMut(&mut Scene, BlurLayer) + 'a;
 
-#[doc = include_str!("scene_converter.doc/FAUX_BOLD_EMBOLDEN_FRACTION.md")]
-const FAUX_BOLD_EMBOLDEN_FRACTION: f64 = 0.02;
+/// The synthetic-oblique shear factor: the standard faux-italic skew of `0.25`
+/// (`tan ≈ 14°`) applied as a per-glyph shear so above-baseline points slide
+/// right and the glyph leans forward (spec §5.18). Matches the CPU backend's
+/// factor so both fake the same slant.
+pub(crate) const FAUX_ITALIC_SKEW: f64 = 0.25;
 
-#[doc = include_str!("scene_converter.doc/SceneConverter.md")]
+#[doc = include_str!("../../docs/api/conversion/scene_converter.doc/positioned_glyphs.md")]
+fn positioned_glyphs(
+    run: &GlyphRun,
+    origin: obscur_geometry::Point,
+) -> impl ExactSizeIterator<Item = vello::Glyph> + '_ {
+    run.glyphs().iter().map(move |glyph| vello::Glyph {
+        id: glyph.glyph_id(),
+        x: origin.x + glyph.x(),
+        y: origin.y + glyph.y(),
+    })
+}
+
+#[doc = include_str!("../../docs/api/conversion/scene_converter.doc/same_bytes.md")]
+fn same_bytes(held: &[u8], offered: &[u8]) -> bool {
+    (std::ptr::eq(held.as_ptr(), offered.as_ptr()) && held.len() == offered.len())
+        || held == offered
+}
+
+#[doc = include_str!("../../docs/api/conversion/scene_converter.doc/SceneConverter.md")]
 #[derive(Debug, Default, Clone)]
 pub struct SceneConverter {
     path: PathConverter,
     brush: BrushConverter,
     clip: ClipConverter,
-    #[doc = include_str!("scene_converter.doc/fonts.md")]
-    fonts: HashMap<u32, FontData>,
-    #[doc = include_str!("scene_converter.doc/image_blobs.md")]
+    #[doc = include_str!("../../docs/api/conversion/scene_converter.doc/fonts.md")]
+    fonts: FastMap<u32, FontData>,
+    /// The `ImageData` handed to vello for each image, kept between frames so its
+    /// atlas keeps its upload.
     image_blobs: ImageBlobs,
 }
 
 impl SceneConverter {
-    #[doc = include_str!("scene_converter.doc/new.md")]
+    #[doc = include_str!("../../docs/api/conversion/scene_converter.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         let color = ColorConverter::new();
@@ -49,40 +70,62 @@ impl SceneConverter {
             path,
             brush: BrushConverter::new(color),
             clip: ClipConverter::new(path),
-            fonts: HashMap::new(),
+            fonts: FastMap::default(),
             image_blobs: ImageBlobs::default(),
         }
     }
 
-    #[doc = include_str!("scene_converter.doc/register_font.md")]
+    #[doc = include_str!("../../docs/api/conversion/scene_converter.doc/register_font.md")]
     pub fn register_font(&mut self, id: u32, font: FontData) {
+        // A `Blob` takes its identity from a global counter, so the same bytes
+        // wrapped twice are two different fonts as far as Vello is concerned —
+        // and that identity is the key of Vello's glyph-outline cache. Replacing
+        // a face with itself would therefore throw away every outline cached for
+        // it, invisibly: nothing breaks, nothing moves on screen, every glyph is
+        // simply extracted and encoded again until the orphaned entries age out.
+        // So a face is replaced only when it is a different face.
+        if let Some(held) = self.fonts.get(&id)
+            && held.index == font.index
+            && same_bytes(held.data.as_ref(), font.data.as_ref())
+        {
+            return;
+        }
         self.fonts.insert(id, font);
     }
 
-    #[doc = include_str!("scene_converter.doc/set_font.md")]
+    #[doc = include_str!("../../docs/api/conversion/scene_converter.doc/set_font.md")]
     pub fn set_font(&mut self, font: FontData) {
         self.register_font(0, font);
     }
 
-    #[doc = include_str!("scene_converter.doc/font_for.md")]
-    fn font_for(&self, id: u32) -> Option<&FontData> {
+    /// Selects the [`FontData`] a run tagged with handle `id` draws against:
+    /// the exact match if present, otherwise the primary (id `0`) as a fallback,
+    /// otherwise `None` (the run is skipped rather than panicking).
+    pub(crate) fn font_for(&self, id: u32) -> Option<&FontData> {
         self.fonts.get(&id).or_else(|| self.fonts.get(&0))
     }
 
-    #[doc = include_str!("scene_converter.doc/can_draw_text.md")]
+    #[doc = include_str!("../../docs/api/conversion/scene_converter.doc/can_draw_text.md")]
     pub(crate) fn can_draw_text(&self, id: u32) -> bool {
         self.font_for(id).is_some()
     }
 
-    #[doc = include_str!("scene_converter.doc/convert.md")]
+    #[doc = include_str!("../../docs/api/conversion/scene_converter.doc/face_bytes.md")]
+    #[cfg(test)]
+    pub(crate) fn face_bytes(&self, id: u32) -> Option<&[u8]> {
+        self.fonts.get(&id).map(|font| font.data.as_ref())
+    }
+
+    #[doc = include_str!("../../docs/api/conversion/scene_converter.doc/convert.md")]
     #[must_use]
     pub fn convert(&self, list: &DisplayList) -> Scene {
+        self.image_blobs.begin_frame();
         let mut scene = Scene::new();
         self.emit(&mut scene, list.commands(), Affine::IDENTITY, None);
         scene
     }
 
-    #[doc = include_str!("scene_converter.doc/convert_with_blurs.md")]
+    #[doc = include_str!("../../docs/api/conversion/scene_converter.doc/convert_with_blurs.md")]
     #[must_use]
     pub fn convert_with_blurs(&self, list: &DisplayList) -> (Scene, Vec<BlurLayer>) {
         let mut scene = Scene::new();
@@ -90,7 +133,7 @@ impl SceneConverter {
         (scene, blurs)
     }
 
-    #[doc = include_str!("scene_converter.doc/convert_with_blurs_into.md")]
+    #[doc = include_str!("../../docs/api/conversion/scene_converter.doc/convert_with_blurs_into.md")]
     pub fn convert_with_blurs_into(&self, scene: &mut Scene, list: &DisplayList) -> Vec<BlurLayer> {
         // `reset` keeps the six encoding streams and empties them; a fresh
         // `Scene` throws the buffers away and grows them back from zero on every
@@ -99,53 +142,157 @@ impl SceneConverter {
         scene.reset();
         self.image_blobs.begin_frame();
         let mut blurs: Vec<BlurLayer> = Vec::new();
-        self.emit(scene, list.commands(), Affine::IDENTITY, Some(&mut blurs));
+        self.emit(
+            scene,
+            list.commands(),
+            Affine::IDENTITY,
+            Some(&mut |_, layer| blurs.push(layer)),
+        );
         blurs
     }
 
-    #[doc = include_str!("scene_converter.doc/convert_segments.md")]
+    #[doc = include_str!("../../docs/api/conversion/scene_converter.doc/convert_segments.md")]
     #[must_use]
     pub fn convert_segments(&self, list: &DisplayList) -> Vec<SceneSegment> {
-        let commands = list.commands();
-        let mut segments: Vec<SceneSegment> = Vec::new();
-        let mut start = 0usize;
-        for (index, command) in commands.iter().enumerate() {
-            if let PaintCommand::BackdropFilter {
-                bounds,
-                radii,
-                blur,
-            } = command
-            {
-                segments.push(self.content_segment(&commands[start..index]));
-                segments.push(SceneSegment::Backdrop {
-                    bounds: *bounds,
-                    radii: *radii,
-                    blur: *blur,
-                });
-                start = index + 1;
+        self.image_blobs.begin_frame();
+        let mut segments = Vec::new();
+        let mut run = Vec::new();
+        let mut scopes: Vec<&PaintCommand> = Vec::new();
+        for command in list.commands() {
+            match command {
+                PaintCommand::BackdropFilter {
+                    bounds,
+                    radii,
+                    blur,
+                } if scopes.iter().all(|scope| match scope {
+                    PaintCommand::PushLayer(layer) => Self::can_split_backdrop_layer(layer),
+                    _ => true,
+                }) =>
+                {
+                    let transform =
+                        scopes
+                            .iter()
+                            .fold(Affine::IDENTITY, |current, scope| match scope {
+                                PaintCommand::PushTransform(transform) => {
+                                    current * to_kurbo_affine(transform)
+                                }
+                                PaintCommand::PushLayer(layer) => {
+                                    current * to_kurbo_affine(&layer.transform())
+                                }
+                                _ => current,
+                            });
+                    close_run(&mut run, &scopes);
+                    self.append_content_segments(&run, &mut segments);
+                    let mut mask_commands: Vec<_> =
+                        scopes.iter().map(|&scope| scope.clone()).collect();
+                    mask_commands.push(PaintCommand::DrawPath {
+                        path: obscur_scene::path::Path::rounded_rect(*bounds, *radii),
+                        paint: Paint::solid_fill(obscur_scene::color::Color::WHITE),
+                    });
+                    close_run(&mut mask_commands, &scopes);
+                    let mut coverage = Scene::new();
+                    self.emit(&mut coverage, &mask_commands, Affine::IDENTITY, None);
+                    let scale = affine_scale(transform);
+                    segments.push(SceneSegment::Backdrop {
+                        bounds: transform_rect(transform, *bounds),
+                        radii: radii.map(|corner| {
+                            obscur_geometry::CornerRadius::new(corner.x * scale, corner.y * scale)
+                        }),
+                        blur: *blur * scale,
+                        coverage,
+                    });
+                    run.clear();
+                    run.extend(scopes.iter().map(|&scope| scope.clone()));
+                    continue;
+                }
+                PaintCommand::PushTransform(_)
+                | PaintCommand::PushClip(_)
+                | PaintCommand::PushLayer(_) => scopes.push(command),
+                PaintCommand::PopTransform | PaintCommand::PopClip | PaintCommand::PopLayer => {
+                    if scopes
+                        .last()
+                        .is_some_and(|scope| command.closes_scope(scope))
+                    {
+                        scopes.pop();
+                    } else {
+                        continue;
+                    }
+                }
+                _ => {}
             }
+            run.push(command.clone());
         }
-        segments.push(self.content_segment(&commands[start..]));
+        self.append_content_segments(&run, &mut segments);
         segments
     }
 
-    #[doc = include_str!("scene_converter.doc/content_segment.md")]
-    fn content_segment(&self, commands: &[PaintCommand]) -> SceneSegment {
-        let mut scene = Scene::new();
-        let mut blurs: Vec<BlurLayer> = Vec::new();
-        self.emit(&mut scene, commands, Affine::IDENTITY, Some(&mut blurs));
-        SceneSegment::Content { scene, blurs }
+    pub(crate) fn can_extract_filter(layer: &SceneLayer) -> bool {
+        layer.clip().and_then(Clip::bounds).is_some()
+            && layer.blend_mode().is_normal()
+            && layer.composition().is_src_over()
+            && layer.opacity() == 1.0
     }
 
-    #[doc = include_str!("scene_converter.doc/emit.md")]
+    pub(crate) fn can_split_backdrop_layer(layer: &SceneLayer) -> bool {
+        !layer.is_isolated()
+            && layer.opacity() == 1.0
+            && layer.blend_mode().is_normal()
+            && layer.composition().is_src_over()
+            && layer.effects().is_empty()
+            && layer
+                .clip()
+                .is_none_or(|clip| matches!(clip, Clip::Shape(_)))
+    }
+
+    fn append_content_segments(&self, commands: &[PaintCommand], segments: &mut Vec<SceneSegment>) {
+        let mut scene = Scene::new();
+        self.emit_ordered(&mut scene, commands, segments);
+        segments.push(SceneSegment::Content {
+            scene,
+            blurs: Vec::new(),
+        });
+    }
+
+    pub(crate) fn convert_ordered_into(
+        &self,
+        scene: &mut Scene,
+        list: &DisplayList,
+    ) -> Vec<SceneSegment> {
+        scene.reset();
+        self.image_blobs.begin_frame();
+        let mut segments = Vec::new();
+        self.emit_ordered(scene, list.commands(), &mut segments);
+        segments
+    }
+
+    fn emit_ordered(
+        &self,
+        scene: &mut Scene,
+        commands: &[PaintCommand],
+        segments: &mut Vec<SceneSegment>,
+    ) {
+        self.emit(
+            scene,
+            commands,
+            Affine::IDENTITY,
+            Some(&mut |scene, layer| {
+                segments.push(SceneSegment::Content {
+                    scene: std::mem::take(scene),
+                    blurs: vec![layer],
+                });
+            }),
+        );
+    }
+
+    #[doc = include_str!("../../docs/api/conversion/scene_converter.doc/emit.md")]
     fn emit(
         &self,
         scene: &mut Scene,
         commands: &[PaintCommand],
         base: Affine,
-        mut extract: Option<&mut Vec<BlurLayer>>,
+        mut extract: Option<&mut FilterSink<'_>>,
     ) {
-        let mut depth: u32 = 0;
+        let mut layers: Vec<SceneScope<'_>> = Vec::new();
         // The active CSS 2D `transform` stack: each `PushTransform` composes its
         // affine onto the running transform, and every draw between it and the
         // matching `PopTransform` is mapped by the top of the stack. Empty (== the
@@ -160,10 +307,12 @@ impl SceneConverter {
                 // also drawn unfiltered.
                 PaintCommand::PushLayer(layer)
                     if extract.is_some()
+                        && layers.is_empty()
+                        && Self::can_extract_filter(layer)
                         && (layer_blur_radius(layer).is_some()
-                            || layer_color_matrix(layer).is_some())
-                        && layer.clip().and_then(Clip::bounds).is_some() =>
+                            || layer_color_matrix(layer).is_some()) =>
                 {
+                    let current = current * to_kurbo_affine(&layer.transform());
                     let color_matrix = layer_color_matrix(layer);
                     // The bounds are `Some` per the match guard. They come in the
                     // layer's LOCAL space, but the sub-scene below is emitted under
@@ -185,9 +334,15 @@ impl SceneConverter {
                     // Build the bracketed subtree as its own scene. Sub-scenes never
                     // extract nested filters (drawn as ordinary layers — documented).
                     let mut sub = Scene::new();
+                    if let Some(clip) = layer.clip() {
+                        self.push_clip(&mut sub, clip, current);
+                    }
                     self.emit(&mut sub, inner, current, None);
-                    if let Some(blurs) = extract.as_deref_mut() {
-                        blurs.push(BlurLayer::new(sub, bounds, radius, color_matrix));
+                    if let Some(clip) = layer.clip() {
+                        self.pop_layer(&mut sub, Some((clip, current)));
+                    }
+                    if let Some(extract) = extract.as_deref_mut() {
+                        extract(scene, BlurLayer::new(sub, bounds, radius, color_matrix));
                     }
                     // Skip past the matching PopLayer (both consumed, still balanced).
                     index = end + 1;
@@ -200,23 +355,53 @@ impl SceneConverter {
                     transforms.push(current * to_kurbo_affine(transform));
                 }
                 PaintCommand::PopTransform => {
-                    transforms.pop();
+                    let depth = layers
+                        .iter()
+                        .rev()
+                        .find_map(|scope| scope.layer_transform_depth);
+                    if depth.is_none_or(|depth| transforms.len() > depth + 1) {
+                        transforms.pop();
+                    }
                 }
                 PaintCommand::PushClip(clip) => {
                     self.push_clip(scene, clip, current);
-                    depth += 1;
+                    layers.push(SceneScope {
+                        clip: Some((clip, current)),
+                        layer_transform_depth: None,
+                    });
                 }
                 PaintCommand::PushLayer(layer) => {
+                    let depth = transforms.len();
+                    let current = current * to_kurbo_affine(&layer.transform());
+                    transforms.push(current);
                     self.push_layer(scene, layer, current);
-                    depth += 1;
+                    layers.push(SceneScope {
+                        clip: layer.clip().map(|clip| (clip, current)),
+                        layer_transform_depth: Some(depth),
+                    });
                 }
                 PaintCommand::PopClip | PaintCommand::PopLayer => {
-                    if depth > 0 {
-                        scene.pop_layer();
-                        depth -= 1;
+                    let closes_layer = matches!(commands[index], PaintCommand::PopLayer);
+                    if layers
+                        .last()
+                        .is_some_and(|scope| scope.layer_transform_depth.is_some() == closes_layer)
+                    {
+                        if let Some(scope) = layers.pop() {
+                            if let Some(depth) = scope.layer_transform_depth {
+                                transforms.truncate(depth);
+                            }
+                            self.pop_layer(scene, scope.clip);
+                        }
                     }
                 }
                 PaintCommand::DrawText { origin, run, brush } => {
+                    // One command, one glyph run. Adjacent same-state commands
+                    // are deliberately *not* gathered into one: a Vello glyph
+                    // run is one path and one draw object, so merging would
+                    // replace N source-over composites with a single non-zero
+                    // fill of their union, and those two agree only where no two
+                    // glyphs reach the same pixel. Measured deltas and the test
+                    // that holds this line are in `tests/text_run_pixels.rs`.
                     self.draw_text(scene, *origin, run, brush, current);
                 }
                 PaintCommand::DrawShadow {
@@ -262,12 +447,12 @@ impl SceneConverter {
             index += 1;
         }
 
-        for _ in 0..depth {
-            scene.pop_layer();
+        while let Some(scope) = layers.pop() {
+            self.pop_layer(scene, scope.clip);
         }
     }
 
-    #[doc = include_str!("scene_converter.doc/draw_text.md")]
+    #[doc = include_str!("../../docs/api/conversion/scene_converter.doc/draw_text.md")]
     fn draw_text(
         &self,
         scene: &mut Scene,
@@ -283,23 +468,16 @@ impl SceneConverter {
             return;
         };
 
-        let glyphs: Vec<vello::Glyph> = run
-            .glyphs()
-            .iter()
-            .map(|glyph| {
-                // The domain glyph id IS this font's glyph index (shaped against
-                // the same host font); use it directly. Positions come from the
-                // domain, never re-shaped.
-                vello::Glyph {
-                    id: glyph.glyph_id(),
-                    x: origin.x + glyph.x(),
-                    y: origin.y + glyph.y(),
-                }
-            })
-            .collect();
-        if glyphs.is_empty() {
+        // Before anything is built. An empty run must leave the scene untouched —
+        // `draw_glyphs` is never entered — and empty runs really do arrive: a
+        // paragraph emits one for an empty line. Emptiness is a property of the
+        // run, so it is asked of the run: this used to map the glyphs into a
+        // `Vec` and ask *that*, one heap allocation per text command per frame
+        // to answer a question the source had already answered.
+        if run.is_empty() {
             return;
         }
+        let glyphs = positioned_glyphs(run, origin);
 
         // Reuse the same Brush→peniko path fills use, so a `Brush::solid(color)`
         // becomes the glyph brush (gradients carry over too).
@@ -317,13 +495,13 @@ impl SceneConverter {
             draw = draw.glyph_transform(Some(Affine::skew(FAUX_ITALIC_SKEW, 0.0)));
         }
         if run.synth_bold() {
-            let amount = f64::from(run.font_size()) * FAUX_BOLD_EMBOLDEN_FRACTION;
+            let amount = f64::from(run.font_size()) * f64::from(SYNTHETIC_BOLD_OUTSET_FRACTION);
             draw = draw.font_embolden(FontEmbolden::new(Diagonal2::new(amount, amount)));
         }
-        draw.draw(peniko::Fill::NonZero, glyphs.into_iter());
+        draw.draw(peniko::Fill::NonZero, glyphs);
     }
 
-    #[doc = include_str!("scene_converter.doc/draw_path.md")]
+    /// Fills or strokes a single path under the active `transform`.
     fn draw_path(
         &self,
         scene: &mut Scene,
@@ -348,41 +526,107 @@ impl SceneConverter {
         }
     }
 
-    #[doc = include_str!("scene_converter.doc/push_clip.md")]
-    fn push_clip(&self, scene: &mut Scene, clip: &Clip, transform: Affine) {
-        let shape = self.clip.shape(clip);
-        scene.push_layer(
-            peniko::Fill::NonZero,
-            peniko::BlendMode::default(),
-            1.0,
-            transform,
-            &shape,
-        );
+    fn layer_clip_shape(&self, clip: &Clip) -> vello::kurbo::BezPath {
+        match clip {
+            Clip::ImageMask { bounds, .. } => self.clip.shape(&Clip::rect(*bounds)),
+            _ => self.clip.shape(clip),
+        }
     }
 
-    #[doc = include_str!("scene_converter.doc/push_layer.md")]
+    fn pop_layer(&self, scene: &mut Scene, clip: Option<(&Clip, Affine)>) {
+        if let Some((
+            Clip::ImageMask {
+                kind,
+                image,
+                bounds,
+            },
+            transform,
+        )) = clip
+        {
+            let shape = self.clip.shape(&Clip::rect(*bounds));
+            scene.push_layer(
+                peniko::Fill::NonZero,
+                peniko::BlendMode::new(peniko::Mix::Normal, peniko::Compose::DestIn),
+                1.0,
+                transform,
+                &shape,
+            );
+            let luminance = kind
+                .kind()
+                .is_luminance()
+                .then(|| self.image_blobs.luminance_mask(image))
+                .flatten();
+            let source = luminance.as_ref().unwrap_or(image);
+            draw_image(
+                scene,
+                source,
+                bounds,
+                bounds,
+                false,
+                false,
+                transform,
+                &self.image_blobs,
+            );
+            scene.pop_layer();
+        }
+        scene.pop_layer();
+    }
+
+    pub(super) fn clip_fill_rule(&self, clip: &Clip) -> peniko::Fill {
+        match clip {
+            Clip::Shape(obscur_scene::clip::ClipShape::Path(path)) => {
+                self.path.fill_rule(path.fill_rule())
+            }
+            _ => peniko::Fill::NonZero,
+        }
+    }
+
+    /// Pushes a clip as a neutral-blend layer bounded by the clip's shape, mapped
+    /// by the active `transform`.
+    fn push_clip(&self, scene: &mut Scene, clip: &Clip, transform: Affine) {
+        let shape = self.layer_clip_shape(clip);
+        let fill = self.clip_fill_rule(clip);
+        scene.push_layer(fill, peniko::BlendMode::default(), 1.0, transform, &shape);
+    }
+
+    /// Pushes a compositing layer with its opacity, blend, and clip shape, the
+    /// shape mapped by the active `transform`.
     fn push_layer(&self, scene: &mut Scene, layer: &SceneLayer, transform: Affine) {
         let blend = peniko::BlendMode::new(mix(layer.blend_mode()), compose(layer.composition()));
         let alpha = layer.opacity();
-        // A mask clip resolves to the same unbounded outline as no clip at all, so
-        // both cases go through `ClipConverter` rather than a second, divergent
-        // mask rule here (spec §5.2: clipping must match across backends).
-        let shape = layer
-            .clip()
-            .map_or_else(ClipConverter::unbounded, |clip| self.clip.shape(clip));
-        scene.push_layer(peniko::Fill::NonZero, blend, alpha, transform, &shape);
+        // An image mask clips to its bounds here and applies its sampled
+        // coverage when the group closes.
+        match layer.clip() {
+            Some(clip) => {
+                let shape = self.layer_clip_shape(clip);
+                scene.push_layer(self.clip_fill_rule(clip), blend, alpha, transform, &shape);
+            }
+            None => scene.push_layer(
+                peniko::Fill::NonZero,
+                blend,
+                alpha,
+                transform,
+                ClipConverter::unbounded_ref(),
+            ),
+        }
     }
 }
 
-#[doc = include_str!("scene_converter.doc/layer_blur_radius.md")]
-fn layer_blur_radius(layer: &SceneLayer) -> Option<f32> {
+fn close_run(run: &mut Vec<PaintCommand>, scopes: &[&PaintCommand]) {
+    run.extend(scopes.iter().rev().filter_map(|scope| scope.scope_close()));
+}
+
+/// The first finite positive [`Blur`](LayerEffect::Blur) radius on a layer.
+/// A zero radius leaves the layer in the ordinary drawing pass.
+pub(crate) fn layer_blur_radius(layer: &SceneLayer) -> Option<f32> {
     layer.effects().iter().find_map(|effect| match effect {
-        LayerEffect::Blur { radius } => Some(*radius),
+        LayerEffect::Blur { radius } if radius.is_finite() && *radius > 0.0 => Some(*radius),
         _ => None,
     })
 }
 
-#[doc = include_str!("scene_converter.doc/layer_color_matrix.md")]
+/// The first [`ColorMatrix`](LayerEffect::ColorMatrix) folded matrix on a layer, if
+/// any — the color-op `filter` chain the coordinator composed into one 4×5 matrix.
 fn layer_color_matrix(layer: &SceneLayer) -> Option<[f32; 20]> {
     layer
         .effects()
@@ -390,16 +634,23 @@ fn layer_color_matrix(layer: &SceneLayer) -> Option<[f32; 20]> {
         .find_map(|effect| effect.as_color_matrix())
 }
 
-#[doc = include_str!("scene_converter.doc/matching_layer_pop.md")]
+/// The index of the `PopLayer` matching the `PushLayer` at `start`,
+/// respecting nested clips and layers. Returns
+/// `commands.len()` for an unbalanced list (the rest is treated as the subtree).
 fn matching_layer_pop(commands: &[PaintCommand], start: usize) -> usize {
-    let mut depth: i32 = 0;
+    let mut scopes = Vec::new();
     for (offset, command) in commands[start..].iter().enumerate() {
         match command {
-            PaintCommand::PushClip(_) | PaintCommand::PushLayer(_) => depth += 1,
+            PaintCommand::PushClip(_) | PaintCommand::PushLayer(_) => scopes.push(command),
             PaintCommand::PopClip | PaintCommand::PopLayer => {
-                depth -= 1;
-                if depth == 0 {
-                    return start + offset;
+                if scopes
+                    .last()
+                    .is_some_and(|scope| command.closes_scope(scope))
+                {
+                    scopes.pop();
+                    if scopes.is_empty() {
+                        return start + offset;
+                    }
                 }
             }
             _ => {}
@@ -408,7 +659,7 @@ fn matching_layer_pop(commands: &[PaintCommand], start: usize) -> usize {
     commands.len()
 }
 
-#[doc = include_str!("scene_converter.doc/transform_rect.md")]
+#[doc = include_str!("../../docs/api/conversion/scene_converter.doc/transform_rect.md")]
 #[allow(clippy::cast_possible_truncation)]
 fn transform_rect(a: Affine, rect: obscur_geometry::Rect) -> obscur_geometry::Rect {
     let m = a.as_coeffs();
@@ -432,15 +683,19 @@ fn transform_rect(a: Affine, rect: obscur_geometry::Rect) -> obscur_geometry::Re
     )
 }
 
-#[doc = include_str!("scene_converter.doc/affine_scale.md")]
+/// The linear (uniform) scale factor of `a`, `sqrt(|det|)` — used to scale a
+/// gaussian blur radius from logical to device pixels so the blur strength tracks
+/// the element's on-screen size. `1.0` for an identity/translate-only transform.
 #[allow(clippy::cast_possible_truncation)]
 fn affine_scale(a: Affine) -> f32 {
     let m = a.as_coeffs();
     (m[0] * m[3] - m[1] * m[2]).abs().sqrt() as f32
 }
 
-#[doc = include_str!("scene_converter.doc/to_kurbo_affine.md")]
-fn to_kurbo_affine(t: &obscur_geometry::AffineTransform) -> Affine {
+/// Converts an obscur-geometry [`AffineTransform`](obscur_geometry::AffineTransform)
+/// into a kurbo [`Affine`]. Both store the six coefficients `[a, b, c, d, e, f]`
+/// in the identical layout, so the conversion is a straight widening to `f64`.
+pub(super) fn to_kurbo_affine(t: &obscur_geometry::AffineTransform) -> Affine {
     let m = t.coeffs;
     Affine::new([
         f64::from(m[0]),
@@ -452,8 +707,8 @@ fn to_kurbo_affine(t: &obscur_geometry::AffineTransform) -> Affine {
     ])
 }
 
-#[doc = include_str!("scene_converter.doc/mix.md")]
-fn mix(mode: BlendMode) -> peniko::Mix {
+/// Maps an obscur-scene [`BlendMode`] to a peniko [`Mix`](peniko::Mix) blend.
+pub(crate) fn mix(mode: BlendMode) -> peniko::Mix {
     match mode {
         BlendMode::Normal => peniko::Mix::Normal,
         BlendMode::Multiply => peniko::Mix::Multiply,
@@ -467,11 +722,16 @@ fn mix(mode: BlendMode) -> peniko::Mix {
         BlendMode::SoftLight => peniko::Mix::SoftLight,
         BlendMode::Difference => peniko::Mix::Difference,
         BlendMode::Exclusion => peniko::Mix::Exclusion,
+        BlendMode::Hue => peniko::Mix::Hue,
+        BlendMode::Saturation => peniko::Mix::Saturation,
+        BlendMode::Color => peniko::Mix::Color,
+        BlendMode::Luminosity => peniko::Mix::Luminosity,
     }
 }
 
-#[doc = include_str!("scene_converter.doc/compose.md")]
-fn compose(mode: CompositionMode) -> peniko::Compose {
+/// Maps an obscur-scene [`CompositionMode`] to a peniko
+/// [`Compose`](peniko::Compose) operator.
+pub(crate) fn compose(mode: CompositionMode) -> peniko::Compose {
     match mode {
         CompositionMode::SrcOver => peniko::Compose::SrcOver,
         CompositionMode::Src => peniko::Compose::Copy,
@@ -757,6 +1017,16 @@ mod tests {
     }
 
     #[test]
+    fn wrong_pop_does_not_end_a_filtered_subtree() {
+        let commands = [
+            PaintCommand::PushLayer(SceneLayer::new()),
+            PaintCommand::PopClip,
+            PaintCommand::PopLayer,
+        ];
+        assert_eq!(matching_layer_pop(&commands, 0), 2);
+    }
+
+    #[test]
     fn unbalanced_stray_pop_does_not_panic() {
         let list = DisplayList::from_commands(vec![
             PaintCommand::PopClip,
@@ -814,6 +1084,32 @@ mod tests {
         assert_eq!(converter.font_for(1), Some(&fallback));
         // The primary (untagged, `font = 0`) run still draws against id 0.
         assert_eq!(converter.font_for(0), Some(&primary));
+    }
+
+    #[doc = include_str!("../../docs/api/conversion/scene_converter.doc/dropping_a_face_would_draw_the_wrong_one_not_nothing.md")]
+    #[test]
+    fn dropping_a_face_would_draw_the_wrong_one_not_nothing() {
+        use vello::peniko::Blob;
+        let primary = FontData::new(Blob::from(vec![7u8, 7, 7]), 0);
+        let discovered = FontData::new(Blob::from(vec![8u8, 8, 8]), 0);
+        let mut converter = SceneConverter::new();
+        converter.register_font(0, primary.clone());
+        converter.register_font(9, discovered.clone());
+        assert_eq!(converter.font_for(9), Some(&discovered));
+
+        // What an eviction would do, done by hand.
+        converter.fonts.remove(&9);
+
+        assert_eq!(
+            converter.font_for(9),
+            Some(&primary),
+            "a handle whose face was dropped does NOT resolve to nothing — it \
+             resolves to the primary, whose glyph ids mean something else \
+             entirely. This is why this table has no ceiling and no eviction: \
+             the only re-supply path (`InstalledFonts::take_discovered`) drains, \
+             so a dropped face never comes back, and what it leaves behind is \
+             wrong glyphs rather than absent ones. See `fonts.md`."
+        );
     }
 
     #[test]
@@ -1076,5 +1372,248 @@ mod tests {
         assert!(!list.is_balanced());
         // Dangling push is closed at the end; no panic.
         let _scene = SceneConverter::new().convert(&list);
+    }
+    // ---- one command, one glyph run --------------------------------------
+    //
+    // These need a font that really parses: `vello::DrawGlyphs::draw` unwraps
+    // `FontRef::from_index`, so a `Blob` of three bytes panics there. The
+    // repository ships one, and it is the same file the toolkit's own bootstrap
+    // installs as the sans-serif generic.
+    const A_REAL_FACE: &[u8] = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../assets/fonts/NotoSans-Regular.ttf"
+    ));
+
+    fn a_converter_with_a_real_face() -> SceneConverter {
+        let mut converter = SceneConverter::new();
+        converter.register_font(0, FontData::new(Blob::from(A_REAL_FACE.to_vec()), 0));
+        converter
+    }
+
+    fn a_run(glyph: u32, x: f32) -> obscur_scene::text::GlyphRun {
+        use obscur_scene::text::{GlyphRun, PositionedGlyph};
+        GlyphRun::new(
+            vec![PositionedGlyph::new(glyph, 0, x, 0.0, 10.0)],
+            16.0,
+            "x",
+        )
+    }
+
+    fn a_text_command(run: obscur_scene::text::GlyphRun, origin: f32) -> PaintCommand {
+        PaintCommand::DrawText {
+            origin: Point::new(origin, 40.0),
+            run,
+            brush: Brush::solid(Color::WHITE),
+        }
+    }
+
+    /// The glyphs a scene ended up encoding, in order, as plain numbers.
+    fn encoded_glyphs(scene: &Scene) -> Vec<(u32, u32, u32)> {
+        scene
+            .encoding()
+            .resources
+            .glyphs
+            .iter()
+            .map(|glyph| (glyph.id, glyph.x.to_bits(), glyph.y.to_bits()))
+            .collect()
+    }
+
+    fn encoded_runs(scene: &Scene) -> usize {
+        scene.encoding().resources.glyph_runs.len()
+    }
+
+    #[test]
+    fn every_text_command_gets_a_glyph_run_of_its_own() {
+        // The guard on the line `draw_text` holds. Two adjacent commands in
+        // identical state — the keyboard's own shape, a key's primary and
+        // shifted legends — are the tempting case to fold into one
+        // `draw_glyphs`, and folding them changes the drawing: a Vello glyph
+        // run is ONE path and ONE draw object (`Resolver::resolve` does
+        // `layout.n_paths += 1` per run and terminates it with a single
+        // `PathTag::PATH`), so a fold turns N source-over composites into one
+        // non-zero fill of the union. `tests/text_run_pixels.rs` measures what
+        // that costs in pixels; this is the cheap sentry that fails everywhere,
+        // GPU or not, the moment someone folds them again.
+        let converter = a_converter_with_a_real_face();
+        let list = DisplayList::from_commands(vec![
+            a_text_command(a_run(20, 0.0), 10.0),
+            a_text_command(a_run(21, 0.0), 30.0),
+        ]);
+        let scene = converter.convert(&list);
+        assert_eq!(encoded_runs(&scene), 2, "one glyph run per text command");
+        assert_eq!(encoded_glyphs(&scene).len(), 2);
+    }
+
+    #[test]
+    fn two_commands_and_one_command_holding_both_glyphs_are_not_the_same_drawing() {
+        // The claim the merge was accepted on, tested instead of asserted. The
+        // two are equal in the glyphs they carry and unequal in what draws
+        // them: two paths and two draw objects against one. Everything the
+        // GPU does differently between them follows from that count, so it is
+        // the one fact worth pinning down without a device.
+        use obscur_scene::text::{GlyphRun, PositionedGlyph};
+        let converter = a_converter_with_a_real_face();
+        let pair = DisplayList::from_commands(vec![
+            a_text_command(a_run(20, 1.5), 10.0),
+            a_text_command(a_run(21, 2.5), 30.0),
+        ]);
+        let single = DisplayList::from_commands(vec![a_text_command(
+            GlyphRun::new(
+                vec![
+                    PositionedGlyph::new(20, 0, 1.5, 0.0, 10.0),
+                    PositionedGlyph::new(21, 0, 22.5, 0.0, 10.0),
+                ],
+                16.0,
+                "xy",
+            ),
+            10.0,
+        )]);
+        let (apart, together) = (converter.convert(&pair), converter.convert(&single));
+        assert_eq!(
+            encoded_glyphs(&apart),
+            encoded_glyphs(&together),
+            "the same glyphs at the same absolute places, either way"
+        );
+        assert_eq!(encoded_runs(&apart), 2);
+        assert_eq!(encoded_runs(&together), 1);
+    }
+
+    #[test]
+    fn a_command_puts_every_glyph_where_it_asked_for_it() {
+        // Glyph positions handed to Vello are absolute, resolved against the
+        // command's own origin. Get this wrong and the second legend slides
+        // onto the first.
+        let converter = a_converter_with_a_real_face();
+        let apart = DisplayList::from_commands(vec![
+            a_text_command(a_run(20, 1.5), 10.0),
+            a_text_command(a_run(21, 2.5), 30.0),
+        ]);
+        let scene = converter.convert(&apart);
+        assert_eq!(
+            encoded_glyphs(&scene),
+            vec![
+                (20, 11.5_f32.to_bits(), 40.0_f32.to_bits()),
+                (21, 32.5_f32.to_bits(), 40.0_f32.to_bits()),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_empty_run_beside_a_drawn_one_neither_hides_it_nor_adds_a_glyph() {
+        // Empty runs really arrive — a paragraph emits one per empty line —
+        // and they must contribute nothing and prevent nothing.
+        use obscur_scene::text::GlyphRun;
+        let converter = a_converter_with_a_real_face();
+        let list = DisplayList::from_commands(vec![
+            a_text_command(GlyphRun::new(Vec::new(), 16.0, ""), 10.0),
+            a_text_command(a_run(20, 0.0), 30.0),
+        ]);
+        let scene = converter.convert(&list);
+        assert_eq!(encoded_runs(&scene), 1, "the empty one enters no pipeline");
+        assert_eq!(encoded_glyphs(&scene).len(), 1);
+    }
+
+    #[test]
+    fn nothing_but_empty_runs_never_enters_the_glyph_pipeline() {
+        use obscur_scene::text::GlyphRun;
+        let converter = a_converter_with_a_real_face();
+        let list = DisplayList::from_commands(vec![
+            a_text_command(GlyphRun::new(Vec::new(), 16.0, ""), 10.0),
+            a_text_command(GlyphRun::new(Vec::new(), 16.0, ""), 30.0),
+        ]);
+        let scene = converter.convert(&list);
+        assert!(scene.encoding().is_empty());
+    }
+
+    #[test]
+    fn what_vello_is_handed_counts_itself_before_it_is_walked() {
+        use obscur_scene::text::{GlyphRun, PositionedGlyph};
+        // `DrawGlyphs::draw` feeds this iterator straight into `Vec::extend`,
+        // which reserves the `size_hint` lower bound in one go — so the count
+        // the iterator states BEFORE anything walks it is the whole point, and
+        // it must be the run's own glyph count.
+        //
+        // Asked of `positioned_glyphs`, the function `draw_text` calls, rather
+        // than of a copy of it built in the test: the copy is what the previous
+        // version of this test compared against itself, and it would have gone
+        // on passing while `draw_text` handed Vello something else entirely.
+        let run = GlyphRun::new(
+            vec![
+                PositionedGlyph::new(20, 0, 0.0, 0.0, 10.0),
+                PositionedGlyph::new(21, 1, 10.0, 0.0, 10.0),
+                PositionedGlyph::new(22, 2, 20.0, 0.0, 10.0),
+            ],
+            16.0,
+            "xyz",
+        );
+        let glyphs = super::positioned_glyphs(&run, Point::new(10.0, 40.0));
+        assert_eq!(
+            glyphs.len(),
+            run.glyphs().len(),
+            "stated up front, before a single glyph is produced"
+        );
+        // And what it then produces has to agree with what it promised, in
+        // order and offset by the command's origin.
+        assert_eq!(
+            glyphs
+                .map(|glyph| (glyph.id, glyph.x, glyph.y))
+                .collect::<Vec<_>>(),
+            vec![(20, 10.0, 40.0), (21, 20.0, 40.0), (22, 30.0, 40.0)]
+        );
+    }
+
+    // ---- the font registry's own identity -------------------------------
+
+    #[test]
+    fn registering_the_same_bytes_again_keeps_the_font_vellos_glyph_cache_is_keyed_by() {
+        // `Blob` ids come from a global counter, so the same bytes wrapped twice
+        // are two fonts, and the id is what `GlyphCache::session` keys outlines
+        // by. Re-registering must therefore be a no-op, or the cache is thrown
+        // away with nothing on screen to say so.
+        let mut converter = SceneConverter::new();
+        converter.register_font(3, FontData::new(Blob::from(vec![1u8, 2, 3]), 0));
+        let first = converter.font_for(3).unwrap().data.id();
+        converter.register_font(3, FontData::new(Blob::from(vec![1u8, 2, 3]), 0));
+        assert_eq!(
+            converter.font_for(3).unwrap().data.id(),
+            first,
+            "the same face re-registered must stay the same face"
+        );
+    }
+
+    #[test]
+    fn registering_a_different_face_under_a_live_handle_replaces_it() {
+        // The other half: the guard must not become "never replace". A handle
+        // pointed at new bytes draws with the new bytes.
+        let mut converter = SceneConverter::new();
+        converter.register_font(3, FontData::new(Blob::from(vec![1u8, 2, 3]), 0));
+        let first = converter.font_for(3).unwrap().data.id();
+        converter.register_font(3, FontData::new(Blob::from(vec![9u8, 9, 9]), 0));
+        assert_ne!(converter.font_for(3).unwrap().data.id(), first);
+        assert_eq!(converter.font_for(3).unwrap().data.as_ref(), &[9u8, 9, 9]);
+    }
+
+    #[test]
+    fn the_same_bytes_at_a_different_face_index_are_a_different_face() {
+        // A `.ttc` holds several faces behind one byte range; the index is half
+        // the identity, and a guard that compared only bytes would pin the
+        // wrong one.
+        let mut converter = SceneConverter::new();
+        converter.register_font(3, FontData::new(Blob::from(vec![1u8, 2, 3]), 0));
+        converter.register_font(3, FontData::new(Blob::from(vec![1u8, 2, 3]), 1));
+        assert_eq!(converter.font_for(3).unwrap().index, 1);
+    }
+
+    #[test]
+    fn two_blobs_over_the_same_bytes_really_do_get_different_ids() {
+        // The premise the guard exists for. If Vello's blob ids ever became
+        // content-derived, the guard would be pointless and this test says so
+        // before anyone reads the guard and is puzzled by it.
+        let bytes = vec![4u8, 5, 6];
+        assert_ne!(
+            Blob::from(bytes.clone()).id(),
+            Blob::from(bytes).id(),
+            "blob identity is a counter, not the content"
+        );
     }
 }

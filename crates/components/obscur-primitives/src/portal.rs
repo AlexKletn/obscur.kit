@@ -1,9 +1,9 @@
-#![doc = include_str!("portal.doc/_module.md")]
+//! `Portal`: a remote-render primitive (spec §2.6).
 
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_view::view::{View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-#[doc = include_str!("portal.doc/Portal.md")]
+#[doc = include_str!("../docs/api/portal.doc/Portal.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Portal {
     target: Box<str>,
@@ -11,13 +11,13 @@ pub struct Portal {
 }
 
 impl Portal {
-    #[doc = include_str!("portal.doc/COMPONENT_ID.md")]
+    #[doc = include_str!("../docs/api/portal.doc/COMPONENT_ID.md")]
     pub const COMPONENT_ID: ComponentId = ComponentId::from_raw(0x00C0_0006);
 
-    #[doc = include_str!("portal.doc/PROP_TARGET.md")]
+    #[doc = include_str!("../docs/api/portal.doc/PROP_TARGET.md")]
     pub const PROP_TARGET: InternedSymbol = InternedSymbol::from_raw(0x00C1_0601);
 
-    #[doc = include_str!("portal.doc/new.md")]
+    /// Creates a portal projecting to the named `target` with no children.
     #[must_use]
     pub fn new(target: impl Into<Box<str>>) -> Self {
         Self {
@@ -26,14 +26,15 @@ impl Portal {
         }
     }
 
-    #[doc = include_str!("portal.doc/child.md")]
+    /// Appends a child node, returning the updated portal.
     #[must_use]
     pub fn child(mut self, node: ViewNode) -> Self {
         self.children.push(node);
         self
     }
 
-    #[doc = include_str!("portal.doc/into_view_node.md")]
+    /// Lowers this portal into its [`ViewNode::Element`], emitting the target
+    /// property and its children as the fragment.
     #[must_use]
     pub fn into_view_node(self) -> ViewNode {
         ViewNode::element(Self::COMPONENT_ID)
@@ -44,7 +45,7 @@ impl Portal {
             .with_children(ViewFragment::from_nodes(self.children))
     }
 
-    #[doc = include_str!("portal.doc/view.md")]
+    /// Lowers this portal into a single-node [`View`].
     #[must_use]
     pub fn view(self) -> View {
         View::single(self.into_view_node())

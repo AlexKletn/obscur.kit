@@ -1,25 +1,27 @@
-#![doc = include_str!("post_layout_sample.doc/_module.md")]
+//! The [`PostLayoutSample`] post-layout phase sample (spec §4.17 "motion
+//! engine", post-layout phase / after-layout geometry).
 
 use obscur_geometry::Rect;
 
 use crate::timeline::TimelineId;
 use crate::value::MotionValue;
 
-#[doc = include_str!("post_layout_sample.doc/PostLayoutSample.md")]
+#[doc = include_str!("../../docs/api/phase/post_layout_sample.doc/PostLayoutSample.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PostLayoutSample {
-    #[doc = include_str!("post_layout_sample.doc/timeline.md")]
+    /// The timeline that produced this sample.
     timeline: TimelineId,
-    #[doc = include_str!("post_layout_sample.doc/progress.md")]
+    /// The timeline progress at the moment of sampling (normalized `0..=1`).
     progress: f32,
-    #[doc = include_str!("post_layout_sample.doc/value.md")]
+    /// The sampled presentation-only value (e.g. an animated transform/opacity).
     value: MotionValue,
-    #[doc = include_str!("post_layout_sample.doc/post_layout_bounds.md")]
+    /// The element's final laid-out box, captured after layout; `None` when it
+    /// was not captured.
     post_layout_bounds: Option<Rect>,
 }
 
 impl PostLayoutSample {
-    #[doc = include_str!("post_layout_sample.doc/new.md")]
+    #[doc = include_str!("../../docs/api/phase/post_layout_sample.doc/new.md")]
     #[must_use]
     pub const fn new(timeline: TimelineId, progress: f32, value: MotionValue) -> Self {
         Self {
@@ -30,38 +32,39 @@ impl PostLayoutSample {
         }
     }
 
-    #[doc = include_str!("post_layout_sample.doc/with_bounds.md")]
+    #[doc = include_str!("../../docs/api/phase/post_layout_sample.doc/with_bounds.md")]
     #[must_use]
     pub const fn with_bounds(mut self, bounds: Rect) -> Self {
         self.post_layout_bounds = Some(bounds);
         self
     }
 
-    #[doc = include_str!("post_layout_sample.doc/timeline_2.md")]
+    /// Returns the timeline that produced this sample.
     #[must_use]
     pub const fn timeline(&self) -> TimelineId {
         self.timeline
     }
 
-    #[doc = include_str!("post_layout_sample.doc/progress_2.md")]
+    /// Returns the timeline progress at the moment of sampling.
     #[must_use]
     pub const fn progress(&self) -> f32 {
         self.progress
     }
 
-    #[doc = include_str!("post_layout_sample.doc/value_2.md")]
+    /// Returns the sampled presentation-only value.
     #[must_use]
     pub const fn value(&self) -> MotionValue {
         self.value
     }
 
-    #[doc = include_str!("post_layout_sample.doc/post_layout_bounds_2.md")]
+    /// Returns the element's captured post-layout box, or `None` if none was
+    /// captured.
     #[must_use]
     pub const fn post_layout_bounds(&self) -> Option<Rect> {
         self.post_layout_bounds
     }
 
-    #[doc = include_str!("post_layout_sample.doc/affects_layout.md")]
+    #[doc = include_str!("../../docs/api/phase/post_layout_sample.doc/affects_layout.md")]
     #[must_use]
     pub const fn affects_layout(&self) -> bool {
         false

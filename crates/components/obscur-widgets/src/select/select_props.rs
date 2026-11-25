@@ -1,4 +1,4 @@
-#![doc = include_str!("select_props.doc/_module.md")]
+#![doc = include_str!("../../docs/api/select/select_props.doc/_module.md")]
 
 use obscur_identity::InternedSymbol;
 use obscur_view::component::{ComponentContract, FromProps, PropsError, prop_value};
@@ -7,38 +7,49 @@ use obscur_view::view::{ViewProperty, ViewValue};
 
 use super::Select;
 
-#[doc = include_str!("select_props.doc/SelectProps.md")]
+#[doc = include_str!("../../docs/api/select/select_props.doc/SelectProps.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SelectProps {
-    #[doc = include_str!("select_props.doc/options.md")]
+    /// The option labels, in the order they are offered.
     pub options: Vec<Box<str>>,
-    #[doc = include_str!("select_props.doc/selected.md")]
+    /// The index of the picked option, or `None` when nothing is picked — in which
+    /// case the header shows the first option, as a bare `<select>` does.
     pub selected: Option<usize>,
-    #[doc = include_str!("select_props.doc/open.md")]
+    /// Whether the dropdown popup is down. The `.select-list` of rows is rendered
+    /// exactly when this is `true`, **including on a disabled control**: see
+    /// [`Select::contents`](super::Select).
     pub open: bool,
 }
 
 impl SelectProps {
-    #[doc = include_str!("select_props.doc/OPTIONS.md")]
+    #[doc = include_str!("../../docs/api/select/select_props.doc/OPTIONS.md")]
     pub const OPTIONS: InternedSymbol = InternedSymbol::from_raw(0xEF28_6CA5);
-    #[doc = include_str!("select_props.doc/SELECTED.md")]
+    #[doc = include_str!("../../docs/api/select/select_props.doc/SELECTED.md")]
     pub const SELECTED: InternedSymbol = InternedSymbol::from_raw(0xCE0A_1774);
-    #[doc = include_str!("select_props.doc/OPEN.md")]
+    #[doc = include_str!("../../docs/api/select/select_props.doc/OPEN.md")]
     pub const OPEN: InternedSymbol = InternedSymbol::from_raw(0xD35E_C4C9);
 
-    #[doc = include_str!("select_props.doc/AUTHORED_SEPARATOR.md")]
+    #[doc = include_str!("../../docs/api/select/select_props.doc/AUTHORED_SEPARATOR.md")]
     pub const AUTHORED_SEPARATOR: char = ',';
 
-    #[doc = include_str!("select_props.doc/NAME.md")]
+    /// Symbol of the component's name, `"Select"` — the FNV-1a-32 hash
+    /// `#[derive(Contract)]` puts on `ComponentContract::with_name`.
     const NAME: InternedSymbol = InternedSymbol::from_raw(0x3E89_2B4D);
-    #[doc = include_str!("select_props.doc/OPTIONS_TYPE.md")]
+    /// Opaque type identity of the `options` prop: the FNV-1a-32 hash of the
+    /// normalised Rust type spelling `Option < String >` — the type of the *authored*
+    /// value, which is a delimited string, not the `Vec<Box<str>>` this struct
+    /// decodes it into. It names no view property and is compared, never interpreted.
     const OPTIONS_TYPE: InternedSymbol = InternedSymbol::from_raw(0x4F1F_A46F);
-    #[doc = include_str!("select_props.doc/SELECTED_TYPE.md")]
+    /// Opaque type identity of the `selected` prop: the FNV-1a-32 hash of the
+    /// normalised Rust type spelling `Option < usize >`, which is what
+    /// `#[derive(Contract)]` records for an `Option<usize>` field.
     const SELECTED_TYPE: InternedSymbol = InternedSymbol::from_raw(0x3AC8_8BA4);
-    #[doc = include_str!("select_props.doc/OPEN_TYPE.md")]
+    /// Opaque type identity of the `open` prop: the FNV-1a-32 hash of the Rust type
+    /// spelling `bool`, which is what `#[derive(Contract)]` records for a plain `bool`
+    /// field carrying `#[contract(default)]`.
     const OPEN_TYPE: InternedSymbol = InternedSymbol::from_raw(0xC894_953D);
 
-    #[doc = include_str!("select_props.doc/contract.md")]
+    #[doc = include_str!("../../docs/api/select/select_props.doc/contract.md")]
     #[must_use]
     pub fn contract() -> ComponentContract {
         ComponentContract::new(Select::COMPONENT_ID)
@@ -50,7 +61,7 @@ impl SelectProps {
 }
 
 impl FromProps for SelectProps {
-    #[doc = include_str!("select_props.doc/from_props.md")]
+    #[doc = include_str!("../../docs/api/select/select_props.doc/from_props.md")]
     fn from_props(props: &[ViewProperty]) -> Result<Self, PropsError> {
         let options = match prop_value(props, Select::PROP_OPTIONS) {
             Some(ViewValue::Text(joined)) => joined

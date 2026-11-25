@@ -1,30 +1,12 @@
-#![doc = include_str!("frame_submission.doc/_module.md")]
+//! How a rendered frame is submitted for presentation (spec §5.2).
 
 use obscur_scene::scene::SceneGeneration;
 
 use crate::frame::RenderFrame;
 
-#[doc = include_str!("frame_submission.doc/PresentMode.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum PresentMode {
-    #[doc = include_str!("frame_submission.doc/Fifo.md")]
-    #[default]
-    Fifo,
-    #[doc = include_str!("frame_submission.doc/Immediate.md")]
-    Immediate,
-    #[doc = include_str!("frame_submission.doc/Mailbox.md")]
-    Mailbox,
-}
+use super::PresentMode;
 
-impl PresentMode {
-    #[doc = include_str!("frame_submission.doc/waits_for_vsync.md")]
-    #[must_use]
-    pub const fn waits_for_vsync(&self) -> bool {
-        matches!(self, Self::Fifo | Self::Mailbox)
-    }
-}
-
-#[doc = include_str!("frame_submission.doc/FrameSubmission.md")]
+#[doc = include_str!("../../docs/api/frame/frame_submission.doc/FrameSubmission.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrameSubmission {
     frame: RenderFrame,
@@ -32,7 +14,8 @@ pub struct FrameSubmission {
 }
 
 impl FrameSubmission {
-    #[doc = include_str!("frame_submission.doc/new.md")]
+    /// Submits `frame` for presentation using the default
+    /// [`PresentMode::Fifo`] (vsync).
     #[must_use]
     pub fn new(frame: RenderFrame) -> Self {
         Self {
@@ -41,26 +24,26 @@ impl FrameSubmission {
         }
     }
 
-    #[doc = include_str!("frame_submission.doc/with_present_mode.md")]
+    /// Sets the presentation mode, returning the updated submission.
     #[must_use]
     pub fn with_present_mode(mut self, present_mode: PresentMode) -> Self {
         self.present_mode = present_mode;
         self
     }
 
-    #[doc = include_str!("frame_submission.doc/frame.md")]
+    /// The frame to be presented.
     #[must_use]
     pub const fn frame(&self) -> &RenderFrame {
         &self.frame
     }
 
-    #[doc = include_str!("frame_submission.doc/present_mode.md")]
+    /// The presentation mode this frame is submitted with.
     #[must_use]
     pub const fn present_mode(&self) -> PresentMode {
         self.present_mode
     }
 
-    #[doc = include_str!("frame_submission.doc/generation.md")]
+    /// The generation of the scene carried by this submission's frame.
     #[must_use]
     pub fn generation(&self) -> SceneGeneration {
         self.frame.generation()
@@ -79,18 +62,6 @@ mod tests {
             SceneSnapshot::new(DisplayList::new(), SceneGeneration::from_raw(3)),
             Size::new(320.0, 240.0),
         )
-    }
-
-    #[test]
-    fn present_mode_waits_for_vsync() {
-        assert!(PresentMode::Fifo.waits_for_vsync());
-        assert!(PresentMode::Mailbox.waits_for_vsync());
-        assert!(!PresentMode::Immediate.waits_for_vsync());
-    }
-
-    #[test]
-    fn present_mode_default_is_fifo() {
-        assert_eq!(PresentMode::default(), PresentMode::Fifo);
     }
 
     #[test]

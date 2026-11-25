@@ -1,18 +1,8 @@
-#![doc = include_str!("replay_result.doc/_module.md")]
+//! The outcome of replaying an [`EventRecording`](super::EventRecording) (spec §7.13).
 
-#[doc = include_str!("replay_result.doc/ReplayStatus.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ReplayStatus {
-    #[doc = include_str!("replay_result.doc/Completed.md")]
-    Completed,
-    #[doc = include_str!("replay_result.doc/Diverged.md")]
-    Diverged {
-        #[doc = include_str!("replay_result.doc/at_step.md")]
-        at_step: usize,
-    },
-}
+use super::ReplayStatus;
 
-#[doc = include_str!("replay_result.doc/ReplayResult.md")]
+#[doc = include_str!("../../docs/api/replay/replay_result.doc/ReplayResult.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReplayResult {
     steps_replayed: usize,
@@ -24,7 +14,7 @@ pub struct ReplayResult {
 }
 
 impl ReplayResult {
-    #[doc = include_str!("replay_result.doc/new.md")]
+    /// Creates a result from its component tallies and final `status`.
     #[must_use]
     pub const fn new(
         steps_replayed: usize,
@@ -44,43 +34,45 @@ impl ReplayResult {
         }
     }
 
-    #[doc = include_str!("replay_result.doc/steps_replayed.md")]
+    /// The number of recorded steps walked during replay (including skipped
+    /// redaction markers).
     #[must_use]
     pub const fn steps_replayed(&self) -> usize {
         self.steps_replayed
     }
 
-    #[doc = include_str!("replay_result.doc/redactions_skipped.md")]
+    /// The number of [`Redacted`](super::RecordedEvent::Redacted) markers
+    /// skipped; their payloads were never recorded, so nothing was dispatched.
     #[must_use]
     pub const fn redactions_skipped(&self) -> usize {
         self.redactions_skipped
     }
 
-    #[doc = include_str!("replay_result.doc/inputs_applied.md")]
+    /// The number of normalized input events applied to the target.
     #[must_use]
     pub const fn inputs_applied(&self) -> usize {
         self.inputs_applied
     }
 
-    #[doc = include_str!("replay_result.doc/clock_advanced_nanos.md")]
+    /// The total nanoseconds the deterministic clock was advanced.
     #[must_use]
     pub const fn clock_advanced_nanos(&self) -> u64 {
         self.clock_advanced_nanos
     }
 
-    #[doc = include_str!("replay_result.doc/completions.md")]
+    /// The number of async completions dispatched to the target.
     #[must_use]
     pub const fn completions(&self) -> usize {
         self.completions
     }
 
-    #[doc = include_str!("replay_result.doc/status.md")]
+    /// The final replay status.
     #[must_use]
     pub const fn status(&self) -> ReplayStatus {
         self.status
     }
 
-    #[doc = include_str!("replay_result.doc/is_complete.md")]
+    /// Returns `true` when replay completed without divergence.
     #[must_use]
     pub const fn is_complete(&self) -> bool {
         matches!(self.status, ReplayStatus::Completed)

@@ -1,27 +1,19 @@
-#![doc = include_str!("route_pattern.doc/_module.md")]
+//! A compiled route pattern with static, parameter, and wildcard segments
+//! (spec §6.13).
 
 use crate::route::RouteParams;
 
-#[doc = include_str!("route_pattern.doc/PatternSegment.md")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PatternSegment {
-    #[doc = include_str!("route_pattern.doc/Static.md")]
-    Static(Box<str>),
-    #[doc = include_str!("route_pattern.doc/Param.md")]
-    Param(Box<str>),
-    #[doc = include_str!("route_pattern.doc/Wildcard.md")]
-    Wildcard(Box<str>),
-}
+use super::PatternSegment;
 
-#[doc = include_str!("route_pattern.doc/RoutePattern.md")]
+#[doc = include_str!("../../docs/api/route/route_pattern.doc/RoutePattern.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RoutePattern {
-    #[doc = include_str!("route_pattern.doc/segments.md")]
+    /// The compiled segments, in path order.
     segments: Vec<PatternSegment>,
 }
 
 impl RoutePattern {
-    #[doc = include_str!("route_pattern.doc/parse.md")]
+    #[doc = include_str!("../../docs/api/route/route_pattern.doc/parse.md")]
     #[must_use]
     pub fn parse(pattern: &str) -> Self {
         let segments = pattern
@@ -40,13 +32,14 @@ impl RoutePattern {
         Self { segments }
     }
 
-    #[doc = include_str!("route_pattern.doc/segments_2.md")]
+    /// Returns the compiled pattern segments.
     #[must_use]
     pub fn segments(&self) -> &[PatternSegment] {
         &self.segments
     }
 
-    #[doc = include_str!("route_pattern.doc/is_static.md")]
+    /// Returns whether the pattern is fully static (no param or wildcard
+    /// segments).
     #[must_use]
     pub fn is_static(&self) -> bool {
         self.segments
@@ -54,7 +47,7 @@ impl RoutePattern {
             .all(|s| matches!(s, PatternSegment::Static(_)))
     }
 
-    #[doc = include_str!("route_pattern.doc/match_path.md")]
+    #[doc = include_str!("../../docs/api/route/route_pattern.doc/match_path.md")]
     #[must_use]
     pub fn match_path(&self, path: &str) -> Option<RouteParams> {
         let path_segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();

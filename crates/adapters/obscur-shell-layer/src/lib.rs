@@ -1,4 +1,4 @@
-#![doc = include_str!("lib.doc/_module.md")]
+#![doc = include_str!("../docs/api/lib.doc/_module.md")]
 #![deny(unsafe_op_in_unsafe_fn)]
 
 pub mod error;

@@ -1,4 +1,4 @@
-#![doc = include_str!("constraint_layout.doc/_module.md")]
+//! `ConstraintLayout`: a minimal constraint / overlay formatting context.
 
 use obscur_geometry::{BoxConstraints, Point, Rect, Size};
 
@@ -6,12 +6,12 @@ use crate::model::{LayoutBox, LayoutStyle};
 
 use super::{ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput};
 
-#[doc = include_str!("constraint_layout.doc/ConstraintLayout.md")]
+#[doc = include_str!("../../docs/api/algorithm/constraint_layout.doc/ConstraintLayout.md")]
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct ConstraintLayout;
 
 impl ConstraintLayout {
-    #[doc = include_str!("constraint_layout.doc/new.md")]
+    /// Creates a minimal constraint / overlay layout.
     #[must_use]
     pub const fn new() -> Self {
         Self

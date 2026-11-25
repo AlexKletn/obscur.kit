@@ -1,17 +1,17 @@
-#![doc = include_str!("ui_transaction.doc/_module.md")]
+//! [`UiTransaction`]: a staged, ordered batch of normalized UI operations (spec §3.2).
 
 use core::slice::Iter;
 
 use super::ui_operation::UiOperation;
 
-#[doc = include_str!("ui_transaction.doc/UiTransaction.md")]
+#[doc = include_str!("../../docs/api/transaction/ui_transaction.doc/UiTransaction.md")]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct UiTransaction {
     operations: Vec<UiOperation>,
 }
 
 impl UiTransaction {
-    #[doc = include_str!("ui_transaction.doc/new.md")]
+    /// Creates a new, empty transaction with no staged operations.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -19,42 +19,44 @@ impl UiTransaction {
         }
     }
 
-    #[doc = include_str!("ui_transaction.doc/push.md")]
+    /// Appends a normalized operation to the end of the batch and returns `&mut self`
+    /// for chaining. The operation is staged only; it is not applied here.
     pub fn push(&mut self, op: UiOperation) -> &mut Self {
         self.operations.push(op);
         self
     }
 
-    #[doc = include_str!("ui_transaction.doc/operations.md")]
+    /// Returns the staged operations in insertion order.
     #[must_use]
     pub fn operations(&self) -> &[UiOperation] {
         &self.operations
     }
 
-    #[doc = include_str!("ui_transaction.doc/iter.md")]
+    /// Returns an iterator over the staged operations in insertion order.
     pub fn iter(&self) -> Iter<'_, UiOperation> {
         self.operations.iter()
     }
 
-    #[doc = include_str!("ui_transaction.doc/len.md")]
+    /// Returns the number of staged operations.
     #[must_use]
     pub fn len(&self) -> usize {
         self.operations.len()
     }
 
-    #[doc = include_str!("ui_transaction.doc/is_empty.md")]
+    /// Returns `true` if no operations are staged.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.operations.is_empty()
     }
 
-    #[doc = include_str!("ui_transaction.doc/is_root_replacement.md")]
+    /// Returns `true` if any staged operation is a root replacement
+    /// (a whole-tree reconcile).
     #[must_use]
     pub fn is_root_replacement(&self) -> bool {
         self.operations.iter().any(UiOperation::is_root_replacement)
     }
 
-    #[doc = include_str!("ui_transaction.doc/into_operations.md")]
+    /// Consumes the transaction and returns the owned batch of staged operations.
     #[must_use]
     pub fn into_operations(self) -> Vec<UiOperation> {
         self.operations

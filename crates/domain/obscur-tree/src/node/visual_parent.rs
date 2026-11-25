@@ -1,31 +1,31 @@
-#![doc = include_str!("visual_parent.doc/_module.md")]
+//! The visual parent of a retained node.
 
 use obscur_identity::NodeId;
 
-#[doc = include_str!("visual_parent.doc/VisualParent.md")]
+#[doc = include_str!("../../docs/api/node/visual_parent.doc/VisualParent.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct VisualParent(Option<NodeId>);
 
 impl VisualParent {
-    #[doc = include_str!("visual_parent.doc/root.md")]
+    /// A visual parent denoting the visual root (no parent).
     #[must_use]
     pub const fn root() -> Self {
         Self(None)
     }
 
-    #[doc = include_str!("visual_parent.doc/of.md")]
+    /// A visual parent pointing at `parent`.
     #[must_use]
     pub const fn of(parent: NodeId) -> Self {
         Self(Some(parent))
     }
 
-    #[doc = include_str!("visual_parent.doc/parent.md")]
+    /// Returns the parent `NodeId`, or `None` at the visual root.
     #[must_use]
     pub const fn parent(self) -> Option<NodeId> {
         self.0
     }
 
-    #[doc = include_str!("visual_parent.doc/is_root.md")]
+    /// Returns `true` if this node has no visual parent (it is a visual root).
     #[must_use]
     pub const fn is_root(self) -> bool {
         self.0.is_none()

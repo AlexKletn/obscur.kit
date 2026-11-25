@@ -1,4 +1,7 @@
-#![doc = include_str!("text_attributes.doc/_module.md")]
+//! Resolves a text node's computed typography into shaping inputs:
+//! [`attributes_for`] (weight + slant) and [`direction_for`] (base direction).
+
+use super::tab_size::TabSize;
 
 use std::borrow::Cow;
 use std::iter::Peekable;
@@ -13,7 +16,7 @@ use obscur_text::span::{FontSlant, FontWeight};
 
 use super::EditingView;
 
-#[doc = include_str!("text_attributes.doc/attributes_for.md")]
+#[doc = include_str!("../../docs/api/orchestration/text_attributes.doc/attributes_for.md")]
 #[must_use]
 pub(crate) fn attributes_for(computed: Option<&ComputedStyle>) -> FontAttributes {
     let mut attributes = FontAttributes::default();
@@ -33,7 +36,7 @@ pub(crate) fn attributes_for(computed: Option<&ComputedStyle>) -> FontAttributes
     attributes
 }
 
-#[doc = include_str!("text_attributes.doc/weight_from.md")]
+#[doc = include_str!("../../docs/api/orchestration/text_attributes.doc/weight_from.md")]
 fn weight_from(weight: f32) -> FontWeight {
     // The weight is rounded to the nearest whole step and clamped into the
     // `1..=1000` axis before the (already-clamping) `FontWeight::new`.
@@ -42,7 +45,8 @@ fn weight_from(weight: f32) -> FontWeight {
     FontWeight::new(value)
 }
 
-#[doc = include_str!("text_attributes.doc/slant_from.md")]
+/// Maps a reserved `font-style` keyword handle to its [`FontSlant`]; any other
+/// symbol (including a stray interned keyword) resolves to [`FontSlant::Normal`].
 fn slant_from(symbol: obscur_identity::InternedSymbol) -> FontSlant {
     if symbol == layout_keyword::FONT_STYLE_ITALIC {
         FontSlant::Italic
@@ -53,7 +57,7 @@ fn slant_from(symbol: obscur_identity::InternedSymbol) -> FontSlant {
     }
 }
 
-#[doc = include_str!("text_attributes.doc/direction_for.md")]
+#[doc = include_str!("../../docs/api/orchestration/text_attributes.doc/direction_for.md")]
 #[must_use]
 pub(crate) fn direction_for(computed: Option<&ComputedStyle>) -> TextDirection {
     let symbol = computed
@@ -69,7 +73,7 @@ pub(crate) fn direction_for(computed: Option<&ComputedStyle>) -> TextDirection {
     }
 }
 
-#[doc = include_str!("text_attributes.doc/alignment_for.md")]
+#[doc = include_str!("../../docs/api/orchestration/text_attributes.doc/alignment_for.md")]
 #[must_use]
 pub(crate) fn alignment_for(computed: Option<&ComputedStyle>) -> TextAlignment {
     let symbol = computed
@@ -89,7 +93,7 @@ pub(crate) fn alignment_for(computed: Option<&ComputedStyle>) -> TextAlignment {
     }
 }
 
-#[doc = include_str!("text_attributes.doc/overflow_for.md")]
+#[doc = include_str!("../../docs/api/orchestration/text_attributes.doc/overflow_for.md")]
 #[must_use]
 pub(crate) fn overflow_for(computed: Option<&ComputedStyle>) -> TextOverflow {
     let symbol = computed
@@ -105,7 +109,7 @@ pub(crate) fn overflow_for(computed: Option<&ComputedStyle>) -> TextOverflow {
     }
 }
 
-#[doc = include_str!("text_attributes.doc/line_height_for.md")]
+#[doc = include_str!("../../docs/api/orchestration/text_attributes.doc/line_height_for.md")]
 #[must_use]
 pub(crate) fn line_height_for(
     computed: Option<&ComputedStyle>,
@@ -122,7 +126,7 @@ pub(crate) fn line_height_for(
     }
 }
 
-#[doc = include_str!("text_attributes.doc/length_to_px.md")]
+#[doc = include_str!("../../docs/api/orchestration/text_attributes.doc/length_to_px.md")]
 fn length_to_px(length: Length, font_size: f32, root_font_size: f32) -> Option<f32> {
     match length {
         Length::Px(px) => Some(px.0),
@@ -132,7 +136,7 @@ fn length_to_px(length: Length, font_size: f32, root_font_size: f32) -> Option<f
     }
 }
 
-#[doc = include_str!("text_attributes.doc/letter_spacing_for.md")]
+#[doc = include_str!("../../docs/api/orchestration/text_attributes.doc/letter_spacing_for.md")]
 #[must_use]
 pub(crate) fn letter_spacing_for(
     computed: Option<&ComputedStyle>,
@@ -147,7 +151,7 @@ pub(crate) fn letter_spacing_for(
     )
 }
 
-#[doc = include_str!("text_attributes.doc/word_spacing_for.md")]
+#[doc = include_str!("../../docs/api/orchestration/text_attributes.doc/word_spacing_for.md")]
 #[must_use]
 pub(crate) fn word_spacing_for(
     computed: Option<&ComputedStyle>,
@@ -157,7 +161,11 @@ pub(crate) fn word_spacing_for(
     length_px_of(computed, PropertyId::WordSpacing, font_size, root_font_size)
 }
 
-#[doc = include_str!("text_attributes.doc/length_px_of.md")]
+/// Reads `property` off `computed` as a [`PropertyValue::Length`] resolved to
+/// logical pixels against the node's font context (`px` / `em` / `rem`, via
+/// [`length_to_px`]), or `0.0` for an absent property, a non-length value, or a
+/// unit not resolved for spacing (`%` — invalid for letter-/word-spacing — and
+/// the viewport units).
 fn length_px_of(
     computed: Option<&ComputedStyle>,
     property: PropertyId,
@@ -175,20 +183,20 @@ fn length_px_of(
     }
 }
 
-#[doc = include_str!("text_attributes.doc/TextTransform.md")]
+#[doc = include_str!("../../docs/api/orchestration/text_attributes.doc/TextTransform.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum TextTransform {
-    #[doc = include_str!("text_attributes.doc/None.md")]
+    /// `none` (the initial): the text is shaped unchanged.
     None,
-    #[doc = include_str!("text_attributes.doc/Uppercase.md")]
+    /// `uppercase`: every character is mapped to uppercase.
     Uppercase,
-    #[doc = include_str!("text_attributes.doc/Lowercase.md")]
+    /// `lowercase`: every character is mapped to lowercase.
     Lowercase,
-    #[doc = include_str!("text_attributes.doc/Capitalize.md")]
+    /// `capitalize`: the first typographic letter of each word is uppercased.
     Capitalize,
 }
 
-#[doc = include_str!("text_attributes.doc/text_transform_for.md")]
+#[doc = include_str!("../../docs/api/orchestration/text_attributes.doc/text_transform_for.md")]
 #[must_use]
 pub(crate) fn text_transform_for(computed: Option<&ComputedStyle>) -> TextTransform {
     let symbol = computed
@@ -206,7 +214,7 @@ pub(crate) fn text_transform_for(computed: Option<&ComputedStyle>) -> TextTransf
     }
 }
 
-#[doc = include_str!("text_attributes.doc/transform_text.md")]
+#[doc = include_str!("../../docs/api/orchestration/text_attributes.doc/transform_text.md")]
 #[must_use]
 pub(crate) fn transform_text(content: &str, transform: TextTransform) -> Cow<'_, str> {
     match transform {
@@ -217,7 +225,7 @@ pub(crate) fn transform_text(content: &str, transform: TextTransform) -> Cow<'_,
     }
 }
 
-#[doc = include_str!("text_attributes.doc/capitalize.md")]
+#[doc = include_str!("../../docs/api/orchestration/text_attributes.doc/capitalize.md")]
 fn capitalize(content: &str) -> String {
     let mut out = String::with_capacity(content.len());
     // `at_word_start` is set at the string start and after every whitespace run;
@@ -237,7 +245,7 @@ fn capitalize(content: &str) -> String {
     out
 }
 
-#[doc = include_str!("text_attributes.doc/white_space_for.md")]
+#[doc = include_str!("../../docs/api/orchestration/text_attributes.doc/white_space_for.md")]
 #[must_use]
 pub(crate) fn white_space_for(computed: Option<&ComputedStyle>) -> WhiteSpace {
     let symbol = computed
@@ -256,7 +264,7 @@ pub(crate) fn white_space_for(computed: Option<&ComputedStyle>) -> WhiteSpace {
     }
 }
 
-#[doc = include_str!("text_attributes.doc/overflow_wrap_for.md")]
+#[doc = include_str!("../../docs/api/orchestration/text_attributes.doc/overflow_wrap_for.md")]
 #[must_use]
 pub(crate) fn overflow_wrap_for(computed: Option<&ComputedStyle>) -> OverflowWrap {
     let symbol = computed
@@ -273,7 +281,7 @@ pub(crate) fn overflow_wrap_for(computed: Option<&ComputedStyle>) -> OverflowWra
     }
 }
 
-#[doc = include_str!("text_attributes.doc/word_break_for.md")]
+#[doc = include_str!("../../docs/api/orchestration/text_attributes.doc/word_break_for.md")]
 #[must_use]
 pub(crate) fn word_break_for(computed: Option<&ComputedStyle>) -> WordBreak {
     let symbol = computed
@@ -290,7 +298,7 @@ pub(crate) fn word_break_for(computed: Option<&ComputedStyle>) -> WordBreak {
     }
 }
 
-#[doc = include_str!("text_attributes.doc/collapse_white_space.md")]
+#[doc = include_str!("../../docs/api/orchestration/text_attributes.doc/collapse_white_space.md")]
 #[must_use]
 pub(crate) fn collapse_white_space(content: &str, white_space: WhiteSpace) -> Cow<'_, str> {
     if !white_space.collapses_spaces() {
@@ -363,7 +371,7 @@ fn normalized_segment_break(ch: char, rest: &mut Peekable<Chars<'_>>) -> char {
     '\n'
 }
 
-#[doc = include_str!("text_attributes.doc/process_text.md")]
+#[doc = include_str!("../../docs/api/orchestration/text_attributes.doc/process_text.md")]
 #[must_use]
 pub(crate) fn process_text(
     content: &str,
@@ -379,7 +387,7 @@ pub(crate) fn process_text(
     }
 }
 
-#[doc = include_str!("text_attributes.doc/display_text.md")]
+#[doc = include_str!("../../docs/api/orchestration/text_attributes.doc/display_text.md")]
 #[must_use]
 pub(crate) fn display_text<'a>(
     content: &'a str,
@@ -415,27 +423,7 @@ pub(crate) fn display_text<'a>(
     }
 }
 
-#[doc = include_str!("text_attributes.doc/TabSize.md")]
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum TabSize {
-    #[doc = include_str!("text_attributes.doc/Factor.md")]
-    Factor(f32),
-    #[doc = include_str!("text_attributes.doc/Length.md")]
-    Length(f32),
-}
-
-impl TabSize {
-    #[doc = include_str!("text_attributes.doc/resolve.md")]
-    #[must_use]
-    pub(crate) fn resolve(self, space_advance: f32) -> f32 {
-        match self {
-            Self::Factor(factor) => factor * space_advance,
-            Self::Length(px) => px,
-        }
-    }
-}
-
-#[doc = include_str!("text_attributes.doc/tab_size_for.md")]
+#[doc = include_str!("../../docs/api/orchestration/text_attributes.doc/tab_size_for.md")]
 #[must_use]
 pub(crate) fn tab_size_for(
     computed: Option<&ComputedStyle>,

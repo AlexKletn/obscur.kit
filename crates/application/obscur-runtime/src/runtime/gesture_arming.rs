@@ -1,4 +1,5 @@
-#![doc = include_str!("gesture_arming.doc/_module.md")]
+//! What a contact going down arms, asked of the frame it landed on:
+//! [`GestureArming`].
 
 use obscur_geometry::Point;
 use obscur_identity::NodeId;
@@ -12,22 +13,22 @@ use super::{
 };
 use crate::orchestration::{ComputedStyles, LayoutBoxes};
 
-#[doc = include_str!("gesture_arming.doc/GestureArming.md")]
+#[doc = include_str!("../../docs/api/runtime/gesture_arming.doc/GestureArming.md")]
 pub(crate) struct GestureArming<'a> {
-    #[doc = include_str!("gesture_arming.doc/tree.md")]
+    /// The tree the long-press binding and the disabled gate are resolved over.
     tree: &'a RetainedTree,
-    #[doc = include_str!("gesture_arming.doc/computed.md")]
+    /// This frame's computed styles: which boxes scroll, and how.
     computed: &'a ComputedStyles,
-    #[doc = include_str!("gesture_arming.doc/boxes.md")]
+    /// This frame's arranged boxes, in unscrolled layout space.
     boxes: &'a LayoutBoxes,
-    #[doc = include_str!("gesture_arming.doc/scroll.md")]
+    /// Every scroll container's live vertical offset.
     scroll: &'a ScrollOffsets,
-    #[doc = include_str!("gesture_arming.doc/virtual_lists.md")]
+    /// The realized virtual-list windows, which say which row a point is over.
     virtual_lists: &'a VirtualLists,
 }
 
 impl<'a> GestureArming<'a> {
-    #[doc = include_str!("gesture_arming.doc/new.md")]
+    /// Bundles the retained frame and its live offsets for one contact.
     pub(crate) const fn new(
         tree: &'a RetainedTree,
         computed: &'a ComputedStyles,
@@ -44,20 +45,21 @@ impl<'a> GestureArming<'a> {
         }
     }
 
-    #[doc = include_str!("gesture_arming.doc/pan_container.md")]
-    pub(crate) fn pan_container(
+    /// Find the horizontal and vertical scroll targets under the start of a direct contact.
+    pub(crate) fn pan_containers(
         &self,
         event: &PointerEvent,
         screen_point: Point,
-    ) -> Option<NodeId> {
+    ) -> [Option<NodeId>; 2] {
         if !event.device().is_direct() {
-            return None;
+            return [None; 2];
         }
-        ScrollTargets::new(self.tree, self.computed, self.boxes, self.scroll)
-            .scrollable_at(screen_point)
+        let targets = ScrollTargets::new(self.tree, self.computed, self.boxes, self.scroll);
+        [Point::new(1.0, 0.0), Point::new(0.0, 1.0)]
+            .map(|delta| targets.scrollable_at(screen_point, delta))
     }
 
-    #[doc = include_str!("gesture_arming.doc/hold.md")]
+    #[doc = include_str!("../../docs/api/runtime/gesture_arming.doc/hold.md")]
     pub(crate) fn hold(
         &self,
         event: &PointerEvent,
@@ -135,7 +137,7 @@ mod tests {
         // The wheel is the mouse's scroll gesture and its second button is what a
         // hold reaches, so the direct-only gate rules both out before the frame is
         // consulted at all.
-        assert_eq!(arming.pan_container(&event, point), None);
+        assert_eq!(arming.pan_containers(&event, point), [None; 2]);
         assert!(arming.hold(&event, point, NodeId::from_raw(1)).is_none());
     }
 
@@ -145,7 +147,7 @@ mod tests {
         let arming = GestureArming::new(&tree, &computed, &boxes, &scroll, &lists);
         let event = down(PointerDevice::Touch);
         let point = Point::new(4.0, 4.0);
-        assert_eq!(arming.pan_container(&event, point), None);
+        assert_eq!(arming.pan_containers(&event, point), [None; 2]);
         // Neither a bound `EVENT_LONG_PRESS` nor a holdable row: arming here would
         // spend half a second of animation frames to conclude nothing.
         assert!(arming.hold(&event, point, NodeId::from_raw(1)).is_none());

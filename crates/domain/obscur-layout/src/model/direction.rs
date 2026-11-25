@@ -1,17 +1,17 @@
-#![doc = include_str!("direction.doc/_module.md")]
+//! The CSS `direction` model: the inline base direction of a box's content.
 
-#[doc = include_str!("direction.doc/Direction.md")]
+#[doc = include_str!("../../docs/api/model/direction.doc/Direction.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Direction {
-    #[doc = include_str!("direction.doc/Ltr.md")]
+    /// Left-to-right inline base direction (the CSS initial value).
     #[default]
     Ltr,
-    #[doc = include_str!("direction.doc/Rtl.md")]
+    /// Right-to-left inline base direction (`direction: rtl`).
     Rtl,
 }
 
 impl Direction {
-    #[doc = include_str!("direction.doc/is_rtl.md")]
+    /// Whether this direction is [`Rtl`](Self::Rtl).
     #[must_use]
     pub const fn is_rtl(self) -> bool {
         matches!(self, Self::Rtl)

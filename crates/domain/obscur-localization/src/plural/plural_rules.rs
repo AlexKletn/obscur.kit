@@ -1,23 +1,23 @@
-#![doc = include_str!("plural_rules.doc/_module.md")]
+#![doc = include_str!("../../docs/api/plural/plural_rules.doc/_module.md")]
 
 use obscur_capability::SupportLevel;
 
 use crate::locale::LanguageTag;
 use crate::plural::{PluralCategory, PluralOperands};
 
-#[doc = include_str!("plural_rules.doc/PluralRules.md")]
+#[doc = include_str!("../../docs/api/plural/plural_rules.doc/PluralRules.md")]
 #[derive(Debug, Clone, Copy)]
 pub struct PluralRules {
-    #[doc = include_str!("plural_rules.doc/select.md")]
+    /// The transcribed CLDR rule for this locale.
     select: fn(&PluralOperands) -> PluralCategory,
-    #[doc = include_str!("plural_rules.doc/categories.md")]
+    /// The categories this rule set can actually produce, in canonical order.
     categories: &'static [PluralCategory],
-    #[doc = include_str!("plural_rules.doc/availability.md")]
+    /// Whether a real rule set was found for the requested locale.
     availability: SupportLevel,
 }
 
 impl PluralRules {
-    #[doc = include_str!("plural_rules.doc/cardinal.md")]
+    #[doc = include_str!("../../docs/api/plural/plural_rules.doc/cardinal.md")]
     #[must_use]
     pub fn cardinal(locale: &LanguageTag) -> Self {
         for link in locale.fallback_chain() {
@@ -46,35 +46,36 @@ impl PluralRules {
         }
     }
 
-    #[doc = include_str!("plural_rules.doc/select_2.md")]
+    /// Returns the category `operands` fall into under these rules.
     #[must_use]
     pub fn select(&self, operands: &PluralOperands) -> PluralCategory {
         (self.select)(operands)
     }
 
-    #[doc = include_str!("plural_rules.doc/select_integer.md")]
+    /// Returns the category the integer `count` falls into — the common case,
+    /// spelled out.
     #[must_use]
     pub fn select_integer(&self, count: i64) -> PluralCategory {
         self.select(&PluralOperands::from_integer(count))
     }
 
-    #[doc = include_str!("plural_rules.doc/categories_2.md")]
+    #[doc = include_str!("../../docs/api/plural/plural_rules.doc/categories_2.md")]
     #[must_use]
     pub fn categories(&self) -> &'static [PluralCategory] {
         self.categories
     }
 
-    #[doc = include_str!("plural_rules.doc/availability_2.md")]
+    #[doc = include_str!("../../docs/api/plural/plural_rules.doc/availability_2.md")]
     #[must_use]
     pub const fn availability(&self) -> SupportLevel {
         self.availability
     }
 }
 
-#[doc = include_str!("plural_rules.doc/OTHER_ONLY.md")]
+/// The categories of a language that makes no plural distinction at all.
 const OTHER_ONLY: &[PluralCategory] = &[PluralCategory::Other];
 
-#[doc = include_str!("plural_rules.doc/RULE_SETS.md")]
+#[doc = include_str!("../../docs/api/plural/plural_rules.doc/RULE_SETS.md")]
 #[allow(clippy::type_complexity)]
 static RULE_SETS: &[(
     &[&str],
@@ -131,12 +132,12 @@ static RULE_SETS: &[(
     (&["ar", "ars"], arabic, &PluralCategory::ALL),
 ];
 
-#[doc = include_str!("plural_rules.doc/root.md")]
+#[doc = include_str!("../../docs/api/plural/plural_rules.doc/root.md")]
 fn root(_: &PluralOperands) -> PluralCategory {
     PluralCategory::Other
 }
 
-#[doc = include_str!("plural_rules.doc/english.md")]
+#[doc = include_str!("../../docs/api/plural/plural_rules.doc/english.md")]
 fn english(op: &PluralOperands) -> PluralCategory {
     if op.i == 1 && op.v == 0 {
         PluralCategory::One
@@ -145,7 +146,7 @@ fn english(op: &PluralOperands) -> PluralCategory {
     }
 }
 
-#[doc = include_str!("plural_rules.doc/russian.md")]
+#[doc = include_str!("../../docs/api/plural/plural_rules.doc/russian.md")]
 fn russian(op: &PluralOperands) -> PluralCategory {
     if op.v != 0 {
         // All three named categories require `v = 0`; a written fraction can only
@@ -165,7 +166,7 @@ fn russian(op: &PluralOperands) -> PluralCategory {
     }
 }
 
-#[doc = include_str!("plural_rules.doc/polish.md")]
+#[doc = include_str!("../../docs/api/plural/plural_rules.doc/polish.md")]
 fn polish(op: &PluralOperands) -> PluralCategory {
     if op.v != 0 {
         return PluralCategory::Other;
@@ -186,7 +187,7 @@ fn polish(op: &PluralOperands) -> PluralCategory {
     }
 }
 
-#[doc = include_str!("plural_rules.doc/czech.md")]
+#[doc = include_str!("../../docs/api/plural/plural_rules.doc/czech.md")]
 fn czech(op: &PluralOperands) -> PluralCategory {
     if op.i == 1 && op.v == 0 {
         PluralCategory::One
@@ -199,7 +200,7 @@ fn czech(op: &PluralOperands) -> PluralCategory {
     }
 }
 
-#[doc = include_str!("plural_rules.doc/arabic.md")]
+#[doc = include_str!("../../docs/api/plural/plural_rules.doc/arabic.md")]
 fn arabic(op: &PluralOperands) -> PluralCategory {
     if op.n == 0.0 {
         return PluralCategory::Zero;
@@ -224,7 +225,7 @@ fn arabic(op: &PluralOperands) -> PluralCategory {
     }
 }
 
-#[doc = include_str!("plural_rules.doc/integer_modulus.md")]
+#[doc = include_str!("../../docs/api/plural/plural_rules.doc/integer_modulus.md")]
 fn integer_modulus(n: f64, modulus: u64) -> Option<u64> {
     if !n.is_finite() || n < 0.0 || n.fract() != 0.0 {
         return None;

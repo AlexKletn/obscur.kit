@@ -1,1 +1,0 @@
-Ascending order (A→Z).

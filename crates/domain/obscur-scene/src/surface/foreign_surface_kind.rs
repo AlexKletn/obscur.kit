@@ -1,17 +1,17 @@
-#![doc = include_str!("foreign_surface_kind.doc/_module.md")]
+//! `ForeignSurfaceKind`: the kind of external content a foreign surface hosts (§5.5).
 
-#[doc = include_str!("foreign_surface_kind.doc/ForeignSurfaceKind.md")]
+#[doc = include_str!("../../docs/api/surface/foreign_surface_kind.doc/ForeignSurfaceKind.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ForeignSurfaceKind {
-    #[doc = include_str!("foreign_surface_kind.doc/Video.md")]
+    /// A video stream or player surface.
     Video,
-    #[doc = include_str!("foreign_surface_kind.doc/WebView.md")]
+    /// An embedded web view.
     WebView,
-    #[doc = include_str!("foreign_surface_kind.doc/Camera.md")]
+    /// A live camera feed.
     Camera,
-    #[doc = include_str!("foreign_surface_kind.doc/NativeControl.md")]
+    /// A native platform control (e.g. a native text field or map view).
     NativeControl,
-    #[doc = include_str!("foreign_surface_kind.doc/ExternalGpu.md")]
+    /// An externally-managed GPU surface.
     ExternalGpu,
 }
 

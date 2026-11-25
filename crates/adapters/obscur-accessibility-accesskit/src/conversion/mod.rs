@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+#![doc = include_str!("../../docs/api/conversion/mod.doc/_module.md")]
 
 mod action_converter;
 pub use action_converter::ActionConverter;

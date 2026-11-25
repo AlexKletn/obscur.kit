@@ -7,6 +7,7 @@ use obscur_kit::primitives::Portal;
 use obscur_kit::runtime::UiRuntime;
 use obscur_kit::style::computed::ComputedValue;
 use obscur_kit::style::property::{PropertyId, StyleColor};
+use obscur_kit::view::view::{ID, ViewProperty, ViewValue};
 use spec_ch4b_support::harness::{at, drive, el, hit, hit_chain, txt, view};
 
 #[doc = include_str!("spec_ch4b_hit_testing.doc/color_of.md")]
@@ -40,7 +41,8 @@ fn ch4_7_a_the_hit_chain_is_the_logical_tree_not_the_portal_target() {
         "root",
         vec![
             el(2, "panel-a", vec![el(3, "trigger", vec![portal])]),
-            el(4, "overlay", vec![]),
+            el(4, "overlay", vec![])
+                .with_prop(ViewProperty::new(ID, ViewValue::Text("overlay".into()))),
         ],
     )]);
 
@@ -52,15 +54,9 @@ fn ch4_7_a_the_hit_chain_is_the_logical_tree_not_the_portal_target() {
     let p = at(&rt, &[0, 0, 0, 0, 0]);
     let overlay = at(&rt, &[0, 1]);
 
-    // --- §4.14: the portal preserves the LOGICAL parent's style scope.
-    //
-    // This half carries the test when the portal is a no-op, and it is why the
-    // test is not vacuous. The chain assertions below are satisfied trivially by
-    // an implementation that never projects anything — `P` simply stays where it
-    // was written — so on their own they could not tell a working portal from an
-    // absent one. These can: they fail the moment someone "wires" portals by
-    // moving `P` in the retained tree, which is both the obvious wrong fix and
-    // the one §4.14 exists to forbid.
+    assert_eq!(rt.tree().visual_parent_of(portal_node), Some(overlay));
+
+    // §4.14 keeps the logical parent's style scope across visual projection.
     let trigger_colour = color_of(&rt, trigger).expect("Trigger declares a colour");
     let overlay_colour = color_of(&rt, overlay).expect("Overlay declares a colour");
     let root_colour = color_of(&rt, root).expect("Root declares a colour");
@@ -346,4 +342,430 @@ fn ch4_7_f_scrolled_content_hits_and_pointer_events_none_is_transparent() {
          click — otherwise the assertion above proves nothing: got chain \
          {chain:?}"
     );
+}
+
+#[test]
+fn geometric_hit_chain_matches_pointer_landing_and_reports_local_points() {
+    use obscur_kit::geometry::Point;
+
+    let v = view(vec![el(1, "parent", vec![el(2, "child", vec![])])]);
+    let mut rt = drive(
+        300.0,
+        300.0,
+        ".parent { width: 100px; height: 100px }
+         .child { width: 30px; height: 20px; transform: translateX(40px) }",
+        &v,
+    );
+    rt.set_device_scale(2.0);
+    rt.set_content_offset(5.0, 0.0);
+    let point = Point::new(80.0, 12.0);
+    let child = at(&rt, &[0, 0]);
+    let parent = at(&rt, &[0]);
+    let chain = rt.hit_test(point);
+
+    assert_eq!(chain.nodes(), [child, parent, at(&rt, &[])]);
+    assert_eq!(chain.target().unwrap().local_point(), Point::new(5.0, 6.0));
+    assert_eq!(chain.hits()[1].local_point(), Point::new(45.0, 6.0));
+    assert_eq!(hit(&mut rt, point.x, point.y), Some(child));
+}
+
+#[test]
+fn a_child_clipped_by_a_rounded_visual_ancestor_cannot_be_hit() {
+    let css = "
+        .under { position: absolute; width: 100px; height: 100px; }
+        .round { position: absolute; width: 100px; height: 100px; border-radius: 75%; }
+        .child { width: 100px; height: 100px; background-color: red; }
+    ";
+    let v = view(vec![
+        el(1, "under", vec![]),
+        el(2, "round", vec![el(3, "child", vec![])]),
+    ]);
+    let mut rt = drive(300.0, 300.0, css, &v);
+    let under = at(&rt, &[0]);
+    let child = at(&rt, &[1, 0]);
+    assert_eq!(hit(&mut rt, 3.0, 3.0), Some(under));
+    assert_eq!(hit(&mut rt, 50.0, 50.0), Some(child));
+}
+
+#[test]
+fn reordered_grid_and_flex_subtrees_paint_and_hit_in_the_same_order() {
+    use obscur_kit::scene::command::PaintCommand;
+
+    for display in ["grid", "flex"] {
+        let css = format!(
+            ".wrap{{display:{display};width:100px;height:100px}}
+             .a,.b{{grid-area:1 / 1;height:60px;flex-shrink:0}}
+             .a{{order:3;width:70px;background-color:red}}
+             .b{{order:-1;width:80px;margin-right:-80px}}
+             .inner{{width:60px;height:50px;background-color:blue}}"
+        );
+        let v = view(vec![el(
+            9,
+            "wrap",
+            vec![el(1, "a", vec![]), el(2, "b", vec![el(3, "inner", vec![])])],
+        )]);
+        let mut rt = drive(800.0, 600.0, &css, &v);
+        let a = at(&rt, &[0, 0]);
+        let snapshot = rt.snapshot();
+        let widths: Vec<_> = snapshot
+            .display_list()
+            .commands()
+            .iter()
+            .filter_map(|command| match command {
+                PaintCommand::DrawPath { path, .. } => {
+                    path.bounds().map(|bounds| bounds.size.width)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(widths, [60.0, 70.0], "{display}");
+        assert_eq!(
+            hit_chain(&mut rt, 20.0, 20.0).first().copied(),
+            Some(a),
+            "{display}"
+        );
+    }
+}
+
+#[test]
+fn boxless_wrappers_interleave_grid_and_flex_items_by_order() {
+    use obscur_kit::scene::command::PaintCommand;
+
+    for display in ["grid", "flex"] {
+        let css = format!(
+            ".wrap{{display:{display};width:100px;height:100px}}
+             .group{{display:contents}}
+             .a,.b,.c{{grid-area:1 / 1;height:60px;flex-shrink:0}}
+             .a{{width:70px;margin-right:-70px;background-color:red;order:0}}
+             .b{{width:80px;margin-right:-80px;background-color:blue;order:-1}}
+             .c{{width:60px;background-color:green;order:1}}"
+        );
+        let v = view(vec![el(
+            9,
+            "wrap",
+            vec![
+                el(1, "a", vec![]),
+                el(
+                    2,
+                    "group",
+                    vec![el(3, "b", vec![]), el(4, "group", vec![el(5, "c", vec![])])],
+                ),
+            ],
+        )]);
+        let mut rt = drive(800.0, 600.0, &css, &v);
+        let group = at(&rt, &[0, 1]);
+        let target = at(&rt, &[0, 1, 1, 0]);
+        let snapshot = rt.snapshot();
+        let widths: Vec<_> = snapshot
+            .display_list()
+            .commands()
+            .iter()
+            .filter_map(|command| match command {
+                PaintCommand::DrawPath { path, .. } => {
+                    path.bounds().map(|bounds| bounds.size.width)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(widths, [80.0, 70.0, 60.0], "{display}");
+        let chain = hit_chain(&mut rt, 20.0, 20.0);
+        assert_eq!(chain.first().copied(), Some(target), "{display}");
+        assert!(chain.contains(&group), "{display}");
+    }
+}
+
+#[test]
+fn static_grid_and_flex_items_use_z_index_before_order() {
+    use obscur_kit::scene::command::PaintCommand;
+
+    for display in ["grid", "flex"] {
+        let css = format!(
+            ".wrap{{display:{display};width:100px;height:100px}}
+             .group{{display:contents}}
+             .a,.b{{grid-area:1 / 1;height:60px;flex-shrink:0}}
+             .a{{order:-1;z-index:2;width:70px;margin-right:-70px;background-color:red}}
+             .b{{order:3;z-index:1;width:80px;background-color:blue}}"
+        );
+        let v = view(vec![el(
+            9,
+            "wrap",
+            vec![el(1, "group", vec![el(2, "a", vec![])]), el(3, "b", vec![])],
+        )]);
+        let mut rt = drive(800.0, 600.0, &css, &v);
+        let a = at(&rt, &[0, 0, 0]);
+        let snapshot = rt.snapshot();
+        let widths: Vec<_> = snapshot
+            .display_list()
+            .commands()
+            .iter()
+            .filter_map(|command| match command {
+                PaintCommand::DrawPath { path, .. } => {
+                    path.bounds().map(|bounds| bounds.size.width)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(widths, [80.0, 70.0], "{display}");
+        assert_eq!(
+            hit_chain(&mut rt, 20.0, 20.0).first().copied(),
+            Some(a),
+            "{display}"
+        );
+    }
+}
+
+#[test]
+fn nested_z_index_stays_inside_its_parent_context_for_paint_and_hits() {
+    use obscur_kit::scene::command::PaintCommand;
+
+    for (parent_z, child_z, expected_widths, target_path) in [
+        (1, 100, [70.0, 80.0], &[0, 1][..]),
+        (3, -100, [80.0, 70.0], &[0, 0, 0][..]),
+    ] {
+        let css = format!(
+            ".parent,.child,.sibling{{position:absolute;left:0;top:0;height:60px}}
+             .parent{{width:100px;z-index:{parent_z};overflow:hidden}}
+             .child{{width:70px;z-index:{child_z};background-color:red}}
+             .sibling{{width:80px;z-index:2;background-color:blue}}"
+        );
+        let v = view(vec![el(
+            9,
+            "wrap",
+            vec![
+                el(1, "parent", vec![el(2, "child", vec![])]),
+                el(3, "sibling", vec![]),
+            ],
+        )]);
+        let mut rt = drive(800.0, 600.0, &css, &v);
+        let target = at(&rt, target_path);
+        let snapshot = rt.snapshot();
+        let widths: Vec<_> = snapshot
+            .display_list()
+            .commands()
+            .iter()
+            .filter_map(|command| match command {
+                PaintCommand::DrawPath { path, .. } => {
+                    path.bounds().map(|bounds| bounds.size.width)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(widths, expected_widths);
+        assert_eq!(
+            hit_chain(&mut rt, 20.0, 20.0).first().copied(),
+            Some(target)
+        );
+    }
+}
+
+#[test]
+fn compositing_effects_isolate_descendant_z_index() {
+    use obscur_kit::scene::command::PaintCommand;
+
+    for (effect, isolated) in [
+        ("opacity:0.5", true),
+        ("transform:translateX(0px)", true),
+        ("transform:none", false),
+        ("filter:blur(2px)", true),
+        ("filter:blur(0)", true),
+        ("filter:none", false),
+        ("backdrop-filter:blur(2px)", true),
+        ("backdrop-filter:none", false),
+        ("mix-blend-mode:multiply", true),
+        ("mix-blend-mode:normal", false),
+        ("isolation:isolate", true),
+        ("isolation:auto", false),
+    ] {
+        let css = format!(
+            ".parent,.child,.sibling{{position:absolute;left:0;top:0;width:80px;height:60px}}
+             .parent{{{effect}}}
+             .child{{width:70px;z-index:100;background-color:red}}
+             .sibling{{z-index:1;background-color:blue}}"
+        );
+        let v = view(vec![el(
+            9,
+            "wrap",
+            vec![
+                el(1, "parent", vec![el(2, "child", vec![])]),
+                el(3, "sibling", vec![]),
+            ],
+        )]);
+        let mut rt = drive(800.0, 600.0, &css, &v);
+        let snapshot = rt.snapshot();
+        if effect.starts_with("isolation:") {
+            assert_eq!(
+                snapshot.display_list().commands().iter().any(
+                    |command| matches!(command, PaintCommand::PushLayer(layer) if layer.is_isolated())
+                ),
+                isolated,
+            );
+        }
+        let widths: Vec<_> = snapshot
+            .display_list()
+            .commands()
+            .iter()
+            .filter_map(|command| match command {
+                PaintCommand::DrawPath { path, .. } => {
+                    path.bounds().map(|bounds| bounds.size.width)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            widths,
+            if isolated { [70.0, 80.0] } else { [80.0, 70.0] },
+            "{effect}"
+        );
+        let expected = if isolated {
+            at(&rt, &[0, 1])
+        } else {
+            at(&rt, &[0, 0, 0])
+        };
+        assert_eq!(
+            hit_chain(&mut rt, 20.0, 20.0).first().copied(),
+            Some(expected),
+            "{effect}"
+        );
+    }
+}
+
+#[test]
+fn fixed_and_sticky_auto_z_index_isolate_their_descendants() {
+    use obscur_kit::scene::command::PaintCommand;
+
+    for (position, isolated) in [
+        ("fixed", true),
+        ("sticky", true),
+        ("absolute", false),
+        ("relative", false),
+    ] {
+        let css = format!(
+            ".parent,.child,.sibling{{position:absolute;left:0;top:0;width:80px;height:60px}}
+             .parent{{position:{position};z-index:auto}}
+             .child{{width:70px;z-index:100;background-color:red}}
+             .sibling{{z-index:1;background-color:blue}}"
+        );
+        let v = view(vec![el(
+            9,
+            "wrap",
+            vec![
+                el(1, "parent", vec![el(2, "child", vec![])]),
+                el(3, "sibling", vec![]),
+            ],
+        )]);
+        let mut rt = drive(800.0, 600.0, &css, &v);
+        let expected = if isolated {
+            at(&rt, &[0, 1])
+        } else {
+            at(&rt, &[0, 0, 0])
+        };
+        let snapshot = rt.snapshot();
+        let widths: Vec<_> = snapshot
+            .display_list()
+            .commands()
+            .iter()
+            .filter_map(|command| match command {
+                PaintCommand::DrawPath { path, .. } => {
+                    path.bounds().map(|bounds| bounds.size.width)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            widths,
+            if isolated { [70.0, 80.0] } else { [80.0, 70.0] },
+            "{position}"
+        );
+        assert_eq!(
+            hit_chain(&mut rt, 20.0, 20.0).first().copied(),
+            Some(expected),
+            "{position}"
+        );
+    }
+}
+
+#[doc = include_str!("spec_ch4b_hit_testing.doc/visibility_preserves_layout_and_visible_descendants.md")]
+#[test]
+fn visibility_preserves_layout_and_visible_descendants() {
+    use obscur_kit::scene::command::PaintCommand;
+    use spec_ch4b_support::harness::geom;
+
+    let css = "
+        .under, .hidden { position: absolute; width: 100px; height: 100px; }
+        .under { background-color: red; }
+        .hidden { visibility: hidden; background-color: blue; }
+        .inherited { width: 30px; height: 30px; background-color: blue; }
+        .visible { visibility: visible; width: 40px; height: 40px; background-color: green; }
+    ";
+    let tree = view(vec![
+        el(1, "under", vec![]),
+        el(
+            2,
+            "hidden",
+            vec![el(3, "inherited", vec![]), el(4, "visible", vec![])],
+        ),
+    ]);
+    let mut rt = drive(800.0, 600.0, css, &tree);
+    let under = at(&rt, &[0]);
+    let hidden = at(&rt, &[1]);
+    let inherited = at(&rt, &[1, 0]);
+    let visible = at(&rt, &[1, 1]);
+    assert_eq!(geom(&rt, hidden), (0.0, 0.0, 100.0, 100.0));
+    assert_eq!(geom(&rt, inherited), (0.0, 0.0, 30.0, 30.0));
+    assert_eq!(geom(&rt, visible), (0.0, 30.0, 40.0, 40.0));
+    let snapshot = rt.snapshot();
+    let widths: Vec<_> = snapshot
+        .display_list()
+        .commands()
+        .iter()
+        .filter_map(|command| match command {
+            PaintCommand::DrawPath { path, .. } => path.bounds().map(|bounds| bounds.size.width),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(widths, [100.0, 40.0]);
+    assert_eq!(hit(&mut rt, 10.0, 10.0), Some(under));
+    assert_eq!(hit(&mut rt, 10.0, 40.0), Some(visible));
+    assert_eq!(hit(&mut rt, 80.0, 80.0), Some(under));
+}
+
+#[doc = include_str!("spec_ch4b_hit_testing.doc/visibility_controls_focus_and_accessibility.md")]
+#[test]
+fn visibility_controls_focus_and_accessibility() {
+    use obscur_kit::view::view::LOCAL_NAME;
+    use spec_ch4b_support::harness::compile;
+
+    let control = |id, class, label| {
+        el(id, class, vec![txt(label)]).with_prop(ViewProperty::new(
+            LOCAL_NAME,
+            ViewValue::Text("button".into()),
+        ))
+    };
+    let tree = view(vec![el(
+        1,
+        "panel",
+        vec![
+            control(2, "inherited", "Hidden control"),
+            control(3, "override", "Visible control"),
+        ],
+    )]);
+    let mut rt = drive(800.0, 600.0, "", &tree);
+    let panel = at(&rt, &[0]);
+    let hidden = at(&rt, &[0, 0]);
+    let visible = at(&rt, &[0, 1]);
+    assert!(rt.focus_node(Some(hidden)));
+
+    let sheet = compile(".panel { visibility: hidden } .override { visibility: visible }");
+    let _ = rt.render_now(&tree, &[sheet]);
+
+    assert_eq!(rt.focused(), None);
+    assert!(!rt.focus_node(Some(hidden)));
+    assert!(rt.focus_first_window_tab_stop());
+    assert_eq!(rt.focused(), Some(visible));
+
+    let semantics = rt.semantic_tree();
+    assert!(!semantics.contains(panel));
+    assert!(!semantics.contains(hidden));
+    assert_eq!(semantics.children(semantics.root().unwrap()), &[visible]);
+    assert!(semantics.get(visible).unwrap().state().focused);
 }

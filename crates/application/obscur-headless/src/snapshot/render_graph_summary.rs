@@ -1,27 +1,27 @@
-#![doc = include_str!("render_graph_summary.doc/_module.md")]
+//! A backend-neutral render-graph description of a frame: [`RenderGraphSummary`].
 
 use obscur_geometry::Size;
 use obscur_scene::scene::SceneSnapshot;
 
 use super::RenderPass;
 
-#[doc = include_str!("render_graph_summary.doc/RenderGraphSummary.md")]
+#[doc = include_str!("../../docs/api/snapshot/render_graph_summary.doc/RenderGraphSummary.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderGraphSummary {
-    #[doc = include_str!("render_graph_summary.doc/passes.md")]
+    /// The ordered render passes the frame comprises.
     passes: Vec<RenderPass>,
-    #[doc = include_str!("render_graph_summary.doc/target.md")]
+    /// The target area the passes render into, in logical pixels.
     target: Size,
 }
 
 impl RenderGraphSummary {
-    #[doc = include_str!("render_graph_summary.doc/new.md")]
+    #[doc = include_str!("../../docs/api/snapshot/render_graph_summary.doc/new.md")]
     #[must_use]
     pub fn new(passes: Vec<RenderPass>, target: Size) -> Self {
         Self { passes, target }
     }
 
-    #[doc = include_str!("render_graph_summary.doc/from_scene.md")]
+    #[doc = include_str!("../../docs/api/snapshot/render_graph_summary.doc/from_scene.md")]
     #[must_use]
     pub fn from_scene(scene: &SceneSnapshot, target: Size) -> Self {
         let stats = scene.statistics();
@@ -33,19 +33,19 @@ impl RenderGraphSummary {
         Self { passes, target }
     }
 
-    #[doc = include_str!("render_graph_summary.doc/passes_2.md")]
+    /// The ordered render passes.
     #[must_use]
     pub fn passes(&self) -> &[RenderPass] {
         &self.passes
     }
 
-    #[doc = include_str!("render_graph_summary.doc/pass_count.md")]
+    /// The number of render passes in the graph.
     #[must_use]
     pub fn pass_count(&self) -> usize {
         self.passes.len()
     }
 
-    #[doc = include_str!("render_graph_summary.doc/target_2.md")]
+    /// The target area the passes render into, in logical pixels.
     #[must_use]
     pub fn target(&self) -> Size {
         self.target

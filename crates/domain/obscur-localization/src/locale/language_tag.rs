@@ -1,4 +1,5 @@
-#![doc = include_str!("language_tag.doc/_module.md")]
+//! `LanguageTag`: the current locale, and the fallback chain it resolves through
+//! (spec §7.2).
 
 use std::fmt;
 
@@ -6,19 +7,19 @@ use obscur_text::shaping::TextDirection;
 
 use crate::locale::script_direction::{language_direction, script_direction};
 
-#[doc = include_str!("language_tag.doc/LanguageTag.md")]
+#[doc = include_str!("../../docs/api/locale/language_tag.doc/LanguageTag.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LanguageTag {
-    #[doc = include_str!("language_tag.doc/language.md")]
+    /// The language subtag, canonical lower-case (2–3 alphabetic characters).
     language: Box<str>,
-    #[doc = include_str!("language_tag.doc/script.md")]
+    /// The script subtag, canonical title-case (4 alphabetic characters).
     script: Option<Box<str>>,
-    #[doc = include_str!("language_tag.doc/region.md")]
+    /// The region subtag, canonical upper-case (2 alphabetic) or 3 numeric.
     region: Option<Box<str>>,
 }
 
 impl LanguageTag {
-    #[doc = include_str!("language_tag.doc/root.md")]
+    #[doc = include_str!("../../docs/api/locale/language_tag.doc/root.md")]
     #[must_use]
     pub fn root() -> Self {
         Self {
@@ -28,7 +29,7 @@ impl LanguageTag {
         }
     }
 
-    #[doc = include_str!("language_tag.doc/parse.md")]
+    #[doc = include_str!("../../docs/api/locale/language_tag.doc/parse.md")]
     #[must_use]
     pub fn parse(tag: &str) -> Option<Self> {
         let mut parts = tag.split('-');
@@ -64,31 +65,31 @@ impl LanguageTag {
         })
     }
 
-    #[doc = include_str!("language_tag.doc/language_2.md")]
+    /// Returns the canonical lower-case language subtag (`ru`, `en`, `und`).
     #[must_use]
     pub fn language(&self) -> &str {
         &self.language
     }
 
-    #[doc = include_str!("language_tag.doc/script_2.md")]
+    /// Returns the canonical title-case script subtag, if the tag names one.
     #[must_use]
     pub fn script(&self) -> Option<&str> {
         self.script.as_deref()
     }
 
-    #[doc = include_str!("language_tag.doc/region_2.md")]
+    /// Returns the canonical upper-case region subtag, if the tag names one.
     #[must_use]
     pub fn region(&self) -> Option<&str> {
         self.region.as_deref()
     }
 
-    #[doc = include_str!("language_tag.doc/is_root.md")]
+    /// Returns whether this is the undetermined [`root`](Self::root) locale.
     #[must_use]
     pub fn is_root(&self) -> bool {
         &*self.language == "und" && self.script.is_none() && self.region.is_none()
     }
 
-    #[doc = include_str!("language_tag.doc/direction.md")]
+    #[doc = include_str!("../../docs/api/locale/language_tag.doc/direction.md")]
     #[must_use]
     pub fn direction(&self) -> TextDirection {
         self.script
@@ -96,7 +97,7 @@ impl LanguageTag {
             .map_or_else(|| language_direction(&self.language), script_direction)
     }
 
-    #[doc = include_str!("language_tag.doc/fallback_chain.md")]
+    #[doc = include_str!("../../docs/api/locale/language_tag.doc/fallback_chain.md")]
     #[must_use]
     pub fn fallback_chain(&self) -> Vec<Self> {
         let mut chain = vec![self.clone()];
@@ -123,14 +124,15 @@ impl LanguageTag {
 }
 
 impl Default for LanguageTag {
-    #[doc = include_str!("language_tag.doc/default.md")]
+    /// The undetermined [`root`](Self::root) locale — *not* `en`.
     fn default() -> Self {
         Self::root()
     }
 }
 
 impl fmt::Display for LanguageTag {
-    #[doc = include_str!("language_tag.doc/fmt.md")]
+    /// Writes the canonical `language[-Script][-REGION]` spelling, which
+    /// [`parse`](Self::parse) round-trips.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.language)?;
         if let Some(script) = &self.script {
@@ -143,7 +145,7 @@ impl fmt::Display for LanguageTag {
     }
 }
 
-#[doc = include_str!("language_tag.doc/title_case.md")]
+/// Canonicalises a 4-letter script subtag to CLDR's title-case spelling.
 fn title_case(script: &str) -> Box<str> {
     let mut out = String::with_capacity(script.len());
     for (i, c) in script.chars().enumerate() {
@@ -156,7 +158,8 @@ fn title_case(script: &str) -> Box<str> {
     out.into_boxed_str()
 }
 
-#[doc = include_str!("language_tag.doc/is_region.md")]
+/// Whether `part` is a BCP-47 region subtag: two letters (`RU`) or three digits
+/// (`419`).
 fn is_region(part: &str) -> bool {
     (part.len() == 2 && part.chars().all(|c| c.is_ascii_alphabetic()))
         || (part.len() == 3 && part.chars().all(|c| c.is_ascii_digit()))

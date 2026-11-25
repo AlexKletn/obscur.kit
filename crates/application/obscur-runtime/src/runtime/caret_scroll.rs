@@ -1,4 +1,4 @@
-#![doc = include_str!("caret_scroll.doc/_module.md")]
+//! Keeping the caret visible in a scrolling field: [`CaretScroll`].
 
 use obscur_style::computed::{ComputedStyle, ComputedValue};
 use obscur_style::property::{Length, PropertyId};
@@ -6,24 +6,27 @@ use obscur_tree::tree::RetainedTree;
 
 use super::{EditableField, TextEditSession};
 use crate::orchestration::{
-    ComputedStyles, LayoutBoxes, SceneCoordinator, caret_advance_x, caret_line_scroll_geometry,
-    overflow_scrolls, white_space_for,
+    CARET_WIDTH, ComputedStyles, LayoutBoxes, SceneCoordinator, caret_line_scroll_geometry,
+    display_text, line_caret_x, line_of_byte, overflow_scrolls, text_transform_for,
+    white_space_for,
 };
 
-#[doc = include_str!("caret_scroll.doc/CaretScroll.md")]
+#[doc = include_str!("../../docs/api/runtime/caret_scroll.doc/CaretScroll.md")]
 pub(crate) struct CaretScroll<'a> {
-    #[doc = include_str!("caret_scroll.doc/tree.md")]
+    /// The retained tree the field's text leaf is found in.
     tree: &'a RetainedTree,
-    #[doc = include_str!("caret_scroll.doc/computed.md")]
+    /// This frame's computed styles: white-space, overflow, the field's own
+    /// padding/border insets and its definite height.
     computed: &'a ComputedStyles,
-    #[doc = include_str!("caret_scroll.doc/boxes.md")]
+    /// This frame's arranged boxes, which supply the scrollport dimensions.
     boxes: &'a LayoutBoxes,
-    #[doc = include_str!("caret_scroll.doc/composer.md")]
+    /// The scene's paragraph orchestrator — the SAME advance and wrapped-line
+    /// model the compose pass paints the caret with.
     composer: &'a SceneCoordinator,
 }
 
 impl<'a> CaretScroll<'a> {
-    #[doc = include_str!("caret_scroll.doc/new.md")]
+    /// Bundles what one caret-follow recomputation measures against.
     pub(crate) fn new(
         tree: &'a RetainedTree,
         computed: &'a ComputedStyles,
@@ -38,7 +41,7 @@ impl<'a> CaretScroll<'a> {
         }
     }
 
-    #[doc = include_str!("caret_scroll.doc/horizontal.md")]
+    #[doc = include_str!("../../docs/api/runtime/caret_scroll.doc/horizontal.md")]
     pub(crate) fn horizontal(&self, session: &TextEditSession) -> Option<f32> {
         let field = session.node();
         let text_node = EditableField::first_text_descendant(self.tree, field)?;
@@ -48,29 +51,57 @@ impl<'a> CaretScroll<'a> {
         }
         // No retained box yet ⇒ nothing to scroll into.
         let field_box = self.boxes.get(&field)?;
-        let scrollport_width =
-            field_content_width(self.computed.get(&field), field_box.size().width);
-        // The caret's pen x and the whole run advance (content width), in the SAME
-        // advance model the compose caret uses, over the live session text.
-        let focus = session.selection().focus();
-        let text = session.text();
+        let (scrollport_left, scrollport_width) = field_box.used_content_rect().map_or_else(
+            || {
+                let style = self.computed.get(&field);
+                let left = field_box.origin().x
+                    + px_length_of(style, PropertyId::PaddingLeft)
+                    + px_length_of(style, PropertyId::BorderLeftWidth);
+                (left, field_content_width(style, field_box.size().width))
+            },
+            |content| (content.origin.x, content.size.width),
+        );
+        let text_box = self.boxes.get(&text_node)?;
         let style = self.computed.get(&text_node);
-        let caret_x = caret_advance_x(self.composer.text(), text, style, focus);
-        let content_width = caret_advance_x(self.composer.text(), text, style, text.len());
+        let view = session.view();
+        let text = display_text(
+            view.text,
+            Some(view),
+            text_transform_for(style),
+            white_space_for(style),
+        );
+        let focus = view
+            .preedit
+            .map_or(view.selection.focus(), |preedit| preedit.at + preedit.caret);
+        let layout = self.composer.text().shape_editable_lines(
+            self.tree,
+            self.computed,
+            self.boxes,
+            text_node,
+            &text,
+            text_box.size().width,
+        );
+        let Some(line) = layout.lines().get(line_of_byte(&layout, focus)) else {
+            return Some(0.0);
+        };
+        let line_left = text_box.origin().x - scrollport_left + line.x_offset();
+        let caret_x = line_left + line_caret_x(line, focus);
+        let caret_right = caret_x + CARET_WIDTH.min(scrollport_width);
+        let content_width = (line_left + line.width()).max(caret_right);
         let mut scroll_left = session.scroll_left();
         // Scroll-into-view: keep the caret within
         // `[scroll_left, scroll_left + scrollport_width]`.
         if caret_x - scroll_left < 0.0 {
             scroll_left = caret_x;
         }
-        if caret_x - scroll_left > scrollport_width {
-            scroll_left = caret_x - scrollport_width;
+        if caret_right - scroll_left > scrollport_width {
+            scroll_left = caret_right - scrollport_width;
         }
         // Never scroll past the text (and never negative).
         Some(scroll_left.clamp(0.0, (content_width - scrollport_width).max(0.0)))
     }
 
-    #[doc = include_str!("caret_scroll.doc/vertical.md")]
+    #[doc = include_str!("../../docs/api/runtime/caret_scroll.doc/vertical.md")]
     pub(crate) fn vertical(&self, session: &TextEditSession, stored: f32) -> Option<f32> {
         let field = session.node();
         // Only a multiline field with a scrolling, definite-height box scrolls
@@ -85,8 +116,10 @@ impl<'a> CaretScroll<'a> {
         let (text_box, field_box) = (self.boxes.get(&text_node)?, self.boxes.get(&field)?);
         // A definite height keeps `field_box` stable across typing, so this is exact
         // even before the grown frame lays out.
-        let scrollport_height =
-            field_content_height(self.computed.get(&field), field_box.size().height);
+        let scrollport_height = field_box.used_content_rect().map_or_else(
+            || field_content_height(self.computed.get(&field), field_box.size().height),
+            |content| content.size.height,
+        );
         // The caret's line box top/bottom and the wrapped content height, measured
         // from the text box origin over the live session text — the frame the
         // container's `translate(0, −scroll_top)` shifts the painted line by.
@@ -119,7 +152,7 @@ impl<'a> CaretScroll<'a> {
     }
 }
 
-#[doc = include_str!("caret_scroll.doc/field_content_width.md")]
+#[doc = include_str!("../../docs/api/runtime/caret_scroll.doc/field_content_width.md")]
 fn field_content_width(style: Option<&ComputedStyle>, border_box_width: f32) -> f32 {
     let pad_left = px_length_of(style, PropertyId::PaddingLeft);
     let pad_right = px_length_of(style, PropertyId::PaddingRight);
@@ -127,7 +160,11 @@ fn field_content_width(style: Option<&ComputedStyle>, border_box_width: f32) -> 
     let border_right = px_length_of(style, PropertyId::BorderRightWidth);
     (border_box_width - pad_left - pad_right - border_left - border_right).max(0.0)
 }
-#[doc = include_str!("caret_scroll.doc/field_content_height.md")]
+/// The field's visible content **height** (its vertical scrollport) — the border
+/// box height minus the top/bottom padding + border edges. The VERTICAL analogue
+/// of [`field_content_width`]: the height a multiline `<textarea>`'s caret line
+/// must stay within as it scrolls vertically (CSS Overflow 3 §3.1). Never
+/// negative.
 fn field_content_height(style: Option<&ComputedStyle>, border_box_height: f32) -> f32 {
     let pad_top = px_length_of(style, PropertyId::PaddingTop);
     let pad_bottom = px_length_of(style, PropertyId::PaddingBottom);
@@ -135,7 +172,9 @@ fn field_content_height(style: Option<&ComputedStyle>, border_box_height: f32) -
     let border_bottom = px_length_of(style, PropertyId::BorderBottomWidth);
     (border_box_height - pad_top - pad_bottom - border_top - border_bottom).max(0.0)
 }
-#[doc = include_str!("caret_scroll.doc/px_length_of.md")]
+/// Reads one computed length property in absolute `px`, defaulting to `0.0` when
+/// the property is absent or is a non-pixel length (mirroring the scene
+/// coordinator's pixel-only inset reads).
 fn px_length_of(style: Option<&ComputedStyle>, id: PropertyId) -> f32 {
     style
         .and_then(|s| s.get(id))
@@ -143,7 +182,7 @@ fn px_length_of(style: Option<&ComputedStyle>, id: PropertyId) -> f32 {
         .and_then(Length::as_px)
         .map_or(0.0, |px| px.0)
 }
-#[doc = include_str!("caret_scroll.doc/has_definite_px_height.md")]
+#[doc = include_str!("../../docs/api/runtime/caret_scroll.doc/has_definite_px_height.md")]
 fn has_definite_px_height(style: Option<&ComputedStyle>) -> bool {
     style
         .and_then(|s| s.get(PropertyId::Height))

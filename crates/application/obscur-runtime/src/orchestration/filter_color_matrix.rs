@@ -1,8 +1,9 @@
-#![doc = include_str!("filter_color_matrix.doc/_module.md")]
+//! Folding a CSS `filter` chain's colour functions into ONE 4×5 affine colour
+//! matrix (CSS Filter Effects §), so a chain costs the renderer one effect.
 
 use obscur_style::property::FilterOp;
 
-#[doc = include_str!("filter_color_matrix.doc/color_matrix_of_ops.md")]
+#[doc = include_str!("../../docs/api/orchestration/filter_color_matrix.doc/color_matrix_of_ops.md")]
 pub(super) fn color_matrix_of_ops(ops: &[FilterOp]) -> Option<[f32; 20]> {
     if !ops.iter().any(FilterOp::is_color_op) {
         return None;
@@ -31,7 +32,9 @@ pub(super) fn color_matrix_of_ops(ops: &[FilterOp]) -> Option<[f32; 20]> {
     Some(out)
 }
 
-#[doc = include_str!("filter_color_matrix.doc/color_op_matrix.md")]
+/// The 4×4 linear part + 4-entry bias of a single color-op [`FilterOp`], or
+/// [`None`] for a spatial op (`blur` / `drop-shadow`). Matrices are taken verbatim
+/// from CSS Filter Effects § (<https://drafts.fxtf.org/filter-effects/>).
 fn color_op_matrix(op: &FilterOp) -> Option<([[f32; 4]; 4], [f32; 4])> {
     // A diagonal RGB scale (alpha untouched) with an RGB bias.
     let rgb_diag = |k: f32, bias: f32| {
@@ -138,7 +141,7 @@ fn color_op_matrix(op: &FilterOp) -> Option<([[f32; 4]; 4], [f32; 4])> {
     })
 }
 
-#[doc = include_str!("filter_color_matrix.doc/mat_mul.md")]
+/// Row-major 4×4 · 4×4 product (`a · b`).
 fn mat_mul(a: &[[f32; 4]; 4], b: &[[f32; 4]; 4]) -> [[f32; 4]; 4] {
     let mut out = [[0.0_f32; 4]; 4];
     for i in 0..4 {
@@ -153,7 +156,7 @@ fn mat_mul(a: &[[f32; 4]; 4], b: &[[f32; 4]; 4]) -> [[f32; 4]; 4] {
     out
 }
 
-#[doc = include_str!("filter_color_matrix.doc/mat_vec.md")]
+/// Row-major 4×4 · vec4 product (`m · v`).
 fn mat_vec(m: &[[f32; 4]; 4], v: [f32; 4]) -> [f32; 4] {
     let mut out = [0.0_f32; 4];
     for i in 0..4 {
@@ -162,7 +165,7 @@ fn mat_vec(m: &[[f32; 4]; 4], v: [f32; 4]) -> [f32; 4] {
     out
 }
 
-#[doc = include_str!("filter_color_matrix.doc/add4.md")]
+/// Component-wise vec4 sum.
 fn add4(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
     [a[0] + b[0], a[1] + b[1], a[2] + b[2], a[3] + b[3]]
 }

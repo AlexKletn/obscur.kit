@@ -1,26 +1,27 @@
-#![doc = include_str!("plural_category.doc/_module.md")]
+//! `PluralCategory`: the six CLDR plural categories (spec §7.2).
 
 use std::fmt;
 
-#[doc = include_str!("plural_category.doc/PluralCategory.md")]
+#[doc = include_str!("../../docs/api/plural/plural_category.doc/PluralCategory.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum PluralCategory {
-    #[doc = include_str!("plural_category.doc/Zero.md")]
+    /// `zero` — e.g. Arabic ٠.
     Zero,
-    #[doc = include_str!("plural_category.doc/One.md")]
+    /// `one` — the singular *category*, which in Russian includes 21 and 101.
     One,
-    #[doc = include_str!("plural_category.doc/Two.md")]
+    /// `two` — the dual, e.g. Arabic.
     Two,
-    #[doc = include_str!("plural_category.doc/Few.md")]
+    /// `few` — the paucal, e.g. Russian 2–4, 22–24.
     Few,
-    #[doc = include_str!("plural_category.doc/Many.md")]
+    /// `many` — e.g. Russian 0, 5–20, 111.
     Many,
-    #[doc = include_str!("plural_category.doc/Other.md")]
+    /// `other` — the catch-all every language has; the only category of a
+    /// language with no plural distinctions at all.
     Other,
 }
 
 impl PluralCategory {
-    #[doc = include_str!("plural_category.doc/ALL.md")]
+    /// Every category, in CLDR's canonical order.
     pub const ALL: [Self; 6] = [
         Self::Zero,
         Self::One,
@@ -30,7 +31,7 @@ impl PluralCategory {
         Self::Other,
     ];
 
-    #[doc = include_str!("plural_category.doc/as_str.md")]
+    #[doc = include_str!("../../docs/api/plural/plural_category.doc/as_str.md")]
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -43,7 +44,7 @@ impl PluralCategory {
         }
     }
 
-    #[doc = include_str!("plural_category.doc/from_keyword.md")]
+    /// Parses a CLDR category keyword; `None` for anything else.
     #[must_use]
     pub fn from_keyword(keyword: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|c| c.as_str() == keyword)

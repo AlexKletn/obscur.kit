@@ -1,8 +1,8 @@
-#![doc = include_str!("theme_scope.doc/_module.md")]
+#![doc = include_str!("../../docs/api/scope/theme_scope.doc/_module.md")]
 
 use crate::scope::ScopeId;
 
-#[doc = include_str!("theme_scope.doc/ThemeScope.md")]
+#[doc = include_str!("../../docs/api/scope/theme_scope.doc/ThemeScope.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ThemeScope {
     scope: ScopeId,
@@ -10,7 +10,7 @@ pub struct ThemeScope {
 }
 
 impl ThemeScope {
-    #[doc = include_str!("theme_scope.doc/new.md")]
+    /// Creates a scoped theme, choosing whether it inherits from its parent.
     #[must_use]
     pub const fn new(scope: ScopeId, inherits_parent: bool) -> Self {
         Self {
@@ -19,19 +19,20 @@ impl ThemeScope {
         }
     }
 
-    #[doc = include_str!("theme_scope.doc/rooted.md")]
+    /// Creates a scoped theme rooted at `scope` that inherits from its parent —
+    /// the default behaviour (§4.15).
     #[must_use]
     pub const fn rooted(scope: ScopeId) -> Self {
         Self::new(scope, true)
     }
 
-    #[doc = include_str!("theme_scope.doc/scope.md")]
+    /// Returns the scope this theme is applied to.
     #[must_use]
     pub const fn scope(self) -> ScopeId {
         self.scope
     }
 
-    #[doc = include_str!("theme_scope.doc/inherits_from_parent.md")]
+    #[doc = include_str!("../../docs/api/scope/theme_scope.doc/inherits_from_parent.md")]
     #[must_use]
     pub const fn inherits_from_parent(self) -> bool {
         self.inherits_parent

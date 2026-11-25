@@ -1,4 +1,4 @@
-#![doc = include_str!("lib.doc/_module.md")]
+//! CSS syntax frontend compiling to obscur-style/obscur-motion structures.
 #![forbid(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 

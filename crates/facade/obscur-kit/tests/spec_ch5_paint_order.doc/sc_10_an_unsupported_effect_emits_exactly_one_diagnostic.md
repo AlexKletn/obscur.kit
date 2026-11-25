@@ -23,3 +23,7 @@ disjunction, not a demand for all three on every diagnostic. Candidate spec
 amendment: say which of the three contexts is required for a render-class
 diagnostic, and if node context is wanted for unsupported effects, carry the
 originating node on the scene command so it can be.
+
+The fixture now uses a mask declaration without a coverage source. CPU
+backdrop blur is supported, so it no longer exercises the unsupported
+effect path.

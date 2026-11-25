@@ -1,19 +1,20 @@
-#![doc = include_str!("listener_phase.doc/_module.md")]
+//! Which of §2.3's propagation phases a listener asked to be run in.
 
 use super::EventPhase;
 
-#[doc = include_str!("listener_phase.doc/ListenerPhase.md")]
+#[doc = include_str!("../../docs/api/event/listener_phase.doc/ListenerPhase.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum ListenerPhase {
-    #[doc = include_str!("listener_phase.doc/Capture.md")]
+    /// Run while the event descends from the root toward the target, *before*
+    /// the target itself is reached.
     Capture,
-    #[doc = include_str!("listener_phase.doc/Bubble.md")]
+    /// Run while the event ascends from the target back toward the root.
     #[default]
     Bubble,
 }
 
 impl ListenerPhase {
-    #[doc = include_str!("listener_phase.doc/runs_in.md")]
+    #[doc = include_str!("../../docs/api/event/listener_phase.doc/runs_in.md")]
     #[must_use]
     pub const fn runs_in(self, phase: EventPhase) -> bool {
         match phase {

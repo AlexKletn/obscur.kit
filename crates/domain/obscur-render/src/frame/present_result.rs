@@ -1,31 +1,34 @@
-#![doc = include_str!("present_result.doc/_module.md")]
+//! The typed outcome of presenting a frame (spec §5.2 explicit diagnostics).
 
 use obscur_scene::scene::SceneGeneration;
 
-#[doc = include_str!("present_result.doc/PresentResult.md")]
+#[doc = include_str!("../../docs/api/frame/present_result.doc/PresentResult.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PresentResult {
-    #[doc = include_str!("present_result.doc/Presented.md")]
+    /// The frame reached the screen, echoing which scene generation was
+    /// presented.
     Presented {
-        #[doc = include_str!("present_result.doc/generation.md")]
+        /// The generation of the scene that reached the screen.
         generation: SceneGeneration,
     },
-    #[doc = include_str!("present_result.doc/Skipped.md")]
+    /// A stale intermediate frame was dropped before presentation (spec §3.5).
     Skipped,
-    #[doc = include_str!("present_result.doc/DeviceLost.md")]
+    /// The GPU device was lost during presentation; see
+    /// [`DeviceLoss`](crate::frame::DeviceLoss) for the reason and
+    /// recoverability.
     DeviceLost,
-    #[doc = include_str!("present_result.doc/Failed.md")]
+    /// Presentation failed for the given human-readable reason.
     Failed(Box<str>),
 }
 
 impl PresentResult {
-    #[doc = include_str!("present_result.doc/is_presented.md")]
+    /// Whether the frame was successfully presented.
     #[must_use]
     pub const fn is_presented(&self) -> bool {
         matches!(self, Self::Presented { .. })
     }
 
-    #[doc = include_str!("present_result.doc/is_recoverable.md")]
+    #[doc = include_str!("../../docs/api/frame/present_result.doc/is_recoverable.md")]
     #[must_use]
     pub const fn is_recoverable(&self) -> bool {
         matches!(
@@ -34,7 +37,8 @@ impl PresentResult {
         )
     }
 
-    #[doc = include_str!("present_result.doc/failure_reason.md")]
+    /// The failure reason when this outcome is [`PresentResult::Failed`], else
+    /// `None`.
     #[must_use]
     pub fn failure_reason(&self) -> Option<&str> {
         match self {

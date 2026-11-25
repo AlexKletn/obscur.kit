@@ -1,31 +1,8 @@
-#![doc = include_str!("symbol.doc/_module.md")]
+//! `Symbol`: a named entity visible within a lexical scope (spec §2.10).
 
-#[doc = include_str!("symbol.doc/SymbolKind.md")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SymbolKind {
-    #[doc = include_str!("symbol.doc/Prop.md")]
-    Prop,
-    #[doc = include_str!("symbol.doc/State.md")]
-    State,
-    #[doc = include_str!("symbol.doc/LoopLocal.md")]
-    LoopLocal,
-    #[doc = include_str!("symbol.doc/Component.md")]
-    Component,
-    #[doc = include_str!("symbol.doc/Function.md")]
-    Function,
-    #[doc = include_str!("symbol.doc/Slot.md")]
-    Slot,
-}
+use super::SymbolKind;
 
-impl SymbolKind {
-    #[doc = include_str!("symbol.doc/is_reference_target.md")]
-    #[must_use]
-    pub const fn is_reference_target(&self) -> bool {
-        matches!(self, Self::Prop | Self::State | Self::LoopLocal)
-    }
-}
-
-#[doc = include_str!("symbol.doc/Symbol.md")]
+#[doc = include_str!("../../docs/api/symbol/symbol.doc/Symbol.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Symbol {
     name: Box<str>,
@@ -33,7 +10,7 @@ pub struct Symbol {
 }
 
 impl Symbol {
-    #[doc = include_str!("symbol.doc/new.md")]
+    /// Creates a symbol with the given `name` and `kind`.
     #[must_use]
     pub fn new(name: impl Into<Box<str>>, kind: SymbolKind) -> Self {
         Self {
@@ -42,43 +19,44 @@ impl Symbol {
         }
     }
 
-    #[doc = include_str!("symbol.doc/prop.md")]
+    /// Creates a [`Prop`](SymbolKind::Prop) symbol.
     #[must_use]
     pub fn prop(name: impl Into<Box<str>>) -> Self {
         Self::new(name, SymbolKind::Prop)
     }
 
-    #[doc = include_str!("symbol.doc/state.md")]
+    /// Creates a [`State`](SymbolKind::State) symbol.
     #[must_use]
     pub fn state(name: impl Into<Box<str>>) -> Self {
         Self::new(name, SymbolKind::State)
     }
 
-    #[doc = include_str!("symbol.doc/loop_local.md")]
+    /// Creates a [`LoopLocal`](SymbolKind::LoopLocal) symbol.
     #[must_use]
     pub fn loop_local(name: impl Into<Box<str>>) -> Self {
         Self::new(name, SymbolKind::LoopLocal)
     }
 
-    #[doc = include_str!("symbol.doc/component.md")]
+    /// Creates a [`Component`](SymbolKind::Component) symbol.
     #[must_use]
     pub fn component(name: impl Into<Box<str>>) -> Self {
         Self::new(name, SymbolKind::Component)
     }
 
-    #[doc = include_str!("symbol.doc/name.md")]
+    /// Returns the symbol's name.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    #[doc = include_str!("symbol.doc/kind.md")]
+    /// Returns the symbol's kind.
     #[must_use]
     pub const fn kind(&self) -> &SymbolKind {
         &self.kind
     }
 
-    #[doc = include_str!("symbol.doc/is_reference_target_2.md")]
+    /// Returns whether this symbol may be read as an expression value (spec
+    /// §2.10); see [`SymbolKind::is_reference_target`].
     #[must_use]
     pub const fn is_reference_target(&self) -> bool {
         self.kind.is_reference_target()

@@ -1,17 +1,17 @@
-#![doc = include_str!("instance_id.doc/_module.md")]
+//! `InstanceId`: identity of a single mounted component instance.
 
-#[doc = include_str!("instance_id.doc/InstanceId.md")]
+#[doc = include_str!("../../docs/api/component/instance_id.doc/InstanceId.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct InstanceId(u64);
 
 impl InstanceId {
-    #[doc = include_str!("instance_id.doc/from_raw.md")]
+    /// Wraps a raw handle value into an `InstanceId`.
     #[must_use]
     pub const fn from_raw(raw: u64) -> Self {
         Self(raw)
     }
 
-    #[doc = include_str!("instance_id.doc/raw.md")]
+    /// Returns the raw handle value backing this identifier.
     #[must_use]
     pub const fn raw(self) -> u64 {
         self.0

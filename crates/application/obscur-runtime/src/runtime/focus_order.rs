@@ -1,27 +1,38 @@
-#![doc = include_str!("focus_order.doc/_module.md")]
+#![doc = include_str!("../../docs/api/runtime/focus_order.doc/_module.md")]
 
 use obscur_identity::NodeId;
 use obscur_interaction::focus::{FocusNode, FocusScope, TabOrder};
 use obscur_tree::tree::RetainedTree;
 
+use crate::orchestration::ComputedStyles;
+
 use super::{SemanticTreeBuilder, StructuralStates};
 
-#[doc = include_str!("focus_order.doc/FocusOrder.md")]
+/// The nodes Tab visits, in order, and whether a scope is trapping it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FocusOrder {
-    #[doc = include_str!("focus_order.doc/order.md")]
+    /// The computed ring.
     order: TabOrder,
-    #[doc = include_str!("focus_order.doc/trapped.md")]
+    #[doc = include_str!("../../docs/api/runtime/focus_order.doc/trapped.md")]
     trapped: bool,
 }
 
 impl FocusOrder {
-    #[doc = include_str!("focus_order.doc/of.md")]
-    pub(crate) fn of(tree: &RetainedTree, scope: Option<&FocusScope>) -> Self {
+    /// Computes the ring over the whole tree, or over `scope` when one is trapping.
+    pub(crate) fn of(
+        tree: &RetainedTree,
+        computed: &ComputedStyles,
+        scope: Option<&FocusScope>,
+    ) -> Self {
         let mut nodes = Vec::new();
         if let Some(root) = tree.root() {
             let states = StructuralStates::of(tree);
             collect(tree, &states, root, scope, &mut nodes);
+            nodes.retain(|node| {
+                !computed
+                    .get(&node.node())
+                    .is_some_and(|style| style.is_visibility_hidden())
+            });
         }
         Self {
             order: TabOrder::compute(&nodes),
@@ -29,7 +40,12 @@ impl FocusOrder {
         }
     }
 
-    #[doc = include_str!("focus_order.doc/step.md")]
+    /// Eligible focus targets in tab order, within the active trap if one is present.
+    pub(crate) fn nodes(&self) -> &[NodeId] {
+        self.order.nodes()
+    }
+
+    #[doc = include_str!("../../docs/api/runtime/focus_order.doc/step.md")]
     pub(crate) fn step(&self, current: Option<NodeId>, backwards: bool) -> Option<NodeId> {
         // Wrapping is unconditional, and that is the same decision either way:
         // an untrapped sequence wraps because this runtime owns one surface and
@@ -45,20 +61,20 @@ impl FocusOrder {
         }
     }
 
-    #[doc = include_str!("focus_order.doc/len.md")]
+    /// How many stops the ring has.
     #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.order.len()
     }
 
-    #[doc = include_str!("focus_order.doc/is_trapped.md")]
+    /// Whether a scope narrowed the ring.
     #[cfg(test)]
     pub(crate) const fn is_trapped(&self) -> bool {
         self.trapped
     }
 }
 
-#[doc = include_str!("focus_order.doc/collect.md")]
+/// Appends the tabbable nodes under `node`, depth first, which is document order.
 fn collect(
     tree: &RetainedTree,
     states: &StructuralStates<'_>,
@@ -76,7 +92,7 @@ fn collect(
     }
 }
 
-#[doc = include_str!("focus_order.doc/is_tabbable.md")]
+#[doc = include_str!("../../docs/api/runtime/focus_order.doc/is_tabbable.md")]
 fn is_tabbable(
     tree: &RetainedTree,
     states: &StructuralStates<'_>,
@@ -101,7 +117,7 @@ fn is_tabbable(
 
 #[cfg(test)]
 mod tests {
-    use super::FocusOrder;
+    use super::{ComputedStyles, FocusOrder};
     use obscur_identity::{ComponentId, NodeId, RuntimeId};
     use obscur_interaction::focus::{FocusScope, FocusScopeId};
     use obscur_view::view::{
@@ -140,7 +156,7 @@ mod tests {
         // including a text leaf, and a Tab ring built from that would walk the
         // user through every box on the screen.
         let (rt, kids) = committed(vec![named("button"), named("div"), named("input")]);
-        let order = FocusOrder::of(rt.tree(), None);
+        let order = FocusOrder::of(rt.tree(), &ComputedStyles::default(), None);
         assert_eq!(order.len(), 2);
         assert_eq!(order.step(None, false), Some(kids[0]));
         assert_eq!(order.step(Some(kids[0]), false), Some(kids[2]));
@@ -150,7 +166,7 @@ mod tests {
     fn a_disabled_control_is_skipped() {
         let disabled = named("button").with_prop(ViewProperty::new(DISABLED, ViewValue::Null));
         let (rt, kids) = committed(vec![named("button"), disabled, named("button")]);
-        let order = FocusOrder::of(rt.tree(), None);
+        let order = FocusOrder::of(rt.tree(), &ComputedStyles::default(), None);
         assert_eq!(order.len(), 2, "the disabled control is not a stop");
         assert_eq!(order.step(Some(kids[0]), false), Some(kids[2]));
     }
@@ -158,7 +174,7 @@ mod tests {
     #[test]
     fn the_sequence_wraps_in_both_directions() {
         let (rt, kids) = committed(vec![named("button"), named("input")]);
-        let order = FocusOrder::of(rt.tree(), None);
+        let order = FocusOrder::of(rt.tree(), &ComputedStyles::default(), None);
         assert_eq!(order.step(Some(kids[1]), false), Some(kids[0]), "forward");
         assert_eq!(order.step(Some(kids[0]), true), Some(kids[1]), "backward");
     }
@@ -169,7 +185,7 @@ mod tests {
         // `current` is not in the ring at all. Tab must start somewhere sensible
         // rather than answer nothing.
         let (rt, kids) = committed(vec![named("div"), named("button")]);
-        let order = FocusOrder::of(rt.tree(), None);
+        let order = FocusOrder::of(rt.tree(), &ComputedStyles::default(), None);
         assert_eq!(order.step(Some(kids[0]), false), Some(kids[1]));
         assert_eq!(order.step(Some(kids[0]), true), Some(kids[1]));
     }
@@ -181,7 +197,7 @@ mod tests {
             .trapping(true)
             .with_member(kids[1])
             .with_member(kids[2]);
-        let order = FocusOrder::of(rt.tree(), Some(&scope));
+        let order = FocusOrder::of(rt.tree(), &ComputedStyles::default(), Some(&scope));
         assert!(order.is_trapped());
         assert_eq!(
             order.len(),
@@ -198,7 +214,7 @@ mod tests {
     #[test]
     fn an_empty_sequence_answers_nothing_rather_than_panicking() {
         let (rt, _kids) = committed(vec![named("div")]);
-        let order = FocusOrder::of(rt.tree(), None);
+        let order = FocusOrder::of(rt.tree(), &ComputedStyles::default(), None);
         assert_eq!(order.len(), 0);
         assert_eq!(order.step(None, false), None);
     }

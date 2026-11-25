@@ -1,5 +1,15 @@
-#![doc = include_str!("dependency_manifest.doc/_module.md")]
+//! A plugin dependency declared in a package manifest.
 
-#[doc = include_str!("dependency_manifest.doc/DependencyManifest.md")]
-#[derive(Debug)]
-pub struct DependencyManifest;
+use super::DependencyKind;
+
+/// One declared plugin dependency.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DependencyManifest {
+    /// The provider plugin ID.
+    pub id: crate::identity::PluginId,
+    /// The supported provider version range.
+    pub version: semver::VersionReq,
+    /// The reason the dependency participates in validation.
+    pub kind: DependencyKind,
+}

@@ -1,10 +1,10 @@
-#![doc = include_str!("scope.doc/_module.md")]
+//! `Scope`: one lexical scope in the scope tree (spec §2.10).
 
 use std::collections::BTreeMap;
 
 use crate::symbol::Symbol;
 
-#[doc = include_str!("scope.doc/Scope.md")]
+#[doc = include_str!("../../docs/api/symbol/scope.doc/Scope.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Scope {
     parent: Option<usize>,
@@ -12,7 +12,8 @@ pub struct Scope {
 }
 
 impl Scope {
-    #[doc = include_str!("scope.doc/new.md")]
+    /// Creates an empty scope whose enclosing scope is at arena index `parent`
+    /// (`None` for the root).
     #[must_use]
     pub fn new(parent: Option<usize>) -> Self {
         Self {
@@ -21,13 +22,15 @@ impl Scope {
         }
     }
 
-    #[doc = include_str!("scope.doc/root.md")]
+    /// Creates an empty root scope (no parent).
     #[must_use]
     pub fn root() -> Self {
         Self::new(None)
     }
 
-    #[doc = include_str!("scope.doc/define.md")]
+    /// Defines `symbol` in this scope, returning `false` if a symbol with the
+    /// same name was already defined here (a duplicate; the existing binding is
+    /// kept).
     pub fn define(&mut self, symbol: Symbol) -> bool {
         if self.symbols.contains_key(symbol.name()) {
             return false;
@@ -36,37 +39,38 @@ impl Scope {
         true
     }
 
-    #[doc = include_str!("scope.doc/get.md")]
+    /// Returns the symbol named `name` defined directly in this scope, if any
+    /// (this scope only — no outward walk).
     #[must_use]
     pub fn get(&self, name: &str) -> Option<&Symbol> {
         self.symbols.get(name)
     }
 
-    #[doc = include_str!("scope.doc/parent.md")]
+    /// Returns the arena index of this scope's parent, or `None` for the root.
     #[must_use]
     pub const fn parent(&self) -> Option<usize> {
         self.parent
     }
 
-    #[doc = include_str!("scope.doc/contains.md")]
+    /// Returns whether a symbol named `name` is defined directly in this scope.
     #[must_use]
     pub fn contains(&self, name: &str) -> bool {
         self.symbols.contains_key(name)
     }
 
-    #[doc = include_str!("scope.doc/len.md")]
+    /// Returns the number of symbols defined directly in this scope.
     #[must_use]
     pub fn len(&self) -> usize {
         self.symbols.len()
     }
 
-    #[doc = include_str!("scope.doc/is_empty.md")]
+    /// Returns whether this scope defines no symbols.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.symbols.is_empty()
     }
 
-    #[doc = include_str!("scope.doc/symbols.md")]
+    /// Iterates the symbols defined directly in this scope, in name order.
     pub fn symbols(&self) -> impl Iterator<Item = &Symbol> {
         self.symbols.values()
     }

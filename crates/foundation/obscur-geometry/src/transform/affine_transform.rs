@@ -1,21 +1,21 @@
-#![doc = include_str!("affine_transform.doc/_module.md")]
+//! 2D affine transform.
 
 use crate::primitive::{Point, Rect, Size};
 
-#[doc = include_str!("affine_transform.doc/AffineTransform.md")]
+#[doc = include_str!("../../docs/api/transform/affine_transform.doc/AffineTransform.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AffineTransform {
-    #[doc = include_str!("affine_transform.doc/coeffs.md")]
+    /// Row-major coefficients `[a, b, c, d, tx, ty]`.
     pub coeffs: [f32; 6],
 }
 
 impl AffineTransform {
-    #[doc = include_str!("affine_transform.doc/IDENTITY.md")]
+    /// The identity transform.
     pub const IDENTITY: Self = Self {
         coeffs: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
     };
 
-    #[doc = include_str!("affine_transform.doc/translate.md")]
+    /// A pure translation.
     #[must_use]
     pub const fn translate(tx: f32, ty: f32) -> Self {
         Self {
@@ -23,7 +23,8 @@ impl AffineTransform {
         }
     }
 
-    #[doc = include_str!("affine_transform.doc/from_matrix.md")]
+    /// An affine from the six coefficients of a CSS `matrix(a, b, c, d, e, f)`
+    /// (which use the identical `[a, b, c, d, tx, ty]` layout).
     // The six single-letter names are the canonical CSS `matrix()` coefficients.
     #[allow(clippy::many_single_char_names)]
     #[must_use]
@@ -33,7 +34,7 @@ impl AffineTransform {
         }
     }
 
-    #[doc = include_str!("affine_transform.doc/scale.md")]
+    /// A pure scale `(sx, sy)` about the origin.
     #[must_use]
     pub const fn scale(sx: f32, sy: f32) -> Self {
         Self {
@@ -41,7 +42,7 @@ impl AffineTransform {
         }
     }
 
-    #[doc = include_str!("affine_transform.doc/rotate.md")]
+    /// A rotation by `radians` (clockwise in the y-down screen space).
     #[must_use]
     pub fn rotate(radians: f32) -> Self {
         let (sin, cos) = radians.sin_cos();
@@ -50,7 +51,8 @@ impl AffineTransform {
         }
     }
 
-    #[doc = include_str!("affine_transform.doc/skew.md")]
+    /// A skew by the two angles (in radians): `ax` shears x by the point's y,
+    /// `ay` shears y by the point's x (CSS `skew(ax, ay)`).
     #[must_use]
     pub fn skew(ax: f32, ay: f32) -> Self {
         Self {
@@ -58,11 +60,26 @@ impl AffineTransform {
         }
     }
 
-    #[doc = include_str!("affine_transform.doc/multiply.md")]
+    #[doc = include_str!("../../docs/api/transform/affine_transform.doc/multiply.md")]
     #[must_use]
     pub fn multiply(self, rhs: Self) -> Self {
         let a = self.coeffs;
         let b = rhs.coeffs;
+        let coeffs = [
+            a[0] * b[0] + a[2] * b[1],
+            a[1] * b[0] + a[3] * b[1],
+            a[0] * b[2] + a[2] * b[3],
+            a[1] * b[2] + a[3] * b[3],
+            a[0] * b[4] + a[2] * b[5] + a[4],
+            a[1] * b[4] + a[3] * b[5] + a[5],
+        ];
+        if coeffs.iter().all(|value| value.is_finite()) {
+            return Self { coeffs };
+        }
+        // Recompute before narrowing: clamping intermediate products would
+        // destroy cancellations and leave NaN from opposite infinities.
+        let a = a.map(f64::from);
+        let b = b.map(f64::from);
         Self {
             coeffs: [
                 a[0] * b[0] + a[2] * b[1],
@@ -71,17 +88,18 @@ impl AffineTransform {
                 a[1] * b[2] + a[3] * b[3],
                 a[0] * b[4] + a[2] * b[5] + a[4],
                 a[1] * b[4] + a[3] * b[5] + a[5],
-            ],
+            ]
+            .map(crate::saturating_f32),
         }
     }
 
-    #[doc = include_str!("affine_transform.doc/is_identity.md")]
+    /// Whether this transform is (exactly) the identity.
     #[must_use]
     pub fn is_identity(self) -> bool {
         self.coeffs == Self::IDENTITY.coeffs
     }
 
-    #[doc = include_str!("affine_transform.doc/inverse.md")]
+    #[doc = include_str!("../../docs/api/transform/affine_transform.doc/inverse.md")]
     // The six single-letter names are the canonical CSS `matrix()` coefficients.
     #[allow(clippy::many_single_char_names)]
     #[must_use]
@@ -110,7 +128,7 @@ impl AffineTransform {
         out.coeffs.iter().all(|v| v.is_finite()).then_some(out)
     }
 
-    #[doc = include_str!("affine_transform.doc/apply.md")]
+    /// Applies this transform to a point.
     #[must_use]
     pub fn apply(self, p: Point) -> Point {
         let m = self.coeffs;
@@ -120,7 +138,7 @@ impl AffineTransform {
         )
     }
 
-    #[doc = include_str!("affine_transform.doc/map_rect.md")]
+    #[doc = include_str!("../../docs/api/transform/affine_transform.doc/map_rect.md")]
     #[must_use]
     pub fn map_rect(self, rect: Rect) -> Rect {
         let (l, t, r, b) = (rect.origin.x, rect.origin.y, rect.right(), rect.bottom());

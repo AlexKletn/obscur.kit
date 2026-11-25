@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Plural module.
 mod plural_category;
 pub use plural_category::PluralCategory;
 mod plural_operands;

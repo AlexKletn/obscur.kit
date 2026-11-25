@@ -1,4 +1,4 @@
-#![doc = include_str!("radio_props.doc/_module.md")]
+#![doc = include_str!("../../docs/api/radio/radio_props.doc/_module.md")]
 
 use obscur_identity::InternedSymbol;
 use obscur_view::component::{
@@ -9,27 +9,34 @@ use obscur_view::view::{CHECKED, StyleAttributes, ViewProperty, ViewValue};
 
 use super::Radio;
 
-#[doc = include_str!("radio_props.doc/RadioProps.md")]
+#[doc = include_str!("../../docs/api/radio/radio_props.doc/RadioProps.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RadioProps {
-    #[doc = include_str!("radio_props.doc/label.md")]
+    /// The label text rendered beside the indicator.
     pub label: String,
-    #[doc = include_str!("radio_props.doc/selected.md")]
+    /// Whether the radio is selected — the filled `.radio-fill` centre is present
+    /// exactly when this is `true`.
     pub selected: bool,
 }
 
 impl RadioProps {
-    #[doc = include_str!("radio_props.doc/LABEL.md")]
+    #[doc = include_str!("../../docs/api/radio/radio_props.doc/LABEL.md")]
     pub const LABEL: InternedSymbol = InternedSymbol::from_raw(0xF697_17FD);
 
-    #[doc = include_str!("radio_props.doc/NAME.md")]
+    /// Symbol of the component's name, `"Radio"` — the FNV-1a-32 hash
+    /// `#[derive(Contract)]` puts on `ComponentContract::with_name`.
     const NAME: InternedSymbol = InternedSymbol::from_raw(0x5675_F954);
-    #[doc = include_str!("radio_props.doc/LABEL_TYPE.md")]
+    /// Opaque type identity of the `label` prop: the FNV-1a-32 hash of the Rust type
+    /// spelling `String`, which is what `#[derive(Contract)]` records as a
+    /// `PropContract`'s `value_type`. It names no view property and is compared,
+    /// never interpreted.
     const LABEL_TYPE: InternedSymbol = InternedSymbol::from_raw(0x604F_4858);
-    #[doc = include_str!("radio_props.doc/SELECTED_TYPE.md")]
+    /// Opaque type identity of the `checked` prop: the FNV-1a-32 hash of the Rust
+    /// type spelling `bool`, which is what `#[derive(Contract)]` records for a plain
+    /// `bool` field carrying `#[contract(default)]`.
     const SELECTED_TYPE: InternedSymbol = InternedSymbol::from_raw(0xC894_953D);
 
-    #[doc = include_str!("radio_props.doc/contract.md")]
+    #[doc = include_str!("../../docs/api/radio/radio_props.doc/contract.md")]
     #[must_use]
     pub fn contract() -> ComponentContract {
         ComponentContract::new(Radio::COMPONENT_ID)
@@ -40,7 +47,7 @@ impl RadioProps {
 }
 
 impl FromProps for RadioProps {
-    #[doc = include_str!("radio_props.doc/from_props.md")]
+    #[doc = include_str!("../../docs/api/radio/radio_props.doc/from_props.md")]
     fn from_props(props: &[ViewProperty]) -> Result<Self, PropsError> {
         let label: String = decode_required(props, Self::LABEL, "label")?;
         let selected = match prop_value(props, Radio::PROP_SELECTED) {

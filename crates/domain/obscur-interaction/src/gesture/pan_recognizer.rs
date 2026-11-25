@@ -1,10 +1,11 @@
-#![doc = include_str!("pan_recognizer.doc/_module.md")]
+//! The [`PanRecognizer`] turning one pointer's samples into a drag (spec §6.16
+//! `Pan`, §2.4 pointer/gesture behaviour).
 
 use obscur_geometry::Point;
 
 use super::{GestureKind, GestureRecognizer, RecognizerId, RecognizerState};
 
-#[doc = include_str!("pan_recognizer.doc/PanRecognizer.md")]
+#[doc = include_str!("../../docs/api/gesture/pan_recognizer.doc/PanRecognizer.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PanRecognizer {
     recognizer: GestureRecognizer,
@@ -18,7 +19,9 @@ pub struct PanRecognizer {
 }
 
 impl PanRecognizer {
-    #[doc = include_str!("pan_recognizer.doc/new.md")]
+    /// Begins tracking `pointer`'s contact, which went down at `origin` at
+    /// logical time `micros`, with a movement threshold of `slop` (in the same
+    /// space as the points).
     #[must_use]
     pub fn new(id: RecognizerId, origin: Point, micros: u64, slop: f32) -> Self {
         Self {
@@ -33,7 +36,7 @@ impl PanRecognizer {
         }
     }
 
-    #[doc = include_str!("pan_recognizer.doc/update.md")]
+    #[doc = include_str!("../../docs/api/gesture/pan_recognizer.doc/update.md")]
     pub fn update(&mut self, at: Point, micros: u64) -> Option<(f32, f32)> {
         if self.recognizer.state().is_terminal() {
             return None;
@@ -56,7 +59,7 @@ impl PanRecognizer {
         Some((at.x - from.x, at.y - from.y))
     }
 
-    #[doc = include_str!("pan_recognizer.doc/end.md")]
+    #[doc = include_str!("../../docs/api/gesture/pan_recognizer.doc/end.md")]
     pub fn end(&mut self) {
         if self.recognizer.state() == RecognizerState::Began {
             self.recognizer.recognize();
@@ -65,42 +68,43 @@ impl PanRecognizer {
         }
     }
 
-    #[doc = include_str!("pan_recognizer.doc/cancel.md")]
+    /// Cancels the sequence — the system took it, or a competing recognizer won
+    /// the arena.
     pub fn cancel(&mut self) {
         self.recognizer.cancel();
     }
 
-    #[doc = include_str!("pan_recognizer.doc/has_begun.md")]
+    /// Whether the slop has been crossed and the pan is driving content.
     #[must_use]
     pub fn has_begun(&self) -> bool {
         self.recognizer.state() == RecognizerState::Began
     }
 
-    #[doc = include_str!("pan_recognizer.doc/state.md")]
+    /// The recognizer's lifecycle state.
     #[must_use]
     pub fn state(&self) -> RecognizerState {
         self.recognizer.state()
     }
 
-    #[doc = include_str!("pan_recognizer.doc/id.md")]
+    /// The recognizer's identity.
     #[must_use]
     pub fn id(&self) -> RecognizerId {
         self.recognizer.id()
     }
 
-    #[doc = include_str!("pan_recognizer.doc/origin.md")]
+    /// Where the contact went down.
     #[must_use]
     pub fn origin(&self) -> Point {
         self.origin
     }
 
-    #[doc = include_str!("pan_recognizer.doc/origin_micros.md")]
+    /// The logical time the contact went down, in microseconds.
     #[must_use]
     pub fn origin_micros(&self) -> u64 {
         self.origin_micros
     }
 
-    #[doc = include_str!("pan_recognizer.doc/velocity_at.md")]
+    #[doc = include_str!("../../docs/api/gesture/pan_recognizer.doc/velocity_at.md")]
     #[must_use]
     pub fn velocity_at(&self, micros: u64, rest_micros: u64) -> (f32, f32) {
         if micros.saturating_sub(self.last_micros) > rest_micros {
@@ -109,7 +113,7 @@ impl PanRecognizer {
         self.velocity
     }
 
-    #[doc = include_str!("pan_recognizer.doc/sample_velocity.md")]
+    #[doc = include_str!("../../docs/api/gesture/pan_recognizer.doc/sample_velocity.md")]
     fn sample_velocity(&mut self, at: Point, micros: u64) {
         let dt = micros.saturating_sub(self.last_micros) as f32 / 1_000_000.0;
         if dt <= 0.0 {
@@ -131,13 +135,13 @@ impl PanRecognizer {
         self.sampled = true;
     }
 
-    #[doc = include_str!("pan_recognizer.doc/travel_from_origin.md")]
+    /// The straight-line distance from the origin to `at`.
     fn travel_from_origin(&self, at: Point) -> f32 {
         (at.x - self.origin.x).hypot(at.y - self.origin.y)
     }
 }
 
-#[doc = include_str!("pan_recognizer.doc/SMOOTHING.md")]
+/// How much of the previous velocity estimate each new sample keeps.
 const SMOOTHING: f32 = 0.4;
 
 #[cfg(test)]

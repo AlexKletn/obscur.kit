@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Driver module.
 mod motion_driver;
 pub use motion_driver::MotionDriver;
 mod progress_driver;

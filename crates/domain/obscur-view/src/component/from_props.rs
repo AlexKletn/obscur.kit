@@ -1,17 +1,17 @@
-#![doc = include_str!("from_props.doc/_module.md")]
+//! `FromProps`: turning a node's authored properties into a component's typed props.
 
 use obscur_identity::InternedSymbol;
 
 use crate::component::{FromViewValue, PropsError};
 use crate::view::{ViewProperty, ViewValue};
 
-#[doc = include_str!("from_props.doc/FromProps.md")]
+#[doc = include_str!("../../docs/api/component/from_props.doc/FromProps.md")]
 pub trait FromProps: Sized {
-    #[doc = include_str!("from_props.doc/from_props.md")]
+    #[doc = include_str!("../../docs/api/component/from_props.doc/from_props.md")]
     fn from_props(props: &[ViewProperty]) -> Result<Self, PropsError>;
 }
 
-#[doc = include_str!("from_props.doc/prop_value.md")]
+#[doc = include_str!("../../docs/api/component/from_props.doc/prop_value.md")]
 #[must_use]
 pub fn prop_value(props: &[ViewProperty], name: InternedSymbol) -> Option<&ViewValue> {
     props
@@ -20,7 +20,7 @@ pub fn prop_value(props: &[ViewProperty], name: InternedSymbol) -> Option<&ViewV
         .map(ViewProperty::value)
 }
 
-#[doc = include_str!("from_props.doc/decode_required.md")]
+#[doc = include_str!("../../docs/api/component/from_props.doc/decode_required.md")]
 pub fn decode_required<T: FromViewValue>(
     props: &[ViewProperty],
     name: InternedSymbol,
@@ -32,7 +32,7 @@ pub fn decode_required<T: FromViewValue>(
     }
 }
 
-#[doc = include_str!("from_props.doc/decode_optional.md")]
+#[doc = include_str!("../../docs/api/component/from_props.doc/decode_optional.md")]
 pub fn decode_optional<T: FromViewValue>(
     props: &[ViewProperty],
     name: InternedSymbol,
@@ -44,7 +44,7 @@ pub fn decode_optional<T: FromViewValue>(
     }
 }
 
-#[doc = include_str!("from_props.doc/decode_value.md")]
+#[doc = include_str!("../../docs/api/component/from_props.doc/decode_value.md")]
 pub fn decode_value<T: FromViewValue>(
     value: &ViewValue,
     name: InternedSymbol,

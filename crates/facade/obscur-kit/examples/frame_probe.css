@@ -1,0 +1,96 @@
+.root {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    padding: 22px;
+    width: 100%;
+    height: 100%;
+    color: #e9f0fb;
+    background: rgba(18, 26, 43, 0.82);
+}
+.controls, .row {
+    display: flex;
+    flex-direction: row;
+    gap: 12px;
+}
+.button {
+    padding: 10px 14px;
+    color: #ecf3ff;
+    background: #30466a;
+    border-radius: 8px;
+}
+.scene {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.tile {
+    width: 40px;
+    height: 32px;
+    background: #70b5ff;
+    border-radius: 6px;
+}
+.tile.translate { animation: probe-translate 900ms linear infinite alternate; }
+.tile.resize { animation: probe-resize 900ms linear infinite alternate; }
+.tile.fade { animation: probe-fade 900ms linear infinite alternate; }
+@keyframes probe-translate {
+    from { transform: translateX(0px); }
+    to { transform: translateX(9px); }
+}
+@keyframes probe-resize {
+    from { width: 40px; }
+    to { width: 49px; }
+}
+@keyframes probe-fade {
+    from { opacity: 0.25; }
+    to { opacity: 1; }
+}
+
+.transition-stage {
+    position: relative;
+    width: 512px;
+    height: 280px;
+    overflow: hidden;
+    background: #172641;
+}
+.transition-clip, .transition-layer, .transition-shadow {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+}
+.transition-clip {
+    width: 96px;
+    overflow: hidden;
+    animation: probe-clip-width 250ms ease-in-out infinite alternate;
+}
+.transition-layer {
+    width: 512px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+}
+.transition-underlay { background: #243c62; }
+.transition-incoming {
+    background: #324c75;
+    animation: probe-incoming 250ms ease-in-out infinite alternate;
+}
+.transition-shadow {
+    width: 8px;
+    background-image: linear-gradient(90deg, transparent, rgba(0, 0, 0, 0.35));
+    animation: probe-shadow 250ms ease-in-out infinite alternate;
+}
+@keyframes probe-clip-width {
+    from { width: 96px; }
+    to { width: 400px; }
+}
+@keyframes probe-incoming {
+    from { transform: translateX(96px); }
+    to { transform: translateX(400px); }
+}
+@keyframes probe-shadow {
+    from { width: 8px; transform: translateX(88px); }
+    to { width: 22px; transform: translateX(378px); }
+}

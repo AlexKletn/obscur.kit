@@ -242,3 +242,124 @@ fn replay_is_bit_reproducible_under_load() {
          resource completion lands at"
     );
 }
+
+#[test]
+fn replay_drives_the_real_headless_runtime_and_completes_selected_jobs() {
+    use obscur_kit::css::{
+        compiler::StylesheetCompiler, parser::StylesheetParser, source::CssSource,
+    };
+    use obscur_kit::geometry::{Point, Size};
+    use obscur_kit::headless::host::HeadlessHost;
+    use obscur_kit::headless::replay::{EnvironmentChange, ReplayStatus};
+    use obscur_kit::identity::RuntimeId;
+    use std::sync::{Arc, Mutex};
+
+    let source = CssSource::anonymous(CSS);
+    let sheet = StylesheetCompiler::new()
+        .compile(&StylesheetParser::new(&source).parse())
+        .matchable;
+    let scene = tree();
+    let mut recording = EventRecording::new();
+    recording.record(
+        0,
+        RecordedEvent::EnvironmentChange(EnvironmentChange::WindowResized {
+            width: 400,
+            height: 240,
+        }),
+    );
+    recording.record(
+        1,
+        RecordedEvent::SchedulerDecision {
+            reason: SchedulerReason::Frame,
+            accepted: true,
+        },
+    );
+    recording.record_input(
+        2,
+        SyntheticInput::pointer_move(SelectorTarget::coordinate(Point::new(20.0, 24.0))),
+        Sensitivity::Normal,
+    );
+    recording.record(3, RecordedEvent::AsyncCompletion { operation: 1 });
+    recording.record(4, RecordedEvent::ClockTick { nanos: 16_000_000 });
+    recording.record(
+        5,
+        RecordedEvent::SchedulerDecision {
+            reason: SchedulerReason::Frame,
+            accepted: true,
+        },
+    );
+    let replay = ReplaySession::new(recording);
+    let run = || {
+        let mut host = HeadlessHost::new(RuntimeId::from_raw(1));
+        let order = Arc::new(Mutex::new(Vec::new()));
+        for index in 0..2 {
+            let order = order.clone();
+            host.executor()
+                .spawn(move || order.lock().unwrap().push(index));
+        }
+        let result = replay.replay_on_host(&mut host, &scene, std::slice::from_ref(&sheet));
+        assert_eq!(result.status(), ReplayStatus::Completed);
+        assert_eq!(result.inputs_applied(), 1);
+        assert_eq!(result.clock_advanced_nanos(), 16_000_000);
+        assert_eq!(result.completions(), 1);
+        assert_eq!(*order.lock().unwrap(), [1]);
+        assert_eq!(host.executor().pending_operations(), [0]);
+        assert_eq!(host.runtime().viewport(), Size::new(400.0, 240.0));
+        let snapshot = host.snapshot();
+        assert!(!snapshot.display_list().is_empty());
+        snapshot
+    };
+    assert_eq!(run().display_list(), run().display_list());
+}
+
+#[test]
+fn replay_delivers_normalized_key_events_to_the_live_editor() {
+    use obscur_kit::headless::{host::HeadlessHost, replay::ReplayStatus};
+    use obscur_kit::identity::{ComponentId, InternedSymbol, RuntimeId};
+    use obscur_kit::interaction::command::{KeyEvent, LogicalKey, NamedKey, PhysicalKey};
+    use obscur_kit::view::view::{
+        EVENT_INPUT, LOCAL_NAME, View, ViewEventBinding, ViewNode, ViewProperty, ViewValue,
+    };
+
+    let field = View::single(
+        ViewNode::element(ComponentId::from_raw(4))
+            .with_prop(ViewProperty::new(
+                LOCAL_NAME,
+                ViewValue::Text("input".into()),
+            ))
+            .with_event(ViewEventBinding::new(
+                EVENT_INPUT,
+                InternedSymbol::named("edit"),
+            )),
+    );
+    let mut host = HeadlessHost::new(RuntimeId::from_raw(1));
+    let mut recording = EventRecording::new();
+    recording.record(
+        0,
+        RecordedEvent::SchedulerDecision {
+            reason: SchedulerReason::Frame,
+            accepted: true,
+        },
+    );
+    recording.record_input(
+        1,
+        SyntheticInput::key(KeyEvent::press(
+            PhysicalKey::Tab,
+            Some(LogicalKey::Named(NamedKey::Tab)),
+        )),
+        Sensitivity::Normal,
+    );
+    let key = |ch| {
+        SyntheticInput::key(KeyEvent::press(
+            PhysicalKey::KeyA,
+            Some(LogicalKey::character(ch)),
+        ))
+    };
+    recording.record_input(2, key('x'), Sensitivity::Secret);
+    recording.record_input(3, key('é'), Sensitivity::Normal);
+    let result = ReplaySession::new(recording).replay_on_host(&mut host, &field, &[]);
+    assert_eq!(result.status(), ReplayStatus::Completed);
+    assert_eq!(result.inputs_applied(), 2);
+    assert_eq!(result.redactions_skipped(), 1);
+    assert_eq!(host.runtime().editing_text(), Some("é"));
+}

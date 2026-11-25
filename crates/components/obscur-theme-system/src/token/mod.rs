@@ -1,4 +1,6 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Design tokens: the atomic themeable values (spec §2.6).
 
 mod theme_token;
-pub use theme_token::{ThemeToken, TokenValue};
+pub use theme_token::ThemeToken;
+mod token_value;
+pub use token_value::TokenValue;

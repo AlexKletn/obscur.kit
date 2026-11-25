@@ -1,6 +1,19 @@
 #![doc = include_str!("layout_css.doc/_module.md")]
 #![forbid(unsafe_code)]
 
+#[path = "layout_css/computed_style_queries.rs"]
+mod computed_style_queries;
+#[path = "layout_css/container_selection.rs"]
+mod container_selection;
+#[path = "layout_css/container_style_math.rs"]
+mod container_style_math;
+#[path = "layout_css/containment.rs"]
+mod containment;
+#[path = "layout_css/flex_and_sizing.rs"]
+mod flex_and_sizing;
+#[path = "layout_css/media_queries.rs"]
+mod media_queries;
+
 use obscur_kit::css::compiler::StylesheetCompiler;
 use obscur_kit::css::parser::StylesheetParser;
 use obscur_kit::css::source::CssSource;
@@ -216,4 +229,105 @@ fn min_and_max_width_clamp_child_size() {
     let (a, b) = children(&max);
     approx(geom(&max, a).2, 25.0, "max-width lowers a.width 50 -> 25");
     approx(geom(&max, b).0, 25.0, "b.x follows the clamped a.width");
+}
+
+#[test]
+fn portal_layout_and_hit_testing_use_the_host_while_commands_use_logical_ancestry() {
+    use obscur_kit::geometry::Point;
+    use obscur_kit::identity::InternedSymbol;
+    use obscur_kit::interaction::pointer::{
+        PointerDevice, PointerEvent, PointerEventKind, PointerId,
+    };
+    use obscur_kit::primitives::Portal;
+    use obscur_kit::view::view::{EVENT_CLICK, ID, ViewEventBinding};
+    use std::{cell::Cell, rc::Rc};
+
+    let make_view = |target: &str| {
+        let content = tag(el(5), "content");
+        let portal = Portal::new(target).child(content).into_view_node();
+        let origin = tag(el(1), "origin")
+            .with_event(ViewEventBinding::new(
+                EVENT_CLICK,
+                InternedSymbol::named("origin_click"),
+            ))
+            .with_children(ViewFragment::from_nodes(vec![portal]));
+        let host = |component, name: &str| {
+            tag(el(component), name).with_prop(ViewProperty::new(ID, ViewValue::Text(name.into())))
+        };
+        View::from_fragment(ViewFragment::from_nodes(vec![
+            origin,
+            host(2, "first"),
+            host(3, "second"),
+        ]))
+    };
+    let css = ".origin, .first, .second {height: 80px; width: 100px;} .first { transform: translateX(20px); } .content {height: 20px; width: 50px; background: red;}";
+    let mut runtime = drive(css, &make_view("first"));
+    let node_for = |runtime: &UiRuntime, component| {
+        runtime
+            .tree()
+            .iter()
+            .find(|(_, n)| n.kind().component_id() == Some(ComponentId::from_raw(component)))
+            .unwrap()
+            .0
+    };
+    let origin = node_for(&runtime, 1);
+    let host = node_for(&runtime, 2);
+    let content = node_for(&runtime, 5);
+    let portal = runtime
+        .tree()
+        .get(content)
+        .unwrap()
+        .logical_parent()
+        .parent()
+        .unwrap();
+    assert_eq!(runtime.tree().visual_parent_of(portal), Some(host));
+    assert_eq!(
+        runtime
+            .tree()
+            .get(portal)
+            .unwrap()
+            .logical_parent()
+            .parent(),
+        Some(origin)
+    );
+    assert_eq!(geom(&runtime, content).1, geom(&runtime, host).1);
+
+    let activated = Rc::new(Cell::new(false));
+    let seen = Rc::clone(&activated);
+    runtime.on_command(InternedSymbol::named("origin_click"), move || {
+        seen.set(true)
+    });
+    let position = Point::new(60.0, geom(&runtime, content).1 + 5.0);
+    runtime.handle_pointer(
+        PointerEvent::new(
+            PointerId::MOUSE,
+            PointerDevice::Mouse,
+            PointerEventKind::Down,
+            position,
+        )
+        .with_button(obscur_kit::interaction::pointer::PointerButton::Primary)
+        .as_trusted(),
+    );
+    runtime.handle_pointer(
+        PointerEvent::new(
+            PointerId::MOUSE,
+            PointerDevice::Mouse,
+            PointerEventKind::Up,
+            position,
+        )
+        .with_button(obscur_kit::interaction::pointer::PointerButton::Primary)
+        .as_trusted(),
+    );
+    assert!(activated.get());
+
+    let sheet = compile(css);
+    let _ = runtime.render_now(&make_view("second"), &[sheet.clone()]);
+    assert_eq!(node_for(&runtime, 5), content);
+    assert_eq!(
+        geom(&runtime, content).1,
+        geom(&runtime, node_for(&runtime, 3)).1
+    );
+    let _ = runtime.render_now(&make_view("missing"), &[sheet]);
+    assert_eq!(runtime.tree().visual_parent_of(portal), Some(origin));
+    assert_eq!(geom(&runtime, content).1, geom(&runtime, origin).1);
 }

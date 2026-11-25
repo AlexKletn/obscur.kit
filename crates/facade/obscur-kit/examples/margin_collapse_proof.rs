@@ -46,7 +46,6 @@ struct Case {
 }
 
 fn cases() -> Vec<Case> {
-    let gap0 = LayoutStyle::default();
     let gap10 = LayoutStyle {
         gap: 10.0,
         ..LayoutStyle::default()
@@ -55,7 +54,7 @@ fn cases() -> Vec<Case> {
         // (a) collapse to max: 20 vs 30 → 30.
         Case {
             label: "(a) mb20 / mt30 → 30 (max)",
-            container: gap0,
+            container: LayoutStyle::default(),
             children: vec![child(1, 0.0, 20.0), child(2, 30.0, 0.0)],
             sizes: vec![Size::new(CONTAINER_W, 40.0), Size::new(CONTAINER_W, 50.0)],
             b_index: 1,
@@ -64,7 +63,7 @@ fn cases() -> Vec<Case> {
         // (b) mixed sum: 20 + (−8) → 12.
         Case {
             label: "(b) mb20 / mt-8 → 12 (sum)",
-            container: gap0,
+            container: LayoutStyle::default(),
             children: vec![child(1, 0.0, 20.0), child(2, -8.0, 0.0)],
             sizes: vec![Size::new(CONTAINER_W, 40.0), Size::new(CONTAINER_W, 50.0)],
             b_index: 1,
@@ -73,7 +72,7 @@ fn cases() -> Vec<Case> {
         // (c) empty spacer collapses through: one 15px gap.
         Case {
             label: "(c) empty m15 spacer → 15 (one gap)",
-            container: gap0,
+            container: LayoutStyle::default(),
             children: vec![child(1, 0.0, 0.0), child(2, 15.0, 15.0), child(3, 0.0, 0.0)],
             sizes: vec![
                 Size::new(CONTAINER_W, 40.0),

@@ -1,4 +1,6 @@
-#![doc = include_str!("text_painter.doc/_module.md")]
+//! Emitting a text node's glyph runs — and, for the focused editable, its
+//! selection highlight, IME preedit underline and caret — into the node's own
+//! paint unit (spec §5.10, §5.11, §5.12).
 
 use obscur_geometry::{Point, Rect, Size};
 use obscur_identity::NodeId;
@@ -6,7 +8,6 @@ use obscur_scene::color::Color;
 use obscur_scene::command::DisplayListBuilder;
 use obscur_scene::paint::Brush;
 use obscur_scene::text::{GlyphRun, PositionedGlyph};
-use obscur_text::layout::{TextAlignment, TextOverflow};
 use obscur_text::selection::{SelectionGeometry, TextSelection};
 use obscur_text::shaping::ShapedRun;
 use obscur_tree::tree::RetainedTree;
@@ -14,24 +15,27 @@ use obscur_tree::tree::RetainedTree;
 use super::caret_geometry::{caret_line_geometry, caret_line_geometry_affinity};
 use super::editing_role::{EditingRole, editing_role};
 use super::paint_color::{scene_color_from, text_color_of};
-use super::paragraph_shaping::{ParagraphShaping, font_size_of, overflow_for_text};
+use super::paragraph_shaping::{ParagraphShaping, font_size_of};
 use super::{
-    ComputedStyles, EditingView, GeneratedRun, LayoutBoxes, alignment_for, attributes_for,
-    direction_for, display_text, families_for, letter_spacing_for, line_height_for,
-    overflow_wrap_for, root_font_size, tab_size_for, text_transform_for, white_space_for,
-    word_break_for, word_spacing_for,
+    ComputedStyles, EditingView, GeneratedRun, LayoutBoxes, display_text, text_transform_for,
+    white_space_for,
 };
 
-#[doc = include_str!("text_painter.doc/CARET_WIDTH.md")]
-pub(super) const CARET_WIDTH: f32 = 1.0;
+/// The width, in logical pixels, of the caret rectangle painted at the collapsed
+/// selection of the focused editable (a thin vertical bar over the text baseline).
+pub(crate) const CARET_WIDTH: f32 = 1.0;
 
-#[doc = include_str!("text_painter.doc/PREEDIT_UNDERLINE_THICKNESS.md")]
+/// The thickness, in logical pixels, of the underline painted beneath an active
+/// IME preedit (spec §5.12) — the visual mark distinguishing the uncommitted
+/// composing text from committed glyphs.
 pub(super) const PREEDIT_UNDERLINE_THICKNESS: f32 = 1.0;
 
-#[doc = include_str!("text_painter.doc/SELECTION_COLOR.md")]
+/// The default selection-highlight color: a semi-transparent blue painted behind
+/// the selected span so the glyphs show through it (spec §5.11). A host has no
+/// hook to override this yet; it is a documented fixed default.
 pub(super) const SELECTION_COLOR: Color = Color::rgba(0.20, 0.45, 0.90, 0.35);
 
-#[doc = include_str!("text_painter.doc/positioned_run.md")]
+#[doc = include_str!("../../docs/api/orchestration/text_painter.doc/positioned_run.md")]
 fn positioned_run(
     segment: &ShapedRun,
     baseline: f32,
@@ -66,12 +70,18 @@ fn positioned_run(
         }
         pen_x += glyph.x_advance();
     }
-    GlyphRun::new(glyphs, font_size, text)
+    let has_suppressed_glyphs = glyphs.len() != run_glyphs.len();
+    let run = GlyphRun::new(glyphs, font_size, text)
         .with_font(segment.font().get())
-        .with_synthesis(segment.synth_oblique(), segment.synth_bold())
+        .with_synthesis(segment.synth_oblique(), segment.synth_bold());
+    if has_suppressed_glyphs {
+        run.with_advance(pen_x)
+    } else {
+        run
+    }
 }
 
-#[doc = include_str!("text_painter.doc/paint_text_node.md")]
+#[doc = include_str!("../../docs/api/orchestration/text_painter.doc/paint_text_node.md")]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn paint_text_node(
     shaping: &ParagraphShaping,
@@ -86,6 +96,10 @@ pub(super) fn paint_text_node(
     let Some(layout_box) = boxes.get(&node) else {
         return;
     };
+    // This node's computed style, looked up ONCE for the whole paint. Every
+    // `*_for` reader below took the map and the id and probed it again — a dozen
+    // probes of one entry — and they all already accept the resolved style.
+    let style = computed.get(&node);
     // Is this text node the focused editable's text? Then paint the
     // live SESSION text (not the possibly-lagging retained content)
     // and, below, the caret + selection highlight. `editing` is
@@ -114,11 +128,11 @@ pub(super) fn paint_text_node(
     // (`nowrap`, per the UA sheet) stays one line while typing — it
     // does NOT reflow like a `<textarea>` — while a `pre-wrap` field
     // keeps its literal newlines and wraps at the box width.
-    let white_space = white_space_for(computed.get(&node));
+    let white_space = white_space_for(style);
     let displayed = display_text(
         retained_content,
         active,
-        text_transform_for(computed.get(&node)),
+        text_transform_for(style),
         white_space,
     );
     let content: &str = displayed.as_ref();
@@ -139,91 +153,20 @@ pub(super) fn paint_text_node(
     // hint) it uses the editing FIELD's normal ink instead of the
     // overlay's muted placeholder color — so typed text is not muted.
     let text_color = match (active, role) {
-        (Some(view), EditingRole::Placeholder) => text_color_of(computed, view.node),
-        _ => text_color_of(computed, node),
+        (Some(view), EditingRole::Placeholder) => text_color_of(computed.get(&view.node)),
+        _ => text_color_of(style),
     };
     let brush = Brush::solid(text_color);
     // Same per-node font size the layout phase measured with, so
     // the drawn advances and baseline match the sized box.
     let font_size = font_size_of(computed, node);
-    // Root `font-size` resolves any `rem` in the text metrics (CSS
-    // Values 4 §5.1.1); `em` / `%` resolve against this node's
-    // `font_size`. Same bases the layout phase measured with.
-    let root_font = root_font_size(computed, tree.root());
-    // The node's authored `font-family` drives the fallback chain,
-    // and its `font-weight`/`font-style`/`direction` drive the
-    // shaping attributes and base direction — the SAME inputs the
-    // layout phase measured this box with.
-    let fallback = families_for(computed.get(&node));
-    let attributes = attributes_for(computed.get(&node));
-    let direction = direction_for(computed.get(&node));
-    let alignment = alignment_for(computed.get(&node));
-    let overflow = overflow_for_text(tree, computed, node);
     let origin = layout_box.origin();
-    // The editing field's horizontal scroll offset (single-line
-    // text-control scroll model, CSS Overflow 3 §3.1): the run,
-    // caret, selection highlight and preedit are all translated
-    // left by `scroll_left` so the caret stays inside the field's
-    // content box, and the field's `overflow: hidden` clip (an
-    // ancestor bracket) hides the scrolled-out head/tail. It is
-    // `0.0` on every non-editing text node and on a fitting or
-    // wrapping field, so the paint is then byte-identical to the
-    // unscrolled path. The runtime derives it with the SAME advance
-    // model (`caret_advance_x`) used below, so paint and hit-test
-    // agree.
     let scroll_left = active.map_or(0.0, |view| view.scroll_left);
-    // A horizontally-scrolled single-line field must NOT
-    // glyph-truncate: `text-overflow: clip`/`ellipsis` keeps only the
-    // box-width *prefix* (CSS UI 3 §7), but scrolling translates the
-    // run left to track the caret, so a truncated prefix would be
-    // shifted off-screen and the box would render empty. When scrolled
-    // we shape the FULL run (`Visible`) and let the field's
-    // `overflow: hidden` clip-rect show only the scrolled window; the
-    // unscrolled path (caret at head, `scroll_left == 0`) keeps the
-    // authored truncation so a long value still clips at the box edge.
-    let overflow = if scroll_left > 0.0 {
-        TextOverflow::Visible
+    let box_width = layout_box.size().width;
+    let layout = if active.is_some() {
+        shaping.shape_editable_lines(tree, computed, boxes, node, content, box_width)
     } else {
-        overflow
-    };
-    // The wrapped multi-line paragraph the glyphs are drawn from
-    // (spec §5.10). The caret + selection resolve their (line, x, y)
-    // against THIS same layout — a byte's line by its wrapped range,
-    // its pen x by the source-order advance model relative to that
-    // line's start — so a caret lands on the line its glyphs paint
-    // on. A single-line (`nowrap`) field wraps to one line, so the
-    // caret resolves to line 0 at the identical pen x the flat
-    // `caret_offset_x` returned (byte-identical single-line paint).
-    let layout = shaping.shape_lines(
-        content,
-        &fallback,
-        &attributes,
-        direction,
-        alignment,
-        overflow,
-        white_space,
-        overflow_wrap_for(computed.get(&node)),
-        word_break_for(computed.get(&node)),
-        font_size,
-        layout_box.size().width,
-        line_height_for(computed.get(&node), font_size, root_font),
-        letter_spacing_for(computed.get(&node), font_size, root_font),
-        word_spacing_for(computed.get(&node), font_size, root_font),
-        tab_size_for(computed.get(&node), font_size, root_font),
-    );
-    // Wrapping answered to the box, alignment answers to the
-    // containing block — see `align_width_for`. The caret and the
-    // selection below resolve against THIS layout, so re-aligning
-    // here keeps all three on one set of line offsets.
-    let layout = if matches!(
-        alignment,
-        TextAlignment::Center | TextAlignment::Right | TextAlignment::End | TextAlignment::Justify
-    ) {
-        let width =
-            ParagraphShaping::align_width_for(tree, computed, boxes, node, layout_box.size().width);
-        layout.aligned_to(width)
-    } else {
-        layout
+        shaping.shape_text_lines(tree, computed, boxes, node, content, box_width)
     };
     // Selection highlight, painted BEHIND the glyphs (emitted before
     // the runs so the text shows over it): the documented
@@ -351,7 +294,7 @@ pub(super) fn paint_text_node(
     }
 }
 
-#[doc = include_str!("text_painter.doc/emit_generated_run.md")]
+#[doc = include_str!("../../docs/api/orchestration/text_painter.doc/emit_generated_run.md")]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn emit_generated_run(
     shaping: &ParagraphShaping,
@@ -366,7 +309,7 @@ pub(super) fn emit_generated_run(
 ) {
     let color = run
         .color
-        .map_or_else(|| text_color_of(computed, node), scene_color_from);
+        .map_or_else(|| text_color_of(computed.get(&node)), scene_color_from);
     let brush = Brush::solid(color);
     let font_size = font_size_of(computed, node);
     let layout = shaping.shape_text_lines(tree, computed, boxes, node, &run.text, box_width);

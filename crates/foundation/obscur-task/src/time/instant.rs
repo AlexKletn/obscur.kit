@@ -1,17 +1,17 @@
-#![doc = include_str!("instant.doc/_module.md")]
+//! A point on an abstract monotonic timeline.
 
-#[doc = include_str!("instant.doc/Instant.md")]
+#[doc = include_str!("../../docs/api/time/instant.doc/Instant.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub struct Instant(u64);
 
 impl Instant {
-    #[doc = include_str!("instant.doc/from_nanos.md")]
+    /// Creates an instant from nanoseconds since the clock origin.
     #[must_use]
     pub const fn from_nanos(nanos: u64) -> Self {
         Self(nanos)
     }
 
-    #[doc = include_str!("instant.doc/as_nanos.md")]
+    /// Returns nanoseconds since the clock origin.
     #[must_use]
     pub const fn as_nanos(self) -> u64 {
         self.0

@@ -1,4 +1,4 @@
-#![doc = include_str!("inline_style_compiler.doc/_module.md")]
+#![doc = include_str!("../../docs/api/compiler/inline_style_compiler.doc/_module.md")]
 
 use obscur_style::matching::InlineStyle;
 
@@ -9,18 +9,18 @@ use crate::parser::StylesheetParser;
 
 use super::StylesheetCompiler;
 
-#[doc = include_str!("inline_style_compiler.doc/CompiledInlineStyle.md")]
+/// A compiled `style` attribute and whatever was wrong with it.
 #[derive(Debug, Clone, Default)]
 pub struct CompiledInlineStyle {
-    #[doc = include_str!("inline_style_compiler.doc/style.md")]
+    /// The declarations that held.
     pub style: InlineStyle,
-    #[doc = include_str!("inline_style_compiler.doc/unsupported.md")]
+    /// Recognised-but-unsupported constructs, to report as diagnostics.
     pub unsupported: Vec<UnsupportedCssFeature>,
-    #[doc = include_str!("inline_style_compiler.doc/errors.md")]
+    /// Syntax errors. The block keeps whatever parsed around them (§1.6).
     pub errors: Vec<CssParseError>,
 }
 
-#[doc = include_str!("inline_style_compiler.doc/compile_inline_style.md")]
+#[doc = include_str!("../../docs/api/compiler/inline_style_compiler.doc/compile_inline_style.md")]
 #[must_use]
 pub fn compile_inline_style(text: &str) -> CompiledInlineStyle {
     // Wrapped in a rule and put through the ordinary compiler rather than given

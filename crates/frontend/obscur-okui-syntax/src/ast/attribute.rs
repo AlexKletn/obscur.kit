@@ -1,14 +1,15 @@
-#![doc = include_str!("attribute.doc/_module.md")]
+//! `Attribute`: the typed AST view of an attribute node (spec §2.3, §2.9).
 
 use crate::ast::Expression;
 use crate::syntax::{SyntaxKind, SyntaxNode};
 
-#[doc = include_str!("attribute.doc/Attribute.md")]
+#[doc = include_str!("../../docs/api/ast/attribute.doc/Attribute.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Attribute(SyntaxNode);
 
 impl Attribute {
-    #[doc = include_str!("attribute.doc/cast.md")]
+    /// Casts a syntax node to an `Attribute`, returning `Some` iff its kind is
+    /// [`Attribute`](SyntaxKind::Attribute).
     #[must_use]
     pub fn cast(node: SyntaxNode) -> Option<Self> {
         if node.kind() == SyntaxKind::Attribute {
@@ -18,13 +19,13 @@ impl Attribute {
         }
     }
 
-    #[doc = include_str!("attribute.doc/syntax.md")]
+    /// Returns the wrapped syntax node.
     #[must_use]
     pub const fn syntax(&self) -> &SyntaxNode {
         &self.0
     }
 
-    #[doc = include_str!("attribute.doc/name.md")]
+    /// Returns the attribute name — the first [`Ident`](SyntaxKind::Ident) token.
     #[must_use]
     pub fn name(&self) -> Option<String> {
         self.0
@@ -33,13 +34,17 @@ impl Attribute {
             .map(|t| t.text().to_owned())
     }
 
-    #[doc = include_str!("attribute.doc/is_event.md")]
+    /// Returns `true` if this is an event-style attribute — it carries a
+    /// [`Colon`](SyntaxKind::Colon) token (the `prefix:name` form, e.g.
+    /// `on:click`).
     #[must_use]
     pub fn is_event(&self) -> bool {
         self.0.tokens().any(|t| t.kind() == SyntaxKind::Colon)
     }
 
-    #[doc = include_str!("attribute.doc/namespace.md")]
+    /// Returns the namespace prefix — the [`Ident`](SyntaxKind::Ident) immediately
+    /// before the [`Colon`](SyntaxKind::Colon) — for an event-style attribute
+    /// (`on` in `on:click`), or `None` when the attribute has no colon.
     #[must_use]
     pub fn namespace(&self) -> Option<String> {
         let mut prev_ident: Option<&str> = None;
@@ -53,7 +58,9 @@ impl Attribute {
         None
     }
 
-    #[doc = include_str!("attribute.doc/value_expression.md")]
+    /// Returns the value expression for a dynamic `attr={expr}` attribute — the
+    /// [`Expression`](SyntaxKind::Expression) node inside the attribute's
+    /// [`AttributeValue`](SyntaxKind::AttributeValue) node.
     #[must_use]
     pub fn value_expression(&self) -> Option<Expression> {
         self.attribute_value()?
@@ -63,7 +70,10 @@ impl Attribute {
             .and_then(Expression::cast)
     }
 
-    #[doc = include_str!("attribute.doc/string_value.md")]
+    /// Returns the literal value of a `attr="literal"` attribute — the text of
+    /// the [`String`](SyntaxKind::String) token inside the
+    /// [`AttributeValue`](SyntaxKind::AttributeValue) node, with its surrounding
+    /// double quotes trimmed.
     #[must_use]
     pub fn string_value(&self) -> Option<String> {
         let token = self
@@ -76,13 +86,15 @@ impl Attribute {
         Some(text.to_owned())
     }
 
-    #[doc = include_str!("attribute.doc/is_dynamic.md")]
+    /// Returns `true` if the attribute's value is a dynamic expression
+    /// (`attr={expr}`) rather than a literal.
     #[must_use]
     pub fn is_dynamic(&self) -> bool {
         self.value_expression().is_some()
     }
 
-    #[doc = include_str!("attribute.doc/attribute_value.md")]
+    /// Returns the attribute's [`AttributeValue`](SyntaxKind::AttributeValue)
+    /// child node, if the attribute has a value.
     fn attribute_value(&self) -> Option<&SyntaxNode> {
         self.0
             .child_nodes()

@@ -1,43 +1,25 @@
-#![doc = include_str!("outlet_rule.doc/_module.md")]
+#![doc = include_str!("../../docs/api/validation/outlet_rule.doc/_module.md")]
 
 use obscur_ui_ir::name_binding::OUTLET_TAG;
 
-#[doc = include_str!("outlet_rule.doc/OutletName.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OutletName<'a> {
-    #[doc = include_str!("outlet_rule.doc/Literal.md")]
-    Literal(&'a str),
-    #[doc = include_str!("outlet_rule.doc/Dynamic.md")]
-    Dynamic,
-    #[doc = include_str!("outlet_rule.doc/Missing.md")]
-    Missing,
-}
+pub use super::{OutletName, OutletUse};
 
-#[doc = include_str!("outlet_rule.doc/OutletUse.md")]
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct OutletUse<'a> {
-    #[doc = include_str!("outlet_rule.doc/extra_attributes.md")]
-    pub extra_attributes: Vec<&'a str>,
-    #[doc = include_str!("outlet_rule.doc/has_children.md")]
-    pub has_children: bool,
-}
-
-#[doc = include_str!("outlet_rule.doc/is_outlet_tag.md")]
+#[doc = include_str!("../../docs/api/validation/outlet_rule.doc/is_outlet_tag.md")]
 #[must_use]
 pub fn is_outlet_tag(tag: &str) -> bool {
     tag == OUTLET_TAG
 }
 
-#[doc = include_str!("outlet_rule.doc/MISSING_NAME_MESSAGE.md")]
+/// The diagnostic for a `<slot/>` with no `name` (spec §2.12).
 pub const MISSING_NAME_MESSAGE: &str = "`<slot>` requires a `name`: §2.12 declares *named* slots, and an authored outlet is matched to its component's declaration by name. The runtime does have a default slot — the outlet naming none, which takes the content that names none — but nothing spells it in `.okui`: a contract declares it under a reserved name no author can write, and until that is decided an unnamed outlet here would be a declaration nothing validates. Write `<slot name=\"…\"/>`";
 
-#[doc = include_str!("outlet_rule.doc/DYNAMIC_NAME_MESSAGE.md")]
+/// The diagnostic for a `<slot name={expr}/>` (spec §2.12).
 pub const DYNAMIC_NAME_MESSAGE: &str = "`<slot name={…}>` is refused: a slot is matched against its component's declaration at compile time, so an outlet's name must be a literal — the same rule that refuses `slot={…}` on the child side of the same join. Write `<slot name=\"…\"/>`";
 
-#[doc = include_str!("outlet_rule.doc/OUTLET_CHILDREN_MESSAGE.md")]
+/// The diagnostic for children under a `<slot>` (spec §2.12).
 pub const OUTLET_CHILDREN_MESSAGE: &str = "`<slot>` takes no children *here*: projection does render an unfilled outlet's children as fallback content, but §2.12 describes no such construct and no authored `.okui` component declares one — the one component that uses it, the built-in `button`, builds its outlet in Rust. Until the spelling is decided, children on an authored outlet would be content nothing validates";
 
-#[doc = include_str!("outlet_rule.doc/extra_attribute_message.md")]
+/// The diagnostic for any attribute other than `name` on a `<slot>` (spec §2.12).
 #[must_use]
 pub fn extra_attribute_message(attribute: &str) -> String {
     format!(
@@ -45,7 +27,7 @@ pub fn extra_attribute_message(attribute: &str) -> String {
     )
 }
 
-#[doc = include_str!("outlet_rule.doc/check_outlet.md")]
+#[doc = include_str!("../../docs/api/validation/outlet_rule.doc/check_outlet.md")]
 #[must_use]
 pub fn check_outlet(tag: &str, name: OutletName<'_>, outlet: &OutletUse<'_>) -> Vec<String> {
     if !is_outlet_tag(tag) {

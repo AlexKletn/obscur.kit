@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! High-level assertions over what a frame produced.
 mod handler_calls;
 mod painted_images;
 

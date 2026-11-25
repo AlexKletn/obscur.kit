@@ -1,30 +1,47 @@
-#![doc = include_str!("background_repeat.doc/_module.md")]
+//! The computed value of CSS `background-repeat` (spec §5.2, CSS Backgrounds §3).
 
-#[doc = include_str!("background_repeat.doc/BackgroundRepeat.md")]
+use super::BackgroundRepeatAxis;
+
+#[doc = include_str!("../../docs/api/property/background_repeat.doc/BackgroundRepeat.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BackgroundRepeat {
-    #[doc = include_str!("background_repeat.doc/Repeat.md")]
+    /// Tile on both axes (the CSS initial). `space` / `round` fold here.
     #[default]
     Repeat,
-    #[doc = include_str!("background_repeat.doc/NoRepeat.md")]
+    /// A single tile, no tiling on either axis.
     NoRepeat,
-    #[doc = include_str!("background_repeat.doc/RepeatX.md")]
+    /// Tile horizontally only (a single row of tiles).
     RepeatX,
-    #[doc = include_str!("background_repeat.doc/RepeatY.md")]
+    /// Tile vertically only (a single column of tiles).
     RepeatY,
+    /// Independently specified modes for the horizontal and vertical axes.
+    Axes(BackgroundRepeatAxis, BackgroundRepeatAxis),
 }
 
 impl BackgroundRepeat {
-    #[doc = include_str!("background_repeat.doc/repeat_x.md")]
+    /// Returns the horizontal and vertical tiling modes.
     #[must_use]
-    pub const fn repeat_x(self) -> bool {
-        matches!(self, Self::Repeat | Self::RepeatX)
+    pub const fn axes(self) -> (BackgroundRepeatAxis, BackgroundRepeatAxis) {
+        use BackgroundRepeatAxis::{NoRepeat, Repeat};
+        match self {
+            Self::Repeat => (Repeat, Repeat),
+            Self::NoRepeat => (NoRepeat, NoRepeat),
+            Self::RepeatX => (Repeat, NoRepeat),
+            Self::RepeatY => (NoRepeat, Repeat),
+            Self::Axes(x, y) => (x, y),
+        }
     }
 
-    #[doc = include_str!("background_repeat.doc/repeat_y.md")]
+    /// Whether the tile repeats along the horizontal (x) axis.
+    #[must_use]
+    pub const fn repeat_x(self) -> bool {
+        !matches!(self.axes().0, BackgroundRepeatAxis::NoRepeat)
+    }
+
+    /// Whether the tile repeats along the vertical (y) axis.
     #[must_use]
     pub const fn repeat_y(self) -> bool {
-        matches!(self, Self::Repeat | Self::RepeatY)
+        !matches!(self.axes().1, BackgroundRepeatAxis::NoRepeat)
     }
 }
 

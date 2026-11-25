@@ -12,7 +12,8 @@ use obscur_kit::interaction::pointer::{PointerDevice, PointerEvent, PointerEvent
 use obscur_kit::okui_compiler::bridge::UiIrViewBridge;
 use obscur_kit::runtime::UiRuntime;
 use obscur_kit::runtime::frame::FrameReason;
-use obscur_kit::screen::{OkuiScreen, ScreenData};
+use obscur_kit::screen::{OkuiScreen, ScreenData, ScreenRow};
+use obscur_kit::view::view::{TEST_ID, ViewValue};
 
 #[doc = include_str!("okui_screen_state.doc/INCREMENT.md")]
 const INCREMENT: InternedSymbol = InternedSymbol::named("increment");
@@ -173,6 +174,217 @@ fn an_unbound_binding_shows_its_path() {
     let (mut runtime, _data, _control, _css) = host(screen);
     frame(&mut runtime);
     assert_eq!(rendered_text(&runtime, "v"), "cuont");
+}
+
+#[test]
+fn runtime_virtual_rows_follow_data_keys_and_scroll() {
+    let data = ScreenData::new();
+    let mut rows: Vec<ScreenRow> = (0..10_000)
+        .map(|index| {
+            [
+                ("id".into(), format!("row-{index}").into()),
+                ("label".into(), format!("Item {index}").into()),
+            ]
+            .into_iter()
+            .collect()
+        })
+        .collect();
+    data.set_rows("rows", rows.clone());
+    data.set("pending", true);
+    let screen = OkuiScreen::compile_with(
+        r#"<div class="scroller" test-id="list"><VirtualFor each={rows} as={row} key={row.id} loading={pending}>
+            <div class="row" test-id={row.id}>{row.label}</div>
+            <Loading><span test-id="pending">Fetching rows</span></Loading>
+            <Empty><span test-id="empty">Nothing here</span></Empty>
+            <Separator extent={4}><span test-id="divider"/></Separator>
+        </VirtualFor></div>"#,
+        data,
+    )
+    .expect("row names resolve in their loop scope");
+    let (mut runtime, data, control, mut css) = host(screen);
+    control.set_stylesheet(
+        ".scroller { width: 200px; height: 120px; overflow: scroll }
+         .row { height: 24px }",
+    );
+    control.apply(&mut runtime, &mut css);
+    frame(&mut runtime);
+    assert_eq!(rendered_text(&runtime, "pending"), "Fetching rows");
+    assert!(
+        SelectorResolver::new()
+            .resolve(&runtime, &SelectorTarget::test_id("row-0"))
+            .is_none()
+    );
+    data.set("pending", false);
+    frame(&mut runtime);
+    let first = node(&runtime, "row-0");
+    assert_eq!(rendered_text(&runtime, "row-0"), "Item 0");
+    assert!(runtime.tree().iter().count() < 100);
+
+    rows.swap(0, 1);
+    rows[1].insert("label".into(), "Updated".into());
+    data.set_rows("rows", rows);
+    frame(&mut runtime);
+    assert_eq!(node(&runtime, "row-0"), first);
+    assert_eq!(rendered_text(&runtime, "row-0"), "Updated");
+
+    let list = node(&runtime, "list");
+    runtime.scroll_by(list, 2_800.0);
+    frame(&mut runtime);
+    assert_eq!(rendered_text(&runtime, "row-100"), "Item 100");
+    let mounted_dividers = runtime
+        .tree()
+        .iter()
+        .filter(|(_, node)| {
+            node.props().iter().any(|prop| {
+                prop.name() == TEST_ID
+                    && matches!(prop.value(), ViewValue::Text(id) if id.as_ref() == "divider")
+            })
+        })
+        .count();
+    assert!(
+        mounted_dividers > 1,
+        "visible rows mount repeated separators"
+    );
+
+    data.set_rows("rows", Vec::<ScreenRow>::new());
+    frame(&mut runtime);
+    assert_eq!(rendered_text(&runtime, "empty"), "Nothing here");
+}
+
+#[test]
+fn runtime_conditionals_select_one_branch_and_react_to_changes() {
+    let data = ScreenData::new();
+    data.set("first", true);
+    data.set("second", true);
+    let screen = OkuiScreen::compile_with(
+        r#"<div>
+            <If cond={first}><span test-id="branch">First</span></If>
+            <ElseIf cond={second}><span test-id="branch">Second</span></ElseIf>
+            <Else><span test-id="branch">Fallback</span></Else>
+            <If cond={false}><span test-id="never">Never</span></If>
+            <If cond={true}><span test-id="literal">Literal</span></If>
+        </div>"#,
+        data,
+    )
+    .expect("conditional screen compiles");
+    let (mut runtime, data, _, _) = host(screen);
+    for (first, second, expected) in [
+        (true, true, "First"),
+        (false, true, "Second"),
+        (false, false, "Fallback"),
+    ] {
+        data.set("first", first);
+        data.set("second", second);
+        frame(&mut runtime);
+        assert_eq!(rendered_text(&runtime, "branch"), expected);
+        assert_eq!(rendered_text(&runtime, "literal"), "Literal");
+        assert!(
+            SelectorResolver::new()
+                .resolve(&runtime, &SelectorTarget::test_id("never"))
+                .is_none()
+        );
+        assert_eq!(
+            runtime
+                .tree()
+                .iter()
+                .filter_map(|(_, node)| node.kind().text())
+                .count(),
+            2
+        );
+    }
+}
+
+#[test]
+fn runtime_boolean_attribute_is_inactive_when_its_binding_is_removed() {
+    let data = ScreenData::new();
+    data.set("blocked", false);
+    let screen = OkuiScreen::compile_with(
+        r#"<button test-id="button" disabled={blocked}>Apply</button>"#,
+        data,
+    )
+    .expect("conditional attribute compiles");
+    let (mut runtime, data, _, _) = host(screen);
+    let disabled = |runtime: &UiRuntime| {
+        runtime
+            .tree()
+            .get(node(runtime, "button"))
+            .unwrap()
+            .attributes()
+            .is_disabled()
+    };
+    frame(&mut runtime);
+    assert!(!disabled(&runtime));
+    data.set("blocked", true);
+    frame(&mut runtime);
+    assert!(disabled(&runtime));
+    assert!(data.remove("blocked"));
+    frame(&mut runtime);
+    assert!(!disabled(&runtime));
+}
+
+#[test]
+fn changing_a_runtime_node_key_replaces_its_retained_identity() {
+    let data = ScreenData::new();
+    data.set("session", "initial");
+    let screen = OkuiScreen::compile_with(
+        r#"<div><span test-id="keyed" key={session}>Session</span></div>"#,
+        data,
+    )
+    .expect("key binding compiles");
+    let (mut runtime, data, _, _) = host(screen);
+    frame(&mut runtime);
+    let initial = node(&runtime, "keyed");
+    frame(&mut runtime);
+    assert_eq!(node(&runtime, "keyed"), initial);
+
+    data.set("session", "replacement");
+    frame(&mut runtime);
+    assert_ne!(node(&runtime, "keyed"), initial);
+    assert!(runtime.tree().get(initial).is_none());
+}
+
+#[test]
+fn runtime_for_uses_keys_and_collection_slots() {
+    let row = |id: &str| ScreenRow::from([("id".into(), id.into())]);
+    let data = ScreenData::new();
+    data.set("pending", true);
+    data.set_rows("rows", vec![row("a"), row("b")]);
+    let screen = OkuiScreen::compile_with(
+        r#"<div test-id="list"><For each={rows} as={record} key={record.id} loading={pending}>
+            <span test-id={record.id}>{record.id}</span>
+            <Separator><span test-id="separator">{index}</span></Separator>
+            <Loading><span test-id="loading">Loading</span></Loading>
+            <Empty><span test-id="empty">Empty</span></Empty>
+        </For></div>"#,
+        data,
+    )
+    .expect("the screen compiles");
+    let (mut runtime, data, _, _) = host(screen);
+    frame(&mut runtime);
+    assert_eq!(rendered_text(&runtime, "loading"), "Loading");
+
+    data.set("pending", false);
+    frame(&mut runtime);
+    let a = node(&runtime, "a");
+    let b = node(&runtime, "b");
+    let separator = node(&runtime, "separator");
+    let list = node(&runtime, "list");
+    assert_eq!(
+        runtime.tree().get(list).unwrap().child_nodes(),
+        &[a, separator, b]
+    );
+    assert_eq!(rendered_text(&runtime, "separator"), "1");
+
+    data.set_rows("rows", vec![row("b"), row("a")]);
+    frame(&mut runtime);
+    assert_eq!(node(&runtime, "a"), a);
+    assert_eq!(node(&runtime, "b"), b);
+    assert_eq!(runtime.tree().get(list).unwrap().child_nodes()[0], b);
+
+    data.set_rows("rows", Vec::<ScreenRow>::new());
+    frame(&mut runtime);
+    assert_eq!(rendered_text(&runtime, "empty"), "Empty");
+    assert_eq!(runtime.tree().get(list).unwrap().child_nodes().len(), 1);
 }
 
 #[doc = include_str!("okui_screen_state.doc/the_per_frame_lowering_is_far_cheaper_than_a_parse.md")]

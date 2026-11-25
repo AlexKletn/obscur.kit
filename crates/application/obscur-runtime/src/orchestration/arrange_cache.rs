@@ -1,114 +1,102 @@
-#![doc = include_str!("arrange_cache.doc/_module.md")]
+//! The §4.2 layout cache: [`ArrangeCache`], and the [`ArrangeKey`] it retains a
+//! subtree under.
 
 use std::collections::HashSet;
 
-use obscur_geometry::{BoxConstraints, Point, Rect};
 use obscur_identity::{FastMap, FastSet, NodeId};
+use obscur_layout::invalidation::LayoutInvalidation;
 use obscur_tree::tree::RetainedTree;
 
+use super::arrange_key::ArrangeKey;
 use super::layout_coordinator::LayoutBoxes;
+use super::layout_eviction::{LayoutEviction, invalidated_layout};
+use super::layout_topology::LayoutTopology;
 
-#[doc = include_str!("arrange_cache.doc/ArrangeKey.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) struct ArrangeKey {
-    #[doc = include_str!("arrange_cache.doc/origin.md")]
-    origin: (u32, u32),
-    #[doc = include_str!("arrange_cache.doc/constraints.md")]
-    constraints: (u32, u32, u32, u32),
-    #[doc = include_str!("arrange_cache.doc/containing_block.md")]
-    containing_block: (u32, u32, u32, u32),
-    #[doc = include_str!("arrange_cache.doc/viewport.md")]
-    viewport: (u32, u32, u32, u32),
-    #[doc = include_str!("arrange_cache.doc/scroll.md")]
-    scroll: (u32, u32),
-}
-
-impl ArrangeKey {
-    #[doc = include_str!("arrange_cache.doc/new.md")]
-    pub(super) fn new(
-        origin: Point,
-        constraints: BoxConstraints,
-        containing_block: Rect,
-        viewport: Rect,
-        scroll: (f32, f32),
-    ) -> Self {
-        let rect = |r: Rect| {
-            (
-                r.origin.x.to_bits(),
-                r.origin.y.to_bits(),
-                r.size.width.to_bits(),
-                r.size.height.to_bits(),
-            )
-        };
-        Self {
-            origin: (origin.x.to_bits(), origin.y.to_bits()),
-            constraints: (
-                constraints.min.width.to_bits(),
-                constraints.min.height.to_bits(),
-                constraints.max.width.to_bits(),
-                constraints.max.height.to_bits(),
-            ),
-            containing_block: rect(containing_block),
-            viewport: rect(viewport),
-            scroll: (scroll.0.to_bits(), scroll.1.to_bits()),
-        }
-    }
-}
-
-#[doc = include_str!("arrange_cache.doc/ArrangeCache.md")]
+#[doc = include_str!("../../docs/api/orchestration/arrange_cache.doc/ArrangeCache.md")]
 #[derive(Debug, Default)]
 pub struct ArrangeCache {
-    #[doc = include_str!("arrange_cache.doc/keys.md")]
+    topology: std::cell::RefCell<Option<LayoutTopology>>,
+    /// The key each node was last arranged under.
     keys: std::cell::RefCell<FastMap<NodeId, ArrangeKey>>,
-    #[doc = include_str!("arrange_cache.doc/retained.md")]
+    /// Every absolute box the last completed pass produced.
     retained: std::cell::RefCell<LayoutBoxes>,
-    #[doc = include_str!("arrange_cache.doc/arranged.md")]
+    /// The nodes whose box the current pass actually computed. Reset per pass.
     arranged: std::cell::RefCell<Vec<NodeId>>,
 }
 
 impl ArrangeCache {
-    #[doc = include_str!("arrange_cache.doc/new_2.md")]
+    /// Creates an empty cache.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    #[doc = include_str!("arrange_cache.doc/begin_pass.md")]
+    /// Starts a pass: forgets what the previous pass arranged, keeping the
+    /// retained keys and boxes.
     pub(super) fn begin_pass(&self) {
         self.arranged.borrow_mut().clear();
     }
 
-    #[doc = include_str!("arrange_cache.doc/end_pass.md")]
+    /// Ends a pass: `boxes` becomes what a later pass may serve subtrees from.
     pub(super) fn end_pass(&self, boxes: &LayoutBoxes) {
         self.retained.borrow_mut().clone_from(boxes);
     }
 
-    #[doc = include_str!("arrange_cache.doc/clear.md")]
+    pub(crate) fn forget_topology(&self) {
+        self.topology.borrow_mut().take();
+    }
+
+    pub(crate) fn retain_topology(&self, tree: &RetainedTree) {
+        static REBUILD: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        if !*REBUILD.get_or_init(|| {
+            std::env::var_os("OBSCUR_FULL_LAYOUT_TOPOLOGY").is_some_and(|value| value == "1")
+        }) {
+            let mut topology = self.topology.borrow_mut();
+            if topology.is_none() {
+                *topology = tree.root().map(|root| LayoutTopology::new(tree, root));
+            }
+        }
+    }
+
+    pub(super) fn invalidated_layout(
+        &self,
+        tree: &RetainedTree,
+        dirty: &LayoutInvalidation,
+    ) -> Option<LayoutEviction> {
+        let topology = self.topology.borrow();
+        match topology.as_ref() {
+            Some(topology) => topology.evictions(dirty),
+            None => invalidated_layout(tree, dirty),
+        }
+    }
+
+    /// Forgets everything retained.
     pub fn clear(&self) {
+        self.forget_topology();
         self.keys.borrow_mut().clear();
         self.retained.borrow_mut().clear();
         self.arranged.borrow_mut().clear();
     }
 
-    #[doc = include_str!("arrange_cache.doc/evict.md")]
+    #[doc = include_str!("../../docs/api/orchestration/arrange_cache.doc/evict.md")]
     pub fn evict(&self, nodes: &FastSet<NodeId>) {
         self.keys
             .borrow_mut()
             .retain(|node, _| !nodes.contains(node));
     }
 
-    #[doc = include_str!("arrange_cache.doc/get.md")]
+    /// The key `node` was last arranged under, if it may still be served.
     pub(super) fn get(&self, node: NodeId) -> Option<ArrangeKey> {
         self.keys.borrow().get(&node).copied()
     }
 
-    #[doc = include_str!("arrange_cache.doc/record.md")]
+    /// Records that this pass arranged `node` under `key`.
     pub(super) fn record(&self, node: NodeId, key: ArrangeKey) {
         self.keys.borrow_mut().insert(node, key);
         self.arranged.borrow_mut().push(node);
     }
 
-    #[doc = include_str!("arrange_cache.doc/serve.md")]
+    #[doc = include_str!("../../docs/api/orchestration/arrange_cache.doc/serve.md")]
     pub(super) fn serve(&self, tree: &RetainedTree, node: NodeId, boxes: &mut LayoutBoxes) -> bool {
         let retained = self.retained.borrow();
         if !retained.contains_key(&node) {
@@ -131,13 +119,14 @@ impl ArrangeCache {
         true
     }
 
-    #[doc = include_str!("arrange_cache.doc/arranged_2.md")]
+    /// Whether the last pass **re-arranged** `node`, as opposed to serving its
+    /// subtree from retained boxes or never reaching it.
     #[must_use]
     pub fn arranged(&self, node: NodeId) -> bool {
         self.arranged.borrow().contains(&node)
     }
 
-    #[doc = include_str!("arrange_cache.doc/arranged_count.md")]
+    /// How many nodes the last pass re-arranged.
     #[must_use]
     pub fn arranged_count(&self) -> usize {
         self.arranged.borrow().len()

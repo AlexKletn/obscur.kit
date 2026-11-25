@@ -1,39 +1,39 @@
-#![doc = include_str!("selector_match.doc/_module.md")]
+//! The typed outcome of testing a selector against a node: [`SelectorMatch`].
 
 use super::selector_specificity::SelectorSpecificity;
 
-#[doc = include_str!("selector_match.doc/SelectorMatch.md")]
+#[doc = include_str!("../../docs/api/selector/selector_match.doc/SelectorMatch.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SelectorMatch {
-    #[doc = include_str!("selector_match.doc/Matched.md")]
+    /// The selector matched the node, contributing the given specificity.
     Matched {
-        #[doc = include_str!("selector_match.doc/specificity.md")]
+        /// The specificity the matched selector contributes to the cascade.
         specificity: SelectorSpecificity,
     },
-    #[doc = include_str!("selector_match.doc/NoMatch.md")]
+    /// The selector did not match the node.
     NoMatch,
 }
 
 impl SelectorMatch {
-    #[doc = include_str!("selector_match.doc/matched.md")]
+    /// Constructs a matched outcome carrying the given specificity.
     #[must_use]
     pub const fn matched(specificity: SelectorSpecificity) -> Self {
         Self::Matched { specificity }
     }
 
-    #[doc = include_str!("selector_match.doc/no_match.md")]
+    /// Constructs a non-matching outcome.
     #[must_use]
     pub const fn no_match() -> Self {
         Self::NoMatch
     }
 
-    #[doc = include_str!("selector_match.doc/is_match.md")]
+    /// Returns `true` if the selector matched the node.
     #[must_use]
     pub const fn is_match(self) -> bool {
         matches!(self, Self::Matched { .. })
     }
 
-    #[doc = include_str!("selector_match.doc/specificity_2.md")]
+    /// Returns the contributed specificity when matched, otherwise `None`.
     #[must_use]
     pub const fn specificity(self) -> Option<SelectorSpecificity> {
         match self {

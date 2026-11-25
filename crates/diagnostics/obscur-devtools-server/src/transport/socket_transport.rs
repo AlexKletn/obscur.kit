@@ -1,4 +1,4 @@
-#![doc = include_str!("socket_transport.doc/_module.md")]
+#![doc = include_str!("../../docs/api/transport/socket_transport.doc/_module.md")]
 
 use std::io;
 
@@ -9,7 +9,7 @@ use crate::endpoint::{CommandOutcome, DevToolsEndpoint};
 use crate::transport::{ClientBound, EventQueue, ServerBound, SocketStream, WireCodec};
 use std::time::Duration;
 
-#[doc = include_str!("socket_transport.doc/SocketTransport.md")]
+#[doc = include_str!("../../docs/api/transport/socket_transport.doc/SocketTransport.md")]
 #[derive(Debug)]
 pub struct SocketTransport {
     stream: SocketStream,
@@ -17,19 +17,19 @@ pub struct SocketTransport {
 }
 
 impl SocketTransport {
-    #[doc = include_str!("socket_transport.doc/new.md")]
+    /// Wraps an accepted connection ready to drive an endpoint.
     #[must_use]
     pub fn new(stream: SocketStream) -> Self {
         Self { stream, served: 0 }
     }
 
-    #[doc = include_str!("socket_transport.doc/served.md")]
+    /// Returns how many messages this transport has served so far.
     #[must_use]
     pub const fn served(&self) -> usize {
         self.served
     }
 
-    #[doc = include_str!("socket_transport.doc/serve_one.md")]
+    #[doc = include_str!("../../docs/api/transport/socket_transport.doc/serve_one.md")]
     pub fn serve_one<S: InspectSource>(
         &mut self,
         endpoint: &mut DevToolsEndpoint<S>,
@@ -50,7 +50,7 @@ impl SocketTransport {
         Ok(true)
     }
 
-    #[doc = include_str!("socket_transport.doc/serve.md")]
+    #[doc = include_str!("../../docs/api/transport/socket_transport.doc/serve.md")]
     pub fn serve<S: InspectSource>(
         &mut self,
         endpoint: &mut DevToolsEndpoint<S>,
@@ -59,7 +59,7 @@ impl SocketTransport {
         Ok(())
     }
 
-    #[doc = include_str!("socket_transport.doc/serve_with_events.md")]
+    #[doc = include_str!("../../docs/api/transport/socket_transport.doc/serve_with_events.md")]
     pub fn serve_with_events<S: InspectSource>(
         &mut self,
         endpoint: &mut DevToolsEndpoint<S>,
@@ -88,7 +88,7 @@ impl SocketTransport {
     }
 }
 
-#[doc = include_str!("socket_transport.doc/is_timeout.md")]
+#[doc = include_str!("../../docs/api/transport/socket_transport.doc/is_timeout.md")]
 fn is_timeout(error: &io::Error) -> bool {
     matches!(
         error.kind(),
@@ -96,7 +96,9 @@ fn is_timeout(error: &io::Error) -> bool {
     )
 }
 
-#[doc = include_str!("socket_transport.doc/answer.md")]
+/// Feeds one decoded client message through the endpoint and maps its typed
+/// outcome to the matching client-bound reply. The endpoint enforces all §7.7
+/// checks; this function only routes the result onto the wire.
 fn answer<S: InspectSource>(
     endpoint: &mut DevToolsEndpoint<S>,
     message: ServerBound,

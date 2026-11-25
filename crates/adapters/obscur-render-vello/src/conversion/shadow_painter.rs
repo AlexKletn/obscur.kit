@@ -1,4 +1,4 @@
-#![doc = include_str!("shadow_painter.doc/_module.md")]
+#![doc = include_str!("../../docs/api/conversion/shadow_painter.doc/_module.md")]
 
 use vello::Scene;
 use vello::kurbo::{Affine, Rect as KurboRect};
@@ -6,7 +6,7 @@ use vello::peniko;
 
 use super::color_converter::ColorConverter;
 
-#[doc = include_str!("shadow_painter.doc/draw_shadow.md")]
+#[doc = include_str!("../../docs/api/conversion/shadow_painter.doc/draw_shadow.md")]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn draw_shadow(
     scene: &mut Scene,
@@ -47,8 +47,8 @@ pub(super) fn draw_shadow(
     scene.draw_blurred_rounded_rect(transform, kurbo_rect, peniko_color, radius, std_dev);
 }
 
-#[doc = include_str!("shadow_painter.doc/blurred_shadow_radius.md")]
-fn blurred_shadow_radius(radii: obscur_geometry::CornerRadii) -> f64 {
+#[doc = include_str!("../../docs/api/conversion/shadow_painter.doc/blurred_shadow_radius.md")]
+pub(super) fn blurred_shadow_radius(radii: obscur_geometry::CornerRadii) -> f64 {
     f64::from(
         radii
             .corners()
@@ -59,7 +59,7 @@ fn blurred_shadow_radius(radii: obscur_geometry::CornerRadii) -> f64 {
     )
 }
 
-#[doc = include_str!("shadow_painter.doc/draw_inset_shadow.md")]
+#[doc = include_str!("../../docs/api/conversion/shadow_painter.doc/draw_inset_shadow.md")]
 #[allow(clippy::too_many_arguments)]
 fn draw_inset_shadow(
     scene: &mut Scene,

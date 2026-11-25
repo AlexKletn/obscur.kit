@@ -1,16 +1,16 @@
-#![doc = include_str!("layout_containment.doc/_module.md")]
+//! Whether a layout context contains layout/size effects at its boundary.
 
-#[doc = include_str!("layout_containment.doc/LayoutContainment.md")]
+#[doc = include_str!("../../docs/api/context/layout_containment.doc/LayoutContainment.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LayoutContainment {
-    #[doc = include_str!("layout_containment.doc/contains_layout.md")]
+    /// Whether internal layout changes are contained (cannot escape the boundary).
     contains_layout: bool,
-    #[doc = include_str!("layout_containment.doc/contains_size.md")]
+    /// Whether the node's own size is contained (independent of its contents).
     contains_size: bool,
 }
 
 impl LayoutContainment {
-    #[doc = include_str!("layout_containment.doc/none.md")]
+    /// No containment: neither layout nor size effects are contained.
     #[must_use]
     pub const fn none() -> Self {
         Self {
@@ -19,7 +19,7 @@ impl LayoutContainment {
         }
     }
 
-    #[doc = include_str!("layout_containment.doc/layout.md")]
+    /// Contains layout effects only.
     #[must_use]
     pub const fn layout() -> Self {
         Self {
@@ -28,7 +28,7 @@ impl LayoutContainment {
         }
     }
 
-    #[doc = include_str!("layout_containment.doc/size.md")]
+    /// Contains size effects only.
     #[must_use]
     pub const fn size() -> Self {
         Self {
@@ -37,7 +37,7 @@ impl LayoutContainment {
         }
     }
 
-    #[doc = include_str!("layout_containment.doc/layout_and_size.md")]
+    /// Contains both layout and size effects.
     #[must_use]
     pub const fn layout_and_size() -> Self {
         Self {
@@ -46,19 +46,19 @@ impl LayoutContainment {
         }
     }
 
-    #[doc = include_str!("layout_containment.doc/contains_layout_2.md")]
+    /// Whether internal layout changes are contained.
     #[must_use]
     pub const fn contains_layout(self) -> bool {
         self.contains_layout
     }
 
-    #[doc = include_str!("layout_containment.doc/contains_size_2.md")]
+    /// Whether the node's own size is contained.
     #[must_use]
     pub const fn contains_size(self) -> bool {
         self.contains_size
     }
 
-    #[doc = include_str!("layout_containment.doc/is_boundary.md")]
+    #[doc = include_str!("../../docs/api/context/layout_containment.doc/is_boundary.md")]
     #[must_use]
     pub const fn is_boundary(self) -> bool {
         self.contains_layout

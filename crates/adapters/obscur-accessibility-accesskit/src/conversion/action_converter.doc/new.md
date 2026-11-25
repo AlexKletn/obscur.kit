@@ -1,1 +1,0 @@
-Creates the stateless converter.

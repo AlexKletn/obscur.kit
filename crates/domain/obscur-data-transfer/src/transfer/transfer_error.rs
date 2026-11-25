@@ -1,30 +1,34 @@
-#![doc = include_str!("transfer_error.doc/_module.md")]
+//! Typed failures of a data transfer (spec §6.20).
 
-#[doc = include_str!("transfer_error.doc/TransferError.md")]
+#[doc = include_str!("../../docs/api/transfer/transfer_error.doc/TransferError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TransferError {
-    #[doc = include_str!("transfer_error.doc/LimitExceeded.md")]
+    /// A capability limit was exceeded (spec §6.20 limits); the payload
+    /// describes the limit that was hit.
     LimitExceeded(Box<str>),
-    #[doc = include_str!("transfer_error.doc/Unsupported.md")]
+    /// No offered representation matched the requested format (spec §6.20); the
+    /// payload names the unsupported format or reason.
     Unsupported(Box<str>),
-    #[doc = include_str!("transfer_error.doc/PermissionDenied.md")]
+    /// A permission check denied the transfer (spec §6.20 permissions).
     PermissionDenied,
-    #[doc = include_str!("transfer_error.doc/Empty.md")]
+    /// There was nothing to transfer (spec §6.20).
     Empty,
-    #[doc = include_str!("transfer_error.doc/Cancelled.md")]
+    /// The transfer was cancelled before it completed (spec §6.20).
     Cancelled,
-    #[doc = include_str!("transfer_error.doc/ProviderFailed.md")]
+    /// A lazy data provider failed to resolve its bytes (spec §6.20 lazy async
+    /// providers); the payload describes the provider failure.
     ProviderFailed(Box<str>),
 }
 
 impl TransferError {
-    #[doc = include_str!("transfer_error.doc/is_cancelled.md")]
+    /// Returns whether this error is [`TransferError::Cancelled`] (spec §6.20).
     #[must_use]
     pub const fn is_cancelled(&self) -> bool {
         matches!(self, Self::Cancelled)
     }
 
-    #[doc = include_str!("transfer_error.doc/is_denied.md")]
+    /// Returns whether this error is [`TransferError::PermissionDenied`] (spec
+    /// §6.20 permissions).
     #[must_use]
     pub const fn is_denied(&self) -> bool {
         matches!(self, Self::PermissionDenied)

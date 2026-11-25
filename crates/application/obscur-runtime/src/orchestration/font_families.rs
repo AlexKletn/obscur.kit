@@ -1,10 +1,11 @@
-#![doc = include_str!("font_families.doc/_module.md")]
+//! Resolves a text node's computed `font-family` into a font fallback chain:
+//! [`families_for`].
 
 use obscur_style::computed::ComputedStyle;
 use obscur_style::property::PropertyId;
 use obscur_text::font::{FontFallback, FontFamily};
 
-#[doc = include_str!("font_families.doc/families_for.md")]
+#[doc = include_str!("../../docs/api/orchestration/font_families.doc/families_for.md")]
 #[must_use]
 pub(crate) fn families_for(computed: Option<&ComputedStyle>) -> FontFallback {
     let names = computed

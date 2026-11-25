@@ -1,24 +1,25 @@
-#![doc = include_str!("pseudo_states.doc/_module.md")]
+//! The runtime-owned per-node interaction state source: [`PseudoStates`].
 
 use obscur_identity::{FastMap, NodeId};
 use obscur_style::selector::PseudoState;
 use obscur_tree::tree::RetainedTree;
 
-#[doc = include_str!("pseudo_states.doc/PseudoStates.md")]
+#[doc = include_str!("../../docs/api/orchestration/pseudo_states.doc/PseudoStates.md")]
 #[derive(Debug, Clone, Default)]
 pub struct PseudoStates {
-    #[doc = include_str!("pseudo_states.doc/states.md")]
+    /// The recorded interaction state for each node that has any non-empty state.
     states: FastMap<NodeId, PseudoState>,
 }
 
 impl PseudoStates {
-    #[doc = include_str!("pseudo_states.doc/new.md")]
+    /// Creates an empty source; every node then reports [`PseudoState::empty`].
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    #[doc = include_str!("pseudo_states.doc/get.md")]
+    /// Returns the interaction state recorded for `node`, or
+    /// [`PseudoState::empty`] when the node has no entry.
     #[must_use]
     pub fn get(&self, node: NodeId) -> PseudoState {
         self.states
@@ -27,7 +28,7 @@ impl PseudoStates {
             .unwrap_or_else(PseudoState::empty)
     }
 
-    #[doc = include_str!("pseudo_states.doc/set.md")]
+    #[doc = include_str!("../../docs/api/orchestration/pseudo_states.doc/set.md")]
     pub fn set(&mut self, node: NodeId, state: PseudoState) {
         if state.is_empty() {
             self.states.remove(&node);
@@ -36,28 +37,29 @@ impl PseudoStates {
         }
     }
 
-    #[doc = include_str!("pseudo_states.doc/clear.md")]
+    /// Clears every recorded interaction state; afterwards every node reports
+    /// [`PseudoState::empty`].
     pub fn clear(&mut self) {
         self.states.clear();
     }
 
-    #[doc = include_str!("pseudo_states.doc/retain_live.md")]
+    #[doc = include_str!("../../docs/api/orchestration/pseudo_states.doc/retain_live.md")]
     pub fn retain_live(&mut self, tree: &RetainedTree) {
         self.states.retain(|node, _| tree.contains(*node));
     }
 
-    #[doc = include_str!("pseudo_states.doc/iter.md")]
+    #[doc = include_str!("../../docs/api/orchestration/pseudo_states.doc/iter.md")]
     pub fn iter(&self) -> impl Iterator<Item = (NodeId, PseudoState)> + '_ {
         self.states.iter().map(|(&node, &state)| (node, state))
     }
 
-    #[doc = include_str!("pseudo_states.doc/is_empty.md")]
+    /// Returns whether no node carries any interaction state.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.states.is_empty()
     }
 
-    #[doc = include_str!("pseudo_states.doc/len.md")]
+    /// Returns the number of nodes carrying a non-empty interaction state.
     #[must_use]
     pub fn len(&self) -> usize {
         self.states.len()

@@ -1,17 +1,8 @@
-#![doc = include_str!("custom_pass.doc/_module.md")]
+//! A privileged custom render pass descriptor (spec §5.3).
 
-#[doc = include_str!("custom_pass.doc/PassStage.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PassStage {
-    #[doc = include_str!("custom_pass.doc/BeforeScene.md")]
-    BeforeScene,
-    #[doc = include_str!("custom_pass.doc/AfterScene.md")]
-    AfterScene,
-    #[doc = include_str!("custom_pass.doc/Overlay.md")]
-    Overlay,
-}
+use super::PassStage;
 
-#[doc = include_str!("custom_pass.doc/CustomPass.md")]
+#[doc = include_str!("../../docs/api/extension/custom_pass.doc/CustomPass.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CustomPass {
     name: Box<str>,
@@ -20,7 +11,8 @@ pub struct CustomPass {
 }
 
 impl CustomPass {
-    #[doc = include_str!("custom_pass.doc/new.md")]
+    /// Creates a custom pass named `name` scheduled at `stage`, using no
+    /// restricted user shaders.
     #[must_use]
     pub fn new(name: impl Into<Box<str>>, stage: PassStage) -> Self {
         Self {
@@ -30,26 +22,27 @@ impl CustomPass {
         }
     }
 
-    #[doc = include_str!("custom_pass.doc/requiring_shaders.md")]
+    /// Sets whether this pass uses restricted user shaders, returning the updated
+    /// pass (spec §5.3).
     #[must_use]
     pub fn requiring_shaders(mut self, requires_shaders: bool) -> Self {
         self.requires_shaders = requires_shaders;
         self
     }
 
-    #[doc = include_str!("custom_pass.doc/name.md")]
+    /// The pass name, used for diagnostics.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    #[doc = include_str!("custom_pass.doc/stage.md")]
+    /// When this pass runs relative to the ordinary scene.
     #[must_use]
     pub const fn stage(&self) -> PassStage {
         self.stage
     }
 
-    #[doc = include_str!("custom_pass.doc/requires_shaders.md")]
+    /// Whether this pass uses restricted user shaders (spec §5.3).
     #[must_use]
     pub const fn requires_shaders(&self) -> bool {
         self.requires_shaders
@@ -73,11 +66,5 @@ mod tests {
         let pass = CustomPass::new("shade", PassStage::Overlay).requiring_shaders(true);
         assert!(pass.requires_shaders());
         assert_eq!(pass.stage(), PassStage::Overlay);
-    }
-
-    #[test]
-    fn stages_are_distinct() {
-        assert_ne!(PassStage::BeforeScene, PassStage::AfterScene);
-        assert_ne!(PassStage::AfterScene, PassStage::Overlay);
     }
 }

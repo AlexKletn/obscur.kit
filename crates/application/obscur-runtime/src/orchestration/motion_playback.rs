@@ -1,19 +1,21 @@
-#![doc = include_str!("motion_playback.doc/_module.md")]
+//! [`MotionPlayback`] — the playback controls an animation or transition starts
+//! with (spec §4.17; css-animations-1 §3.6/§3.8/§3.9, css-transitions-1 §2.4).
 
 use obscur_motion::timeline::{FillMode, PlaybackDirection, RepeatCount};
 
-#[doc = include_str!("motion_playback.doc/MotionPlayback.md")]
+#[doc = include_str!("../../docs/api/orchestration/motion_playback.doc/MotionPlayback.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MotionPlayback {
-    #[doc = include_str!("motion_playback.doc/delay_secs.md")]
+    /// The start delay, in seconds. Negative seeks that far into the play cycle
+    /// at start.
     pub delay_secs: f32,
-    #[doc = include_str!("motion_playback.doc/repeat.md")]
+    /// How many iterations to run.
     pub repeat: RepeatCount,
-    #[doc = include_str!("motion_playback.doc/direction.md")]
+    /// The direction iteration 1 plays in.
     pub direction: PlaybackDirection,
-    #[doc = include_str!("motion_playback.doc/alternates.md")]
+    /// Whether each iteration flips direction.
     pub alternates: bool,
-    #[doc = include_str!("motion_playback.doc/fill.md")]
+    /// Whether the value applies during the start delay.
     pub fill: FillMode,
 }
 
@@ -30,7 +32,8 @@ impl Default for MotionPlayback {
 }
 
 impl MotionPlayback {
-    #[doc = include_str!("motion_playback.doc/delayed.md")]
+    /// The default playback with only the start delay set — the shape a CSS
+    /// `transition` needs, since `transition-delay` is its one playback control.
     #[must_use]
     pub fn delayed(delay_secs: f32) -> Self {
         Self {

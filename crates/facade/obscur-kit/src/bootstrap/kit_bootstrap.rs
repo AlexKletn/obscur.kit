@@ -1,11 +1,13 @@
-#![doc = include_str!("kit_bootstrap.doc/_module.md")]
+//! High-level toolkit bootstrap (spec §2.9): assembles the default adapter
+//! instances selected by the enabled Cargo features, so an application gets a
+//! working set of backends without hand-picking individual adapter crates.
 
 use obscur_diagnostics::{Diagnostic, DiagnosticCode, DiagnosticSeverity, DiagnosticSubsystem};
 
 #[cfg(feature = "cache-fs")]
 use std::path::PathBuf;
 
-#[doc = include_str!("kit_bootstrap.doc/KitBootstrap.md")]
+#[doc = include_str!("../../docs/api/bootstrap/kit_bootstrap.doc/KitBootstrap.md")]
 #[derive(Debug, Clone, Default)]
 pub struct KitBootstrap {
     runtime_id: u64,
@@ -13,8 +15,14 @@ pub struct KitBootstrap {
     renderer_id: u64,
     #[cfg(feature = "cache-fs")]
     cache_root: Option<PathBuf>,
-    #[doc = include_str!("kit_bootstrap.doc/fonts.md")]
+    #[doc = include_str!("../../docs/api/bootstrap/kit_bootstrap.doc/fonts.md")]
     fonts: super::FontSet,
+    #[cfg(all(
+        feature = "font-fontconfig",
+        feature = "text-harfrust",
+        feature = "text-unicode"
+    ))]
+    fontconfig_fallback: std::sync::OnceLock<std::sync::Arc<super::FontconfigFallback>>,
     // Spelled as the OPT-OUT rather than as `builtin_components: bool`, so the
     // `Default` this type derives is the defaults-on answer without a hand-written
     // `impl Default` that a later field could quietly diverge from.
@@ -22,20 +30,20 @@ pub struct KitBootstrap {
 }
 
 impl KitBootstrap {
-    #[doc = include_str!("kit_bootstrap.doc/new.md")]
+    /// Creates a bootstrap with default identifiers and no cache root.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    #[doc = include_str!("kit_bootstrap.doc/with_runtime_id.md")]
+    /// Sets the runtime identifier used for the headless host.
     #[must_use]
     pub const fn with_runtime_id(mut self, id: u64) -> Self {
         self.runtime_id = id;
         self
     }
 
-    #[doc = include_str!("kit_bootstrap.doc/with_renderer_id.md")]
+    /// Sets the renderer identifier used for the default renderer.
     #[cfg(feature = "render-cpu")]
     #[must_use]
     pub const fn with_renderer_id(mut self, id: u64) -> Self {
@@ -43,7 +51,7 @@ impl KitBootstrap {
         self
     }
 
-    #[doc = include_str!("kit_bootstrap.doc/with_cache_root.md")]
+    /// Sets the on-disk directory for the persistent cache store.
     #[cfg(feature = "cache-fs")]
     #[must_use]
     pub fn with_cache_root(mut self, root: impl Into<PathBuf>) -> Self {
@@ -51,20 +59,26 @@ impl KitBootstrap {
         self
     }
 
-    #[doc = include_str!("kit_bootstrap.doc/with_font.md")]
+    #[doc = include_str!("../../docs/api/bootstrap/kit_bootstrap.doc/with_font.md")]
     #[must_use]
     pub fn with_font(mut self, face: super::FontFaceBytes) -> Self {
         self.fonts.push(face);
         self
     }
 
-    #[doc = include_str!("kit_bootstrap.doc/font_set.md")]
+    #[doc = include_str!("../../docs/api/bootstrap/kit_bootstrap.doc/font_set.md")]
     #[must_use]
     pub fn font_set(&self) -> super::FontSet {
         // The application's own faces first: within one family the registry
         // keeps the first face on an attribute tie, so a face an application
         // shipped deliberately outranks a same-named one the machine happens to
         // have.
+        #[cfg(all(
+            feature = "font-fontconfig",
+            feature = "text-harfrust",
+            feature = "text-unicode"
+        ))]
+        self.fontconfig_fallback();
         let mut set = self.fonts.clone();
         #[cfg(feature = "font-fontconfig")]
         for face in self.system_font_set().unwrap_or_default().faces() {
@@ -73,30 +87,42 @@ impl KitBootstrap {
         set
     }
 
-    #[doc = include_str!("kit_bootstrap.doc/headless_host.md")]
+    /// Builds a deterministic [`HeadlessHost`](crate::headless::HeadlessHost) —
+    /// a real runtime driven by a deterministic clock and executor, for
+    /// reproducible, offscreen rendering and tests. Always available (no feature
+    /// gate).
     #[must_use]
     pub fn headless_host(&self) -> crate::headless::HeadlessHost {
         crate::headless::HeadlessHost::new(crate::identity::RuntimeId::from_raw(self.runtime_id))
     }
 
-    #[doc = include_str!("kit_bootstrap.doc/ua_stylesheet.md")]
+    #[doc = include_str!("../../docs/api/bootstrap/kit_bootstrap.doc/ua_stylesheet.md")]
     #[must_use]
     pub fn ua_stylesheet(&self) -> crate::style::matching::Stylesheet {
         crate::default_stylesheet::ua_stylesheet()
     }
 
-    #[doc = include_str!("kit_bootstrap.doc/install_default_stylesheet.md")]
+    #[doc = include_str!("../../docs/api/bootstrap/kit_bootstrap.doc/install_default_stylesheet.md")]
     pub fn install_default_stylesheet(&self, runtime: &mut crate::runtime::UiRuntime) {
         super::css_pipeline::install_custom_value_parser(runtime);
         runtime.set_default_stylesheet(self.ua_stylesheet());
     }
 
-    #[doc = include_str!("kit_bootstrap.doc/install_system_theme_from.md")]
+    #[doc = include_str!("../../docs/api/bootstrap/kit_bootstrap.doc/install_system_theme_from.md")]
     pub fn install_system_theme_from(
         &self,
         runtime: &mut crate::runtime::UiRuntime,
         provider: &dyn obscur_system::appearance::AppearanceProvider,
     ) -> crate::system_theme::ThemeVars {
+        let appearance = Self::read_system_appearance_from(runtime, provider);
+        self.install_system_theme(runtime, &appearance)
+    }
+
+    /// Reads the current snapshot and reports unavailable or partial appearance data.
+    pub(crate) fn read_system_appearance_from(
+        runtime: &crate::runtime::UiRuntime,
+        provider: &dyn obscur_system::appearance::AppearanceProvider,
+    ) -> obscur_system::appearance::SystemAppearance {
         // Absence is not a failure — a machine with no portal, no `gsettings`
         // and no `kdeglobals` is a machine with no desktop preferences, and an
         // application's own stylesheet is then simply the whole answer. It is
@@ -107,7 +133,7 @@ impl KitBootstrap {
                 runtime,
                 "platform.appearance.no_source",
                 DiagnosticSeverity::Warning,
-                "no desktop appearance source: no portal, no gsettings, no kdeglobals.                  No `--obscur-sys-*` variable is defined and the application's own                  stylesheet stands unaided.",
+                "the appearance provider has no desktop settings source",
             );
         }
         let appearance = provider.appearance();
@@ -120,13 +146,13 @@ impl KitBootstrap {
                 runtime,
                 "platform.appearance.no_palette",
                 DiagnosticSeverity::Info,
-                "the desktop stated no colours, so no `--obscur-sys-window-bg` and                  friends are defined. Expected on GNOME, whose settings name a theme                  and not its palette.",
+                "the appearance provider did not supply a palette, so palette variables are unavailable",
             );
         }
-        self.install_system_theme(runtime, &appearance)
+        appearance
     }
 
-    #[doc = include_str!("kit_bootstrap.doc/install_system_theme.md")]
+    #[doc = include_str!("../../docs/api/bootstrap/kit_bootstrap.doc/install_system_theme.md")]
     pub fn install_system_theme(
         &self,
         runtime: &mut crate::runtime::UiRuntime,
@@ -137,7 +163,7 @@ impl KitBootstrap {
                 runtime,
                 "platform.appearance.empty",
                 DiagnosticSeverity::Warning,
-                "the desktop appearance is empty: no `--obscur-sys-*` variable is                  defined, and a stylesheet reading one gets nothing.",
+                "the desktop appearance is empty, so no `--obscur-sys-*` variables are defined",
             );
         }
         // The kit is about to write `var()`-readable CSS into this runtime, so it
@@ -166,23 +192,29 @@ impl KitBootstrap {
             .compile(&parsed)
             .matchable;
         runtime.set_default_stylesheet(sheet);
+        use obscur_system::appearance::{ColorScheme, Contrast};
+        runtime.set_media_preferences(crate::style::matching::MediaPreferences {
+            dark: appearance.color_scheme == Some(ColorScheme::Dark),
+            reduced_motion: appearance.reduced_motion.unwrap_or(false),
+            increased_contrast: appearance.contrast == Some(Contrast::High),
+        });
         vars
     }
 
-    #[doc = include_str!("kit_bootstrap.doc/without_builtin_components.md")]
+    #[doc = include_str!("../../docs/api/bootstrap/kit_bootstrap.doc/without_builtin_components.md")]
     #[must_use]
     pub const fn without_builtin_components(mut self) -> Self {
         self.without_builtin_components = true;
         self
     }
 
-    #[doc = include_str!("kit_bootstrap.doc/registers_builtin_components.md")]
+    #[doc = include_str!("../../docs/api/bootstrap/kit_bootstrap.doc/registers_builtin_components.md")]
     #[must_use]
     pub const fn registers_builtin_components(&self) -> bool {
         !self.without_builtin_components
     }
 
-    #[doc = include_str!("kit_bootstrap.doc/install_builtin_components.md")]
+    #[doc = include_str!("../../docs/api/bootstrap/kit_bootstrap.doc/install_builtin_components.md")]
     pub fn install_builtin_components(
         &self,
         runtime: &mut crate::runtime::UiRuntime,
@@ -198,7 +230,7 @@ impl KitBootstrap {
         super::BuiltinComponents::install(runtime)
     }
 
-    #[doc = include_str!("kit_bootstrap.doc/install_builtin_painters.md")]
+    #[doc = include_str!("../../docs/api/bootstrap/kit_bootstrap.doc/install_builtin_painters.md")]
     pub fn install_builtin_painters(&self, runtime: &mut crate::runtime::UiRuntime) {
         if self.without_builtin_components {
             return;
@@ -206,7 +238,7 @@ impl KitBootstrap {
         super::BuiltinPainters::new().install(runtime);
     }
 
-    #[doc = include_str!("kit_bootstrap.doc/default_renderer.md")]
+    /// Builds the default software [`Renderer`](crate::render::Renderer).
     #[cfg(feature = "render-cpu")]
     #[must_use]
     pub fn default_renderer(&self) -> crate::render_cpu::renderer::CpuRenderer {
@@ -215,21 +247,21 @@ impl KitBootstrap {
         ))
     }
 
-    #[doc = include_str!("kit_bootstrap.doc/default_resource_loader.md")]
+    /// Builds the default filesystem resource loader.
     #[cfg(feature = "resource-fs")]
     #[must_use]
     pub fn default_resource_loader(&self) -> crate::resource_fs::loader::FsResourceLoader {
         crate::resource_fs::loader::FsResourceLoader::new()
     }
 
-    #[doc = include_str!("kit_bootstrap.doc/default_image_decoder.md")]
+    #[doc = include_str!("../../docs/api/bootstrap/kit_bootstrap.doc/default_image_decoder.md")]
     #[cfg(feature = "resource-decode")]
     #[must_use]
     pub fn default_image_decoder(&self) -> crate::resource_decode::decoder::ImageDecoder {
         crate::resource_decode::decoder::ImageDecoder::new()
     }
 
-    #[doc = include_str!("kit_bootstrap.doc/install_image_resources.md")]
+    #[doc = include_str!("../../docs/api/bootstrap/kit_bootstrap.doc/install_image_resources.md")]
     #[cfg(all(feature = "resource-fs", feature = "resource-decode"))]
     pub fn install_image_resources(
         &self,
@@ -244,7 +276,7 @@ impl KitBootstrap {
         );
     }
 
-    #[doc = include_str!("kit_bootstrap.doc/install_vector_resources.md")]
+    #[doc = include_str!("../../docs/api/bootstrap/kit_bootstrap.doc/install_vector_resources.md")]
     #[cfg(feature = "resource-decode")]
     pub fn install_vector_resources(&self, runtime: &mut crate::runtime::UiRuntime) {
         runtime.set_vector_decoder(std::sync::Arc::new(
@@ -252,7 +284,7 @@ impl KitBootstrap {
         ));
     }
 
-    #[doc = include_str!("kit_bootstrap.doc/install_accessibility.md")]
+    #[doc = include_str!("../../docs/api/bootstrap/kit_bootstrap.doc/install_accessibility.md")]
     #[cfg(feature = "accesskit")]
     #[must_use]
     pub fn install_accessibility(
@@ -266,7 +298,8 @@ impl KitBootstrap {
         bridge
     }
 
-    #[doc = include_str!("kit_bootstrap.doc/default_cache_store.md")]
+    /// Builds the default filesystem persistent cache store, if a cache root was
+    /// configured (otherwise `None` — persistence is opt-in).
     #[cfg(feature = "cache-fs")]
     #[must_use]
     pub fn default_cache_store(&self) -> Option<crate::cache_fs::store::FsCacheStore> {
@@ -275,14 +308,14 @@ impl KitBootstrap {
             .map(crate::cache_fs::store::FsCacheStore::new)
     }
 
-    #[doc = include_str!("kit_bootstrap.doc/default_task_spawner.md")]
+    #[doc = include_str!("../../docs/api/bootstrap/kit_bootstrap.doc/default_task_spawner.md")]
     #[cfg(feature = "task-smol")]
     #[must_use]
     pub fn default_task_spawner(&self) -> crate::task_smol::spawner::SmolSpawner {
         crate::task_smol::spawner::SmolSpawner::new()
     }
 
-    #[doc = include_str!("kit_bootstrap.doc/install_blocking_executor.md")]
+    #[doc = include_str!("../../docs/api/bootstrap/kit_bootstrap.doc/install_blocking_executor.md")]
     #[cfg(feature = "task-smol")]
     pub fn install_blocking_executor(
         &self,
@@ -293,14 +326,16 @@ impl KitBootstrap {
         spawner
     }
 
-    #[doc = include_str!("kit_bootstrap.doc/system_shell_provider.md")]
+    /// Builds the platform shell provider. On Linux this shells out to
+    /// `xdg-open`; the dialog and notification providers are obtained the same
+    /// way from `crate::system_platform::provider`.
     #[cfg(target_os = "linux")]
     #[must_use]
     pub fn system_shell_provider(&self) -> crate::system_platform::provider::LinuxShellProvider {
         crate::system_platform::provider::LinuxShellProvider::new()
     }
 
-    #[doc = include_str!("kit_bootstrap.doc/text_shaper_from_bytes.md")]
+    #[doc = include_str!("../../docs/api/bootstrap/kit_bootstrap.doc/text_shaper_from_bytes.md")]
     #[cfg(feature = "text-harfrust")]
     #[must_use]
     pub fn text_shaper_from_bytes(
@@ -310,7 +345,7 @@ impl KitBootstrap {
         Box::new(crate::text_harfrust::HarfrustShaper::from_bytes(bytes))
     }
 
-    #[doc = include_str!("kit_bootstrap.doc/text_shaper_without_font.md")]
+    #[doc = include_str!("../../docs/api/bootstrap/kit_bootstrap.doc/text_shaper_without_font.md")]
     #[cfg(feature = "text-harfrust")]
     #[must_use]
     pub fn text_shaper_without_font(
@@ -320,21 +355,21 @@ impl KitBootstrap {
         Box::new(crate::text_harfrust::HarfrustShaper::without_font().with_faces(faces))
     }
 
-    #[doc = include_str!("kit_bootstrap.doc/font_registry.md")]
+    #[doc = include_str!("../../docs/api/bootstrap/kit_bootstrap.doc/font_registry.md")]
     #[cfg(feature = "text-harfrust")]
     #[must_use]
     pub fn font_registry(&self) -> crate::text_harfrust::FontRegistry {
         crate::text_harfrust::FontRegistry::new()
     }
 
-    #[doc = include_str!("kit_bootstrap.doc/text_itemizer.md")]
+    #[doc = include_str!("../../docs/api/bootstrap/kit_bootstrap.doc/text_itemizer.md")]
     #[cfg(feature = "text-unicode")]
     #[must_use]
     pub fn text_itemizer(&self) -> Box<dyn crate::text::shaping::TextItemizer> {
         Box::new(crate::text_unicode::UnicodeTextItemizer::new())
     }
 
-    #[doc = include_str!("kit_bootstrap.doc/install_text_stack.md")]
+    #[doc = include_str!("../../docs/api/bootstrap/kit_bootstrap.doc/install_text_stack.md")]
     #[cfg(all(feature = "text-harfrust", feature = "text-unicode"))]
     pub fn install_text_stack(
         &self,
@@ -343,7 +378,7 @@ impl KitBootstrap {
     ) -> super::InstalledFonts {
         use crate::text::font::{FontAttributes, FontFamily, GenericFamily};
 
-        #[doc = include_str!("kit_bootstrap.doc/BUNDLED_FALLBACK.md")]
+        /// The vendored last-resort face, embedded so it needs no filesystem.
         const BUNDLED_FALLBACK: &[u8] = include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../../assets/fonts/NotoSans-Regular.ttf"
@@ -397,8 +432,7 @@ impl KitBootstrap {
         // lookup and the face is then kept. Only wired where fontconfig is — a
         // host without it keeps exactly the previous behaviour.
         #[cfg(feature = "font-fontconfig")]
-        let registry =
-            registry.with_system_fallback(std::sync::Arc::new(super::FontconfigFallback::new()));
+        let registry = registry.with_system_fallback(self.fontconfig_fallback());
         // The registry is cloned rather than moved: the discovery state is shared
         // between clones, so the copy kept here sees the faces the runtime's copy
         // pulls in and can hand them to the renderer.
@@ -408,7 +442,19 @@ impl KitBootstrap {
         super::InstalledFonts::new(handles).with_registry(registry)
     }
 
-    #[doc = include_str!("kit_bootstrap.doc/system_font_set.md")]
+    #[cfg(all(
+        feature = "font-fontconfig",
+        feature = "text-harfrust",
+        feature = "text-unicode"
+    ))]
+    fn fontconfig_fallback(&self) -> std::sync::Arc<super::FontconfigFallback> {
+        std::sync::Arc::clone(
+            self.fontconfig_fallback
+                .get_or_init(|| std::sync::Arc::new(super::FontconfigFallback::new())),
+        )
+    }
+
+    #[doc = include_str!("../../docs/api/bootstrap/kit_bootstrap.doc/system_font_set.md")]
     #[cfg(feature = "font-fontconfig")]
     #[must_use]
     pub fn system_font_set(&self) -> Option<super::FontSet> {
@@ -437,9 +483,9 @@ impl KitBootstrap {
     }
 }
 
-#[doc = include_str!("kit_bootstrap.doc/report.md")]
+/// One diagnostic, so the three call sites above read as what they say.
 fn report(
-    runtime: &mut crate::runtime::UiRuntime,
+    runtime: &crate::runtime::UiRuntime,
     code: &'static str,
     severity: DiagnosticSeverity,
     message: &'static str,
@@ -598,12 +644,9 @@ mod tests {
         let boot = KitBootstrap::new().with_renderer_id(3);
         let renderer = boot.default_renderer();
         assert_eq!(renderer.frames_rendered(), 0);
-        // The default renderer is the software one: a host that asks is told, before
-        // it renders anything, that the GPU-class effects will not appear (spec
-        // §5.2, and the CPU/GPU effect-split policy).
         assert_eq!(
             renderer.supports_effect(crate::render::SceneEffect::Blur),
-            obscur_capability::SupportLevel::Unavailable
+            obscur_capability::SupportLevel::Limited
         );
     }
 

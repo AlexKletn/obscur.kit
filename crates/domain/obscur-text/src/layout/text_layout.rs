@@ -1,34 +1,28 @@
-#![doc = include_str!("text_layout.doc/_module.md")]
+//! The full laid-out paragraph: lines stacked vertically (spec §5.10).
 
 use obscur_geometry::Size;
 
 use crate::shaping::{GlyphRun, ShapedGlyph};
 use crate::span::TextRange;
 
+use super::glyph_word::GlyphWord;
 use super::{LineBreak, TextAlignment, TextLine, TextOverflow, WhiteSpace};
 
-#[doc = include_str!("text_layout.doc/TextLayout.md")]
+#[doc = include_str!("../../docs/api/layout/text_layout.doc/TextLayout.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct TextLayout {
-    #[doc = include_str!("text_layout.doc/lines.md")]
+    /// The laid-out lines, top to bottom.
     lines: Vec<TextLine>,
-    #[doc = include_str!("text_layout.doc/size.md")]
+    /// The total bounding size: max line width by summed line height.
     size: Size,
-    #[doc = include_str!("text_layout.doc/alignment.md")]
+    /// The horizontal alignment applied to the lines.
     alignment: TextAlignment,
-    #[doc = include_str!("text_layout.doc/overflow.md")]
+    /// The overflow policy for text exceeding the available width.
     overflow: TextOverflow,
 }
 
-#[doc = include_str!("text_layout.doc/Word.md")]
-struct Word {
-    glyphs: Vec<ShapedGlyph>,
-    width: f32,
-    mandatory_break_after: bool,
-}
-
 impl TextLayout {
-    #[doc = include_str!("text_layout.doc/new.md")]
+    #[doc = include_str!("../../docs/api/layout/text_layout.doc/new.md")]
     #[must_use]
     pub fn new(lines: Vec<TextLine>, alignment: TextAlignment, overflow: TextOverflow) -> Self {
         let width = lines.iter().map(TextLine::width).fold(0.0_f32, f32::max);
@@ -41,7 +35,7 @@ impl TextLayout {
         }
     }
 
-    #[doc = include_str!("text_layout.doc/wrap.md")]
+    #[doc = include_str!("../../docs/api/layout/text_layout.doc/wrap.md")]
     #[must_use]
     pub fn wrap(
         run: &GlyphRun,
@@ -84,7 +78,8 @@ impl TextLayout {
         Self::new(lines, alignment, overflow)
     }
 
-    #[doc = include_str!("text_layout.doc/pack_lines.md")]
+    /// Groups a non-empty run's glyphs into per-line glyph vectors under a greedy
+    /// `max_width` fit. `max_width` is assumed positive.
     fn pack_lines(run: &GlyphRun, text: &str, max_width: f32) -> Vec<Vec<ShapedGlyph>> {
         let words = Self::split_words(run, text);
 
@@ -113,21 +108,24 @@ impl TextLayout {
         lines
     }
 
-    #[doc = include_str!("text_layout.doc/split_words.md")]
-    fn split_words(run: &GlyphRun, text: &str) -> Vec<Word> {
+    /// Segments a run's glyphs into [`GlyphWord`]s at the line-break opportunities of
+    /// `text`. A break at byte offset `o` starts a new word at the glyph whose
+    /// cluster equals `o`; a hard break marks the preceding word for a mandatory
+    /// line break.
+    fn split_words(run: &GlyphRun, text: &str) -> Vec<GlyphWord> {
         // The single-run legacy wrapper keeps its historical break model — soft
         // breaks at whitespace runs plus hard breaks at each `\n` — which is
         // exactly `pre-line` semantics. The multi-font `ParagraphLayout` is the
         // white-space-aware live path; `TextLayout` is retained for the mock path.
         let breaks = LineBreak::opportunities(text, WhiteSpace::PreLine);
-        let mut words: Vec<Word> = Vec::new();
+        let mut words: Vec<GlyphWord> = Vec::new();
         let mut glyphs: Vec<ShapedGlyph> = Vec::new();
         let mut width = 0.0_f32;
         for glyph in run.glyphs() {
             if let Some(brk) = breaks.iter().find(|b| b.offset() == glyph.cluster())
                 && !glyphs.is_empty()
             {
-                words.push(Word {
+                words.push(GlyphWord {
                     glyphs: std::mem::take(&mut glyphs),
                     width,
                     mandatory_break_after: brk.is_mandatory(),
@@ -138,7 +136,7 @@ impl TextLayout {
             width += glyph.x_advance();
         }
         if !glyphs.is_empty() {
-            words.push(Word {
+            words.push(GlyphWord {
                 glyphs,
                 width,
                 mandatory_break_after: false,
@@ -147,43 +145,43 @@ impl TextLayout {
         words
     }
 
-    #[doc = include_str!("text_layout.doc/lines_2.md")]
+    /// Returns the laid-out lines, top to bottom.
     #[must_use]
     pub fn lines(&self) -> &[TextLine] {
         &self.lines
     }
 
-    #[doc = include_str!("text_layout.doc/size_2.md")]
+    /// Returns the total bounding size of the paragraph.
     #[must_use]
     pub const fn size(&self) -> Size {
         self.size
     }
 
-    #[doc = include_str!("text_layout.doc/alignment_2.md")]
+    /// Returns the horizontal alignment applied to the lines.
     #[must_use]
     pub const fn alignment(&self) -> TextAlignment {
         self.alignment
     }
 
-    #[doc = include_str!("text_layout.doc/overflow_2.md")]
+    /// Returns the overflow policy for text exceeding the available width.
     #[must_use]
     pub const fn overflow(&self) -> TextOverflow {
         self.overflow
     }
 
-    #[doc = include_str!("text_layout.doc/line_count.md")]
+    /// Returns the number of lines.
     #[must_use]
     pub fn line_count(&self) -> usize {
         self.lines.len()
     }
 
-    #[doc = include_str!("text_layout.doc/is_empty.md")]
+    /// Returns whether the paragraph has no lines.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.lines.is_empty()
     }
 
-    #[doc = include_str!("text_layout.doc/line_at.md")]
+    /// Returns the line at `index`, or `None` if out of bounds.
     #[must_use]
     pub fn line_at(&self, index: usize) -> Option<&TextLine> {
         self.lines.get(index)

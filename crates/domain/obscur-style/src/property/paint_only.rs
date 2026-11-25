@@ -1,9 +1,9 @@
-#![doc = include_str!("paint_only.doc/_module.md")]
+#![doc = include_str!("../../docs/api/property/paint_only.doc/_module.md")]
 
 use crate::property::PropertyId;
 
 impl PropertyId {
-    #[doc = include_str!("paint_only.doc/is_paint_only.md")]
+    #[doc = include_str!("../../docs/api/property/paint_only.doc/is_paint_only.md")]
     #[must_use]
     pub const fn is_paint_only(self) -> bool {
         matches!(
@@ -46,6 +46,12 @@ impl PropertyId {
                 // Compositing only: the blend mode changes how the group paints,
                 // never its box.
                 | Self::MixBlendMode
+                | Self::BackgroundBlendMode
+                | Self::BackgroundClip
+                | Self::ClipPath
+                | Self::BackgroundOrigin
+                | Self::BackgroundAttachment
+                | Self::Isolation
                 // A painter fills a box it does not size. Which routine draws
                 // into it can change every frame of an animation, and making
                 // that relayout would put a full layout pass behind a repaint.
@@ -54,10 +60,15 @@ impl PropertyId {
                 // only which node a pointer lands on, and hit testing reads the
                 // computed style directly rather than through a box.
                 | Self::PointerEvents
+                | Self::PixelSnap
+                | Self::OverscrollBehaviorX
+                | Self::OverscrollBehaviorY
         )
     }
 
-    #[doc = include_str!("paint_only.doc/affects_layout.md")]
+    /// Whether a change to this property can change a node's box — the inverse of
+    /// [`is_paint_only`](Self::is_paint_only). Conservative: any property not on
+    /// the paint-only allow-list — including newly added ones — answers `true`.
     #[must_use]
     pub const fn affects_layout(self) -> bool {
         !self.is_paint_only()
@@ -88,6 +99,7 @@ mod tests {
             PropertyId::Visibility,
             PropertyId::Painter,
             PropertyId::PointerEvents,
+            PropertyId::PixelSnap,
         ] {
             assert!(id.is_paint_only(), "{id:?} should be paint-only");
             assert!(!id.affects_layout(), "{id:?} must not force a relayout");

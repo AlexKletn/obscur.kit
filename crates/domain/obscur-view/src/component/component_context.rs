@@ -1,25 +1,28 @@
-#![doc = include_str!("component_context.doc/_module.md")]
+//! `ComponentContext`: the borrow threaded through render and lifecycle hooks.
 
 use obscur_identity::SignalId;
 
 use crate::lifecycle::LifecycleState;
 use crate::state::{SignalGenerations, SubscriptionScope};
 
-#[doc = include_str!("component_context.doc/ComponentContext.md")]
+#[doc = include_str!("../../docs/api/component/component_context.doc/ComponentContext.md")]
 #[derive(Debug)]
 pub struct ComponentContext<'a> {
-    #[doc = include_str!("component_context.doc/scope.md")]
+    /// The instance's scoped subscriptions, borrowed for the call.
     scope: &'a mut SubscriptionScope,
-    #[doc = include_str!("component_context.doc/signals.md")]
+    /// The current version of every observable source, so [`track`](Self::track)
+    /// can record *which* generation a dependency was taken at. Read-only: a
+    /// component observes sources, it never advances them (values flow down).
     signals: &'a SignalGenerations,
-    #[doc = include_str!("component_context.doc/phase.md")]
+    /// The lifecycle phase this context was created for.
     phase: LifecycleState,
-    #[doc = include_str!("component_context.doc/needs_update.md")]
+    /// Flag set by [`request_update`](Self::request_update); the runtime reads
+    /// and clears it. Borrowed so the signal outlives the context.
     needs_update: &'a mut bool,
 }
 
 impl<'a> ComponentContext<'a> {
-    #[doc = include_str!("component_context.doc/new.md")]
+    #[doc = include_str!("../../docs/api/component/component_context.doc/new.md")]
     #[must_use]
     pub fn new(
         scope: &'a mut SubscriptionScope,
@@ -35,36 +38,38 @@ impl<'a> ComponentContext<'a> {
         }
     }
 
-    #[doc = include_str!("component_context.doc/track.md")]
+    #[doc = include_str!("../../docs/api/component/component_context.doc/track.md")]
     pub fn track(&mut self, source: SignalId) {
         let observed = self.signals.generation(source);
         self.scope.subscribe(source, observed);
     }
 
-    #[doc = include_str!("component_context.doc/phase_2.md")]
+    /// Returns the lifecycle phase this context is running in.
     #[must_use]
     pub const fn phase(&self) -> LifecycleState {
         self.phase
     }
 
-    #[doc = include_str!("component_context.doc/subscriptions.md")]
+    /// Shared access to the component's scoped subscriptions.
     #[must_use]
     pub fn subscriptions(&self) -> &SubscriptionScope {
         &*self.scope
     }
 
-    #[doc = include_str!("component_context.doc/subscriptions_mut.md")]
+    /// Mutable access to the component's scoped subscriptions, e.g. to open or
+    /// release one. Everything opened here is cleaned up when the scope drops.
     #[must_use]
     pub fn subscriptions_mut(&mut self) -> &mut SubscriptionScope {
         &mut *self.scope
     }
 
-    #[doc = include_str!("component_context.doc/request_update.md")]
+    #[doc = include_str!("../../docs/api/component/component_context.doc/request_update.md")]
     pub fn request_update(&mut self) {
         *self.needs_update = true;
     }
 
-    #[doc = include_str!("component_context.doc/needs_update_2.md")]
+    /// Returns whether [`request_update`](Self::request_update) was called on
+    /// this context.
     #[must_use]
     pub fn needs_update(&self) -> bool {
         *self.needs_update

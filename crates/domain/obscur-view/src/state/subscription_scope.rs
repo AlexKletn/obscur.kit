@@ -1,10 +1,10 @@
-#![doc = include_str!("subscription_scope.doc/_module.md")]
+//! `SubscriptionScope`: owns subscriptions and releases them on drop.
 
 use crate::state::state_generation::StateGeneration;
-use crate::state::subscription::{Subscription, SubscriptionId};
+use crate::state::{Subscription, SubscriptionId};
 use obscur_identity::SignalId;
 
-#[doc = include_str!("subscription_scope.doc/SubscriptionScope.md")]
+#[doc = include_str!("../../docs/api/state/subscription_scope.doc/SubscriptionScope.md")]
 #[derive(Debug, Default)]
 pub struct SubscriptionScope {
     subscriptions: Vec<Subscription>,
@@ -12,7 +12,7 @@ pub struct SubscriptionScope {
 }
 
 impl SubscriptionScope {
-    #[doc = include_str!("subscription_scope.doc/new.md")]
+    /// Creates an empty scope.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -21,7 +21,7 @@ impl SubscriptionScope {
         }
     }
 
-    #[doc = include_str!("subscription_scope.doc/subscribe.md")]
+    #[doc = include_str!("../../docs/api/state/subscription_scope.doc/subscribe.md")]
     pub fn subscribe(&mut self, source: SignalId, observed: StateGeneration) -> SubscriptionId {
         let id = SubscriptionId::from_raw(self.next_id);
         self.next_id = self.next_id.wrapping_add(1);
@@ -30,7 +30,9 @@ impl SubscriptionScope {
         id
     }
 
-    #[doc = include_str!("subscription_scope.doc/is_stale_for.md")]
+    /// Whether any subscription in this scope depends on `source` and is behind
+    /// its `current` generation — i.e. this scope's owner is a consumer of a
+    /// value that changed (spec §3.1).
     #[must_use]
     pub fn is_stale_for(&self, source: SignalId, current: StateGeneration) -> bool {
         self.subscriptions
@@ -38,36 +40,37 @@ impl SubscriptionScope {
             .any(|s| s.source() == source && s.is_stale_against(current))
     }
 
-    #[doc = include_str!("subscription_scope.doc/sources.md")]
+    /// Every source this scope depends on, in the order the dependencies were
+    /// recorded.
     pub fn sources(&self) -> impl Iterator<Item = SignalId> + '_ {
         self.subscriptions.iter().map(Subscription::source)
     }
 
-    #[doc = include_str!("subscription_scope.doc/unsubscribe.md")]
+    /// Releases a single subscription early, returning it if it was present.
     pub fn unsubscribe(&mut self, id: SubscriptionId) -> Option<Subscription> {
         let index = self.subscriptions.iter().position(|s| s.id() == id)?;
         Some(self.subscriptions.remove(index))
     }
 
-    #[doc = include_str!("subscription_scope.doc/get.md")]
+    /// Returns the subscription with `id`, if it is still active.
     #[must_use]
     pub fn get(&self, id: SubscriptionId) -> Option<&Subscription> {
         self.subscriptions.iter().find(|s| s.id() == id)
     }
 
-    #[doc = include_str!("subscription_scope.doc/len.md")]
+    /// Number of active subscriptions in this scope.
     #[must_use]
     pub fn len(&self) -> usize {
         self.subscriptions.len()
     }
 
-    #[doc = include_str!("subscription_scope.doc/is_empty.md")]
+    /// Returns `true` if the scope currently owns no subscriptions.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.subscriptions.is_empty()
     }
 
-    #[doc = include_str!("subscription_scope.doc/clear.md")]
+    #[doc = include_str!("../../docs/api/state/subscription_scope.doc/clear.md")]
     pub fn clear(&mut self) {
         self.subscriptions.clear();
     }

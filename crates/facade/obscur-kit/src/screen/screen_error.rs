@@ -1,16 +1,16 @@
-#![doc = include_str!("screen_error.doc/_module.md")]
+//! [`ScreenError`] — why an `.okui` source could not become an [`OkuiScreen`].
 
-#[doc = include_str!("screen_error.doc/ScreenError.md")]
+#[doc = include_str!("../../docs/api/screen/screen_error.doc/ScreenError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScreenError {
-    #[doc = include_str!("screen_error.doc/Parse.md")]
+    /// The source did not parse; one message per parse error.
     Parse(Vec<String>),
-    #[doc = include_str!("screen_error.doc/Compile.md")]
+    /// The source parsed but failed to compile; one message per diagnostic.
     Compile(Vec<String>),
 }
 
 impl ScreenError {
-    #[doc = include_str!("screen_error.doc/messages.md")]
+    /// The diagnostics behind this failure, in report order.
     #[must_use]
     pub fn messages(&self) -> &[String] {
         match self {

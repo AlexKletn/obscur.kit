@@ -1,1 +1,0 @@
-The up arrow key.

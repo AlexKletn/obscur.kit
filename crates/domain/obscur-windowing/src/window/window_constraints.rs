@@ -1,30 +1,30 @@
-#![doc = include_str!("window_constraints.doc/_module.md")]
+//! Minimum/maximum size constraints for a window (spec §6.2).
 
 use obscur_geometry::Size;
 
-#[doc = include_str!("window_constraints.doc/WindowConstraints.md")]
+#[doc = include_str!("../../docs/api/window/window_constraints.doc/WindowConstraints.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct WindowConstraints {
-    #[doc = include_str!("window_constraints.doc/min_size.md")]
+    /// The smallest permitted size, if any.
     pub min_size: Option<Size>,
-    #[doc = include_str!("window_constraints.doc/max_size.md")]
+    /// The largest permitted size, if any.
     pub max_size: Option<Size>,
 }
 
 impl WindowConstraints {
-    #[doc = include_str!("window_constraints.doc/UNCONSTRAINED.md")]
+    /// A fully unconstrained set of bounds (both `min` and `max` absent).
     pub const UNCONSTRAINED: Self = Self {
         min_size: None,
         max_size: None,
     };
 
-    #[doc = include_str!("window_constraints.doc/new.md")]
+    /// Constructs constraints from optional minimum and maximum sizes.
     #[must_use]
     pub const fn new(min_size: Option<Size>, max_size: Option<Size>) -> Self {
         Self { min_size, max_size }
     }
 
-    #[doc = include_str!("window_constraints.doc/with_min.md")]
+    /// Constructs constraints with only a minimum size.
     #[must_use]
     pub const fn with_min(min_size: Size) -> Self {
         Self {
@@ -33,7 +33,7 @@ impl WindowConstraints {
         }
     }
 
-    #[doc = include_str!("window_constraints.doc/with_max.md")]
+    /// Constructs constraints with only a maximum size.
     #[must_use]
     pub const fn with_max(max_size: Size) -> Self {
         Self {
@@ -42,7 +42,7 @@ impl WindowConstraints {
         }
     }
 
-    #[doc = include_str!("window_constraints.doc/constrain.md")]
+    #[doc = include_str!("../../docs/api/window/window_constraints.doc/constrain.md")]
     #[must_use]
     pub fn constrain(&self, size: Size) -> Size {
         Size::new(
@@ -60,7 +60,8 @@ impl WindowConstraints {
     }
 }
 
-#[doc = include_str!("window_constraints.doc/clamp_axis.md")]
+/// Clamps a single axis value into `[min, max]`, applying the maximum before the
+/// minimum so the minimum wins when `min > max`.
 fn clamp_axis(value: f32, min: Option<f32>, max: Option<f32>) -> f32 {
     let mut v = value;
     if let Some(max) = max

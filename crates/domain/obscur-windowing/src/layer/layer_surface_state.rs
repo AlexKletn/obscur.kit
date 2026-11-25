@@ -1,25 +1,25 @@
-#![doc = include_str!("layer_surface_state.doc/_module.md")]
+//! Where a layer surface is in its life.
 
-#[doc = include_str!("layer_surface_state.doc/LayerSurfaceState.md")]
+#[doc = include_str!("../../docs/api/layer/layer_surface_state.doc/LayerSurfaceState.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum LayerSurfaceState {
-    #[doc = include_str!("layer_surface_state.doc/Configuring.md")]
+    #[doc = include_str!("../../docs/api/layer/layer_surface_state.doc/Configuring.md")]
     #[default]
     Configuring,
-    #[doc = include_str!("layer_surface_state.doc/Ready.md")]
+    /// Configured: the size is real and the surface can be drawn to.
     Ready,
-    #[doc = include_str!("layer_surface_state.doc/Closed.md")]
+    /// The compositor closed it. Every handle is dead and the host should stop.
     Closed,
 }
 
 impl LayerSurfaceState {
-    #[doc = include_str!("layer_surface_state.doc/is_drawable.md")]
+    /// Whether the surface may be drawn to.
     #[must_use]
     pub const fn is_drawable(self) -> bool {
         matches!(self, Self::Ready)
     }
 
-    #[doc = include_str!("layer_surface_state.doc/is_closed.md")]
+    /// Whether the surface is gone for good.
     #[must_use]
     pub const fn is_closed(self) -> bool {
         matches!(self, Self::Closed)

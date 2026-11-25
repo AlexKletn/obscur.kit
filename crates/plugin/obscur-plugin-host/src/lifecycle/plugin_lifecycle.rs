@@ -1,5 +1,6 @@
-#![doc = include_str!("plugin_lifecycle.doc/_module.md")]
+//! `PluginLifecycle` (skeleton stub for the spec-defined entity; not yet implemented).
 
-#[doc = include_str!("plugin_lifecycle.doc/PluginLifecycle.md")]
+/// Placeholder for the `PluginLifecycle` entity. See the Obscur Kit 2 specs for its
+/// contract; this stub exists to materialise the target source layout.
 #[derive(Debug)]
 pub struct PluginLifecycle;

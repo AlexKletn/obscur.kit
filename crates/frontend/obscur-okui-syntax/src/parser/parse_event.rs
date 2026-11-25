@@ -1,29 +1,32 @@
-#![doc = include_str!("parse_event.doc/_module.md")]
+//! `ParseEvent`: the flat, rowan-style event stream the parser emits before
+//! materializing it into a [`SyntaxTree`](crate::syntax::SyntaxTree).
 
 use crate::parser::ParseError;
 use crate::syntax::{SyntaxKind, SyntaxToken};
 
-#[doc = include_str!("parse_event.doc/ParseEvent.md")]
+#[doc = include_str!("../../docs/api/parser/parse_event.doc/ParseEvent.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum ParseEvent {
-    #[doc = include_str!("parse_event.doc/StartNode.md")]
+    /// Open a new interior node of the given (node-valued) kind. Subsequent
+    /// tokens and child nodes attach to it until the matching
+    /// [`FinishNode`](Self::FinishNode).
     StartNode(SyntaxKind),
-    #[doc = include_str!("parse_event.doc/Token.md")]
+    /// Attach a leaf token to the currently open node.
     Token(SyntaxToken),
-    #[doc = include_str!("parse_event.doc/FinishNode.md")]
+    /// Close the most recently opened, still-open node.
     FinishNode,
-    #[doc = include_str!("parse_event.doc/Error.md")]
+    /// Record a diagnostic. Does not open or close a node.
     Error(ParseError),
 }
 
 impl ParseEvent {
-    #[doc = include_str!("parse_event.doc/is_start.md")]
+    /// Returns `true` if this event opens a node.
     #[must_use]
     pub const fn is_start(&self) -> bool {
         matches!(self, Self::StartNode(_))
     }
 
-    #[doc = include_str!("parse_event.doc/is_finish.md")]
+    /// Returns `true` if this event closes a node.
     #[must_use]
     pub const fn is_finish(&self) -> bool {
         matches!(self, Self::FinishNode)

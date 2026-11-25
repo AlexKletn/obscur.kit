@@ -1,1 +1,0 @@
-The `T` scan position.

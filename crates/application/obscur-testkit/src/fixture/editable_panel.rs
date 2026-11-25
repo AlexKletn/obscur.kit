@@ -1,4 +1,6 @@
-#![doc = include_str!("editable_panel.doc/_module.md")]
+//! The editable a text test focuses: one field that binds `on-input`, inside the
+//! [`InteractionPanel`](super::InteractionPanel) geometry every press coordinate in
+//! these tests depends on.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -13,15 +15,16 @@ use obscur_view::view::{
 
 use crate::fixture::{InteractionPanel, TestFixture, mouse};
 
-#[doc = include_str!("editable_panel.doc/EditablePanel.md")]
+#[doc = include_str!("../../docs/api/fixture/editable_panel.doc/EditablePanel.md")]
 #[derive(Debug)]
 pub struct EditablePanel;
 
 impl EditablePanel {
-    #[doc = include_str!("editable_panel.doc/CMD_INPUT.md")]
+    /// The app-owned command the field binds `on-input` to, and that a test registers a
+    /// text-input handler for.
     pub const CMD_INPUT: InternedSymbol = InternedSymbol::from_raw(0x1247);
 
-    #[doc = include_str!("editable_panel.doc/view.md")]
+    /// The field seeded with `text` as its editable value.
     #[must_use]
     pub fn view(text: &str) -> View {
         Self::panel(vec![Self::field().with_children(ViewFragment::from_nodes(
@@ -29,7 +32,7 @@ impl EditablePanel {
         ))])
     }
 
-    #[doc = include_str!("editable_panel.doc/placeholder_view.md")]
+    #[doc = include_str!("../../docs/api/fixture/editable_panel.doc/placeholder_view.md")]
     #[must_use]
     pub fn placeholder_view() -> View {
         Self::panel(vec![Self::field().with_children(ViewFragment::from_nodes(
@@ -46,13 +49,13 @@ impl EditablePanel {
         ))])
     }
 
-    #[doc = include_str!("editable_panel.doc/sheet.md")]
+    /// The sheet that sizes the panel and its field — [`InteractionPanel::sheet`].
     #[must_use]
     pub fn sheet() -> Stylesheet {
         InteractionPanel::sheet()
     }
 
-    #[doc = include_str!("editable_panel.doc/focused.md")]
+    #[doc = include_str!("../../docs/api/fixture/editable_panel.doc/focused.md")]
     #[must_use]
     pub fn focused(seed: &str) -> (UiRuntime, Rc<RefCell<String>>) {
         let mut runtime = TestFixture::runtime();
@@ -75,7 +78,7 @@ impl EditablePanel {
         (runtime, mirror)
     }
 
-    #[doc = include_str!("editable_panel.doc/panel.md")]
+    /// The 100×100 `panel` wrapper both views share.
     fn panel(children: Vec<ViewNode>) -> View {
         View::from_fragment(ViewFragment::from_nodes(vec![
             ViewNode::element(ComponentId::from_raw(500))
@@ -84,7 +87,7 @@ impl EditablePanel {
         ]))
     }
 
-    #[doc = include_str!("editable_panel.doc/field.md")]
+    /// The `b` child, bound to `on-input`, before its children are attached.
     fn field() -> ViewNode {
         ViewNode::element(ComponentId::from_raw(501))
             .with_prop(ViewProperty::new(CLASS, ViewValue::Text("b".into())))

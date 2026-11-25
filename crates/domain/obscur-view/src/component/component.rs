@@ -1,39 +1,42 @@
-#![doc = include_str!("component.doc/_module.md")]
+//! `Component`: the author-facing trait a component type implements.
 
 use crate::boundary::ErrorBoundaryPolicy;
 use crate::component::ComponentContext;
 use crate::lifecycle::{MountContext, UnmountContext, UpdateContext};
 use crate::view::View;
 
-#[doc = include_str!("component.doc/Component.md")]
+#[doc = include_str!("../../docs/api/component/component.doc/Component.md")]
 pub trait Component {
-    #[doc = include_str!("component.doc/Props.md")]
+    /// The typed inputs this component receives. Values flow down through this
+    /// type; it is supplied by the parent on every render (spec §3.1).
     type Props;
 
-    #[doc = include_str!("component.doc/render.md")]
+    #[doc = include_str!("../../docs/api/component/component.doc/render.md")]
     fn render(&mut self, ctx: &mut ComponentContext<'_>, props: &Self::Props) -> View;
 
-    #[doc = include_str!("component.doc/on_mount.md")]
+    /// Called once when the instance is first mounted. Default: no-op.
     fn on_mount(&mut self, ctx: &mut MountContext<'_, '_>) {
         let _ = ctx;
     }
 
-    #[doc = include_str!("component.doc/on_update.md")]
+    #[doc = include_str!("../../docs/api/component/component.doc/on_update.md")]
     fn on_update(&mut self, ctx: &mut UpdateContext<'_, '_>) {
         let _ = ctx;
     }
 
-    #[doc = include_str!("component.doc/on_unmount.md")]
+    #[doc = include_str!("../../docs/api/component/component.doc/on_unmount.md")]
     fn on_unmount(&mut self, ctx: &mut UnmountContext<'_, '_>) {
         let _ = ctx;
     }
 
-    #[doc = include_str!("component.doc/error_boundary.md")]
+    /// The error-boundary policy for this component. Default: an enabled
+    /// boundary with a small retry budget. Override to customize or return
+    /// [`ErrorBoundaryPolicy::disabled`] to opt out (spec §1.7).
     fn error_boundary(&self) -> ErrorBoundaryPolicy {
         ErrorBoundaryPolicy::default()
     }
 
-    #[doc = include_str!("component.doc/fallback.md")]
+    #[doc = include_str!("../../docs/api/component/component.doc/fallback.md")]
     fn fallback(&self) -> Option<View> {
         None
     }

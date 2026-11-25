@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Support module.
 mod support_level;
 
 pub use support_level::SupportLevel;

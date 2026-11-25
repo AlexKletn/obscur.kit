@@ -1,38 +1,39 @@
-#![doc = include_str!("stacking_context.doc/_module.md")]
+//! The stacking context a `LAYER_ROOT` node establishes.
 
 use std::cmp::Ordering;
 
 use obscur_identity::NodeId;
 
-#[doc = include_str!("stacking_context.doc/StackingContext.md")]
+#[doc = include_str!("../../docs/api/layer/stacking_context.doc/StackingContext.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StackingContext {
-    #[doc = include_str!("stacking_context.doc/root.md")]
+    /// The node that establishes this stacking context.
     root: NodeId,
-    #[doc = include_str!("stacking_context.doc/z_index.md")]
+    /// Paint order among siblings; higher paints on top.
     z_index: i32,
 }
 
 impl StackingContext {
-    #[doc = include_str!("stacking_context.doc/new.md")]
+    /// Creates a stacking context established by `root` at paint order
+    /// `z_index`.
     #[must_use]
     pub const fn new(root: NodeId, z_index: i32) -> Self {
         Self { root, z_index }
     }
 
-    #[doc = include_str!("stacking_context.doc/root_2.md")]
+    /// Returns the node that establishes this stacking context.
     #[must_use]
     pub const fn root(self) -> NodeId {
         self.root
     }
 
-    #[doc = include_str!("stacking_context.doc/z_index_2.md")]
+    /// Returns the paint order (`z_index`); higher paints on top.
     #[must_use]
     pub const fn z_index(self) -> i32 {
         self.z_index
     }
 
-    #[doc = include_str!("stacking_context.doc/paint_order.md")]
+    #[doc = include_str!("../../docs/api/layer/stacking_context.doc/paint_order.md")]
     #[must_use]
     pub fn paint_order(self, other: Self) -> Ordering {
         self.z_index

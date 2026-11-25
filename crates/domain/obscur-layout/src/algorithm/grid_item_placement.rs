@@ -1,26 +1,34 @@
-#![doc = include_str!("grid_item_placement.doc/_module.md")]
+#![doc = include_str!("../../docs/api/algorithm/grid_item_placement.doc/_module.md")]
+
+use std::collections::HashMap;
+
+use obscur_identity::NodeId;
 
 use super::LayoutChild;
-use super::grid::GridAutoFlow;
+use super::grid::{GridAutoFlow, preceding_tracks, resolve_axis};
+use super::layout_child::ordered_child_indices;
 
-#[doc = include_str!("grid_item_placement.doc/PlacedItems.md")]
+#[doc = include_str!("../../docs/api/algorithm/grid_item_placement.doc/PlacedItems.md")]
 pub(super) struct PlacedItems {
-    #[doc = include_str!("grid_item_placement.doc/col.md")]
+    /// Each item's start column.
     pub(super) col: Vec<usize>,
-    #[doc = include_str!("grid_item_placement.doc/row.md")]
+    /// Each item's start row.
     pub(super) row: Vec<usize>,
-    #[doc = include_str!("grid_item_placement.doc/col_span.md")]
+    /// Each item's column span (at least `1`).
     pub(super) col_span: Vec<usize>,
-    #[doc = include_str!("grid_item_placement.doc/row_span.md")]
+    /// Each item's row span (at least `1`).
     pub(super) row_span: Vec<usize>,
-    #[doc = include_str!("grid_item_placement.doc/n_cols.md")]
+    /// Total columns the grid spans, explicit and implicit.
     pub(super) n_cols: usize,
-    #[doc = include_str!("grid_item_placement.doc/n_rows.md")]
+    /// Total rows the grid spans, explicit and implicit.
     pub(super) n_rows: usize,
+    pub(super) preceding_cols: usize,
+    pub(super) preceding_rows: usize,
+    pub(super) limited_item: Option<NodeId>,
 }
 
 impl PlacedItems {
-    #[doc = include_str!("grid_item_placement.doc/resolve.md")]
+    #[doc = include_str!("../../docs/api/algorithm/grid_item_placement.doc/resolve.md")]
     pub(super) fn resolve(
         children: &[LayoutChild],
         flow: GridAutoFlow,
@@ -36,106 +44,138 @@ impl PlacedItems {
         let mut col_span = Vec::with_capacity(count);
         let mut row_anchor = Vec::with_capacity(count);
         let mut row_span = Vec::with_capacity(count);
+        let (preceding_cols, preceding_rows) =
+            children.iter().fold((0, 0), |(cols, rows), child| {
+                let placement = child.style().grid_placement();
+                (
+                    cols.max(preceding_tracks(
+                        placement.column_start,
+                        placement.column_end,
+                        templ_cols_len,
+                    )),
+                    rows.max(preceding_tracks(
+                        placement.row_start,
+                        placement.row_end,
+                        templ_rows_len,
+                    )),
+                )
+            });
+        let mut limited_item = None;
         for child in children {
             let placement = child.style().grid_placement();
-            let (ca, cs) = placement.resolve_column(templ_cols_len);
-            let (ra, rs) = placement.resolve_row(templ_rows_len);
+            let ((ca, cs), col_limited) = resolve_axis(
+                placement.column_start,
+                placement.column_end,
+                templ_cols_len,
+                preceding_cols,
+            );
+            let ((ra, rs), row_limited) = resolve_axis(
+                placement.row_start,
+                placement.row_end,
+                templ_rows_len,
+                preceding_rows,
+            );
+            if col_limited || row_limited {
+                limited_item.get_or_insert(child.node());
+            }
             col_anchor.push(ca);
             col_span.push(cs.max(1));
             row_anchor.push(ra);
             row_span.push(rs.max(1));
         }
 
-        // Column count: the explicit tracks, grown to cover any definite column
-        // line that overflows the template and any span wider than it (implicit
-        // auto columns). With all-`Auto` placement (every span 1, no definite
-        // line) this is exactly the template width — the historical grid.
-        let mut n_cols = templ_cols_len.max(1);
-        for i in 0..count {
-            if let Some(c) = col_anchor[i] {
-                n_cols = n_cols.max(c + col_span[i]);
-            }
-            n_cols = n_cols.max(col_span[i]);
+        let templ_cols_len = templ_cols_len + preceding_cols;
+        let templ_rows_len = templ_rows_len + preceding_rows;
+
+        // Use one placement algorithm for both directions. In column flow
+        // its rows are physical columns and its columns are physical rows.
+        let mut column_count = templ_cols_len;
+        if flow.is_column() {
+            std::mem::swap(&mut col_anchor, &mut row_anchor);
+            std::mem::swap(&mut col_span, &mut row_span);
+            column_count = templ_rows_len;
         }
 
-        // Row-wrap bound for **column** auto-flow: the explicit rows, grown to
-        // cover any definite row line / row span (the row analogue of `n_cols`).
-        // Only consulted when the container flows column-major.
-        let mut n_rows_flow = templ_rows_len.max(1);
+        let mut occupied = Vec::new();
+        let mut place_col = vec![0; count];
+        let mut place_row = vec![0; count];
+
+        // Fully definite items can overlap one another, but reserve their
+        // cells before any item searches for a free position.
         for i in 0..count {
-            if let Some(r) = row_anchor[i] {
-                n_rows_flow = n_rows_flow.max(r + row_span[i]);
+            if let (Some(col), Some(row)) = (col_anchor[i], row_anchor[i]) {
+                place_col[i] = col;
+                place_row[i] = row;
+                mark_block(&mut occupied, row, row_span[i], col, col_span[i]);
             }
-            n_rows_flow = n_rows_flow.max(row_span[i]);
         }
 
-        // Two-phase placement into an occupancy grid. Phase A — items with a
-        // definite column and/or row: honour the definite axis, auto-flow any
-        // missing axis. Phase B — fully-auto items, placed per the container's
-        // `grid-auto-flow`: row- vs column-major (the iteration axis) and sparse
-        // vs dense (a forward-only cursor vs a from-the-origin search that
-        // backfills earlier holes). With the default `Row` (sparse) flow and
-        // all-`Auto` placement Phase A is empty and Phase B fills cell `i` in
-        // row-major order — byte-identical to the previous auto-placement.
-        let mut occ: Vec<Vec<bool>> = Vec::new();
-        let mut place_col = vec![0_usize; count];
-        let mut place_row = vec![0_usize; count];
-        for i in 0..count {
-            let (ca, ra) = (col_anchor[i], row_anchor[i]);
-            if ca.is_none() && ra.is_none() {
-                continue; // fully auto → Phase B
+        let order = ordered_child_indices(children);
+        let item_index = |i| order.as_ref().map_or(i, |indices| indices[i]);
+
+        // Items locked to a row may grow the grid in the other direction.
+        let mut locked_row_end = HashMap::new();
+        for i in (0..count).map(item_index) {
+            if let (None, Some(row)) = (col_anchor[i], row_anchor[i]) {
+                let mut col = locked_row_end.get(&row).copied().unwrap_or(0);
+                while !block_free(&occupied, row, row_span[i], col, col_span[i]) {
+                    col += 1;
+                }
+                if !flow.is_dense() {
+                    locked_row_end.insert(row, col + col_span[i]);
+                }
+                place_col[i] = col;
+                place_row[i] = row;
+                mark_block(&mut occupied, row, row_span[i], col, col_span[i]);
             }
-            let (cspan, rspan) = (col_span[i], row_span[i]);
-            let (c0, r0) = match (ca, ra) {
-                (Some(c), Some(r)) => (c, r),
-                (Some(c), None) => (c, first_row(&occ, c, cspan, rspan, n_cols)),
-                (None, Some(r)) => (first_col(&occ, r, cspan, rspan, n_cols), r),
-                (None, None) => unreachable!(),
-            };
-            mark_block(&mut occ, r0, rspan, c0, cspan, n_cols);
-            place_col[i] = c0;
-            place_row[i] = r0;
         }
-        // Phase B: the auto-placement cursor. `is_dense` searches from the origin
-        // every item (backfilling holes); the sparse cursor only moves forward.
-        let (mut cur_major, mut cur_minor) = (0_usize, 0_usize);
+
+        let mut n_cols = column_count.max(1);
         for i in 0..count {
-            if col_anchor[i].is_some() || row_anchor[i].is_some() {
-                continue; // placed in Phase A
-            }
-            let (cspan, rspan) = (col_span[i], row_span[i]);
-            let (c0, r0) = if flow.is_column() {
-                // Column-major: `cur_major` is the column, `cur_minor` the row.
-                let (sc, sr) = if flow.is_dense() {
-                    (0, 0)
-                } else {
-                    (cur_major, cur_minor)
-                };
-                first_fit_col_major(&occ, cspan, rspan, n_rows_flow, sc, sr)
-            } else if flow.is_dense() {
-                first_fit(&occ, cspan, rspan, n_cols)
+            let col = if row_anchor[i].is_some() {
+                place_col[i]
             } else {
-                // Row-major sparse: `cur_major` is the row, `cur_minor` the column.
-                first_fit_from(&occ, cspan, rspan, n_cols, cur_major, cur_minor)
+                col_anchor[i].unwrap_or(0)
             };
-            mark_block(&mut occ, r0, rspan, c0, cspan, n_cols);
-            place_col[i] = c0;
-            place_row[i] = r0;
-            if !flow.is_dense() {
-                (cur_major, cur_minor) = if flow.is_column() { (c0, r0) } else { (r0, c0) };
-            }
+            n_cols = n_cols.max(col + col_span[i]);
         }
-        // Column-flow items may land past the explicit column count (implicit
-        // columns); grow `n_cols` to cover them. For row flow every placed column
-        // is already within `n_cols`, so this is a no-op (byte-identical).
-        for i in 0..count {
-            n_cols = n_cols.max(place_col[i] + col_span[i]);
+
+        // Place the remaining items in order-modified source order. Sparse flows keep the
+        // cursor forward-only while dense flows restart each search at zero.
+        let (mut row, mut col) = (0, 0);
+        for i in (0..count).map(item_index) {
+            if row_anchor[i].is_some() {
+                continue;
+            }
+            if flow.is_dense() {
+                (row, col) = (0, 0);
+            }
+            let (cspan, rspan) = (col_span[i], row_span[i]);
+            if let Some(fixed_col) = col_anchor[i] {
+                row += usize::from(fixed_col < col);
+                col = fixed_col;
+                while !block_free(&occupied, row, rspan, col, cspan) {
+                    row += 1;
+                }
+            } else {
+                (col, row) = first_fit_from(&occupied, cspan, rspan, n_cols, row, col);
+            }
+            place_col[i] = col;
+            place_row[i] = row;
+            mark_block(&mut occupied, row, rspan, col, cspan);
+        }
+
+        if flow.is_column() {
+            std::mem::swap(&mut place_col, &mut place_row);
+            std::mem::swap(&mut col_span, &mut row_span);
+            n_cols = (0..count)
+                .map(|i| place_col[i] + col_span[i])
+                .fold(templ_cols_len.max(1), usize::max);
         }
 
         let n_rows = (0..count)
             .map(|i| place_row[i] + row_span[i])
-            .max()
-            .unwrap_or(0);
+            .fold(templ_rows_len, usize::max);
 
         Self {
             col: place_col,
@@ -144,105 +184,38 @@ impl PlacedItems {
             row_span,
             n_cols,
             n_rows,
+            preceding_cols,
+            preceding_rows,
+            limited_item,
         }
     }
 }
 
-#[doc = include_str!("grid_item_placement.doc/block_free.md")]
-fn block_free(
-    occ: &[Vec<bool>],
-    row: usize,
-    rspan: usize,
-    col: usize,
-    cspan: usize,
-    n_cols: usize,
-) -> bool {
-    if col + cspan > n_cols {
-        return false;
+/// Checks whether a block is free. Cells beyond the stored occupancy are free.
+fn block_free(occ: &[Vec<bool>], row: usize, rspan: usize, col: usize, cspan: usize) -> bool {
+    occ.iter()
+        .skip(row)
+        .take(rspan)
+        .all(|line| !line.iter().skip(col).take(cspan).any(|&cell| cell))
+}
+
+/// Marks a block occupied, extending the occupancy rows touched by the block.
+fn mark_block(occ: &mut Vec<Vec<bool>>, row: usize, rspan: usize, col: usize, cspan: usize) {
+    if occ.len() < row + rspan {
+        occ.resize_with(row + rspan, Vec::new);
     }
-    for line in occ.iter().skip(row).take(rspan) {
-        for &cell in line.iter().skip(col).take(cspan) {
-            if cell {
-                return false;
-            }
+    let end = col + cspan;
+    for line in &mut occ[row..row + rspan] {
+        if line.len() < end {
+            line.resize(end, false);
         }
-    }
-    true
-}
-
-#[doc = include_str!("grid_item_placement.doc/mark_block.md")]
-fn mark_block(
-    occ: &mut Vec<Vec<bool>>,
-    row: usize,
-    rspan: usize,
-    col: usize,
-    cspan: usize,
-    n_cols: usize,
-) {
-    let width = n_cols.max(col + cspan);
-    while occ.len() < row + rspan {
-        occ.push(vec![false; width]);
-    }
-    for line in occ.iter_mut() {
-        if line.len() < width {
-            line.resize(width, false);
-        }
-    }
-    for line in occ.iter_mut().skip(row).take(rspan) {
-        for cell in line.iter_mut().skip(col).take(cspan) {
-            *cell = true;
-        }
+        line[col..end].fill(true);
     }
 }
 
-#[doc = include_str!("grid_item_placement.doc/first_row.md")]
-fn first_row(occ: &[Vec<bool>], col: usize, cspan: usize, rspan: usize, n_cols: usize) -> usize {
-    let mut row = 0;
-    while !block_free(occ, row, rspan, col, cspan, n_cols) {
-        row += 1;
-    }
-    row
-}
-
-#[doc = include_str!("grid_item_placement.doc/first_col.md")]
-fn first_col(occ: &[Vec<bool>], row: usize, cspan: usize, rspan: usize, n_cols: usize) -> usize {
-    if cspan > n_cols {
-        return 0;
-    }
-    (0..=(n_cols - cspan))
-        .find(|&col| block_free(occ, row, rspan, col, cspan, n_cols))
-        .unwrap_or(0)
-}
-
-#[doc = include_str!("grid_item_placement.doc/first_fit.md")]
-fn first_fit(occ: &[Vec<bool>], cspan: usize, rspan: usize, n_cols: usize) -> (usize, usize) {
-    if cspan > n_cols {
-        return (0, 0);
-    }
-    let mut row = 0;
-    loop {
-        if let Some(col) =
-            (0..=(n_cols - cspan)).find(|&col| block_free(occ, row, rspan, col, cspan, n_cols))
-        {
-            return (col, row);
-        }
-        row += 1;
-    }
-}
-
-#[doc = include_str!("grid_item_placement.doc/block_is_free.md")]
-fn block_is_free(occ: &[Vec<bool>], row: usize, rspan: usize, col: usize, cspan: usize) -> bool {
-    for line in occ.iter().skip(row).take(rspan) {
-        for c in col..col + cspan {
-            if line.get(c).copied().unwrap_or(false) {
-                return false;
-            }
-        }
-    }
-    true
-}
-
-#[doc = include_str!("grid_item_placement.doc/first_fit_from.md")]
+/// Finds the first free `(col, row)` in row-major order at or after the cursor.
+/// The current row starts at `start_col`. Later rows start at column zero.
+/// The column bound must fit at least one item span.
 fn first_fit_from(
     occ: &[Vec<bool>],
     cspan: usize,
@@ -251,46 +224,16 @@ fn first_fit_from(
     start_row: usize,
     start_col: usize,
 ) -> (usize, usize) {
-    if cspan > n_cols {
-        return (0, start_row);
-    }
     let hi = n_cols - cspan;
     let mut row = start_row;
     let mut col_lo = start_col;
     loop {
         if col_lo <= hi
-            && let Some(col) =
-                (col_lo..=hi).find(|&col| block_free(occ, row, rspan, col, cspan, n_cols))
+            && let Some(col) = (col_lo..=hi).find(|&col| block_free(occ, row, rspan, col, cspan))
         {
             return (col, row);
         }
         row += 1;
         col_lo = 0;
-    }
-}
-
-#[doc = include_str!("grid_item_placement.doc/first_fit_col_major.md")]
-fn first_fit_col_major(
-    occ: &[Vec<bool>],
-    cspan: usize,
-    rspan: usize,
-    n_rows: usize,
-    start_col: usize,
-    start_row: usize,
-) -> (usize, usize) {
-    if rspan > n_rows {
-        return (start_col, 0);
-    }
-    let hi = n_rows - rspan;
-    let mut col = start_col;
-    let mut row_lo = start_row;
-    loop {
-        if row_lo <= hi
-            && let Some(row) = (row_lo..=hi).find(|&row| block_is_free(occ, row, rspan, col, cspan))
-        {
-            return (col, row);
-        }
-        col += 1;
-        row_lo = 0;
     }
 }

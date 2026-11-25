@@ -533,3 +533,359 @@ fn a_sliding_window_costs_what_the_window_costs() {
         (rss_kb().saturating_sub(base_rss)) as f64 / FRAMES as f64
     );
 }
+
+#[test]
+fn child_edits_reuse_styles_only_when_selectors_allow_it() {
+    let keyed_view = |keys: &[u64]| {
+        View::from_fragment(ViewFragment::from_nodes(
+            keys.iter()
+                .map(|&key| {
+                    ViewNode::element(ComponentId::from_raw(1))
+                        .with_key(ViewKey::from(key))
+                        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("row".into())))
+                })
+                .collect(),
+        ))
+    };
+    let structural_css = ".row:not(:nth-last-child(odd)) { background-color: red; }";
+    for structural in [false, true] {
+        let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(200.0, 200.0));
+        let counts = Rc::new(RefCell::new(StyleCounts::default()));
+        runtime.set_telemetry_sink(Box::new(CountingSink(Rc::clone(&counts))));
+        let source = if structural {
+            format!("{STYLESHEET}\n{structural_css}")
+        } else {
+            STYLESHEET.to_owned()
+        };
+        let mut css = CssPipeline::new();
+        css.install(&mut runtime, &[CssSource::anonymous(source)]);
+        let sheets = css.sheets();
+
+        let _ = runtime.render_now(&keyed_view(&[1, 2, 3, 4]), sheets);
+        for (keys, narrow_count) in [
+            (&[1, 5, 2, 3, 4][..], Some(1)),
+            (&[1, 5, 2, 4][..], Some(0)),
+            (&[5, 1, 2, 4][..], None),
+        ] {
+            counts.borrow_mut().resolved.clear();
+            let view = keyed_view(keys);
+            let _ = runtime.render_now(&view, sheets);
+            let actual: Vec<_> = children(&runtime)
+                .into_iter()
+                .map(|node| background(&runtime, node))
+                .collect();
+
+            let mut fresh = UiRuntime::new(RuntimeId::from_raw(2), Size::new(200.0, 200.0));
+            let _ = fresh.render_now(&view, sheets);
+            let expected: Vec<_> = children(&fresh)
+                .into_iter()
+                .map(|node| background(&fresh, node))
+                .collect();
+            assert_eq!(actual, expected);
+            if !structural && let Some(count) = narrow_count {
+                assert_eq!(
+                    counts.borrow().resolved.iter().sum::<u64>(),
+                    count,
+                    "existing siblings should retain their styles"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_sibling_rule_only_widens_child_edits_where_its_target_can_match() {
+    let leaf = |key: u64, class: &str| {
+        ViewNode::element(ComponentId::from_raw(1))
+            .with_key(ViewKey::from(key))
+            .with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
+    };
+    let branch = |key: u64, children| {
+        ViewNode::element(ComponentId::from_raw(2))
+            .with_key(ViewKey::from(key))
+            .with_children(ViewFragment::from_nodes(children))
+    };
+    let view = |insert_elsewhere, insert_between| {
+        let mut unrelated = vec![leaf(10, "row"), leaf(11, "row")];
+        if insert_elsewhere {
+            unrelated.insert(0, leaf(12, "row"));
+        }
+        let mut related = vec![
+            leaf(23, "row"),
+            leaf(24, "row"),
+            leaf(20, "lead"),
+            leaf(21, "row target"),
+        ];
+        if insert_between {
+            related.insert(3, leaf(22, "row"));
+        }
+        View::from_fragment(ViewFragment::from_nodes(vec![
+            branch(1, unrelated),
+            branch(2, related),
+        ]))
+    };
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(200.0, 200.0));
+    let counts = Rc::new(RefCell::new(StyleCounts::default()));
+    runtime.set_telemetry_sink(Box::new(CountingSink(Rc::clone(&counts))));
+    let mut css = CssPipeline::new();
+    css.install(
+        &mut runtime,
+        &[CssSource::anonymous(format!(
+            "{STYLESHEET}\n.lead + .target {{ background-color: red; }}\n.row:not(:indeterminate) {{ opacity: 1; }}"
+        ))],
+    );
+    let sheets = css.sheets();
+    let target_color = |runtime: &UiRuntime| {
+        let related = children(runtime)[1];
+        let target = *runtime
+            .tree()
+            .get(related)
+            .unwrap()
+            .child_nodes()
+            .last()
+            .unwrap();
+        background(runtime, target)
+    };
+    let _ = runtime.render_now(&view(false, false), sheets);
+    assert_eq!(target_color(&runtime), Some(RED));
+
+    counts.borrow_mut().resolved.clear();
+    let _ = runtime.render_now(&view(true, false), sheets);
+    assert_eq!(counts.borrow().resolved.iter().sum::<u64>(), 1);
+    assert_eq!(target_color(&runtime), Some(RED));
+
+    for insert_between in [true, false] {
+        let view = view(true, insert_between);
+        counts.borrow_mut().resolved.clear();
+        let _ = runtime.render_now(&view, sheets);
+        assert_eq!(
+            counts.borrow().resolved.iter().sum::<u64>(),
+            if insert_between { 2 } else { 1 }
+        );
+        let mut fresh = UiRuntime::new(RuntimeId::from_raw(2), Size::new(200.0, 200.0));
+        let _ = fresh.render_now(&view, sheets);
+        assert_eq!(target_color(&runtime), target_color(&fresh));
+        assert_eq!(
+            target_color(&runtime),
+            Some(if insert_between { BLUE } else { RED })
+        );
+    }
+}
+
+#[doc = include_str!("incremental_restyle.doc/focus_within_follows_the_focused_branch.md")]
+#[test]
+fn focus_within_follows_the_focused_branch() {
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(200.0, 200.0));
+    let mut css = CssPipeline::new();
+    css.install(
+        &mut runtime,
+        &[CssSource::anonymous(
+            ".branch { background-color: blue; }
+             .branch:focus-within { background-color: red; }",
+        )],
+    );
+    let sheets = css.sheets().to_vec();
+    let branch = |id, has_child| {
+        let children = if has_child {
+            vec![ViewNode::element(ComponentId::from_raw(id + 10))]
+        } else {
+            Vec::new()
+        };
+        ViewNode::element(ComponentId::from_raw(id))
+            .with_prop(ViewProperty::new(CLASS, ViewValue::Text("branch".into())))
+            .with_children(ViewFragment::from_nodes(children))
+    };
+    let view = View::from_fragment(ViewFragment::from_nodes(vec![
+        branch(1, true),
+        branch(2, true),
+    ]));
+    let _ = runtime.render_now(&view, &sheets);
+    let branches = children(&runtime);
+    let leaf = |runtime: &UiRuntime, branch| runtime.tree().get(branch).unwrap().child_nodes()[0];
+    let left = leaf(&runtime, branches[0]);
+    let right = leaf(&runtime, branches[1]);
+
+    for (focused, highlighted, other) in [
+        (left, branches[0], branches[1]),
+        (right, branches[1], branches[0]),
+    ] {
+        runtime.focus_node(Some(focused));
+        let _ = runtime.render_now(&view, &sheets);
+        assert!(
+            runtime
+                .pseudo_state(focused)
+                .contains(PseudoState::FOCUS_WITHIN)
+        );
+        assert!(
+            !runtime
+                .pseudo_state(highlighted)
+                .contains(PseudoState::FOCUS)
+        );
+        assert_eq!(background(&runtime, highlighted), Some((1.0, 0.0, 0.0)));
+        assert_eq!(background(&runtime, other), Some((0.0, 0.0, 1.0)));
+    }
+
+    let without_right = View::from_fragment(ViewFragment::from_nodes(vec![
+        branch(1, true),
+        branch(2, false),
+    ]));
+    let _ = runtime.render_now(&without_right, &sheets);
+    assert_eq!(runtime.focused(), None);
+    assert_eq!(background(&runtime, branches[1]), Some((0.0, 0.0, 1.0)));
+}
+
+#[doc = include_str!("incremental_restyle.doc/hover_follows_a_stationary_cursor.md")]
+#[test]
+fn hover_follows_a_stationary_cursor() {
+    use obscur_kit::geometry::Point;
+    use obscur_kit::interaction::pointer::{
+        PointerDevice, PointerEvent, PointerEventKind, PointerId,
+    };
+
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(200.0, 300.0));
+    let mut css = CssPipeline::new();
+    css.install(
+        &mut runtime,
+        &[CssSource::anonymous(
+            ".row { width: 100px; height: 50px; background-color: blue }
+             .row:hover { background-color: red }
+             .tall { height: 150px }
+             .port { width: 100px; height: 150px; overflow: auto }",
+        )],
+    );
+    let sheets = css.sheets().to_vec();
+    let rows = |count, tall| {
+        (0..count)
+            .map(|index| {
+                ViewNode::element(ComponentId::from_raw(10 + index)).with_prop(ViewProperty::new(
+                    CLASS,
+                    ViewValue::Text(
+                        if tall && index == 0 {
+                            "row tall"
+                        } else {
+                            "row"
+                        }
+                        .into(),
+                    ),
+                ))
+            })
+            .collect()
+    };
+    let point = Point::new(10.0, 120.0);
+    let move_cursor = |runtime: &mut UiRuntime| {
+        runtime.handle_pointer(PointerEvent::new(
+            PointerId::MOUSE,
+            PointerDevice::Mouse,
+            PointerEventKind::Move,
+            point,
+        ));
+    };
+    let initial = View::from_fragment(ViewFragment::from_nodes(rows(3, false)));
+    let _ = runtime.render_now(&initial, &sheets);
+    let nodes = children(&runtime);
+    move_cursor(&mut runtime);
+    assert_eq!(runtime.hovered(), Some(nodes[2]));
+
+    let grown = View::from_fragment(ViewFragment::from_nodes(rows(3, true)));
+    let frame = runtime.render_now(&grown, &sheets);
+    assert_eq!(runtime.hovered(), Some(nodes[0]));
+    use obscur_kit::scene::command::PaintCommand;
+    use obscur_kit::scene::paint::{Brush, Paint};
+    let red: Vec<_> = frame
+        .snapshot()
+        .display_list()
+        .commands()
+        .iter()
+        .filter_map(|command| match command {
+            PaintCommand::DrawPath {
+                path,
+                paint: Paint::Fill(Brush::Solid(brush)),
+                ..
+            } if brush.color().r == 1.0 => path.bounds(),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(red.len(), 1);
+    assert_eq!(red[0].origin.y, 0.0);
+    assert_eq!(red[0].size.height, 150.0);
+    assert_eq!(background(&runtime, nodes[0]), Some((1.0, 0.0, 0.0)));
+    assert_eq!(background(&runtime, nodes[2]), Some((0.0, 0.0, 1.0)));
+
+    let empty = View::from_fragment(ViewFragment::from_nodes(Vec::new()));
+    let _ = runtime.render_now(&empty, &sheets);
+    assert_eq!(runtime.hovered(), runtime.tree().root());
+
+    let scrollable = View::single(
+        ViewNode::element(ComponentId::from_raw(1))
+            .with_prop(ViewProperty::new(CLASS, ViewValue::Text("port".into())))
+            .with_children(ViewFragment::from_nodes(rows(7, false))),
+    );
+    let _ = runtime.render_now(&scrollable, &sheets);
+    let port = children(&runtime)[0];
+    let rows = runtime.tree().get(port).unwrap().child_nodes().to_vec();
+    move_cursor(&mut runtime);
+    assert_eq!(runtime.hovered(), Some(rows[2]));
+    assert_eq!(runtime.handle_scroll(100.0, point), Some(port));
+    assert_eq!(runtime.hovered(), Some(rows[4]));
+    let _ = runtime.run_due_frame(&scrollable, &sheets);
+    assert_eq!(background(&runtime, rows[4]), Some((1.0, 0.0, 0.0)));
+}
+
+#[doc = include_str!("incremental_restyle.doc/animated_transform_updates_hover_before_paint.md")]
+#[test]
+fn animated_transform_updates_hover_before_paint() {
+    use obscur_kit::geometry::Point;
+    use obscur_kit::interaction::pointer::{
+        PointerDevice, PointerEvent, PointerEventKind, PointerId,
+    };
+    use obscur_kit::scene::command::PaintCommand;
+    use obscur_kit::scene::paint::{Brush, Paint};
+
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(200.0, 100.0));
+    let mut css = CssPipeline::new();
+    css.install(
+        &mut runtime,
+        &[CssSource::anonymous(
+            ".moving { width: 30px; height: 30px; background-color: blue;
+                       animation: slide 1s linear both }
+             .moving:hover { background-color: red }
+             @keyframes slide {
+                 from { transform: translateX(0px) }
+                 to { transform: translateX(120px) }
+             }",
+        )],
+    );
+    let view = View::single(
+        ViewNode::element(ComponentId::from_raw(42))
+            .with_prop(ViewProperty::new(CLASS, ViewValue::Text("moving".into()))),
+    );
+    let _ = runtime.render_now(&view, css.sheets());
+    let node = children(&runtime)[0];
+    runtime.handle_pointer(PointerEvent::new(
+        PointerId::MOUSE,
+        PointerDevice::Mouse,
+        PointerEventKind::Move,
+        Point::new(70.0, 10.0),
+    ));
+    assert_ne!(runtime.hovered(), Some(node));
+
+    for (red, expected) in [(true, Some(node)), (false, runtime.tree().root())] {
+        runtime.advance_motion(0.5);
+        let frame = runtime.render_now(&view, css.sheets());
+        assert_eq!(runtime.hovered(), expected);
+        assert!(!frame.relaid_out());
+        assert_eq!(
+            frame
+                .snapshot()
+                .display_list()
+                .commands()
+                .iter()
+                .any(|command| {
+                    matches!(command, PaintCommand::DrawPath {
+                    paint: Paint::Fill(Brush::Solid(brush)), ..
+                } if brush.color().r == 1.0)
+                }),
+            red,
+        );
+    }
+}

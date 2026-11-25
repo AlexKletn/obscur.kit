@@ -1,10 +1,10 @@
-#![doc = include_str!("authenticator.doc/_module.md")]
+//! Token → scope authenticator for DevTools sessions (spec §7.7).
 
 use std::collections::HashMap;
 
 use obscur_devtools_protocol::message::{PermissionScope, ScopeSet};
 
-#[doc = include_str!("authenticator.doc/Authenticator.md")]
+#[doc = include_str!("../../docs/api/auth/authenticator.doc/Authenticator.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Authenticator {
     tokens: HashMap<Box<str>, ScopeSet>,
@@ -13,7 +13,7 @@ pub struct Authenticator {
 }
 
 impl Authenticator {
-    #[doc = include_str!("authenticator.doc/new.md")]
+    #[doc = include_str!("../../docs/api/auth/authenticator.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -23,7 +23,7 @@ impl Authenticator {
         }
     }
 
-    #[doc = include_str!("authenticator.doc/production.md")]
+    #[doc = include_str!("../../docs/api/auth/authenticator.doc/production.md")]
     #[must_use]
     pub fn production() -> Self {
         Self {
@@ -33,45 +33,47 @@ impl Authenticator {
         }
     }
 
-    #[doc = include_str!("authenticator.doc/with_control_excluded.md")]
+    /// Returns a copy of this authenticator that excludes the `Control` scope
+    /// from every granted set (spec §7.7).
     #[must_use]
     pub fn with_control_excluded(mut self) -> Self {
         self.exclude_control = true;
         self
     }
 
-    #[doc = include_str!("authenticator.doc/with_inject_excluded.md")]
+    /// Returns a copy of this authenticator that also excludes the `Inject`
+    /// scope from every granted set (spec §7.7).
     #[must_use]
     pub fn with_inject_excluded(mut self) -> Self {
         self.exclude_inject = true;
         self
     }
 
-    #[doc = include_str!("authenticator.doc/register_token.md")]
+    #[doc = include_str!("../../docs/api/auth/authenticator.doc/register_token.md")]
     pub fn register_token(&mut self, token: impl Into<Box<str>>, scopes: ScopeSet) {
         self.tokens.insert(token.into(), scopes);
     }
 
-    #[doc = include_str!("authenticator.doc/authenticate.md")]
+    #[doc = include_str!("../../docs/api/auth/authenticator.doc/authenticate.md")]
     #[must_use]
     pub fn authenticate(&self, token: &str) -> Option<ScopeSet> {
         let granted = *self.tokens.get(token)?;
         Some(self.mask(granted))
     }
 
-    #[doc = include_str!("authenticator.doc/is_enabled.md")]
+    #[doc = include_str!("../../docs/api/auth/authenticator.doc/is_enabled.md")]
     #[must_use]
     pub fn is_enabled(&self) -> bool {
         !self.tokens.is_empty()
     }
 
-    #[doc = include_str!("authenticator.doc/excludes_control.md")]
+    /// Returns whether the `Control` scope is excluded from every grant.
     #[must_use]
     pub fn excludes_control(&self) -> bool {
         self.exclude_control
     }
 
-    #[doc = include_str!("authenticator.doc/mask.md")]
+    /// Applies the configured production exclusions to a granted scope set.
     fn mask(&self, mut scopes: ScopeSet) -> ScopeSet {
         if self.exclude_control {
             scopes = scopes.without(PermissionScope::Control);

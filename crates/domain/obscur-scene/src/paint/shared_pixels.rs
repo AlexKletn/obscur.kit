@@ -1,18 +1,20 @@
-#![doc = include_str!("shared_pixels.doc/_module.md")]
+#![doc = include_str!("../../docs/api/paint/shared_pixels.doc/_module.md")]
 
 use std::sync::Arc;
 
-#[doc = include_str!("shared_pixels.doc/SharedPixels.md")]
+/// Bytes shared as a slice — what a decoder or any other `Arc<[u8]>` producer
+/// already holds.
 #[derive(Debug, Clone)]
 pub enum SharedPixels {
-    #[doc = include_str!("shared_pixels.doc/Shared.md")]
+    /// An `Arc<[u8]>` that already existed. Taken as-is.
     Shared(Arc<[u8]>),
-    #[doc = include_str!("shared_pixels.doc/Owned.md")]
+    /// A `Vec` moved in. Taken as-is: converting it to an `Arc<[u8]>` would allocate a
+    /// second buffer and copy the whole thing.
     Owned(Arc<Vec<u8>>),
 }
 
 impl SharedPixels {
-    #[doc = include_str!("shared_pixels.doc/as_bytes.md")]
+    /// The bytes, whichever shape they are in.
     #[must_use]
     pub fn as_bytes(&self) -> &[u8] {
         match self {
@@ -21,13 +23,13 @@ impl SharedPixels {
         }
     }
 
-    #[doc = include_str!("shared_pixels.doc/len.md")]
+    /// How many bytes there are.
     #[must_use]
     pub fn len(&self) -> usize {
         self.as_bytes().len()
     }
 
-    #[doc = include_str!("shared_pixels.doc/is_empty.md")]
+    /// Whether there are no bytes at all.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.as_bytes().is_empty()
@@ -47,7 +49,7 @@ impl From<Arc<[u8]>> for SharedPixels {
 }
 
 impl From<Vec<u8>> for SharedPixels {
-    #[doc = include_str!("shared_pixels.doc/from_vec.md")]
+    /// Moves the buffer in — it is never copied.
     fn from(bytes: Vec<u8>) -> Self {
         // A MOVE. `Arc<[u8]>::from(vec)` would allocate a second buffer and copy
         // into it — measured at 1080p, six milliseconds a frame to publish bytes

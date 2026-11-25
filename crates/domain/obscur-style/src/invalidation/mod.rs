@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Invalidation module.
 mod style_dependency;
 pub use style_dependency::StyleDependency;
 mod style_invalidation;

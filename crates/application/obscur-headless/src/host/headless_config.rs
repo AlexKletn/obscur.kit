@@ -1,33 +1,34 @@
-#![doc = include_str!("headless_config.doc/_module.md")]
+//! Configuration for a headless host: [`HeadlessConfig`].
 
 use obscur_geometry::{ScaleFactor, Size};
 
-#[doc = include_str!("headless_config.doc/HeadlessConfig.md")]
+#[doc = include_str!("../../docs/api/host/headless_config.doc/HeadlessConfig.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HeadlessConfig {
-    #[doc = include_str!("headless_config.doc/viewport.md")]
+    /// The logical viewport each frame is laid out under.
     viewport: Size,
-    #[doc = include_str!("headless_config.doc/scale.md")]
+    /// The display scale factor mapping logical to physical pixels.
     scale: ScaleFactor,
 }
 
 impl HeadlessConfig {
-    #[doc = include_str!("headless_config.doc/DEFAULT_VIEWPORT.md")]
+    /// The default logical viewport (800x600) used by [`Default`] and
+    /// [`with_viewport`](Self::with_viewport).
     const DEFAULT_VIEWPORT: Size = Size::new(800.0, 600.0);
 
-    #[doc = include_str!("headless_config.doc/new.md")]
+    /// Creates a configuration with an explicit `viewport` and `scale`.
     #[must_use]
     pub const fn new(viewport: Size, scale: ScaleFactor) -> Self {
         Self { viewport, scale }
     }
 
-    #[doc = include_str!("headless_config.doc/with_viewport.md")]
+    #[doc = include_str!("../../docs/api/host/headless_config.doc/with_viewport.md")]
     #[must_use]
     pub const fn with_viewport(viewport: Size) -> Self {
         Self::new(viewport, ScaleFactor::IDENTITY)
     }
 
-    #[doc = include_str!("headless_config.doc/with_scale.md")]
+    /// Returns a copy of this configuration with `scale` replaced.
     #[must_use]
     pub const fn with_scale(self, scale: ScaleFactor) -> Self {
         Self {
@@ -36,13 +37,13 @@ impl HeadlessConfig {
         }
     }
 
-    #[doc = include_str!("headless_config.doc/viewport_2.md")]
+    /// Returns the logical viewport each frame is laid out under.
     #[must_use]
     pub const fn viewport(self) -> Size {
         self.viewport
     }
 
-    #[doc = include_str!("headless_config.doc/scale_2.md")]
+    /// Returns the display scale factor mapping logical to physical pixels.
     #[must_use]
     pub const fn scale(self) -> ScaleFactor {
         self.scale
@@ -50,7 +51,7 @@ impl HeadlessConfig {
 }
 
 impl Default for HeadlessConfig {
-    #[doc = include_str!("headless_config.doc/default.md")]
+    /// An 800x600 logical viewport at [`ScaleFactor::IDENTITY`].
     fn default() -> Self {
         Self::new(Self::DEFAULT_VIEWPORT, ScaleFactor::IDENTITY)
     }

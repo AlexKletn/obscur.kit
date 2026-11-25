@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! View module.
 mod view;
 pub use view::View;
 mod view_event_binding;
@@ -13,10 +13,11 @@ mod canvas;
 pub use canvas::{CANVAS_PAINTER, CanvasPaint, canvas_painter, canvas_painter_prop};
 mod event_name;
 pub use event_name::{
-    EVENT_BLUR, EVENT_CHANGE, EVENT_CLICK, EVENT_CONTEXT_MENU, EVENT_FOCUS, EVENT_INPUT,
-    EVENT_KEY_DOWN, EVENT_KEY_UP, EVENT_LONG_PRESS, EVENT_POINTER_CANCEL, EVENT_POINTER_DOWN,
-    EVENT_POINTER_ENTER, EVENT_POINTER_LEAVE, EVENT_POINTER_MOVE, EVENT_POINTER_UP, EVENT_WHEEL,
-    RESERVED_EVENTS,
+    EVENT_BLUR, EVENT_CHANGE, EVENT_CLICK, EVENT_CONTEXT_MENU, EVENT_FOCUS, EVENT_GAMEPAD,
+    EVENT_INPUT, EVENT_KEY_DOWN, EVENT_KEY_UP, EVENT_LONG_PRESS, EVENT_POINTER_CANCEL,
+    EVENT_POINTER_DOWN, EVENT_POINTER_ENTER, EVENT_POINTER_LEAVE, EVENT_POINTER_MOVE,
+    EVENT_POINTER_UP, EVENT_SCROLL_GESTURE, EVENT_SYSTEM_BACK, EVENT_TOUCH_GESTURE,
+    EVENT_TOUCHPAD_GESTURE, EVENT_WHEEL, RESERVED_EVENTS,
 };
 mod slot;
 pub use slot::{
@@ -26,11 +27,13 @@ pub use slot::{
 mod slot_mismatch;
 pub use slot_mismatch::{SlotMismatch, slot_symbol};
 mod virtual_collection;
+mod virtual_row_builder;
 pub use virtual_collection::{
     DEFAULT_VIRTUAL_ROW_EXTENT, VIRTUAL_COLLECTION, VIRTUAL_ITEM_COUNT, VIRTUAL_LIST_ID,
-    VIRTUAL_ROW_EXTENT, VIRTUAL_SCROLL_RESET, VIRTUAL_SPACER, has_virtual_collection,
-    is_virtual_collection, realize_virtual_collections, realize_virtual_lists, virtual_item_count,
-    virtual_list_id, virtual_row_extent, virtual_scroll_reset, virtual_scroll_resets,
+    VIRTUAL_ROW_EXTENT, VIRTUAL_SCROLL_RESET, VIRTUAL_SPACER, has_inline_virtual_rows,
+    has_virtual_collection, is_virtual_collection, realize_virtual_collections,
+    realize_virtual_lists, virtual_item_count, virtual_list_id, virtual_row_extent,
+    virtual_scroll_reset, virtual_scroll_resets,
 };
 mod slider;
 pub use slider::{
@@ -47,3 +50,6 @@ mod view_property;
 pub use view_property::ViewProperty;
 mod view_value;
 pub use view_value::ViewValue;
+
+mod shared_element_key;
+pub use shared_element_key::SHARED_ELEMENT_KEY;

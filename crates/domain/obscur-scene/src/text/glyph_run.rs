@@ -1,30 +1,34 @@
-#![doc = include_str!("glyph_run.doc/_module.md")]
+//! A shaped, positioned run of glyphs carried by a `DrawText` command.
 
 use super::PositionedGlyph;
 
-#[doc = include_str!("glyph_run.doc/GlyphRun.md")]
+#[doc = include_str!("../../docs/api/text/glyph_run.doc/GlyphRun.md")]
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct GlyphRun {
-    #[doc = include_str!("glyph_run.doc/glyphs.md")]
+    /// The positioned glyphs, in pen order.
     glyphs: Vec<PositionedGlyph>,
-    #[doc = include_str!("glyph_run.doc/font.md")]
+    /// The shaped run advance when some advances have no corresponding painted glyph.
+    advance_override: Option<f32>,
+    /// The font handle the glyph indices belong to (a bare face index; `0` is the
+    /// primary face).
     font: u32,
-    #[doc = include_str!("glyph_run.doc/font_size.md")]
+    /// The font size the run was shaped at, in logical pixels.
     font_size: f32,
-    #[doc = include_str!("glyph_run.doc/text.md")]
+    /// The run's source text, retained as metadata.
     text: Box<str>,
-    #[doc = include_str!("glyph_run.doc/synth_oblique.md")]
+    /// Whether the renderer should shear the glyphs to synthesize a slant.
     synth_oblique: bool,
-    #[doc = include_str!("glyph_run.doc/synth_bold.md")]
+    /// Whether the renderer should thicken the glyphs to synthesize a bold weight.
     synth_bold: bool,
 }
 
 impl GlyphRun {
-    #[doc = include_str!("glyph_run.doc/new.md")]
+    #[doc = include_str!("../../docs/api/text/glyph_run.doc/new.md")]
     #[must_use]
     pub fn new(glyphs: Vec<PositionedGlyph>, font_size: f32, text: impl Into<Box<str>>) -> Self {
         Self {
             glyphs,
+            advance_override: None,
             font: 0,
             font_size,
             text: text.into(),
@@ -33,14 +37,24 @@ impl GlyphRun {
         }
     }
 
-    #[doc = include_str!("glyph_run.doc/with_font.md")]
+    /// Sets the total logical advance independently of the glyphs that paint.
+    #[must_use]
+    pub const fn with_advance(mut self, advance: f32) -> Self {
+        self.advance_override = Some(advance);
+        self
+    }
+
+    /// Returns this run tagged with the `font` handle its glyph indices belong to
+    /// (a bare face index; `0` is the primary face).
     #[must_use]
     pub const fn with_font(mut self, font: u32) -> Self {
         self.font = font;
         self
     }
 
-    #[doc = include_str!("glyph_run.doc/with_synthesis.md")]
+    /// Returns this run flagged for synthetic styling: `oblique` shears the glyphs
+    /// to fake a slant, `bold` thickens them to fake weight. Both default to
+    /// `false` (the resolved face carries the requested style).
     #[must_use]
     pub const fn with_synthesis(mut self, oblique: bool, bold: bool) -> Self {
         self.synth_oblique = oblique;
@@ -48,58 +62,61 @@ impl GlyphRun {
         self
     }
 
-    #[doc = include_str!("glyph_run.doc/synth_oblique_2.md")]
+    /// Returns whether the renderer should shear the glyphs to synthesize a slant.
     #[must_use]
     pub const fn synth_oblique(&self) -> bool {
         self.synth_oblique
     }
 
-    #[doc = include_str!("glyph_run.doc/synth_bold_2.md")]
+    /// Returns whether the renderer should thicken the glyphs to synthesize a bold
+    /// weight.
     #[must_use]
     pub const fn synth_bold(&self) -> bool {
         self.synth_bold
     }
 
-    #[doc = include_str!("glyph_run.doc/font_2.md")]
+    /// Returns the font handle the run's glyph indices belong to (a bare face
+    /// index; `0` is the primary face).
     #[must_use]
     pub const fn font(&self) -> u32 {
         self.font
     }
 
-    #[doc = include_str!("glyph_run.doc/glyphs_2.md")]
+    /// Returns the positioned glyphs, in pen order.
     #[must_use]
     pub fn glyphs(&self) -> &[PositionedGlyph] {
         &self.glyphs
     }
 
-    #[doc = include_str!("glyph_run.doc/font_size_2.md")]
+    /// Returns the font size the run was shaped at, in logical pixels.
     #[must_use]
     pub const fn font_size(&self) -> f32 {
         self.font_size
     }
 
-    #[doc = include_str!("glyph_run.doc/text_2.md")]
+    /// Returns the run's source text.
     #[must_use]
     pub fn text(&self) -> &str {
         &self.text
     }
 
-    #[doc = include_str!("glyph_run.doc/len.md")]
+    /// Returns the number of glyphs in the run.
     #[must_use]
     pub fn len(&self) -> usize {
         self.glyphs.len()
     }
 
-    #[doc = include_str!("glyph_run.doc/is_empty.md")]
+    /// Returns whether the run contains no glyphs.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.glyphs.is_empty()
     }
 
-    #[doc = include_str!("glyph_run.doc/advance.md")]
+    /// Returns the run’s total logical advance. By default it sums the glyph advances. A shaped run can supply an explicit advance for invisible spacing, such as tabs.
     #[must_use]
     pub fn advance(&self) -> f32 {
-        self.glyphs.iter().map(PositionedGlyph::advance).sum()
+        self.advance_override
+            .unwrap_or_else(|| self.glyphs.iter().map(PositionedGlyph::advance).sum())
     }
 }
 
@@ -127,6 +144,9 @@ mod tests {
         assert_eq!(run.font_size(), 16.0);
         assert_eq!(run.text(), "abc");
         assert_eq!(run.advance(), 18.0);
+        let with_spacing = run.clone().with_advance(24.0);
+        assert_eq!(with_spacing.advance(), 24.0);
+        assert_eq!(with_spacing.glyphs(), run.glyphs());
         assert_eq!(run.glyphs()[1].glyph_id(), u32::from('b'));
         // A run built with `new` defaults to the primary face (font 0).
         assert_eq!(run.font(), 0);

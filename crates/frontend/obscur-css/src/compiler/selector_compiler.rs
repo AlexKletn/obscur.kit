@@ -1,4 +1,4 @@
-#![doc = include_str!("selector_compiler.doc/_module.md")]
+#![doc = include_str!("../../docs/api/compiler/selector_compiler.doc/_module.md")]
 
 use crate::error::{UnsupportedCssFeature, UnsupportedFeatureKind};
 use crate::parser::{
@@ -10,35 +10,29 @@ use crate::source::{CssSource, SourceSpan};
 use obscur_style::selector as style;
 use obscur_style::selector::{SelectorId, SelectorSpecificity};
 
-#[doc = include_str!("selector_compiler.doc/CompiledSelector.md")]
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct CompiledSelector {
-    #[doc = include_str!("selector_compiler.doc/id.md")]
-    pub id: SelectorId,
-    #[doc = include_str!("selector_compiler.doc/specificity.md")]
-    pub specificity: SelectorSpecificity,
-}
+use super::CompiledSelector;
 
-#[doc = include_str!("selector_compiler.doc/SelectorCompiler.md")]
+#[doc = include_str!("../../docs/api/compiler/selector_compiler.doc/SelectorCompiler.md")]
 #[derive(Debug, Clone, Default)]
 pub struct SelectorCompiler {
     next_id: u64,
 }
 
 impl SelectorCompiler {
-    #[doc = include_str!("selector_compiler.doc/new.md")]
+    /// Creates a selector compiler whose first minted id is zero.
     #[must_use]
     pub const fn new() -> Self {
         Self { next_id: 0 }
     }
 
-    #[doc = include_str!("selector_compiler.doc/specificity_2.md")]
+    #[doc = include_str!("../../docs/api/compiler/selector_compiler.doc/specificity_2.md")]
     #[must_use]
     pub fn specificity(selector: &ParsedComplexSelector) -> SelectorSpecificity {
         Self::lower_complex(selector).specificity()
     }
 
-    #[doc = include_str!("selector_compiler.doc/compile.md")]
+    /// Compiles one complex selector, minting its id and reporting any excluded
+    /// pseudo-classes and pseudo-elements into `unsupported`.
     #[must_use]
     pub fn compile(
         &mut self,
@@ -52,7 +46,7 @@ impl SelectorCompiler {
         CompiledSelector { id, specificity }
     }
 
-    #[doc = include_str!("selector_compiler.doc/compile_list.md")]
+    /// Compiles every complex selector in a selector list, in source order.
     #[must_use]
     pub fn compile_list(
         &mut self,
@@ -65,13 +59,14 @@ impl SelectorCompiler {
             .collect()
     }
 
-    #[doc = include_str!("selector_compiler.doc/lower_list.md")]
+    #[doc = include_str!("../../docs/api/compiler/selector_compiler.doc/lower_list.md")]
     #[must_use]
     pub fn lower_list(list: &ParsedSelectorList) -> style::SelectorList {
         style::SelectorList::new(list.0.iter().map(Self::lower_complex).collect())
     }
 
-    #[doc = include_str!("selector_compiler.doc/lower_complex.md")]
+    /// Lowers one parsed complex selector, mapping the head and each
+    /// combinator-linked tail compound left-to-right.
     #[must_use]
     pub fn lower_complex(selector: &ParsedComplexSelector) -> style::ComplexSelector {
         let head = Self::lower_compound(&selector.head);
@@ -88,14 +83,14 @@ impl SelectorCompiler {
         style::ComplexSelector::new(head, tail)
     }
 
-    #[doc = include_str!("selector_compiler.doc/lower_compound.md")]
+    /// Lowers one parsed compound selector into its run of simple selectors.
     #[must_use]
     pub fn lower_compound(compound: &ParsedCompoundSelector) -> style::CompoundSelector {
         style::CompoundSelector::new(compound.parts.iter().map(lower_simple).collect())
     }
 }
 
-#[doc = include_str!("selector_compiler.doc/lower_combinator.md")]
+/// Maps a parser combinator onto its `obscur-style` counterpart (1:1 by name).
 const fn lower_combinator(combinator: Combinator) -> style::Combinator {
     match combinator {
         Combinator::Descendant => style::Combinator::Descendant,
@@ -105,14 +100,16 @@ const fn lower_combinator(combinator: Combinator) -> style::Combinator {
     }
 }
 
-#[doc = include_str!("selector_compiler.doc/lower_simple.md")]
+#[doc = include_str!("../../docs/api/compiler/selector_compiler.doc/lower_simple.md")]
 fn lower_simple(simple: &SimpleSelector) -> style::SimpleSelector {
     match simple {
         SimpleSelector::Type(name) => style::SimpleSelector::Type(name.clone()),
         SimpleSelector::Universal => style::SimpleSelector::Universal,
         SimpleSelector::Class(name) => style::SimpleSelector::Class(name.clone()),
         SimpleSelector::Id(name) => style::SimpleSelector::Id(name.clone()),
-        SimpleSelector::PseudoElement(name) => style::SimpleSelector::PseudoElement(name.clone()),
+        SimpleSelector::PseudoElement(name) => {
+            style::SimpleSelector::PseudoElement(name.to_ascii_lowercase().into_boxed_str())
+        }
         SimpleSelector::Part(name) => style::SimpleSelector::Part(name.clone()),
         SimpleSelector::Attribute { name, op, value } => {
             // A missing operator or operand is a bare presence test (`[a]`).
@@ -131,7 +128,7 @@ fn lower_simple(simple: &SimpleSelector) -> style::SimpleSelector {
     }
 }
 
-#[doc = include_str!("selector_compiler.doc/lower_attr_op.md")]
+/// Pairs an attribute operator with its operand to build an [`style::AttrMatch`].
 fn lower_attr_op(op: AttrOp, operand: &str) -> style::AttrMatch {
     match op {
         AttrOp::Exact => style::AttrMatch::Exact(operand.into()),
@@ -143,7 +140,7 @@ fn lower_attr_op(op: AttrOp, operand: &str) -> style::AttrMatch {
     }
 }
 
-#[doc = include_str!("selector_compiler.doc/lower_pseudo_class.md")]
+#[doc = include_str!("../../docs/api/compiler/selector_compiler.doc/lower_pseudo_class.md")]
 fn lower_pseudo_class(name: &str, arg: Option<&str>) -> style::PseudoClassSelector {
     use style::PseudoClassSelector as P;
     let lowered_name = name.to_ascii_lowercase();
@@ -196,7 +193,7 @@ fn lower_pseudo_class(name: &str, arg: Option<&str>) -> style::PseudoClassSelect
     }
 }
 
-#[doc = include_str!("selector_compiler.doc/parse_nested_list.md")]
+#[doc = include_str!("../../docs/api/compiler/selector_compiler.doc/parse_nested_list.md")]
 fn parse_nested_list(arg: &str) -> style::SelectorList {
     let trimmed = arg.trim();
     if trimmed.is_empty() {
@@ -209,12 +206,14 @@ fn parse_nested_list(arg: &str) -> style::SelectorList {
         .unwrap_or_default()
 }
 
-#[doc = include_str!("selector_compiler.doc/parse_forgiving_list.md")]
+/// The `<forgiving-selector-list>` of selectors-4 §16.1, for `:is()` and
+/// `:where()` — "parses each selector in the list individually, simply ignoring
+/// ones that fail to parse, so the remaining selectors can still be used."
 fn parse_forgiving_list(arg: &str) -> style::SelectorList {
     parse_nested_list(arg)
 }
 
-#[doc = include_str!("selector_compiler.doc/parse_strict_list.md")]
+#[doc = include_str!("../../docs/api/compiler/selector_compiler.doc/parse_strict_list.md")]
 fn parse_strict_list(arg: &str) -> Option<style::SelectorList> {
     let trimmed = arg.trim();
     if trimmed.is_empty() {
@@ -227,7 +226,7 @@ fn parse_strict_list(arg: &str) -> Option<style::SelectorList> {
     (!lowered.selectors().is_empty()).then_some(lowered)
 }
 
-#[doc = include_str!("selector_compiler.doc/split_anb_of.md")]
+#[doc = include_str!("../../docs/api/compiler/selector_compiler.doc/split_anb_of.md")]
 fn split_anb_of(arg: &str) -> (&str, Option<&str>) {
     let bytes = arg.as_bytes();
     let mut depth: i32 = 0;
@@ -270,12 +269,14 @@ fn split_anb_of(arg: &str) -> (&str, Option<&str>) {
     (arg, None)
 }
 
-#[doc = include_str!("selector_compiler.doc/is_ident_byte.md")]
+/// Returns whether `byte` would continue a CSS identifier, so that an `of` with
+/// such a neighbour is part of a longer name rather than the `of` keyword. A
+/// missing byte — the start or the end of the argument — is not one.
 fn is_ident_byte(byte: Option<u8>) -> bool {
     byte.is_some_and(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
-#[doc = include_str!("selector_compiler.doc/parse_anb.md")]
+#[doc = include_str!("../../docs/api/compiler/selector_compiler.doc/parse_anb.md")]
 fn parse_anb(arg: &str) -> style::AnB {
     let compact: String = arg.chars().filter(|c| !c.is_whitespace()).collect();
     let lower = compact.to_ascii_lowercase();
@@ -305,7 +306,7 @@ fn parse_anb(arg: &str) -> style::AnB {
     style::AnB::new(0, lower.parse::<i32>().unwrap_or(0))
 }
 
-#[doc = include_str!("selector_compiler.doc/collect_unsupported.md")]
+#[doc = include_str!("../../docs/api/compiler/selector_compiler.doc/collect_unsupported.md")]
 fn collect_unsupported(
     selector: &ParsedComplexSelector,
     unsupported: &mut Vec<UnsupportedCssFeature>,
@@ -323,10 +324,10 @@ fn collect_unsupported(
                         SourceSpan::empty(0),
                     ));
                 }
-                // No `content` property and no generated box: a pseudo-element
-                // rule styles nothing at all rather than leaking onto the
-                // originating element.
-                SimpleSelector::PseudoElement(name) => {
+                SimpleSelector::PseudoElement(name)
+                    if !name.eq_ignore_ascii_case("before")
+                        && !name.eq_ignore_ascii_case("after") =>
+                {
                     unsupported.push(UnsupportedCssFeature::new(
                         UnsupportedFeatureKind::PseudoElement,
                         format!("::{name}"),
@@ -339,7 +340,7 @@ fn collect_unsupported(
     }
 }
 
-#[doc = include_str!("selector_compiler.doc/is_excluded_pseudo.md")]
+#[doc = include_str!("../../docs/api/compiler/selector_compiler.doc/is_excluded_pseudo.md")]
 fn is_excluded_pseudo(name: &str, arg: Option<&str>) -> bool {
     name.eq_ignore_ascii_case("link")
         || name.eq_ignore_ascii_case("visited")
@@ -452,24 +453,24 @@ mod tests {
     }
 
     #[test]
-    fn pseudo_element_is_unsupported() {
+    fn reports_only_unsupported_pseudo_elements() {
         let mut compiler = SelectorCompiler::new();
         let mut unsupported = Vec::new();
         let _ = compiler.compile(&selector(".badge::before"), &mut unsupported);
         let _ = compiler.compile(&selector("li::after"), &mut unsupported);
-        assert_eq!(unsupported.len(), 2);
+        let _ = compiler.compile(&selector("li::marker"), &mut unsupported);
+        assert_eq!(unsupported.len(), 1);
         assert_eq!(unsupported[0].kind(), UnsupportedFeatureKind::PseudoElement);
-        assert_eq!(unsupported[0].name(), "::before");
-        assert_eq!(unsupported[1].name(), "::after");
+        assert_eq!(unsupported[0].name(), "::marker");
     }
 
     #[test]
     fn pseudo_element_in_a_tail_compound_is_reported() {
         let mut compiler = SelectorCompiler::new();
         let mut unsupported = Vec::new();
-        let _ = compiler.compile(&selector("ul > li::before"), &mut unsupported);
+        let _ = compiler.compile(&selector("ul > li::marker"), &mut unsupported);
         assert_eq!(unsupported.len(), 1);
-        assert_eq!(unsupported[0].name(), "::before");
+        assert_eq!(unsupported[0].name(), "::marker");
     }
 
     #[test]

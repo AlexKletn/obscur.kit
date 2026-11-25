@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Frame module.
 mod frame_context;
 pub use frame_context::FrameContext;
 // `FrameId` is an identity, so it lives with the others in `obscur-identity`

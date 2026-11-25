@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! `#[derive(Contract)]` expansion logic (spec §2.13).
 
 mod contract_derive;
 pub(crate) use contract_derive::ContractDerive;

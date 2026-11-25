@@ -1,17 +1,18 @@
-#![doc = include_str!("layout_inputs.doc/_module.md")]
+//! What layout reads that is not a computed style: [`LayoutInputs`].
 
 use obscur_geometry::Size;
 use obscur_identity::NodeId;
 
-#[doc = include_str!("layout_inputs.doc/LayoutInputs.md")]
+#[doc = include_str!("../../docs/api/runtime/layout_inputs.doc/LayoutInputs.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct LayoutInputs {
-    #[doc = include_str!("layout_inputs.doc/viewport.md")]
+    /// The viewport the boxes were arranged under.
     pub(crate) viewport: Size,
-    #[doc = include_str!("layout_inputs.doc/scroll.md")]
+    /// The viewport scroll offset (drives `position: sticky`).
     pub(crate) scroll: (f32, f32),
-    #[doc = include_str!("layout_inputs.doc/editing.md")]
+    /// The focused editable's `(node, text, preedit)` — the string the text leaf
+    /// was measured from; `None` when no editing session is active.
     pub(crate) editing: Option<(NodeId, String, Option<String>)>,
-    #[doc = include_str!("layout_inputs.doc/language.md")]
+    #[doc = include_str!("../../docs/api/runtime/layout_inputs.doc/language.md")]
     pub(crate) language: Box<str>,
 }

@@ -1,154 +1,157 @@
-#![doc = include_str!("physical_key.doc/_module.md")]
+//! The [`PhysicalKey`] layout-independent key position (spec §6.7).
 
 use crate::command::Modifier;
 
-#[doc = include_str!("physical_key.doc/PhysicalKey.md")]
+#[doc = include_str!("../../docs/api/command/physical_key.doc/PhysicalKey.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PhysicalKey {
-    #[doc = include_str!("physical_key.doc/KeyA.md")]
+    /// The `A` scan position.
     KeyA,
-    #[doc = include_str!("physical_key.doc/KeyB.md")]
+    /// The `B` scan position.
     KeyB,
-    #[doc = include_str!("physical_key.doc/KeyC.md")]
+    /// The `C` scan position.
     KeyC,
-    #[doc = include_str!("physical_key.doc/KeyD.md")]
+    /// The `D` scan position.
     KeyD,
-    #[doc = include_str!("physical_key.doc/KeyE.md")]
+    /// The `E` scan position.
     KeyE,
-    #[doc = include_str!("physical_key.doc/KeyF.md")]
+    /// The `F` scan position.
     KeyF,
-    #[doc = include_str!("physical_key.doc/KeyG.md")]
+    /// The `G` scan position.
     KeyG,
-    #[doc = include_str!("physical_key.doc/KeyH.md")]
+    /// The `H` scan position.
     KeyH,
-    #[doc = include_str!("physical_key.doc/KeyI.md")]
+    /// The `I` scan position.
     KeyI,
-    #[doc = include_str!("physical_key.doc/KeyJ.md")]
+    /// The `J` scan position.
     KeyJ,
-    #[doc = include_str!("physical_key.doc/KeyK.md")]
+    /// The `K` scan position.
     KeyK,
-    #[doc = include_str!("physical_key.doc/KeyL.md")]
+    /// The `L` scan position.
     KeyL,
-    #[doc = include_str!("physical_key.doc/KeyM.md")]
+    /// The `M` scan position.
     KeyM,
-    #[doc = include_str!("physical_key.doc/KeyN.md")]
+    /// The `N` scan position.
     KeyN,
-    #[doc = include_str!("physical_key.doc/KeyO.md")]
+    /// The `O` scan position.
     KeyO,
-    #[doc = include_str!("physical_key.doc/KeyP.md")]
+    /// The `P` scan position.
     KeyP,
-    #[doc = include_str!("physical_key.doc/KeyQ.md")]
+    /// The `Q` scan position.
     KeyQ,
-    #[doc = include_str!("physical_key.doc/KeyR.md")]
+    /// The `R` scan position.
     KeyR,
-    #[doc = include_str!("physical_key.doc/KeyS.md")]
+    /// The `S` scan position.
     KeyS,
-    #[doc = include_str!("physical_key.doc/KeyT.md")]
+    /// The `T` scan position.
     KeyT,
-    #[doc = include_str!("physical_key.doc/KeyU.md")]
+    /// The `U` scan position.
     KeyU,
-    #[doc = include_str!("physical_key.doc/KeyV.md")]
+    /// The `V` scan position.
     KeyV,
-    #[doc = include_str!("physical_key.doc/KeyW.md")]
+    /// The `W` scan position.
     KeyW,
-    #[doc = include_str!("physical_key.doc/KeyX.md")]
+    /// The `X` scan position.
     KeyX,
-    #[doc = include_str!("physical_key.doc/KeyY.md")]
+    /// The `Y` scan position.
     KeyY,
-    #[doc = include_str!("physical_key.doc/KeyZ.md")]
+    /// The `Z` scan position.
     KeyZ,
-    #[doc = include_str!("physical_key.doc/Digit0.md")]
+    /// The `0` scan position on the main number row.
     Digit0,
-    #[doc = include_str!("physical_key.doc/Digit1.md")]
+    /// The `1` scan position on the main number row.
     Digit1,
-    #[doc = include_str!("physical_key.doc/Digit2.md")]
+    /// The `2` scan position on the main number row.
     Digit2,
-    #[doc = include_str!("physical_key.doc/Digit3.md")]
+    /// The `3` scan position on the main number row.
     Digit3,
-    #[doc = include_str!("physical_key.doc/Digit4.md")]
+    /// The `4` scan position on the main number row.
     Digit4,
-    #[doc = include_str!("physical_key.doc/Digit5.md")]
+    /// The `5` scan position on the main number row.
     Digit5,
-    #[doc = include_str!("physical_key.doc/Digit6.md")]
+    /// The `6` scan position on the main number row.
     Digit6,
-    #[doc = include_str!("physical_key.doc/Digit7.md")]
+    /// The `7` scan position on the main number row.
     Digit7,
-    #[doc = include_str!("physical_key.doc/Digit8.md")]
+    /// The `8` scan position on the main number row.
     Digit8,
-    #[doc = include_str!("physical_key.doc/Digit9.md")]
+    /// The `9` scan position on the main number row.
     Digit9,
-    #[doc = include_str!("physical_key.doc/F1.md")]
+    /// The `F1` function key.
     F1,
-    #[doc = include_str!("physical_key.doc/F2.md")]
+    /// The `F2` function key.
     F2,
-    #[doc = include_str!("physical_key.doc/F3.md")]
+    /// The `F3` function key.
     F3,
-    #[doc = include_str!("physical_key.doc/F4.md")]
+    /// The `F4` function key.
     F4,
-    #[doc = include_str!("physical_key.doc/F5.md")]
+    /// The `F5` function key.
     F5,
-    #[doc = include_str!("physical_key.doc/F6.md")]
+    /// The `F6` function key.
     F6,
-    #[doc = include_str!("physical_key.doc/F7.md")]
+    /// The `F7` function key.
     F7,
-    #[doc = include_str!("physical_key.doc/F8.md")]
+    /// The `F8` function key.
     F8,
-    #[doc = include_str!("physical_key.doc/F9.md")]
+    /// The `F9` function key.
     F9,
-    #[doc = include_str!("physical_key.doc/F10.md")]
+    /// The `F10` function key.
     F10,
-    #[doc = include_str!("physical_key.doc/F11.md")]
+    /// The `F11` function key.
     F11,
-    #[doc = include_str!("physical_key.doc/F12.md")]
+    /// The `F12` function key.
     F12,
-    #[doc = include_str!("physical_key.doc/Escape.md")]
+    /// The `Escape` key.
     Escape,
-    #[doc = include_str!("physical_key.doc/Enter.md")]
+    /// The `Enter` / `Return` key.
     Enter,
-    #[doc = include_str!("physical_key.doc/Space.md")]
+    /// The space bar.
     Space,
-    #[doc = include_str!("physical_key.doc/Tab.md")]
+    /// The `Tab` key.
     Tab,
-    #[doc = include_str!("physical_key.doc/Backspace.md")]
+    /// The `Backspace` key.
     Backspace,
-    #[doc = include_str!("physical_key.doc/Delete.md")]
+    /// The forward `Delete` key.
     Delete,
-    #[doc = include_str!("physical_key.doc/ArrowUp.md")]
+    /// The up arrow key.
     ArrowUp,
-    #[doc = include_str!("physical_key.doc/ArrowDown.md")]
+    /// The down arrow key.
     ArrowDown,
-    #[doc = include_str!("physical_key.doc/ArrowLeft.md")]
+    /// The left arrow key.
     ArrowLeft,
-    #[doc = include_str!("physical_key.doc/ArrowRight.md")]
+    /// The right arrow key.
     ArrowRight,
-    #[doc = include_str!("physical_key.doc/Home.md")]
+    /// The `Home` key.
     Home,
-    #[doc = include_str!("physical_key.doc/End.md")]
+    /// The `End` key.
     End,
-    #[doc = include_str!("physical_key.doc/PageUp.md")]
+    /// The `Page Up` key.
     PageUp,
-    #[doc = include_str!("physical_key.doc/PageDown.md")]
+    /// The `Page Down` key.
     PageDown,
-    #[doc = include_str!("physical_key.doc/ShiftLeft.md")]
+    /// The left `Shift` key.
     ShiftLeft,
-    #[doc = include_str!("physical_key.doc/ShiftRight.md")]
+    /// The right `Shift` key.
     ShiftRight,
-    #[doc = include_str!("physical_key.doc/ControlLeft.md")]
+    /// The left `Control` key.
     ControlLeft,
-    #[doc = include_str!("physical_key.doc/ControlRight.md")]
+    /// The right `Control` key.
     ControlRight,
-    #[doc = include_str!("physical_key.doc/AltLeft.md")]
+    /// The left `Alt` / `Option` key.
     AltLeft,
-    #[doc = include_str!("physical_key.doc/AltRight.md")]
+    /// The right `Alt` / `Option` key.
     AltRight,
-    #[doc = include_str!("physical_key.doc/MetaLeft.md")]
+    /// The left `Meta` / `Super` / `Command` key.
     MetaLeft,
-    #[doc = include_str!("physical_key.doc/MetaRight.md")]
+    /// The right `Meta` / `Super` / `Command` key.
     MetaRight,
+    /// A key whose physical position has no corresponding kit key.
+    Unidentified,
 }
 
 impl PhysicalKey {
-    #[doc = include_str!("physical_key.doc/is_modifier.md")]
+    /// Returns whether this is one of the left/right modifier keys
+    /// (`Shift`, `Control`, `Alt`, or `Meta`).
     #[must_use]
     pub const fn is_modifier(&self) -> bool {
         matches!(
@@ -164,7 +167,7 @@ impl PhysicalKey {
         )
     }
 
-    #[doc = include_str!("physical_key.doc/modifier.md")]
+    #[doc = include_str!("../../docs/api/command/physical_key.doc/modifier.md")]
     #[must_use]
     pub const fn modifier(&self) -> Option<Modifier> {
         match self {
@@ -176,7 +179,7 @@ impl PhysicalKey {
         }
     }
 
-    #[doc = include_str!("physical_key.doc/is_arrow.md")]
+    /// Returns whether this is one of the four arrow keys.
     #[must_use]
     pub const fn is_arrow(&self) -> bool {
         matches!(

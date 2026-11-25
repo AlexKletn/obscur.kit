@@ -1,26 +1,26 @@
-#![doc = include_str!("deletion_unit.doc/_module.md")]
+//! The granularity of a delete operation in the editing engine (spec §5.11).
 
-#[doc = include_str!("deletion_unit.doc/DeletionUnit.md")]
+#[doc = include_str!("../../docs/api/editing/deletion_unit.doc/DeletionUnit.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DeletionUnit {
-    #[doc = include_str!("deletion_unit.doc/Grapheme.md")]
+    /// One extended grapheme cluster — Backspace (backward) / Delete (forward).
     Grapheme,
-    #[doc = include_str!("deletion_unit.doc/Word.md")]
+    /// One word — Ctrl+Backspace (backward) / Ctrl+Delete (forward).
     Word,
-    #[doc = include_str!("deletion_unit.doc/Line.md")]
+    /// The whole line the caret sits on.
     Line,
-    #[doc = include_str!("deletion_unit.doc/ToLineStart.md")]
+    /// From the caret to the start of its line — e.g. Cmd+Backspace on macOS.
     ToLineStart,
-    #[doc = include_str!("deletion_unit.doc/ToLineEnd.md")]
+    /// From the caret to the end of its line — e.g. Ctrl+K.
     ToLineEnd,
-    #[doc = include_str!("deletion_unit.doc/ToDocumentStart.md")]
+    /// From the caret to the start of the document.
     ToDocumentStart,
-    #[doc = include_str!("deletion_unit.doc/ToDocumentEnd.md")]
+    /// From the caret to the end of the document.
     ToDocumentEnd,
 }
 
 impl DeletionUnit {
-    #[doc = include_str!("deletion_unit.doc/is_line_relative.md")]
+    #[doc = include_str!("../../docs/api/editing/deletion_unit.doc/is_line_relative.md")]
     #[must_use]
     pub const fn is_line_relative(&self) -> bool {
         matches!(self, Self::Line | Self::ToLineStart | Self::ToLineEnd)

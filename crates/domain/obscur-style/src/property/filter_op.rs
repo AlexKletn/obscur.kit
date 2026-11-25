@@ -1,34 +1,37 @@
-#![doc = include_str!("filter_op.doc/_module.md")]
+//! A single CSS `filter` function op (spec §5.2).
 
 use crate::property::BoxShadow;
 
-#[doc = include_str!("filter_op.doc/FilterOp.md")]
+#[doc = include_str!("../../docs/api/property/filter_op.doc/FilterOp.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum FilterOp {
-    #[doc = include_str!("filter_op.doc/DropShadow.md")]
+    /// A `drop-shadow(...)` op: a drop-only [`BoxShadow`].
     DropShadow(BoxShadow),
-    #[doc = include_str!("filter_op.doc/Blur.md")]
+    /// A `blur(<length>)` content blur; the radius is in logical pixels (`>= 0`).
     Blur(f32),
-    #[doc = include_str!("filter_op.doc/Brightness.md")]
+    /// A `brightness(<number|percentage>)`: `RGB *= amount` (amount `>= 0`).
     Brightness(f32),
-    #[doc = include_str!("filter_op.doc/Contrast.md")]
+    /// A `contrast(<number|percentage>)`: `RGB' = (RGB − 0.5)·amount + 0.5`.
     Contrast(f32),
-    #[doc = include_str!("filter_op.doc/Saturate.md")]
+    /// A `saturate(<number|percentage>)`: the spec luminance saturation matrix.
     Saturate(f32),
-    #[doc = include_str!("filter_op.doc/Grayscale.md")]
+    /// A `grayscale(<number|percentage>)`: interpolate toward the luma matrix
+    /// (amount clamped `0..1`; `1` is fully desaturated).
     Grayscale(f32),
-    #[doc = include_str!("filter_op.doc/Sepia.md")]
+    /// A `sepia(<number|percentage>)`: the spec sepia matrix (amount `0..1`).
     Sepia(f32),
-    #[doc = include_str!("filter_op.doc/Invert.md")]
+    /// An `invert(<number|percentage>)`: `channel' = (1 − 2·amount)·channel +
+    /// amount` per RGB (amount clamped `0..1`).
     Invert(f32),
-    #[doc = include_str!("filter_op.doc/HueRotate.md")]
+    /// A `hue-rotate(<angle>)`: the spec hue-rotation matrix; the angle is stored
+    /// in **radians**.
     HueRotate(f32),
-    #[doc = include_str!("filter_op.doc/Opacity.md")]
+    /// An `opacity(<number|percentage>)`: `A *= amount` (amount clamped `0..1`).
     Opacity(f32),
 }
 
 impl FilterOp {
-    #[doc = include_str!("filter_op.doc/as_drop_shadow.md")]
+    /// Returns the drop-shadow if this is a [`FilterOp::DropShadow`].
     #[must_use]
     pub const fn as_drop_shadow(&self) -> Option<&BoxShadow> {
         match self {
@@ -37,7 +40,7 @@ impl FilterOp {
         }
     }
 
-    #[doc = include_str!("filter_op.doc/as_blur.md")]
+    /// Returns the blur radius (logical px) if this is a [`FilterOp::Blur`].
     #[must_use]
     pub const fn as_blur(&self) -> Option<f32> {
         match self {
@@ -46,13 +49,16 @@ impl FilterOp {
         }
     }
 
-    #[doc = include_str!("filter_op.doc/is_color_op.md")]
+    /// Whether this op is an affine **color** transform (one of the color-matrix
+    /// functions the coordinator folds into a single 4×5 matrix) — i.e. anything
+    /// that is neither a [`DropShadow`](FilterOp::DropShadow) nor a
+    /// [`Blur`](FilterOp::Blur) (both spatial, not color).
     #[must_use]
     pub const fn is_color_op(&self) -> bool {
         !matches!(self, Self::DropShadow(_) | Self::Blur(_))
     }
 
-    #[doc = include_str!("filter_op.doc/uses_ch.md")]
+    #[doc = include_str!("../../docs/api/property/filter_op.doc/uses_ch.md")]
     #[must_use]
     pub const fn uses_ch(&self) -> bool {
         match self.as_drop_shadow() {
@@ -61,13 +67,13 @@ impl FilterOp {
         }
     }
 
-    #[doc = include_str!("filter_op.doc/is_drop_shadow.md")]
+    /// Whether this is a [`FilterOp::DropShadow`].
     #[must_use]
     pub const fn is_drop_shadow(&self) -> bool {
         matches!(self, Self::DropShadow(_))
     }
 
-    #[doc = include_str!("filter_op.doc/is_blur.md")]
+    /// Whether this is a [`FilterOp::Blur`].
     #[must_use]
     pub const fn is_blur(&self) -> bool {
         matches!(self, Self::Blur(_))

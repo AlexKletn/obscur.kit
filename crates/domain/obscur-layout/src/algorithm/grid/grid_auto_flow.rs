@@ -1,27 +1,28 @@
-#![doc = include_str!("grid_auto_flow.doc/_module.md")]
+//! `GridAutoFlow`: a grid container's auto-placement flow mode (spec §4.5).
 
-#[doc = include_str!("grid_auto_flow.doc/GridAutoFlow.md")]
+#[doc = include_str!("../../../docs/api/algorithm/grid/grid_auto_flow.doc/GridAutoFlow.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum GridAutoFlow {
-    #[doc = include_str!("grid_auto_flow.doc/Row.md")]
+    /// `row` — row-major, sparse. The default.
     #[default]
     Row,
-    #[doc = include_str!("grid_auto_flow.doc/Column.md")]
+    /// `column` — column-major, sparse.
     Column,
-    #[doc = include_str!("grid_auto_flow.doc/RowDense.md")]
+    /// `row dense` — row-major, dense (backfills earlier holes).
     RowDense,
-    #[doc = include_str!("grid_auto_flow.doc/ColumnDense.md")]
+    /// `column dense` — column-major, dense (backfills earlier holes).
     ColumnDense,
 }
 
 impl GridAutoFlow {
-    #[doc = include_str!("grid_auto_flow.doc/is_column.md")]
+    /// Whether items flow *column-major* (down a column before wrapping across).
     #[must_use]
     pub const fn is_column(self) -> bool {
         matches!(self, Self::Column | Self::ColumnDense)
     }
 
-    #[doc = include_str!("grid_auto_flow.doc/is_dense.md")]
+    /// Whether packing is *dense* (each auto item searched from the origin, so it
+    /// may backfill an earlier hole).
     #[must_use]
     pub const fn is_dense(self) -> bool {
         matches!(self, Self::RowDense | Self::ColumnDense)

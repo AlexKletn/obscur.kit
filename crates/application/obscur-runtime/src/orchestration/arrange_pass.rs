@@ -1,34 +1,27 @@
-#![doc = include_str!("arrange_pass.doc/_module.md")]
+#![doc = include_str!("../../docs/api/orchestration/arrange_pass.doc/_module.md")]
 
 use obscur_geometry::{BoxConstraints, Insets, Point, Rect, Size};
 use obscur_identity::NodeId;
 use obscur_layout::algorithm::LayoutChild;
-use obscur_layout::model::{LayoutBox, LayoutStyle, Position};
-use obscur_style::computed::ComputedValue;
-use obscur_style::property::PropertyId;
+use obscur_layout::model::{
+    AlignItems, Dimension, Direction, LayoutBox, LayoutDisplay, LayoutStyle, Position, WritingMode,
+};
 use obscur_text::layout::Hyphenator;
 use obscur_text::shaping::ParagraphShaper;
 use obscur_tree::tree::RetainedTree;
 
-use super::arrange_cache::{ArrangeCache, ArrangeKey};
+use super::arrange_cache::ArrangeCache;
+use super::arrange_key::ArrangeKey;
 use super::formatting_context::{algorithm_for, partition_children, style_of};
 use super::layout_coordinator::LayoutBoxes;
 use super::layout_coordinator::LayoutStyles;
 use super::measure_cache::MeasureCache;
 use super::measure_pass::{RecMeasurer, measure};
+use super::paint_transform::has_transform;
 use super::scroll::overflow_scrolls;
 use super::{ComputedStyles, EditingView, GridTemplates};
 
-#[doc = include_str!("arrange_pass.doc/transform_establishes_containing_block.md")]
-fn transform_establishes_containing_block(computed: &ComputedStyles, node: NodeId) -> bool {
-    computed
-        .get(&node)
-        .and_then(|style| style.get(PropertyId::Transform))
-        .and_then(ComputedValue::as_transform)
-        .is_some_and(|transform| transform.establishes_containing_block())
-}
-
-#[doc = include_str!("arrange_pass.doc/padding_box.md")]
+#[doc = include_str!("../../docs/api/orchestration/arrange_pass.doc/padding_box.md")]
 fn padding_box(border_box: Rect, border: Insets) -> Rect {
     let x = border_box.origin.x + border.left;
     let y = border_box.origin.y + border.top;
@@ -37,7 +30,7 @@ fn padding_box(border_box: Rect, border: Insets) -> Rect {
     Rect::new(Point::new(x, y), Size::new(width, height))
 }
 
-#[doc = include_str!("arrange_pass.doc/arrange.md")]
+#[doc = include_str!("../../docs/api/orchestration/arrange_pass.doc/arrange.md")]
 // The recursive arrange walk threads the tree, both style maps, the target
 // origin/constraints, the containing block + viewport for positioning, the
 // output map, the shaper, and the depth budget; these are cohesive positional
@@ -66,8 +59,10 @@ pub(super) fn arrange(
     // containing block. `None` everywhere else — a recursive call never passes it,
     // because every other node has a style of its own.
     style_override: Option<LayoutStyle>,
+    natural_block_size: bool,
 ) {
     if depth == 0 {
+        cache.record_depth_limit(node);
         return;
     }
 
@@ -85,7 +80,16 @@ pub(super) fn arrange(
         containing_block,
         viewport,
         scroll_offset,
-    );
+    )
+    .with_natural_block_size(natural_block_size);
+    let key = if styles
+        .get(&node)
+        .is_some_and(|style| style.padding_lengths.is_some())
+    {
+        key.with_padding_basis(constraints)
+    } else {
+        key
+    };
     if arrange_cache.get(node) == Some(key) && arrange_cache.serve(tree, node, boxes) {
         return;
     }
@@ -97,7 +101,7 @@ pub(super) fn arrange(
     // nothing matches it, so both axes come back `auto`), and a host that hands the
     // root an explicit size or padding means it — replacing that would be the
     // override deciding layout for a box the caller had already described.
-    let style = match style_override {
+    let mut style = match style_override {
         Some(icb) => {
             let own = style_of(styles, node);
             LayoutStyle {
@@ -116,6 +120,19 @@ pub(super) fn arrange(
         }
         None => style_of(styles, node),
     };
+
+    style.resolve_padding(if style.writing_mode.is_vertical() {
+        constraints.percent_height()
+    } else {
+        constraints.percent_width()
+    });
+    if natural_block_size && style.display == LayoutDisplay::Flex {
+        // A tight arrangement constraint carries the measured size, but the
+        // cyclic percentage in a Flex gap still resolves against zero.
+        if let Some(gap) = style.row_gap.as_ref().or(style.gap_dimension.as_ref()) {
+            style.row_gap = Some(Dimension::Px(gap.resolve(0.0).unwrap_or(0.0).max(0.0)));
+        }
+    }
 
     // A text node is a constraint-aware leaf: shape + wrap to `max.width` and
     // write the wrapped box, bypassing the box algorithms (spec §5.10). It has
@@ -176,7 +193,9 @@ pub(super) fn arrange(
     // change anything — a childless scroll container has no content to overflow, so
     // its box is identical relaxed or not; keeping it unrelaxed avoids forcing the
     // whole subtree onto the indefinite-height path for nothing.
+    // Size containment uses the actual assignment to lay out the children.
     let scroll_relaxed = overflow_scrolls(computed, node)
+        && !style.size_containment.contains_height(style.writing_mode)
         && constraints.max.height.is_finite()
         && !children.is_empty();
     let child_constraints = if scroll_relaxed {
@@ -208,6 +227,8 @@ pub(super) fn arrange(
         algorithm.layout(&style, &children, child_constraints, &mut measurer)
     };
 
+    cache.record_grid_limit(out.grid_limited_item());
+
     // Now safe to write this node's absolute box. A relaxed scroll container keeps
     // its scrollport height (the tight block constraint) while its content
     // overflows; every other node uses the algorithm's own size verbatim.
@@ -217,7 +238,16 @@ pub(super) fn arrange(
         out.size()
     };
     let border_box = Rect::new(origin, node_size);
-    boxes.insert(node, LayoutBox::new(border_box));
+    let mut layout_box = LayoutBox::new(border_box);
+    if style.padding_lengths.is_some() {
+        layout_box = layout_box.with_content_insets(Insets {
+            top: style.padding.top + style.border.top,
+            right: style.padding.right + style.border.right,
+            bottom: style.padding.bottom + style.border.bottom,
+            left: style.padding.left + style.border.left,
+        });
+    }
+    boxes.insert(node, layout_box);
 
     // The containing block this node establishes for its positioned descendants:
     // a positioned node (`relative`/`absolute`/`fixed`) — OR any node carrying a
@@ -225,7 +255,7 @@ pub(super) fn arrange(
     // padding box; a plain `static` node is transparent and passes the inherited
     // block through (so an absolute grandchild resolves against the nearest
     // positioned/transformed ancestor, not this static node).
-    let establishes_cb_by_transform = transform_establishes_containing_block(computed, node);
+    let establishes_cb_by_transform = computed.get(&node).is_some_and(has_transform);
     let node_padding_box = padding_box(border_box, style.border);
     let descendant_cb = if style.position.is_positioned() || establishes_cb_by_transform {
         node_padding_box
@@ -287,6 +317,10 @@ pub(super) fn arrange(
         ),
         viewport.size,
     );
+    let block_size_definite = style.height.resolve(constraints.percent_height()).is_some()
+        || (!natural_block_size
+            && constraints.max.height.is_finite()
+            && constraints.min.height >= constraints.max.height);
     // Zipping bounds both sides, so a mismatched length never indexes out of range.
     for (index, (child, child_rel)) in children.iter().zip(out.child_boxes().iter()).enumerate() {
         let rel = child_rel.origin();
@@ -318,6 +352,10 @@ pub(super) fn arrange(
         } else {
             child_style.relative_offset(containing.width, containing.height)
         };
+        let stretches_block = child_style.align_self.resolve(style.align_items)
+            == AlignItems::Stretch
+            && !child_style.margin.top.is_auto()
+            && !child_style.margin.bottom.is_auto();
         let child_origin = Point::new(static_origin.x + dx, static_origin.y + dy);
         arrange(
             tree,
@@ -339,6 +377,19 @@ pub(super) fn arrange(
             arrange_cache,
             // Every node below the root has a computed style of its own.
             None,
+            child_style.height.is_auto()
+                && match style.display {
+                    LayoutDisplay::Block => true,
+                    LayoutDisplay::Flex if style.flex_direction.is_row() => {
+                        !block_size_definite || style.flex_wrap.is_multi_line() || !stretches_block
+                    }
+                    LayoutDisplay::Flex => {
+                        !block_size_definite
+                            && child_style.flex_basis.resolve(f32::INFINITY).is_none()
+                    }
+                    LayoutDisplay::Grid => !stretches_block,
+                    _ => false,
+                },
         );
     }
 
@@ -348,7 +399,7 @@ pub(super) fn arrange(
             styles,
             computed,
             grid_templates,
-            *child,
+            child.clone(),
             descendant_cb,
             descendant_fixed_cb,
             scroll_offset,
@@ -363,7 +414,7 @@ pub(super) fn arrange(
     }
 }
 
-#[doc = include_str!("arrange_pass.doc/arrange_out_of_flow.md")]
+#[doc = include_str!("../../docs/api/orchestration/arrange_pass.doc/arrange_out_of_flow.md")]
 // The out-of-flow placement threads the same cohesive recursion inputs as
 // [`arrange`]; they are one internal positioning step, not a public API.
 #[allow(clippy::too_many_arguments)]
@@ -385,9 +436,10 @@ fn arrange_out_of_flow(
     arrange_cache: &ArrangeCache,
 ) {
     if depth == 0 {
+        cache.record_depth_limit(child.node());
         return;
     }
-    let style = child.style();
+    let mut style = child.style().clone();
     // Fixed positions against the viewport, ignoring ancestors; absolute against
     // the nearest positioned ancestor's padding box.
     let cb = if matches!(style.position, Position::Fixed) {
@@ -396,21 +448,61 @@ fn arrange_out_of_flow(
         parent_cb
     };
 
-    // Natural (content) size: measure loosely up to the containing block. This is
-    // the used size on an axis that is not pinned by both insets.
-    let natural = measure(
-        tree,
-        styles,
-        computed,
-        grid_templates,
-        child.node(),
-        BoxConstraints::loose(cb.size),
-        paragraph,
-        hyphenator,
-        editing,
-        depth,
-        cache,
-    );
+    let mut ancestor = tree.visual_parent_of(child.node());
+    let mut axes = (WritingMode::HorizontalTb, Direction::Ltr);
+    for _ in 0..tree.len() {
+        let Some(node) = ancestor else {
+            break;
+        };
+        if let Some(ancestor_style) = styles.get(&node)
+            && (computed.get(&node).is_some_and(has_transform)
+                || (!matches!(style.position, Position::Fixed)
+                    && ancestor_style.position.is_positioned()))
+        {
+            axes = (ancestor_style.writing_mode, ancestor_style.direction);
+            break;
+        }
+        ancestor = tree.visual_parent_of(node);
+    }
+    style.resolve_padding(if axes.0.is_vertical() {
+        cb.size.height
+    } else {
+        cb.size.width
+    });
+
+    // Measure only if at least one axis uses intrinsic size. Width and
+    // height both resolve before arrange for fixed-size overlays and clips.
+    let uses_natural = |extent, size: Dimension, start: Dimension, end: Dimension| {
+        size.resolve(extent).is_none()
+            && (start.resolve(extent).is_none() || end.resolve(extent).is_none())
+    };
+    let natural = if uses_natural(
+        cb.size.width,
+        style.width.clone(),
+        style.inset.left.clone(),
+        style.inset.right.clone(),
+    ) || uses_natural(
+        cb.size.height,
+        style.height.clone(),
+        style.inset.top.clone(),
+        style.inset.bottom.clone(),
+    ) {
+        measure(
+            tree,
+            styles,
+            computed,
+            grid_templates,
+            child.node(),
+            BoxConstraints::loose(cb.size),
+            paragraph,
+            hyphenator,
+            editing,
+            depth,
+            cache,
+        )
+    } else {
+        Size::ZERO
+    };
     // The per-axis border + padding sum, so an explicit `content-box` width/height
     // grows into the border box `resolve_absolute_box` returns (matching the flow
     // path's `box_sizing.content_extent`). `natural` is already a border box.
@@ -418,21 +510,28 @@ fn arrange_out_of_flow(
         style.border.left + style.border.right + style.padding.left + style.padding.right,
         style.border.top + style.border.bottom + style.padding.top + style.padding.bottom,
     );
-    let rect = style.inset.resolve_absolute_box(
-        cb,
-        style.width,
-        style.height,
-        natural,
-        style.box_sizing,
-        border_padding,
-    );
+    let rect = style
+        .inset
+        .resolve_absolute_style(cb, &style, natural, border_padding, axes);
 
     // Arrange the child's subtree under a tight constraint at its resolved box.
     // The recursive `arrange` re-derives and writes the child's own box (identical
     // to `rect` under the tight constraint) and, because the child is positioned,
-    // establishes its padding box as the containing block for its descendants; the
-    // `containing_block` argument we pass is therefore only a placeholder it
-    // overrides.
+    // establishes its padding box for its own positioned descendants. Keep
+    // the inherited block only when a direct sticky child uses it. Otherwise
+    // an animated clipping ancestor's width must not invalidate this box.
+    let has_sticky_child = tree.get(child.node()).is_some_and(|record| {
+        record.child_nodes().iter().any(|node| {
+            styles
+                .get(node)
+                .is_some_and(|style| style.position.is_sticky())
+        })
+    });
+    let inherited_block = if has_sticky_child {
+        cb
+    } else {
+        Rect::new(Point::new(0.0, 0.0), Size::ZERO)
+    };
     arrange(
         tree,
         styles,
@@ -440,11 +539,11 @@ fn arrange_out_of_flow(
         grid_templates,
         child.node(),
         rect.origin,
-        BoxConstraints::tight(rect.size),
+        BoxConstraints::tight(rect.size).with_percent_basis(cb.size),
         boxes,
         paragraph,
         hyphenator,
-        cb,
+        inherited_block,
         viewport,
         scroll_offset,
         editing,
@@ -453,5 +552,6 @@ fn arrange_out_of_flow(
         arrange_cache,
         // Every node below the root has a computed style of its own.
         None,
+        false,
     );
 }

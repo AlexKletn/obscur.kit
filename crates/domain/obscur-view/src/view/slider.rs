@@ -1,30 +1,30 @@
-#![doc = include_str!("slider.doc/_module.md")]
+#![doc = include_str!("../../docs/api/view/slider.doc/_module.md")]
 
 use obscur_identity::InternedSymbol;
 
 use super::{ViewProperty, ViewValue};
 
-#[doc = include_str!("slider.doc/SLIDER_MIN.md")]
+/// The lowest value the control offers.
 pub const SLIDER_MIN: InternedSymbol = InternedSymbol::from_raw(0x0000_0501);
-#[doc = include_str!("slider.doc/SLIDER_MAX.md")]
+/// The highest value the control offers.
 pub const SLIDER_MAX: InternedSymbol = InternedSymbol::from_raw(0x0000_0502);
-#[doc = include_str!("slider.doc/SLIDER_STEP.md")]
+/// The interval values snap to, when the control is stepped.
 pub const SLIDER_STEP: InternedSymbol = InternedSymbol::from_raw(0x0000_0503);
-#[doc = include_str!("slider.doc/SLIDER_LOW.md")]
+/// The low end of a ranged control's selection.
 pub const SLIDER_LOW: InternedSymbol = InternedSymbol::from_raw(0x0000_0504);
-#[doc = include_str!("slider.doc/SLIDER_HIGH.md")]
+/// The high end of a ranged control's selection.
 pub const SLIDER_HIGH: InternedSymbol = InternedSymbol::from_raw(0x0000_0505);
-#[doc = include_str!("slider.doc/SLIDER_RANGED.md")]
+/// Whether the control selects a RANGE rather than a single value.
 pub const SLIDER_RANGED: InternedSymbol = InternedSymbol::from_raw(0x0000_0506);
 
-#[doc = include_str!("slider.doc/SliderScale.md")]
+/// The bounds and the step a slider offers.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SliderScale {
-    #[doc = include_str!("slider.doc/min.md")]
+    /// The lowest value offered.
     pub min: f32,
-    #[doc = include_str!("slider.doc/max.md")]
+    /// The highest value offered.
     pub max: f32,
-    #[doc = include_str!("slider.doc/step.md")]
+    /// The interval values snap to; `None` is a free slider.
     pub step: Option<f32>,
 }
 
@@ -43,7 +43,7 @@ impl Default for SliderScale {
 }
 
 impl SliderScale {
-    #[doc = include_str!("slider.doc/new.md")]
+    /// A free scale between two bounds.
     #[must_use]
     pub fn new(min: f32, max: f32) -> Self {
         Self {
@@ -53,7 +53,7 @@ impl SliderScale {
         }
     }
 
-    #[doc = include_str!("slider.doc/stepped_by.md")]
+    #[doc = include_str!("../../docs/api/view/slider.doc/stepped_by.md")]
     #[must_use]
     pub fn stepped_by(mut self, step: f32) -> Self {
         // A non-positive or non-finite step is no step. Honouring one would
@@ -62,19 +62,19 @@ impl SliderScale {
         self
     }
 
-    #[doc = include_str!("slider.doc/span.md")]
+    /// How much ground the scale covers.
     #[must_use]
     pub fn span(&self) -> f32 {
         self.max - self.min
     }
 
-    #[doc = include_str!("slider.doc/is_degenerate.md")]
+    /// Whether the scale covers no ground — `max` at or below `min`, or either not finite.
     #[must_use]
     pub fn is_degenerate(&self) -> bool {
         !self.min.is_finite() || !self.max.is_finite() || self.span() <= 0.0
     }
 
-    #[doc = include_str!("slider.doc/quantize.md")]
+    #[doc = include_str!("../../docs/api/view/slider.doc/quantize.md")]
     #[must_use]
     pub fn quantize(&self, value: f32) -> f32 {
         if self.is_degenerate() || !value.is_finite() {
@@ -100,7 +100,7 @@ impl SliderScale {
         }
     }
 
-    #[doc = include_str!("slider.doc/fraction_of.md")]
+    /// Where along the track a value sits, from 0 to 1.
     #[must_use]
     pub fn fraction_of(&self, value: f32) -> f32 {
         if self.is_degenerate() {
@@ -109,7 +109,7 @@ impl SliderScale {
         ((value.clamp(self.min, self.max) - self.min) / self.span()).clamp(0.0, 1.0)
     }
 
-    #[doc = include_str!("slider.doc/value_at.md")]
+    /// The value a fraction of the way along the track, snapped to the step.
     #[must_use]
     pub fn value_at(&self, fraction: f32) -> f32 {
         if self.is_degenerate() || !fraction.is_finite() {
@@ -118,7 +118,7 @@ impl SliderScale {
         self.quantize(self.min + fraction.clamp(0.0, 1.0) * self.span())
     }
 
-    #[doc = include_str!("slider.doc/read.md")]
+    /// The scale a node declares, falling back to the default wherever it says nothing.
     #[must_use]
     pub fn read(props: &[ViewProperty]) -> Self {
         let default = Self::default();
@@ -130,7 +130,7 @@ impl SliderScale {
     }
 }
 
-#[doc = include_str!("slider.doc/number.md")]
+/// A numeric property, whichever way it was written, or [`None`] if it is absent or not finite.
 pub(crate) fn number(props: &[ViewProperty], name: InternedSymbol) -> Option<f32> {
     props
         .iter()

@@ -1,33 +1,33 @@
-#![doc = include_str!("subsystem_recovery.doc/_module.md")]
+//! `SubsystemRecovery`: budgeted retry-or-degrade for non-component subsystems.
 
 use obscur_diagnostics::DiagnosticSubsystem;
 
 use crate::recovery::RecoveryResult;
 
-#[doc = include_str!("subsystem_recovery.doc/SubsystemRecovery.md")]
+#[doc = include_str!("../../docs/api/recovery/subsystem_recovery.doc/SubsystemRecovery.md")]
 #[derive(Debug, Clone, Copy)]
 pub struct SubsystemRecovery {
-    #[doc = include_str!("subsystem_recovery.doc/max_retries.md")]
+    /// How many times a subsystem's work may be retried before it degrades.
     max_retries: u32,
 }
 
 impl SubsystemRecovery {
-    #[doc = include_str!("subsystem_recovery.doc/DEFAULT_MAX_RETRIES.md")]
+    /// The default subsystem retry budget: a single retry before degrading.
     pub const DEFAULT_MAX_RETRIES: u32 = 1;
 
-    #[doc = include_str!("subsystem_recovery.doc/new.md")]
+    /// Creates a subsystem-recovery policy with a retry budget of `max_retries`.
     #[must_use]
     pub const fn new(max_retries: u32) -> Self {
         Self { max_retries }
     }
 
-    #[doc = include_str!("subsystem_recovery.doc/max_retries_2.md")]
+    /// The configured retry budget.
     #[must_use]
     pub const fn max_retries(self) -> u32 {
         self.max_retries
     }
 
-    #[doc = include_str!("subsystem_recovery.doc/recover.md")]
+    #[doc = include_str!("../../docs/api/recovery/subsystem_recovery.doc/recover.md")]
     #[must_use]
     pub const fn recover(self, subsystem: DiagnosticSubsystem, attempt: u32) -> RecoveryResult {
         let _ = subsystem;
@@ -40,7 +40,7 @@ impl SubsystemRecovery {
 }
 
 impl Default for SubsystemRecovery {
-    #[doc = include_str!("subsystem_recovery.doc/default.md")]
+    /// A policy with a small default budget ([`DEFAULT_MAX_RETRIES`](Self::DEFAULT_MAX_RETRIES)).
     fn default() -> Self {
         Self::new(Self::DEFAULT_MAX_RETRIES)
     }

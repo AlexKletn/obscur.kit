@@ -1,33 +1,38 @@
-#![doc = include_str!("clipboard_result.doc/_module.md")]
+//! The typed outcome of a clipboard request (spec §6.20 data transfer —
+//! clipboard).
 
 use crate::offer::DataOffer;
 use crate::transfer::TransferError;
 
-#[doc = include_str!("clipboard_result.doc/ClipboardResult.md")]
+#[doc = include_str!("../../docs/api/clipboard/clipboard_result.doc/ClipboardResult.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum ClipboardResult {
-    #[doc = include_str!("clipboard_result.doc/Read.md")]
+    /// A paste succeeded, yielding this offer (spec §6.20 PASTE).
     Read(DataOffer),
-    #[doc = include_str!("clipboard_result.doc/Written.md")]
+    /// A copy or cut stored its payload (spec §6.20 COPY/CUT).
     Written,
-    #[doc = include_str!("clipboard_result.doc/Cleared.md")]
+    /// The clipboard was cleared (spec §6.20).
     Cleared,
-    #[doc = include_str!("clipboard_result.doc/Empty.md")]
+    /// There was nothing on the clipboard to read (spec §6.20).
     Empty,
-    #[doc = include_str!("clipboard_result.doc/Denied.md")]
+    /// A permission check refused clipboard access (spec §6.20 permissions).
     Denied,
-    #[doc = include_str!("clipboard_result.doc/Unsupported.md")]
+    /// The requested format was unavailable, or the operation is unsupported
+    /// (spec §6.20).
     Unsupported,
 }
 
 impl ClipboardResult {
-    #[doc = include_str!("clipboard_result.doc/is_success.md")]
+    /// Returns whether this is a success outcome — a
+    /// [`Read`](ClipboardResult::Read), [`Written`](ClipboardResult::Written),
+    /// or [`Cleared`](ClipboardResult::Cleared) (spec §6.20).
     #[must_use]
     pub const fn is_success(&self) -> bool {
         matches!(self, Self::Read(_) | Self::Written | Self::Cleared)
     }
 
-    #[doc = include_str!("clipboard_result.doc/offer.md")]
+    /// Returns the pasted [`DataOffer`] for a [`Read`](ClipboardResult::Read),
+    /// or `None` otherwise (spec §6.20 PASTE).
     #[must_use]
     pub const fn offer(&self) -> Option<&DataOffer> {
         match self {
@@ -36,7 +41,7 @@ impl ClipboardResult {
         }
     }
 
-    #[doc = include_str!("clipboard_result.doc/into_error.md")]
+    #[doc = include_str!("../../docs/api/clipboard/clipboard_result.doc/into_error.md")]
     #[must_use]
     pub fn into_error(self) -> Option<TransferError> {
         match self {

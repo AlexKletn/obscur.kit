@@ -1,4 +1,4 @@
-#![doc = include_str!("measure_pass.doc/_module.md")]
+#![doc = include_str!("../../docs/api/orchestration/measure_pass.doc/_module.md")]
 
 use obscur_geometry::{BoxConstraints, Size};
 use obscur_identity::NodeId;
@@ -20,27 +20,31 @@ use super::{
     word_spacing_for,
 };
 
-#[doc = include_str!("measure_pass.doc/RecMeasurer.md")]
+#[doc = include_str!("../../docs/api/orchestration/measure_pass.doc/RecMeasurer.md")]
 pub(super) struct RecMeasurer<'a> {
-    #[doc = include_str!("measure_pass.doc/tree.md")]
+    /// The retained tree being laid out.
     pub(super) tree: &'a RetainedTree,
-    #[doc = include_str!("measure_pass.doc/styles.md")]
+    /// Per-node layout styles.
     pub(super) styles: &'a LayoutStyles,
-    #[doc = include_str!("measure_pass.doc/computed.md")]
+    /// Per-node computed styles, for resolving a text child's `font-family`.
     pub(super) computed: &'a ComputedStyles,
-    #[doc = include_str!("measure_pass.doc/grid_templates.md")]
+    /// Per-node authored grid templates, for dispatching a grid child's real
+    /// track-sizing algorithm.
     pub(super) grid_templates: &'a GridTemplates,
-    #[doc = include_str!("measure_pass.doc/children.md")]
+    /// The children of the node currently being laid out, parallel to the
+    /// indices the algorithm passes to [`ChildMeasurer::measure_child`].
     pub(super) children: &'a [LayoutChild],
-    #[doc = include_str!("measure_pass.doc/paragraph.md")]
+    /// The paragraph orchestrator used to shape and wrap a text-leaf child.
     pub(super) paragraph: &'a ParagraphShaper,
-    #[doc = include_str!("measure_pass.doc/hyphenator.md")]
+    /// The hyphenator used to break an over-wide word in a text-leaf child.
     pub(super) hyphenator: Option<&'a dyn Hyphenator>,
-    #[doc = include_str!("measure_pass.doc/editing.md")]
+    /// The active text-editing session view, so a text-leaf child that is the
+    /// focused editable's text measures the live session buffer (the SAME string
+    /// the scene phase paints); [`None`] on every non-editing frame.
     pub(super) editing: Option<EditingView<'a>>,
-    #[doc = include_str!("measure_pass.doc/depth.md")]
+    /// Remaining recursion budget for children measured through this measurer.
     pub(super) depth: u32,
-    #[doc = include_str!("measure_pass.doc/cache.md")]
+    /// The shared per-frame measure memoization (see [`MeasureCache`]).
     pub(super) cache: &'a MeasureCache,
 }
 
@@ -64,9 +68,53 @@ impl ChildMeasurer for RecMeasurer<'_> {
             None => Size::ZERO,
         }
     }
+
+    fn measure_child_with_baseline(
+        &mut self,
+        index: usize,
+        constraints: BoxConstraints,
+    ) -> (Size, Option<f32>) {
+        self.measure_baseline(index, constraints, false)
+    }
+
+    fn measure_child_with_last_baseline(
+        &mut self,
+        index: usize,
+        constraints: BoxConstraints,
+    ) -> (Size, Option<f32>) {
+        self.measure_baseline(index, constraints, true)
+    }
 }
 
-#[doc = include_str!("measure_pass.doc/overflow_for_text.md")]
+impl RecMeasurer<'_> {
+    /// Measures a child and selects its first or last in-flow baseline.
+    fn measure_baseline(
+        &mut self,
+        index: usize,
+        constraints: BoxConstraints,
+        last: bool,
+    ) -> (Size, Option<f32>) {
+        let Some(child) = self.children.get(index) else {
+            return (Size::ZERO, None);
+        };
+        measure_node(
+            self.tree,
+            self.styles,
+            self.computed,
+            self.grid_templates,
+            child.node(),
+            constraints,
+            self.paragraph,
+            self.hyphenator,
+            self.editing,
+            self.depth,
+            self.cache,
+            Some(last),
+        )
+    }
+}
+
+#[doc = include_str!("../../docs/api/orchestration/measure_pass.doc/overflow_for_text.md")]
 fn overflow_for_text(tree: &RetainedTree, computed: &ComputedStyles, node: NodeId) -> TextOverflow {
     let container = tree
         .get(node)
@@ -75,7 +123,7 @@ fn overflow_for_text(tree: &RetainedTree, computed: &ComputedStyles, node: NodeI
     overflow_for(computed.get(&container))
 }
 
-#[doc = include_str!("measure_pass.doc/measure.md")]
+#[doc = include_str!("../../docs/api/orchestration/measure_pass.doc/measure.md")]
 // The tree, both style maps, the constraints, the shaper, the hyphenator, and
 // the depth budget are cohesive positional arguments of one internal recursion.
 #[allow(clippy::too_many_arguments)]
@@ -92,19 +140,64 @@ pub(super) fn measure(
     depth: u32,
     cache: &MeasureCache,
 ) -> Size {
+    measure_node(
+        tree,
+        styles,
+        computed,
+        grid_templates,
+        node,
+        constraints,
+        paragraph,
+        hyphenator,
+        editing,
+        depth,
+        cache,
+        None,
+    )
+    .0
+}
+
+/// Measures a retained node and optionally exports its first or last in-flow baseline.
+#[allow(clippy::too_many_arguments)]
+fn measure_node(
+    tree: &RetainedTree,
+    styles: &LayoutStyles,
+    computed: &ComputedStyles,
+    grid_templates: &GridTemplates,
+    node: NodeId,
+    constraints: BoxConstraints,
+    paragraph: &ParagraphShaper,
+    hyphenator: Option<&dyn Hyphenator>,
+    editing: Option<EditingView<'_>>,
+    depth: u32,
+    cache: &MeasureCache,
+    baseline_request: Option<bool>,
+) -> (Size, Option<f32>) {
     if depth == 0 {
-        return Size::ZERO;
+        cache.record_depth_limit(node);
+        return (Size::ZERO, None);
     }
     // Memoize on (node, constraints): the arrange walk measures the same node
     // under the same constraints many times per frame; return the first result.
     let key = measure_key(node, constraints);
-    if let Some(hit) = cache.get(&key) {
-        return hit;
+    if let Some(size) = cache.get(&key) {
+        let Some(last) = baseline_request else {
+            return (size, None);
+        };
+        if let Some(baseline) = cache.baseline(key, last) {
+            return (size, baseline);
+        }
     }
-    let style = style_of(styles, node);
+    let mut style = style_of(styles, node);
+    style.resolve_padding(if style.writing_mode.is_vertical() {
+        constraints.percent_height()
+    } else {
+        constraints.percent_width()
+    });
     // A text node is a constraint-aware leaf: shape + wrap to `max.width`,
     // bypassing the box algorithms entirely (spec §5.10).
     if let Some(content) = tree.get(node).and_then(|n| n.kind().text()) {
+        let started = cache.start_text_measure();
         let fallback = families_for(computed.get(&node));
         let attributes = attributes_for(computed.get(&node));
         let direction = direction_for(computed.get(&node));
@@ -132,7 +225,7 @@ pub(super) fn measure(
             text_transform_for(computed.get(&node)),
             white_space,
         );
-        let size = measure_text_node(
+        let (size, baseline) = measure_text_node(
             content.as_ref(),
             &style,
             &fallback,
@@ -150,12 +243,19 @@ pub(super) fn measure(
             letter_spacing_for(computed.get(&node), style.font_size, root_font),
             word_spacing_for(computed.get(&node), style.font_size, root_font),
             tab_size_for(computed.get(&node), style.font_size, root_font),
+            baseline_request.unwrap_or(false),
         );
+        if let Some(started) = started {
+            cache.finish_text_measure(started);
+        }
         cache.record(key, node, size);
-        return size;
+        if let Some(last) = baseline_request {
+            cache.record_baseline(key, last, baseline);
+        }
+        return (size, baseline);
     }
     let Some(algorithm) = algorithm_for(style.display, node, grid_templates, style.gap) else {
-        return Size::ZERO;
+        return (Size::ZERO, None);
     };
     // Out-of-flow (absolute/fixed) children are excluded from the formatting
     // context: they contribute nothing to this node's content size. Only the
@@ -177,5 +277,39 @@ pub(super) fn measure(
     let out = algorithm.layout(&style, &children, constraints, &mut measurer);
     let size = out.size();
     cache.record(key, node, size);
-    size
+    let baseline = if let Some(last) = baseline_request {
+        let content = Size::new(
+            (size.width
+                - style.padding.left
+                - style.padding.right
+                - style.border.left
+                - style.border.right)
+                .max(0.0),
+            (size.height
+                - style.padding.top
+                - style.padding.bottom
+                - style.border.top
+                - style.border.bottom)
+                .max(0.0),
+        );
+        let baseline_of = |(index, child): (usize, &obscur_layout::model::LayoutBox)| {
+            let basis = out.child_percent_basis(index).resolve(content);
+            let offer = BoxConstraints::tight(child.size()).with_percent_basis(basis);
+            measurer
+                .measure_baseline(index, offer, last)
+                .1
+                .map(|baseline| child.origin().y + baseline)
+        };
+        let mut boxes = out.child_boxes().iter().enumerate();
+        let baseline = if last {
+            boxes.rev().find_map(baseline_of)
+        } else {
+            boxes.find_map(baseline_of)
+        };
+        cache.record_baseline(key, last, baseline);
+        baseline
+    } else {
+        None
+    };
+    (size, baseline)
 }

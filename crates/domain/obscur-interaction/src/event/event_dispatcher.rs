@@ -1,38 +1,23 @@
-#![doc = include_str!("event_dispatcher.doc/_module.md")]
+//! Computes the ordered capture → target → bubble propagation path (spec §4.7).
 
 use obscur_identity::NodeId;
 
 use super::{DispatchResult, EventPhase, UiEvent};
 
-#[doc = include_str!("event_dispatcher.doc/DispatchStep.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct DispatchStep {
-    #[doc = include_str!("event_dispatcher.doc/node.md")]
-    pub node: NodeId,
-    #[doc = include_str!("event_dispatcher.doc/phase.md")]
-    pub phase: EventPhase,
-}
+use super::DispatchStep;
 
-impl DispatchStep {
-    #[doc = include_str!("event_dispatcher.doc/new.md")]
-    #[must_use]
-    pub const fn new(node: NodeId, phase: EventPhase) -> Self {
-        Self { node, phase }
-    }
-}
-
-#[doc = include_str!("event_dispatcher.doc/EventDispatcher.md")]
+#[doc = include_str!("../../docs/api/event/event_dispatcher.doc/EventDispatcher.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct EventDispatcher;
 
 impl EventDispatcher {
-    #[doc = include_str!("event_dispatcher.doc/new_2.md")]
+    /// Creates a dispatcher.
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    #[doc = include_str!("event_dispatcher.doc/path.md")]
+    #[doc = include_str!("../../docs/api/event/event_dispatcher.doc/path.md")]
     #[must_use]
     pub fn path(&self, ancestors_root_to_target: &[NodeId]) -> Vec<DispatchStep> {
         let mut steps = Vec::new();
@@ -49,7 +34,7 @@ impl EventDispatcher {
         steps
     }
 
-    #[doc = include_str!("event_dispatcher.doc/dispatch.md")]
+    #[doc = include_str!("../../docs/api/event/event_dispatcher.doc/dispatch.md")]
     #[must_use]
     pub fn dispatch(
         &self,

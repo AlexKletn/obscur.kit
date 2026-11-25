@@ -50,11 +50,21 @@ All four combinators are real end to end: the parser reads `~` as
 `SubsequentSibling`, and the matcher walks preceding siblings for it. This page
 used to say the general sibling combinator did not exist; it did, and does.
 
-Pseudo-**elements** parse and are then reported unsupported: `::before` and
-`::after` generate nothing. This fails closed by design — a rule that would have
-produced content produces none, rather than producing something wrong. `::part()`
-is a separate thing and is **not** affected — it is how §4.16's synthetic parts
-(`input::part(placeholder)`) are reached.
+Use `::before` and `::after` to add decorative boxes. A quoted `content`
+value creates a box, including an empty string for a decoration made entirely
+with box styling. `content: none` removes it. The boxes participate in the
+owner's layout and paint order. They stay outside the component tree,
+accessibility tree, and event targeting. For text-only blocks with simple
+decorations the runs share a row. Full inline formatting is outside this
+layout model.
+
+```css
+.badge::before { content: "!"; color: orange; }
+.badge::after { content: ""; display: block; height: 2px; background: orange; }
+```
+
+Use `::part()` for exported synthetic parts such as
+`input::part(placeholder)`.
 
 ## Cascade origins
 
@@ -88,8 +98,8 @@ align-content align-items align-self backdrop-filter background-color
 background-image background-position background-repeat background-size
 border-*-color border-*-style border-*-width border-*-radius
 border-block-* border-inline-*  bottom box-shadow box-sizing color content
-direction display filter flex-basis flex-direction flex-grow flex-shrink
-flex-wrap font-family font-size font-style font-weight gap grid-area
+direction display filter flex-basis flex-direction flex-flow flex-grow flex-shrink
+flex-wrap font-family font-size font-style font-weight gap row-gap column-gap grid-area
 grid-auto-columns grid-auto-flow grid-auto-rows grid-column-* grid-row-*
 grid-template-areas grid-template-columns grid-template-rows height
 inset-block-* inset-inline-* justify-content justify-items justify-self left
@@ -106,6 +116,36 @@ Logical properties (`*-inline-start`, `*-block-end`, …) resolve onto their
 physical counterparts at computed-value time against `direction` and
 `writing-mode`.
 
+`flex-flow` accepts `flex-direction` and `flex-wrap` in either order. An
+omitted component resets to its initial value (`row` or `nowrap`).
+A `var()` can supply the whole shorthand or a component, with an optional
+fallback that can itself reference another variable. The substituted value
+is validated as one shorthand.
+
+Longhands substitute `var()` before parsing the result as the target
+property. References can appear inside functions such as `calc()` and
+`min()`, including inside a fallback. Layout resolves percentage math in
+sizing properties against the corresponding containing axis, including
+`calc()`, `min()`, `max()`, and `clamp()`. Percentage margin expressions
+use the containing inline extent and can produce negative offsets.
+`gap` sets both axes. With two values it sets `row-gap` first and
+`column-gap` second. A variable can supply one or both values, and the
+substituted shorthand is validated before each axis is applied.
+Percentage gap expressions use the container's content extent on each
+definite axis in Flex and Grid. On a content-sized Grid axis, the percentage
+component contributes zero to intrinsic sizing and resolves against the
+resulting content extent for placement.
+A resolved
+value with the wrong grammar uses the property's invalid-at-computed-value
+behavior.
+
+### Grid placement limits
+
+An authored grid placement can extend the explicit grid by at most 1,024
+implicit tracks on either side of each axis. A placement wholly outside
+the limit uses the nearest edge track. When arrangement clamps a placement,
+the runtime reports `layout.grid_track_limit` with the first affected node.
+
 ### `pointer-events`
 
 `auto` (initial) or `none`, and it **inherits** — SVG 1.1 §16.6 and css-ui both
@@ -114,9 +154,20 @@ of a `none` element has already computed `none`, so hit-testing reads one node's
 own computed value and needs no walk. A descendant that declares `auto` computes
 `auto` and stays hittable, which is the overlay-with-a-live-button pattern.
 
-A `none` element is transparent to the pointer: it never appears in a hit chain,
+A `none` element is transparent to the pointer: it cannot be the geometric target,
 and a pointer over its box reaches whatever is painted behind it. §4.7's hit
 policy is what reads it (`HitTesting::is_pointer_transparent`).
+
+## Percentage translations
+
+`translate(x, y)`, `translateX(x)`, and `translateY(y)` accept percentages,
+including in `calc()`. The horizontal percentage uses the arranged border box
+width and the vertical percentage uses its height. Rendering and hit testing
+use the same resolved transform.
+
+CSS keyframes support percentages and linear `calc()` expressions that mix
+pixels and percentages in these translations. The presentation sample uses
+the box size at the frame being drawn, including when the size is animated.
 
 ## Custom properties and `var()`
 
@@ -226,7 +277,9 @@ Absolute (`px`), font-relative (`em`, `rem`, `ch`), viewport-relative (`vw`,
 
 `em`, `rem`, `vw`, `vh`, `vmin` and `vmax` fold to pixels **at computed-value
 time**, once, so layout and paint cannot disagree about the same box.
-Percentages stay symbolic until layout knows the containing block.
+Percentages in dimensions, positions, margins, padding and gaps stay
+symbolic until layout knows their basis. Math expressions that include a
+percentage use the same basis as the corresponding bare percentage.
 
 Math functions — `calc()`, `min()`, `max()`, `clamp()` — are accepted wherever a
 `<length>` is, including as a component of a 1–4 value box shorthand, and one
@@ -262,44 +315,165 @@ layout; it is not memoized away.
 |---|---|
 | `@media` | **wired, for the features below and no others** — see the fail-closed rule |
 | `@keyframes` | **wired** — drives `UiRuntime::animate` through `set_css_motion` |
-| `@container` | **unwired** — it lowers to a real condition, but nothing supplies a container size, so `FeatureQuery::holds` answers `false` on a container axis. The rule never matches |
+| `@container` | **wired in `UiRuntime`** for named and unnamed size queries |
 | `@import` | recognised and reported unsupported |
 | `@supports` | not recognised |
 
-> Container query *units* (`cqw`, `cqh`, …) resolve against the viewport rather
-> than a query container.
+### Container size queries
 
-### What `@media` can actually ask, and what happens to the rest
+Declare the query container with `container-type: inline-size` or
+`container-type: size`. Give it a name with `container-name` to target it
+explicitly. The runtime selects the closest eligible logical ancestor and
+evaluates its content box in logical pixels. Use `width`, `height`,
+`inline-size`, or `block-size` with a pixel threshold.
 
-Representable: `width` / `height` and their `min-`/`max-` and range forms, plus
-the logical spellings `inline-size` / `block-size`. The reference value must be
-a **`px` length** (or a unitless `0`). `@media print` is representable too, as
-knowledge rather than ignorance — it is `Never` in this (screen) environment, so
-`not print` correctly negates to `Always`.
+```css
+.sidebar { container: sidebar / inline-size; }
+@container sidebar (min-inline-size: 280px) {
+    .details { display: flex; }
+}
+```
 
-Everything else — `prefers-color-scheme`, `orientation`,
-`prefers-reduced-motion`, boolean features, unknown names, and any `min-`/`max-`
-width written in `em` or `rem` or `vw` — is **unrepresentable**, and a query
-containing one now lowers to `Never` **and is pushed onto
-`CssPipeline::unsupported()`** as `@media (feature)`, which the facade also turns
-into a `css.unsupported_at_rule` warning — reaching a host that installed a
-diagnostic sink, and readable from `unsupported()` by one that did not.
+The next scheduled frame applies changes after the initial layout or a resize.
+With `container-type: size`, descendants do not contribute to the layout size
+on either axis. With `inline-size`, only the logical inline axis is contained.
+Explicit dimensions, min/max bounds, and sizes assigned by the parent still
+apply. Descendants are laid out inside the resulting box and can overflow it.
+Use `contain-intrinsic-size: 120px 80px` to provide the intrinsic content
+width and height for size-contained axes. One length sets both axes and
+`none` clears the override. The physical width/height and logical
+inline-size/block-size longhands participate in the same cascade.
+Remembered sizing with `auto` remains pending.
 
-That is a behaviour change, and it is the direction that matters. Until
-`53f00463` an unrepresentable feature lowered to `Always`: a
-`@media (prefers-color-scheme: dark)` block applied on **every** screen, always
-and silently. A dark theme painting over a light application; a phone layout on
-a 4K desktop. **If you have a stylesheet with such a block, its rules were
-live and are now dead** — which is what you asked for, but it will look like a
-regression until you read `unsupported()`.
+Both `container-name` and `container` accept a space-separated list of
+case-sensitive names or the keyword `none`. In the shorthand, an optional
+`/ normal`, `/ inline-size`, or `/ size` follows the list. Omitting the type
+resets it to `normal`. A standalone `container: var(--preset)` substitutes
+the whole shorthand. Variables can also supply individual parts, as in
+`container: var(--names) / var(--kind, inline-size)`. An optional
+fallback is used when the referenced custom property cannot be resolved.
+That fallback can contain further variable references. The result is
+validated as one shorthand before applying each longhand.
 
-Two details the fix had to get right, and which you can rely on:
+Container query units (`cqw`, `cqh`, `cqi`, `cqb`, `cqmin`, `cqmax`) use the
+nearest eligible ancestor's content box for each axis. An axis with no
+eligible ancestor uses the logical viewport. The same follow-up frame
+updates these units when the query container changes size.
 
-- **`not` is not applied over an unrepresentable feature.** `Not(Never)` is
-  `Always`, which would have reopened the same hole in the opposite polarity.
-- **A query _list_ keeps whichever of its queries can be evaluated.** A list is a
-  disjunction, so `@media (min-width: 600px), (orientation: landscape)` still
-  honours the first half rather than being dropped whole.
+### Container style queries
+
+`style(--name)` checks for a resolved custom property. `style(--name: value)`
+compares its token value. A standalone `var(--other)` in the comparison
+resolves on the selected container. A style-only query can select any
+ancestor element, including one with `container-type: normal`. With a name,
+it selects the nearest matching ancestor. A query combining style and size
+features selects one ancestor eligible for all queried axes.
+
+```css
+.toolbar { container-name: toolbar; --density: compact; }
+@container toolbar style(--density: compact) {
+    .tool { padding: 4px; }
+}
+```
+
+Changes to the selected ancestor's custom properties are applied on the
+next scheduled frame. Use parentheses to combine `and`, `or`, and `not`
+across size and style conditions or inside `style()`. For example,
+`@container toolbar style((--density: compact) or (--density: dense))`
+matches either value on the selected container. An unsupported condition
+stays unknown under negation.
+
+Standard-property queries support `display`, `position`, `box-sizing`,
+`direction`, `writing-mode`, `visibility`, `pointer-events`, `isolation`,
+`mix-blend-mode`, `color`, `background-color`, `opacity`, `order`,
+`flex-grow`, `flex-shrink`, `flex-direction`, `flex-wrap`, `z-index`,
+`align-content`, `justify-content`, `align-items`, `justify-items`, `align-self`,
+`justify-self`, `overflow-x`, `overflow-y`, `overscroll-behavior-x`,
+`overscroll-behavior-y`, `text-align`, `text-overflow`, `text-transform`,
+`white-space`, `overflow-wrap`, `word-break`, `width`, `height`, `min-width`,
+`min-height`, `max-width`, `max-height`, `flex-basis`, the physical and logical
+`margin-*` and `padding-*` longhands, physical and logical insets, and
+`font-size`. The logical margin, padding, and inset properties use the
+selected container's writing mode and direction. Overflow queries use
+the computed pair of axes, so `overflow-y: scroll` can compute
+`overflow-x` to `auto`. For example,
+`style(width: 120px)` compares the computed CSS width. An omitted value
+tests whether the computed value differs from the initial value, and
+`style(opacity: initial)` tests for the initial value. For the maximum size
+properties, `none` matches an unbounded maximum. Sizing properties also
+compare intrinsic keywords such as `min-content`, `max-content`, and
+`fit-content`. Expected lengths
+can use absolute or relative units, percentages, and math expressions where
+the property grammar accepts them. For example, `style(width: 4em)` uses
+the selected container's font size. Expected `font-size` values use the same bases as
+normal declarations, including the parent font for `em`, `ch`, and
+percentages. A standalone `var(--target, 4em)` in an expected value reads the
+selected container's custom property, with an optional fallback that can
+itself be a standalone `var()`. A resolved variable is validated using
+the same rules as a literal comparison value. An invalid resolved value
+makes the condition unknown, including under negation. An expression with an unresolved percentage compares to
+the computed expression after normalizing its length components. Comparisons
+of other standard properties remain pending.
+
+Numeric custom-property ranges support numbers, percentages, and CSS
+lengths. Relative lengths resolve in the selected container's context,
+including its font metrics, root font size, viewport, and eligible ancestor
+sizes for `cq*` units. The property can appear on either side of a comparison,
+as in `style(--gap >= 12px)` or `style(12px <= --gap)`, or between two
+bounds, as in `style(12px <= --gap < 40px)`. Chained comparisons must point
+in the same direction. Values compare within the same dimension, with
+unitless zero also usable as a length. Thresholds can reference custom
+properties on the same container, including a literal fallback, as in
+`style(var(--min, 12px) <= --gap < var(--max))`. Numbers, lengths, and
+percentages can use `calc()`, `min()`, `max()`, and `clamp()` in values,
+bounds, and fallbacks. For example, `style(--level >= calc(2 * 3))` compares
+numbers, and `style(--gap >= calc(1em + 4px))` computes a length in the
+selected container. Math that mixes lengths and percentages has no
+percentage basis in this comparison. A fallback can reference another
+property, as in `style(--gap >= var(--limit, var(--default, 12px)))`.
+A resolved value that fails the comparison does not advance the fallback
+chain.
+
+### Media queries
+
+Media queries support viewport width and height, their min/max and range
+forms, and the logical spellings `inline-size` and `block-size`. Numeric
+bounds use pixels. `orientation` follows the viewport's proportions, with
+`portrait` matching square viewports. `resolution` uses the surface's
+device pixel ratio, including fractional scales. It accepts `dppx` (or
+`x`), `dpi`, and `dpcm`, with min/max and range forms. Both bounds of
+`(1.5dppx <= resolution < 2dppx)` must hold. In the screen environment,
+`print` evaluates to false.
+
+`prefers-color-scheme`, `prefers-reduced-motion` and `prefers-contrast`
+read the runtime's media preferences. A system appearance snapshot updates
+all three. Without a preference from the host, the screen uses light mode
+and no motion or contrast preference. The runtime represents increased
+contrast as `more`.
+
+`pointer` and `hover` use the primary device. `any-pointer` and `any-hover`
+include additional devices. Hosts report capabilities with
+`UiRuntime::set_media_input` or `AppControl::set_media_input`. Pass
+`Some(MediaInput::default())` for a known absence of pointing devices.
+With `None`, capabilities are unknown and these queries do not match.
+Wayland windows, panels and panel popups receive a profile from seat capabilities.
+A seat pointer is treated as the primary fine hovering device when touch
+is also available. An explicit override takes precedence until
+`clear_media_input_override()` restores the detected profile. Non-Wayland
+window backends rely on the host to provide a profile.
+
+Media queries support `and`, `or`, and `not`. Group mixed operators with
+parentheses. Unsupported features are reported through
+`CssPipeline::unsupported()` and evaluate to unknown. A known true branch
+of `or` still matches, and negating an unknown term preserves it as unknown.
+A syntax error disables only the affected comma-separated branch and is
+reported as a parse error. An empty media list matches all media.
+Transition
+rules, animation declarations and keyframe definitions use the same media
+and container query environment as style rules. The winning `transition` shorthand
+replaces the property list according to importance, selector specificity,
+and source order. A winning `transition: none` clears the list and stops
+running CSS transitions on the element.
 
 ## The UA stylesheet
 
@@ -366,11 +540,22 @@ Three worth knowing before they cost you an afternoon:
    font chain is the suspect before the layout is. See
    [07 — Text and fonts](07-text-and-fonts.md).
 
+## Incremental style updates
+
+For a child-list edit, sibling combinators add the candidate children and
+their subtrees to the invalidation scope. Candidate children must have a
+required class or ID from the right-hand compound. Unkeyed sibling rules
+consider all children. Positional and relational pseudo-classes retain
+conservative invalidation. A changed
+stylesheet or style environment triggers a full pass.
+
 ## Debugging a sheet
 
 | | |
 |---|---|
 | `CssPipeline::errors()` / `unsupported()` | what was dropped and why |
 | `UiRuntime::computed_style(node)` | what actually won for a node |
+| `OBSCUR_FULL_CSS_MOTION_MATCH=1` | also matches motion selectors on frames with unchanged style inputs |
+| `OBSCUR_RESTYLE_TRACE=1` | logs the nodes that start incremental invalidation and whether broad structural rules are present |
 | `OBSCUR_FULL_RESTYLE=1` | forces the pre-incremental restyle path — if a bug disappears under it, incremental invalidation is the cause |
 | `UiRuntime::inspect_snapshot()` | the whole tree with boxes, for assertions |

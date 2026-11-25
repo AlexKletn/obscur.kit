@@ -1,26 +1,27 @@
-#![doc = include_str!("buffer_format.doc/_module.md")]
+#![doc = include_str!("../../docs/api/paint/buffer_format.doc/_module.md")]
 
-#[doc = include_str!("buffer_format.doc/BufferFormat.md")]
+/// The byte layout of one pixel in a foreign buffer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BufferFormat {
-    #[doc = include_str!("buffer_format.doc/Rgba8.md")]
+    /// Red, green, blue, alpha — one byte each. What the scene already speaks.
     Rgba8,
-    #[doc = include_str!("buffer_format.doc/Bgra8.md")]
+    /// Blue, green, red, alpha. The most common foreign layout there is: Windows,
+    /// X11, Wayland and most of ffmpeg's packed RGB output.
     Bgra8,
-    #[doc = include_str!("buffer_format.doc/Rgbx8.md")]
+    /// Red, green, blue and one byte of PADDING. Opaque — the fourth byte is not read.
     Rgbx8,
-    #[doc = include_str!("buffer_format.doc/Bgrx8.md")]
+    /// Blue, green, red and one byte of PADDING. Opaque — the fourth byte is not read.
     Bgrx8,
-    #[doc = include_str!("buffer_format.doc/Rgb8.md")]
+    /// Three bytes per pixel, red first. Opaque.
     Rgb8,
-    #[doc = include_str!("buffer_format.doc/Bgr8.md")]
+    /// Three bytes per pixel, blue first. Opaque.
     Bgr8,
-    #[doc = include_str!("buffer_format.doc/Gray8.md")]
+    /// One byte per pixel, replicated across the three colour channels. Opaque.
     Gray8,
 }
 
 impl BufferFormat {
-    #[doc = include_str!("buffer_format.doc/bytes_per_pixel.md")]
+    /// How many bytes one pixel occupies — the unit a row stride is measured in.
     #[must_use]
     pub const fn bytes_per_pixel(self) -> usize {
         match self {
@@ -30,13 +31,13 @@ impl BufferFormat {
         }
     }
 
-    #[doc = include_str!("buffer_format.doc/carries_alpha.md")]
+    #[doc = include_str!("../../docs/api/paint/buffer_format.doc/carries_alpha.md")]
     #[must_use]
     pub const fn carries_alpha(self) -> bool {
         matches!(self, Self::Rgba8 | Self::Bgra8)
     }
 
-    #[doc = include_str!("buffer_format.doc/to_rgba.md")]
+    /// Reads one pixel out as RGBA8.
     #[must_use]
     pub(crate) fn to_rgba(self, src: &[u8]) -> [u8; 4] {
         // `x` is a padding byte, not an alpha one — a producer is free to leave

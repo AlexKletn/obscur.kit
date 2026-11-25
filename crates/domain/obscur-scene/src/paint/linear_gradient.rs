@@ -1,24 +1,25 @@
-#![doc = include_str!("linear_gradient.doc/_module.md")]
+//! A linear (axial) gradient brush.
 
 use obscur_geometry::Point;
 
 use super::{ExtendMode, GradientStop};
 
-#[doc = include_str!("linear_gradient.doc/LinearGradient.md")]
+#[doc = include_str!("../../docs/api/paint/linear_gradient.doc/LinearGradient.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct LinearGradient {
-    #[doc = include_str!("linear_gradient.doc/start.md")]
+    /// Axis start, mapping to gradient offset `0.0`.
     pub start: Point,
-    #[doc = include_str!("linear_gradient.doc/end.md")]
+    /// Axis end, mapping to gradient offset `1.0`.
     pub end: Point,
-    #[doc = include_str!("linear_gradient.doc/stops.md")]
+    /// Color stops, ordered by ascending offset.
     pub stops: Vec<GradientStop>,
-    #[doc = include_str!("linear_gradient.doc/extend.md")]
+    /// How the gradient extends beyond its `[0, 1]` range.
     pub extend: ExtendMode,
 }
 
 impl LinearGradient {
-    #[doc = include_str!("linear_gradient.doc/new.md")]
+    /// Creates a linear gradient from `start` to `end` with `stops` and the
+    /// default [`ExtendMode::Pad`] extend mode.
     #[must_use]
     pub fn new(start: Point, end: Point, stops: Vec<GradientStop>) -> Self {
         Self {
@@ -29,32 +30,32 @@ impl LinearGradient {
         }
     }
 
-    #[doc = include_str!("linear_gradient.doc/with_extend.md")]
+    /// Returns a copy of this gradient with its extend mode set to `mode`.
     #[must_use]
     pub fn with_extend(mut self, mode: ExtendMode) -> Self {
         self.extend = mode;
         self
     }
 
-    #[doc = include_str!("linear_gradient.doc/start_2.md")]
+    /// Returns the axis start point (gradient offset `0.0`).
     #[must_use]
     pub const fn start(&self) -> Point {
         self.start
     }
 
-    #[doc = include_str!("linear_gradient.doc/end_2.md")]
+    /// Returns the axis end point (gradient offset `1.0`).
     #[must_use]
     pub const fn end(&self) -> Point {
         self.end
     }
 
-    #[doc = include_str!("linear_gradient.doc/stops_2.md")]
+    /// Returns the gradient's color stops.
     #[must_use]
     pub fn stops(&self) -> &[GradientStop] {
         &self.stops
     }
 
-    #[doc = include_str!("linear_gradient.doc/extend_2.md")]
+    /// Returns the gradient's extend mode.
     #[must_use]
     pub const fn extend(&self) -> ExtendMode {
         self.extend

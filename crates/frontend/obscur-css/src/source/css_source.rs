@@ -1,19 +1,20 @@
-#![doc = include_str!("css_source.doc/_module.md")]
+//! An owned CSS source: its id, logical name, and text (spec §2.5 source maps).
 
 use crate::source::{SourceId, SourceSpan, SourceVersion};
 
-#[doc = include_str!("css_source.doc/CssSource.md")]
+#[doc = include_str!("../../docs/api/source/css_source.doc/CssSource.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CssSource {
     id: SourceId,
-    #[doc = include_str!("css_source.doc/version.md")]
+    /// Which revision of this source's text `text` is (spec §4.12). Stamped by
+    /// the owner; a cache compares it rather than the text.
     version: SourceVersion,
     name: Box<str>,
     text: Box<str>,
 }
 
 impl CssSource {
-    #[doc = include_str!("css_source.doc/new.md")]
+    /// Creates a source with the given `id`, logical `name`, and `text`.
     #[must_use]
     pub fn new(id: SourceId, name: impl Into<Box<str>>, text: impl Into<Box<str>>) -> Self {
         Self {
@@ -24,56 +25,57 @@ impl CssSource {
         }
     }
 
-    #[doc = include_str!("css_source.doc/anonymous.md")]
+    /// Creates an anonymous source ([`SourceId::ANONYMOUS`], empty name) from
+    /// `text`.
     #[must_use]
     pub fn anonymous(text: impl Into<Box<str>>) -> Self {
         Self::new(SourceId::ANONYMOUS, "", text)
     }
 
-    #[doc = include_str!("css_source.doc/at_version.md")]
+    #[doc = include_str!("../../docs/api/source/css_source.doc/at_version.md")]
     #[must_use]
     pub fn at_version(mut self, version: SourceVersion) -> Self {
         self.version = version;
         self
     }
 
-    #[doc = include_str!("css_source.doc/version_2.md")]
+    /// The revision of this source's text.
     #[must_use]
     pub const fn version(&self) -> SourceVersion {
         self.version
     }
 
-    #[doc = include_str!("css_source.doc/id.md")]
+    /// Returns the id of this source.
     #[must_use]
     pub const fn id(&self) -> SourceId {
         self.id
     }
 
-    #[doc = include_str!("css_source.doc/name.md")]
+    /// Returns the logical name of this source.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    #[doc = include_str!("css_source.doc/text.md")]
+    /// Returns the full source text.
     #[must_use]
     pub fn text(&self) -> &str {
         &self.text
     }
 
-    #[doc = include_str!("css_source.doc/len.md")]
+    /// Returns the length of the source text in bytes.
     #[must_use]
     pub fn len(&self) -> usize {
         self.text.len()
     }
 
-    #[doc = include_str!("css_source.doc/is_empty.md")]
+    /// Returns whether the source text is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.text.is_empty()
     }
 
-    #[doc = include_str!("css_source.doc/slice.md")]
+    #[doc = include_str!("../../docs/api/source/css_source.doc/slice.md")]
     #[must_use]
     pub fn slice(&self, span: SourceSpan) -> &str {
         let text = &self.text;

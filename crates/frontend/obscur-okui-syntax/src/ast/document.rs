@@ -1,14 +1,15 @@
-#![doc = include_str!("document.doc/_module.md")]
+//! `Document`: the typed AST view of the lossless tree root (spec §2.2).
 
 use crate::ast::Element;
 use crate::syntax::{SyntaxKind, SyntaxNode};
 
-#[doc = include_str!("document.doc/Document.md")]
+#[doc = include_str!("../../docs/api/ast/document.doc/Document.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Document(SyntaxNode);
 
 impl Document {
-    #[doc = include_str!("document.doc/cast.md")]
+    /// Casts a syntax node to a `Document`, returning `Some` iff its kind is
+    /// [`Document`](SyntaxKind::Document).
     #[must_use]
     pub fn cast(node: SyntaxNode) -> Option<Self> {
         if node.kind() == SyntaxKind::Document {
@@ -18,18 +19,18 @@ impl Document {
         }
     }
 
-    #[doc = include_str!("document.doc/syntax.md")]
+    /// Returns the wrapped syntax node.
     #[must_use]
     pub const fn syntax(&self) -> &SyntaxNode {
         &self.0
     }
 
-    #[doc = include_str!("document.doc/elements.md")]
+    #[doc = include_str!("../../docs/api/ast/document.doc/elements.md")]
     pub fn elements(&self) -> impl Iterator<Item = Element> + '_ {
         self.0.child_nodes().cloned().filter_map(Element::cast)
     }
 
-    #[doc = include_str!("document.doc/child_count.md")]
+    /// Returns the number of direct child nodes of the document.
     #[must_use]
     pub fn child_count(&self) -> usize {
         self.0.child_nodes().count()

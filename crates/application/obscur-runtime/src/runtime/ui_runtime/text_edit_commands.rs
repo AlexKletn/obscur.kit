@@ -1,4 +1,4 @@
-#![doc = include_str!("text_edit_commands.doc/_module.md")]
+#![doc = include_str!("../../../docs/api/runtime/ui_runtime/text_edit_commands.doc/_module.md")]
 
 use obscur_identity::NodeId;
 use obscur_interaction::command::KeyEvent;
@@ -13,7 +13,7 @@ use crate::runtime::{
 use super::UiRuntime;
 
 impl UiRuntime {
-    #[doc = include_str!("text_edit_commands.doc/try_text_edit.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/text_edit_commands.doc/try_text_edit.md")]
     pub(super) fn try_text_edit(&mut self, target: NodeId, event: &KeyEvent) -> bool {
         // An edit needs an active session bound to this focus's editable ancestor.
         let Some(session) = self.editing.as_ref() else {
@@ -75,7 +75,9 @@ impl UiRuntime {
         }
     }
 
-    #[doc = include_str!("text_edit_commands.doc/apply_edit.md")]
+    /// Applies `command` to the active editing session, then notifies the app
+    /// (on a mutating edit) and schedules an input frame via
+    /// [`after_edit`](Self::after_edit).
     pub(super) fn apply_edit(&mut self, command: EditCommand) {
         let mutating = command.is_mutating();
         // A **readonly** field (WHATWG HTML §attr-input-readonly) is focusable and
@@ -95,7 +97,7 @@ impl UiRuntime {
         self.after_edit(mutating);
     }
 
-    #[doc = include_str!("text_edit_commands.doc/after_edit.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/text_edit_commands.doc/after_edit.md")]
     fn after_edit(&mut self, mutating: bool) {
         let mut dispatched = false;
         if mutating
@@ -132,7 +134,7 @@ impl UiRuntime {
         }
     }
 
-    #[doc = include_str!("text_edit_commands.doc/edit_is_compose_only.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/text_edit_commands.doc/edit_is_compose_only.md")]
     pub(super) fn edit_is_compose_only(&self, mutating: bool) -> bool {
         // A caret/selection change leaves the text — and therefore every box —
         // untouched: compose-only regardless of the field's shape.

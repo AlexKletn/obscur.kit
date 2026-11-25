@@ -1,22 +1,23 @@
-#![doc = include_str!("progress_driver.doc/_module.md")]
+//! The [`ProgressDriver`] progress-driven motion source (spec §4.17).
 
 use crate::driver::MotionDriver;
 
-#[doc = include_str!("progress_driver.doc/ProgressDriver.md")]
+#[doc = include_str!("../../docs/api/driver/progress_driver.doc/ProgressDriver.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ProgressDriver {
-    #[doc = include_str!("progress_driver.doc/progress.md")]
+    /// The externally-set normalized progress, always kept within `[0, 1]` by
+    /// the [`at`](Self::at) and [`set`](Self::set) entry points.
     progress: f32,
 }
 
 impl ProgressDriver {
-    #[doc = include_str!("progress_driver.doc/new.md")]
+    /// Creates a driver at progress `0.0`.
     #[must_use]
     pub const fn new() -> Self {
         Self { progress: 0.0 }
     }
 
-    #[doc = include_str!("progress_driver.doc/at.md")]
+    /// Creates a driver at the given `progress`, clamped to `[0, 1]`.
     #[must_use]
     pub fn at(progress: f32) -> Self {
         Self {
@@ -24,26 +25,27 @@ impl ProgressDriver {
         }
     }
 
-    #[doc = include_str!("progress_driver.doc/set.md")]
+    #[doc = include_str!("../../docs/api/driver/progress_driver.doc/set.md")]
     pub fn set(&mut self, progress: f32) {
         self.progress = progress.clamp(0.0, 1.0);
     }
 }
 
 impl Default for ProgressDriver {
-    #[doc = include_str!("progress_driver.doc/default.md")]
+    /// The default driver sits at progress `0.0`.
     fn default() -> Self {
         Self::new()
     }
 }
 
 impl MotionDriver for ProgressDriver {
-    #[doc = include_str!("progress_driver.doc/progress_2.md")]
+    /// Returns the stored normalized progress (always within `[0, 1]`).
     fn progress(&self) -> f32 {
         self.progress
     }
 
-    #[doc = include_str!("progress_driver.doc/is_active.md")]
+    /// Always `true`: an external scrubber is considered permanently live, since
+    /// it can move to any progress at any time.
     fn is_active(&self) -> bool {
         true
     }

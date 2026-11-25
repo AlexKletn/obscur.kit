@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Select control (spec §2.6).
 
 mod select;
 pub use select::Select;

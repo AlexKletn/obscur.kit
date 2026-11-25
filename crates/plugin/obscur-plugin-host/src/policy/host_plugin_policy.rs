@@ -1,5 +1,6 @@
-#![doc = include_str!("host_plugin_policy.doc/_module.md")]
+//! `HostPluginPolicy` (skeleton stub for the spec-defined entity; not yet implemented).
 
-#[doc = include_str!("host_plugin_policy.doc/HostPluginPolicy.md")]
+/// Placeholder for the `HostPluginPolicy` entity. See the Obscur Kit 2 specs for its
+/// contract; this stub exists to materialise the target source layout.
 #[derive(Debug)]
 pub struct HostPluginPolicy;

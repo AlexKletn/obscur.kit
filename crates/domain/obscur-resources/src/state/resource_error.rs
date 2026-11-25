@@ -1,26 +1,33 @@
-#![doc = include_str!("resource_error.doc/_module.md")]
+//! Why a resource failed to load, decode, or compile (spec §5.15 failed state).
 
-#[doc = include_str!("resource_error.doc/ResourceError.md")]
+#[doc = include_str!("../../docs/api/state/resource_error.doc/ResourceError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResourceError {
-    #[doc = include_str!("resource_error.doc/NotFound.md")]
+    /// The requested resource could not be located at its source.
     NotFound,
-    #[doc = include_str!("resource_error.doc/Unsupported.md")]
+    /// The resource's format is unknown or unsupported by the available loaders
+    /// (spec §5.15); the payload names the offending format or reason.
     Unsupported(Box<str>),
-    #[doc = include_str!("resource_error.doc/DecodeFailed.md")]
+    /// Decoding the resource's bytes into a CPU representation failed (spec
+    /// §5.15); the payload describes the decode failure.
     DecodeFailed(Box<str>),
-    #[doc = include_str!("resource_error.doc/CompileFailed.md")]
+    /// Compiling the resource (for example a shader) failed (spec §5.15); the
+    /// payload describes the compilation failure.
     CompileFailed(Box<str>),
-    #[doc = include_str!("resource_error.doc/LimitExceeded.md")]
+    /// A safety limit was exceeded, such as a maximum dimension or byte budget
+    /// (spec §5.16); the payload describes the limit that was hit.
     LimitExceeded(Box<str>),
-    #[doc = include_str!("resource_error.doc/SourceUnavailable.md")]
+    /// The resource's backing source became unavailable during loading (spec
+    /// §5.15); the payload describes the source failure.
     SourceUnavailable(Box<str>),
-    #[doc = include_str!("resource_error.doc/Cancelled.md")]
+    /// The load job was cancelled, typically because a newer version superseded
+    /// it (spec §5.15 stale-job rejection).
     Cancelled,
 }
 
 impl ResourceError {
-    #[doc = include_str!("resource_error.doc/is_cancelled.md")]
+    /// Returns whether this error is [`ResourceError::Cancelled`] (spec §5.15
+    /// stale-job rejection).
     #[must_use]
     pub const fn is_cancelled(&self) -> bool {
         matches!(self, Self::Cancelled)

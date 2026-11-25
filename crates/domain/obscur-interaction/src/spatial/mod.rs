@@ -1,11 +1,24 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Spatial module.
+mod detail_levels;
+pub use detail_levels::DetailLevels;
 mod hit_chain;
 pub use hit_chain::HitChain;
 mod hit_test;
 pub use hit_test::HitTest;
+mod materialization_change;
+pub use materialization_change::MaterializationChange;
 mod navigation_direction;
 pub use navigation_direction::NavigationDirection;
+mod spatial_grid;
 mod spatial_index;
-pub use spatial_index::{Entry, SpatialIndex};
+pub use spatial_index::SpatialIndex;
+mod entry;
+pub use entry::Entry;
+mod spatial_materialization;
+pub use spatial_materialization::SpatialMaterialization;
 mod spatial_navigation;
 pub use spatial_navigation::SpatialNavigation;
+mod world_grid;
+pub use world_grid::WorldGrid;
+mod world_snap;
+pub use world_snap::snap_world_point;

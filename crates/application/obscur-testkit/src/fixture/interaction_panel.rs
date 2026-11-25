@@ -1,4 +1,4 @@
-#![doc = include_str!("interaction_panel.doc/_module.md")]
+//! The panel two pointers can work at once.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -14,31 +14,31 @@ use obscur_view::view::{
 use crate::fixture::{ClassRule, TestFixture};
 use crate::selector::NodePath;
 
-#[doc = include_str!("interaction_panel.doc/InteractionPanel.md")]
+#[doc = include_str!("../../docs/api/fixture/interaction_panel.doc/InteractionPanel.md")]
 #[derive(Debug)]
 pub struct InteractionPanel {
-    #[doc = include_str!("interaction_panel.doc/runtime.md")]
+    /// The runtime, with one frame already rendered.
     pub runtime: UiRuntime,
-    #[doc = include_str!("interaction_panel.doc/panel.md")]
+    /// The container node, y ∈ [0, 100).
     pub panel: NodeId,
-    #[doc = include_str!("interaction_panel.doc/a.md")]
+    /// The upper child, y ∈ [0, 50), bound to [`CMD_A`](Self::CMD_A).
     pub a: NodeId,
-    #[doc = include_str!("interaction_panel.doc/b.md")]
+    /// The lower child, y ∈ [50, 100), bound to [`CMD_B`](Self::CMD_B).
     pub b: NodeId,
-    #[doc = include_str!("interaction_panel.doc/ran_a.md")]
+    /// Set when `a`'s handler runs.
     pub ran_a: Rc<Cell<bool>>,
-    #[doc = include_str!("interaction_panel.doc/ran_b.md")]
+    /// Set when `b`'s handler runs.
     pub ran_b: Rc<Cell<bool>>,
 }
 
 impl InteractionPanel {
-    #[doc = include_str!("interaction_panel.doc/CMD_A.md")]
+    /// The click command bound to the upper child.
     pub const CMD_A: InternedSymbol = InternedSymbol::from_raw(0x0A);
 
-    #[doc = include_str!("interaction_panel.doc/CMD_B.md")]
+    /// The click command bound to the lower child.
     pub const CMD_B: InternedSymbol = InternedSymbol::from_raw(0x0B);
 
-    #[doc = include_str!("interaction_panel.doc/new.md")]
+    #[doc = include_str!("../../docs/api/fixture/interaction_panel.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         let mut runtime = TestFixture::runtime();
@@ -64,13 +64,13 @@ impl InteractionPanel {
         }
     }
 
-    #[doc = include_str!("interaction_panel.doc/view.md")]
+    #[doc = include_str!("../../docs/api/fixture/interaction_panel.doc/view.md")]
     #[must_use]
     pub fn view() -> View {
         Self::panel(Self::child)
     }
 
-    #[doc = include_str!("interaction_panel.doc/command_view.md")]
+    /// The panel with each child bound to the given click command.
     #[must_use]
     pub fn command_view(cmd_a: InternedSymbol, cmd_b: InternedSymbol) -> View {
         Self::panel(|component, class| {
@@ -79,7 +79,7 @@ impl InteractionPanel {
         })
     }
 
-    #[doc = include_str!("interaction_panel.doc/ancestor_bound_view.md")]
+    #[doc = include_str!("../../docs/api/fixture/interaction_panel.doc/ancestor_bound_view.md")]
     #[must_use]
     pub fn ancestor_bound_view(panel_command: InternedSymbol, b_command: InternedSymbol) -> View {
         let node = Self::panel_node(move |component, class| {
@@ -94,7 +94,7 @@ impl InteractionPanel {
         View::from_fragment(ViewFragment::from_nodes(vec![node]))
     }
 
-    #[doc = include_str!("interaction_panel.doc/sheet.md")]
+    #[doc = include_str!("../../docs/api/fixture/interaction_panel.doc/sheet.md")]
     #[must_use]
     pub fn sheet() -> Stylesheet {
         Stylesheet::new(
@@ -109,7 +109,7 @@ impl InteractionPanel {
         )
     }
 
-    #[doc = include_str!("interaction_panel.doc/nodes.md")]
+    /// The `(panel, a, b)` ids, after a frame has populated the tree.
     #[must_use]
     pub fn nodes(runtime: &UiRuntime) -> (NodeId, NodeId, NodeId) {
         let panel = NodePath::new(&[0]).resolve(runtime);
@@ -117,12 +117,12 @@ impl InteractionPanel {
         (panel, kids[0], kids[1])
     }
 
-    #[doc = include_str!("interaction_panel.doc/panel_fn.md")]
+    /// Builds the container and its two children through `child`.
     fn panel(child: impl Fn(u64, &str) -> ViewNode) -> View {
         View::from_fragment(ViewFragment::from_nodes(vec![Self::panel_node(child)]))
     }
 
-    #[doc = include_str!("interaction_panel.doc/panel_node.md")]
+    #[doc = include_str!("../../docs/api/fixture/interaction_panel.doc/panel_node.md")]
     fn panel_node(child: impl Fn(u64, &str) -> ViewNode) -> ViewNode {
         ViewNode::element(ComponentId::from_raw(100))
             .with_prop(ViewProperty::new(CLASS, ViewValue::Text("panel".into())))
@@ -132,7 +132,7 @@ impl InteractionPanel {
             ]))
     }
 
-    #[doc = include_str!("interaction_panel.doc/child.md")]
+    /// One classed child element.
     fn child(component: u64, class: &str) -> ViewNode {
         ViewNode::element(ComponentId::from_raw(component))
             .with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))

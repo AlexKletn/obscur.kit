@@ -1,5 +1,6 @@
-#![doc = include_str!("contribution_context.doc/_module.md")]
+//! `ContributionContext` (skeleton stub for the spec-defined entity; not yet implemented).
 
-#[doc = include_str!("contribution_context.doc/ContributionContext.md")]
+/// Placeholder for the `ContributionContext` entity. See the Obscur Kit 2 specs for its
+/// contract; this stub exists to materialise the target source layout.
 #[derive(Debug)]
 pub struct ContributionContext;

@@ -46,6 +46,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
+      - run: sudo apt-get install -y fonts-dejavu-core
+      - name: Run interactive headless examples
+        run: |
+          cargo run -p obscur-kit --example controls_headless
+          cargo run -p obscur-kit --example wireframe_live_headless
 
   architecture:
     name: architecture checks (xtask)
@@ -67,8 +72,34 @@ jobs:
       - run: cargo build -p obscur-kit
       - run: cargo build -p obscur-kit --no-default-features
       - run: cargo build -p obscur-kit --features full
-      # The windowed example is compile-only in CI (no display/GPU).
-      - run: cargo build -p obscur-kit --example windowed_counter --features full
+      - name: Check that plugins are opt-in
+        run: |
+          for profile in default minimal plugins plugin-process plugin-wasm; do
+            args=()
+            if [[ "$profile" != default ]]; then args+=(--no-default-features); fi
+            if [[ "$profile" == plugin* ]]; then args+=(--features "$profile"); fi
+            case "$profile" in
+              default|minimal) forbidden='^obscur-plugin-' ;;
+              plugins) forbidden='^obscur-plugin-executor-' ;;
+              plugin-process) forbidden='^obscur-plugin-executor-wasm ' ;;
+              plugin-wasm) forbidden='^obscur-plugin-executor-process ' ;;
+            esac
+            tree=$(cargo tree -p obscur-kit -e normal --prefix none "${args[@]}")
+            if grep -E "$forbidden" <<< "$tree"; then
+              echo "Unexpected plugin dependency in the $profile profile"
+              exit 1
+            fi
+          done
+      - run: cargo test -p obscur-kit --no-default-features --features plugin-wasm --test plugin_settings --test plugin_ui
+      # The windowed examples are compile-only in CI (no display/GPU).
+      - name: Check interactive windowed examples
+        run: >-
+          cargo check -p obscur-kit --features full
+          --example windowed_counter
+          --example controls_window
+          --example showcase_window
+          --example uikit_window
+          --example wireframe_live_window
       # An application's view of the facade: crates outside the workspace whose
       # only dependency is `obscur-kit`. The one place a defect in what the
       # authoring surfaces *emit* is visible. Two profiles — a window, and a

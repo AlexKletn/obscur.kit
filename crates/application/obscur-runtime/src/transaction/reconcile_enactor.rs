@@ -1,4 +1,5 @@
-#![doc = include_str!("reconcile_enactor.doc/_module.md")]
+//! [`ReconcileEnactor`]: enacts a frame's root reconcile through the atomic
+//! transaction commit boundary (spec §3.2, §3.4 phase 4).
 
 use obscur_identity::{NodeId, VersionStamp};
 use obscur_tree::reconciliation::{Reconciler, ReconciliationPlan};
@@ -11,17 +12,18 @@ use super::transaction_validator::TransactionValidator;
 use super::ui_operation::UiOperation;
 use super::ui_transaction::UiTransaction;
 
-#[doc = include_str!("reconcile_enactor.doc/ReconcileEnactor.md")]
+#[doc = include_str!("../../docs/api/transaction/reconcile_enactor.doc/ReconcileEnactor.md")]
 #[derive(Debug, Clone, Default)]
 pub struct ReconcileEnactor {
-    #[doc = include_str!("reconcile_enactor.doc/validator.md")]
+    /// The stateless structural validator each staged batch passes through.
     validator: TransactionValidator,
-    #[doc = include_str!("reconcile_enactor.doc/version.md")]
+    /// The last version stamped at a committing frame boundary. Advances only
+    /// when a commit actually changed the tree.
     version: VersionStamp,
 }
 
 impl ReconcileEnactor {
-    #[doc = include_str!("reconcile_enactor.doc/new.md")]
+    /// Creates an enactor whose commit version starts at the default stamp.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -30,19 +32,19 @@ impl ReconcileEnactor {
         }
     }
 
-    #[doc = include_str!("reconcile_enactor.doc/version_2.md")]
+    #[doc = include_str!("../../docs/api/transaction/reconcile_enactor.doc/version_2.md")]
     #[must_use]
     pub const fn version(&self) -> VersionStamp {
         self.version
     }
 
-    #[doc = include_str!("reconcile_enactor.doc/validator_2.md")]
+    #[doc = include_str!("../../docs/api/transaction/reconcile_enactor.doc/validator_2.md")]
     #[must_use]
     pub const fn validator(&self) -> &TransactionValidator {
         &self.validator
     }
 
-    #[doc = include_str!("reconcile_enactor.doc/commit_root.md")]
+    #[doc = include_str!("../../docs/api/transaction/reconcile_enactor.doc/commit_root.md")]
     pub fn commit_root(
         &mut self,
         reconciler: &Reconciler,
@@ -62,7 +64,7 @@ impl ReconcileEnactor {
         Ok(self.commit_if_changed(staged, plan))
     }
 
-    #[doc = include_str!("reconcile_enactor.doc/commit_subtree.md")]
+    #[doc = include_str!("../../docs/api/transaction/reconcile_enactor.doc/commit_subtree.md")]
     pub fn commit_subtree(
         &mut self,
         reconciler: &Reconciler,
@@ -81,7 +83,7 @@ impl ReconcileEnactor {
         Ok(self.commit_if_changed(staged, plan))
     }
 
-    #[doc = include_str!("reconcile_enactor.doc/commit_if_changed.md")]
+    #[doc = include_str!("../../docs/api/transaction/reconcile_enactor.doc/commit_if_changed.md")]
     fn commit_if_changed(
         &mut self,
         staged: UiTransaction,

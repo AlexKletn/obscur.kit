@@ -14,6 +14,7 @@ obscur-geometry = { workspace = true }
 obscur-capability = { workspace = true }
 obscur-diagnostics = { workspace = true }
 tiny-skia = "0.11"
+kurbo = "0.13"
 # Real glyph-outline extraction so text rasterizes as honest glyph shapes rather
 # than box-coverage cells (adapter-only; spec §5.2). External-crate boundary.
 skrifa = { workspace = true }

@@ -1,20 +1,20 @@
-#![doc = include_str!("role_converter.doc/_module.md")]
+//! Maps a domain [`SemanticRole`] onto the closest AccessKit [`Role`] (§7.1).
 
 use accesskit::Role;
 use obscur_accessibility::semantic::SemanticRole;
 
-#[doc = include_str!("role_converter.doc/RoleConverter.md")]
+#[doc = include_str!("../../docs/api/conversion/role_converter.doc/RoleConverter.md")]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct RoleConverter;
 
 impl RoleConverter {
-    #[doc = include_str!("role_converter.doc/new.md")]
+    /// Creates the stateless converter.
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    #[doc = include_str!("role_converter.doc/convert.md")]
+    #[doc = include_str!("../../docs/api/conversion/role_converter.doc/convert.md")]
     #[must_use]
     pub const fn convert(&self, role: SemanticRole) -> Role {
         match role {
@@ -32,6 +32,7 @@ impl RoleConverter {
             SemanticRole::List => Role::List,
             SemanticRole::ListItem => Role::ListItem,
             SemanticRole::Table => Role::Table,
+            SemanticRole::TreeGrid => Role::TreeGrid,
             SemanticRole::Row => Role::Row,
             SemanticRole::Cell => Role::Cell,
             SemanticRole::Dialog => Role::Dialog,

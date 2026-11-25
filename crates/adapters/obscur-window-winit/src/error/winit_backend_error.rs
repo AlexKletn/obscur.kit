@@ -1,22 +1,24 @@
-#![doc = include_str!("winit_backend_error.doc/_module.md")]
+//! The [`WinitBackendError`] failure type for the winit window backend
+//! (spec §6.1 windowing; §2.7 "Реализует `WindowBackend` и преобразует native
+//! events в доменные события").
 
 use obscur_windowing::port::WindowError;
 
-#[doc = include_str!("winit_backend_error.doc/WinitBackendError.md")]
+#[doc = include_str!("../../docs/api/error/winit_backend_error.doc/WinitBackendError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WinitBackendError {
-    #[doc = include_str!("winit_backend_error.doc/EventLoopCreation.md")]
+    /// The winit event loop could not be created; carries the reason.
     EventLoopCreation(Box<str>),
-    #[doc = include_str!("winit_backend_error.doc/WindowCreation.md")]
+    /// A platform window could not be created; carries the reason.
     WindowCreation(Box<str>),
-    #[doc = include_str!("winit_backend_error.doc/NoActiveEventLoop.md")]
+    /// An operation required an active event loop, but none was available.
     NoActiveEventLoop,
-    #[doc = include_str!("winit_backend_error.doc/Backend.md")]
+    /// Any other backend-side failure; carries the reason.
     Backend(Box<str>),
 }
 
 impl WinitBackendError {
-    #[doc = include_str!("winit_backend_error.doc/into_window_error.md")]
+    #[doc = include_str!("../../docs/api/error/winit_backend_error.doc/into_window_error.md")]
     #[must_use]
     pub fn into_window_error(self) -> WindowError {
         match self {

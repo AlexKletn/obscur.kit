@@ -1,188 +1,58 @@
-#![doc = include_str!("event_recording.doc/_module.md")]
+//! An ordered, timestamped log of recorded steps for record & replay (spec §7.13).
 
+use super::{RecordedEvent, RecordedStep, RedactionPolicy, Sensitivity};
 use crate::input::SyntheticInput;
 
-#[doc = include_str!("event_recording.doc/Sensitivity.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum Sensitivity {
-    #[doc = include_str!("event_recording.doc/Normal.md")]
-    #[default]
-    Normal,
-    #[doc = include_str!("event_recording.doc/Secret.md")]
-    Secret,
-    #[doc = include_str!("event_recording.doc/Clipboard.md")]
-    Clipboard,
-}
-
-#[doc = include_str!("event_recording.doc/RedactionPolicy.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct RedactionPolicy {
-    #[doc = include_str!("event_recording.doc/redact_secrets.md")]
-    pub redact_secrets: bool,
-    #[doc = include_str!("event_recording.doc/redact_clipboard.md")]
-    pub redact_clipboard: bool,
-}
-
-impl Default for RedactionPolicy {
-    #[doc = include_str!("event_recording.doc/default.md")]
-    fn default() -> Self {
-        Self {
-            redact_secrets: true,
-            redact_clipboard: true,
-        }
-    }
-}
-
-impl RedactionPolicy {
-    #[doc = include_str!("event_recording.doc/redacting.md")]
-    #[must_use]
-    pub fn redacting() -> Self {
-        Self::default()
-    }
-
-    #[doc = include_str!("event_recording.doc/allow_all.md")]
-    #[must_use]
-    pub const fn allow_all() -> Self {
-        Self {
-            redact_secrets: false,
-            redact_clipboard: false,
-        }
-    }
-
-    #[doc = include_str!("event_recording.doc/redacts.md")]
-    #[must_use]
-    pub const fn redacts(&self, sensitivity: Sensitivity) -> bool {
-        match sensitivity {
-            Sensitivity::Normal => false,
-            Sensitivity::Secret => self.redact_secrets,
-            Sensitivity::Clipboard => self.redact_clipboard,
-        }
-    }
-}
-
-#[doc = include_str!("event_recording.doc/RecordedEvent.md")]
-#[derive(Debug, Clone, PartialEq)]
-pub enum RecordedEvent {
-    #[doc = include_str!("event_recording.doc/Input.md")]
-    Input(SyntheticInput),
-    #[doc = include_str!("event_recording.doc/ClockTick.md")]
-    ClockTick {
-        #[doc = include_str!("event_recording.doc/nanos.md")]
-        nanos: u64,
-    },
-    #[doc = include_str!("event_recording.doc/AsyncCompletion.md")]
-    AsyncCompletion {
-        #[doc = include_str!("event_recording.doc/operation.md")]
-        operation: u64,
-    },
-    #[doc = include_str!("event_recording.doc/SchedulerDecision.md")]
-    SchedulerDecision {
-        #[doc = include_str!("event_recording.doc/reason.md")]
-        reason: SchedulerReason,
-        #[doc = include_str!("event_recording.doc/accepted.md")]
-        accepted: bool,
-    },
-    #[doc = include_str!("event_recording.doc/ResourceVersion.md")]
-    ResourceVersion {
-        #[doc = include_str!("event_recording.doc/resource.md")]
-        resource: u64,
-        #[doc = include_str!("event_recording.doc/version.md")]
-        version: u64,
-    },
-    #[doc = include_str!("event_recording.doc/EnvironmentChange.md")]
-    EnvironmentChange(EnvironmentChange),
-    #[doc = include_str!("event_recording.doc/Redacted.md")]
-    Redacted {
-        #[doc = include_str!("event_recording.doc/kind.md")]
-        kind: Sensitivity,
-    },
-}
-
-#[doc = include_str!("event_recording.doc/SchedulerReason.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum SchedulerReason {
-    #[doc = include_str!("event_recording.doc/Frame.md")]
-    Frame,
-    #[doc = include_str!("event_recording.doc/Timer.md")]
-    Timer,
-    #[doc = include_str!("event_recording.doc/Idle.md")]
-    Idle,
-    #[doc = include_str!("event_recording.doc/Coalesced.md")]
-    Coalesced,
-}
-
-#[doc = include_str!("event_recording.doc/EnvironmentChange_2.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum EnvironmentChange {
-    #[doc = include_str!("event_recording.doc/WindowResized.md")]
-    WindowResized {
-        #[doc = include_str!("event_recording.doc/width.md")]
-        width: u32,
-        #[doc = include_str!("event_recording.doc/height.md")]
-        height: u32,
-    },
-    #[doc = include_str!("event_recording.doc/VisibilityChanged.md")]
-    VisibilityChanged {
-        #[doc = include_str!("event_recording.doc/visible.md")]
-        visible: bool,
-    },
-}
-
-#[doc = include_str!("event_recording.doc/RecordedStep.md")]
-#[derive(Debug, Clone, PartialEq)]
-pub struct RecordedStep {
-    #[doc = include_str!("event_recording.doc/tick.md")]
-    pub tick: u64,
-    #[doc = include_str!("event_recording.doc/event.md")]
-    pub event: RecordedEvent,
-}
-
-impl RecordedStep {
-    #[doc = include_str!("event_recording.doc/new.md")]
-    #[must_use]
-    pub const fn new(tick: u64, event: RecordedEvent) -> Self {
-        Self { tick, event }
-    }
-}
-
-#[doc = include_str!("event_recording.doc/EventRecording.md")]
+#[doc = include_str!("../../docs/api/replay/event_recording.doc/EventRecording.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct EventRecording {
     steps: Vec<RecordedStep>,
     policy: RedactionPolicy,
+    ticks_are_clock_nanos: bool,
 }
 
 impl EventRecording {
-    #[doc = include_str!("event_recording.doc/new_2.md")]
+    /// Creates an empty recording using the default (redacting) policy.
     #[must_use]
     pub fn new() -> Self {
-        Self {
-            steps: Vec::new(),
-            policy: RedactionPolicy::default(),
-        }
+        Self::with_policy(RedactionPolicy::default())
     }
 
-    #[doc = include_str!("event_recording.doc/with_policy.md")]
+    /// Creates an empty recording using an explicit redaction `policy`.
     #[must_use]
     pub fn with_policy(policy: RedactionPolicy) -> Self {
         Self {
             steps: Vec::new(),
             policy,
+            ticks_are_clock_nanos: false,
         }
     }
 
-    #[doc = include_str!("event_recording.doc/policy.md")]
+    pub(crate) fn from_host_clock() -> Self {
+        Self {
+            ticks_are_clock_nanos: true,
+            ..Self::new()
+        }
+    }
+
+    pub(crate) fn pointer_timestamp(&self, step: &RecordedStep) -> Option<u64> {
+        self.ticks_are_clock_nanos.then_some(step.tick / 1_000)
+    }
+
+    /// Returns the redaction policy this recording was captured under.
     #[must_use]
     pub fn policy(&self) -> RedactionPolicy {
         self.policy
     }
 
-    #[doc = include_str!("event_recording.doc/record.md")]
+    /// Appends `event` at `tick`. Structured events pass through unchanged; use
+    /// [`record_input`](Self::record_input) to record input through the
+    /// redaction policy.
     pub fn record(&mut self, tick: u64, event: RecordedEvent) {
         self.steps.push(RecordedStep::new(tick, event));
     }
 
-    #[doc = include_str!("event_recording.doc/record_input.md")]
+    #[doc = include_str!("../../docs/api/replay/event_recording.doc/record_input.md")]
     pub fn record_input(&mut self, tick: u64, input: SyntheticInput, sensitivity: Sensitivity) {
         let event = if self.policy.redacts(sensitivity) {
             // The payload is intentionally dropped here; redaction is irreversible.
@@ -193,25 +63,25 @@ impl EventRecording {
         self.steps.push(RecordedStep::new(tick, event));
     }
 
-    #[doc = include_str!("event_recording.doc/steps.md")]
+    /// Returns the recorded steps in order.
     #[must_use]
     pub fn steps(&self) -> &[RecordedStep] {
         &self.steps
     }
 
-    #[doc = include_str!("event_recording.doc/len.md")]
+    /// Returns the number of recorded steps.
     #[must_use]
     pub fn len(&self) -> usize {
         self.steps.len()
     }
 
-    #[doc = include_str!("event_recording.doc/is_empty.md")]
+    /// Returns `true` when no steps have been recorded.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.steps.is_empty()
     }
 
-    #[doc = include_str!("event_recording.doc/iter.md")]
+    /// Iterates over the recorded steps in order.
     pub fn iter(&self) -> std::slice::Iter<'_, RecordedStep> {
         self.steps.iter()
     }
@@ -234,6 +104,7 @@ impl<'a> IntoIterator for &'a EventRecording {
 
 #[cfg(test)]
 mod tests {
+    use super::super::SchedulerReason;
     use super::*;
     use crate::input::{PointerButton, SelectorTarget, SyntheticInput};
     use obscur_identity::NodeId;

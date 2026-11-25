@@ -1,30 +1,31 @@
-#![doc = include_str!("command_validator.doc/_module.md")]
+//! `CommandValidator`: checks every `on:<event>` handler reference in a document
+//! against the commands the caller declared (spec §2.13).
 
 use obscur_okui_syntax::ast::{Document, Element};
 
 use crate::lowering::{attribute_value_text, event_local_name};
 use crate::validation::{CommandSurface, ValidationDiagnostic};
 
-#[doc = include_str!("command_validator.doc/CommandValidator.md")]
+#[doc = include_str!("../../docs/api/validation/command_validator.doc/CommandValidator.md")]
 #[derive(Debug, Clone, Default)]
 pub struct CommandValidator {
     surface: CommandSurface,
 }
 
 impl CommandValidator {
-    #[doc = include_str!("command_validator.doc/new.md")]
+    /// Creates a validator judging handler references against `surface`.
     #[must_use]
     pub const fn new(surface: CommandSurface) -> Self {
         Self { surface }
     }
 
-    #[doc = include_str!("command_validator.doc/surface.md")]
+    /// The surface this validator judges against.
     #[must_use]
     pub const fn surface(&self) -> &CommandSurface {
         &self.surface
     }
 
-    #[doc = include_str!("command_validator.doc/validate.md")]
+    #[doc = include_str!("../../docs/api/validation/command_validator.doc/validate.md")]
     #[must_use]
     pub fn validate(&self, document: &Document) -> Vec<ValidationDiagnostic> {
         let mut diagnostics = Vec::new();
@@ -37,7 +38,8 @@ impl CommandValidator {
         diagnostics
     }
 
-    #[doc = include_str!("command_validator.doc/validate_element.md")]
+    /// Checks one element's event bindings, then recurses into its element-shaped
+    /// children.
     fn validate_element(&self, element: &Element, diagnostics: &mut Vec<ValidationDiagnostic>) {
         let element_offset = element.syntax().offset().unwrap_or(0);
         for attribute in element.attributes() {

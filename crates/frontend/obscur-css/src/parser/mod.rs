@@ -1,25 +1,72 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! CSS parsers: tokenizer and hand-rolled parsers producing the crate's own
+//! parsed-AST (spec §4.13). Entry point: [`StylesheetParser`].
 
 mod container_query_parser;
-pub use container_query_parser::{ContainerCondition, ContainerQueryParser, ParsedContainerQuery};
+pub use container_query_parser::ContainerQueryParser;
+mod container_condition;
+pub use container_condition::ContainerCondition;
+mod container_group;
+pub use container_group::ContainerGroup;
+mod container_logic;
+pub use container_logic::ContainerLogic;
+mod parsed_container_query;
+pub use parsed_container_query::ParsedContainerQuery;
+mod css_token;
+mod css_token_kind;
 mod css_tokenizer;
+mod parsed_media_query_list;
+pub use parsed_media_query_list::ParsedMediaQueryList;
+mod parsed_media_query;
+pub use parsed_media_query::ParsedMediaQuery;
+mod media_logic;
+pub use media_logic::MediaLogic;
+mod media_qualifier;
+pub use media_qualifier::MediaQualifier;
+mod media_condition;
+pub use media_condition::MediaCondition;
+mod media_comparator;
+pub use media_comparator::MediaComparator;
 mod media_query_parser;
-pub use media_query_parser::{
-    MediaComparator, MediaCondition, MediaQualifier, MediaQueryParser, ParsedMediaQuery,
-    ParsedMediaQueryList,
-};
+pub use media_query_parser::MediaQueryParser;
 mod property_parser;
-pub use property_parser::{ParsedDeclaration, PropertyParser};
+mod query_condition_parser;
+pub use property_parser::PropertyParser;
+mod parsed_declaration;
+pub use parsed_declaration::ParsedDeclaration;
 mod selector_parser;
-pub use selector_parser::{
-    AttrOp, Combinator, ParsedComplexSelector, ParsedCompoundSelector, ParsedSelectorList,
-    SelectorParser, SimpleSelector,
-};
+pub use selector_parser::SelectorParser;
+mod attr_op;
+pub use attr_op::AttrOp;
+mod combinator;
+pub use combinator::Combinator;
+mod parsed_complex_selector;
+pub use parsed_complex_selector::ParsedComplexSelector;
+mod parsed_compound_selector;
+pub use parsed_compound_selector::ParsedCompoundSelector;
+mod parsed_selector_list;
+pub use parsed_selector_list::ParsedSelectorList;
+mod simple_selector;
+pub use simple_selector::SimpleSelector;
 mod stylesheet_parser;
-pub use stylesheet_parser::{
-    KeyframeSelector, ParsedContainerRule, ParsedKeyframe, ParsedKeyframesRule, ParsedMediaRule,
-    ParsedRule, ParsedStyleRule, ParsedStylesheet, StylesheetParser,
-};
+pub use stylesheet_parser::StylesheetParser;
+mod keyframe_selector;
+pub use keyframe_selector::KeyframeSelector;
+mod parsed_container_rule;
+pub use parsed_container_rule::ParsedContainerRule;
+mod parsed_keyframe;
+pub use parsed_keyframe::ParsedKeyframe;
+mod parsed_keyframes_rule;
+pub use parsed_keyframes_rule::ParsedKeyframesRule;
+mod parsed_media_rule;
+pub use parsed_media_rule::ParsedMediaRule;
+mod parsed_rule;
+pub use parsed_rule::ParsedRule;
+mod parsed_style_rule;
+pub use parsed_style_rule::ParsedStyleRule;
+mod parsed_stylesheet;
+pub use parsed_stylesheet::ParsedStylesheet;
 mod token_cursor;
 mod value_parser;
-pub use value_parser::{ParsedValue, ValueParser};
+pub use value_parser::ValueParser;
+mod parsed_value;
+pub use parsed_value::ParsedValue;

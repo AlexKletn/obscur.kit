@@ -7,5 +7,29 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[features]
+plugin-wasm = ["dep:obscur-plugin-executor-wasm"]
+
+[dependencies]
+obscur-plugin-model = { workspace = true }
+obscur-plugin-api = { workspace = true }
+obscur-plugin-package = { workspace = true }
+obscur-plugin-executor-wasm = { workspace = true, optional = true }
+obscur-routing = { workspace = true }
+obscur-view = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+event-listener = "5.4"
+
+[target.'cfg(any(unix, windows))'.dependencies]
+sha2 = { workspace = true }
+tempfile = { workspace = true }
+
+[dev-dependencies]
+sha2 = { workspace = true }
+tar = { workspace = true }
+tempfile = { workspace = true }
+wat = "1"
+
 [lints]
 workspace = true

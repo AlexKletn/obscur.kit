@@ -267,3 +267,23 @@ fn im_03_a_2x_asset_has_a_halved_logical_intrinsic_size() {
         );
     }
 }
+
+#[test]
+fn contained_image_uses_empty_natural_size_on_contained_axes() {
+    let dir = asset_dir(&[("pic.png", solid_png(40, 20, [255, 0, 0]))]);
+    let picture = Image::new("pic.png")
+        .into_view_node()
+        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("pic".into())));
+    let view = View::from_fragment(ViewFragment::from_nodes(vec![picture]));
+    for (containment, expected) in [("size", (10.0, 10.0)), ("inline-size", (10.0, 20.0))] {
+        let sheet = compile(&format!(
+            ".pic {{ container-type: {containment}; box-sizing: border-box; padding: 5px; }}"
+        ));
+        let mut runtime = runtime_at(&dir);
+        let _ = runtime.render_now(&view, std::slice::from_ref(&sheet));
+        let _ = runtime.poll_resource_tasks();
+        let _ = runtime.render_now(&view, std::slice::from_ref(&sheet));
+        let (_, _, width, height) = geom(&runtime, at(&runtime, &[0]));
+        assert_eq!((width, height), expected, "{containment}");
+    }
+}

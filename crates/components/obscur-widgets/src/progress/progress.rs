@@ -1,4 +1,6 @@
-#![doc = include_str!("progress.doc/_module.md")]
+#![doc = include_str!("../../docs/api/progress/progress.doc/_module.md")]
+
+use super::ProgressShape;
 
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_primitives::Canvas;
@@ -6,69 +8,36 @@ use obscur_view::view::{
     LOCAL_NAME, View, ViewFragment, ViewNode, ViewProperty, ViewValue, canvas_painter_prop,
 };
 
-#[doc = include_str!("progress.doc/Progress.md")]
+/// A progress bar.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Progress {
-    #[doc = include_str!("progress.doc/value.md")]
+    /// How far along, from 0 to 1, clamped at construction.
     value: f32,
-    #[doc = include_str!("progress.doc/tracked.md")]
+    /// Whether the bar knows how far along it is.
     tracked: bool,
-    #[doc = include_str!("progress.doc/shape.md")]
+    /// The shape the bar is drawn along.
     shape: ProgressShape,
-    #[doc = include_str!("progress.doc/path.md")]
+    /// SVG path data the bar runs along, when the author supplied one.
     path: Option<Box<str>>,
 }
 
-#[doc = include_str!("progress.doc/ProgressShape.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ProgressShape {
-    #[doc = include_str!("progress.doc/Line.md")]
-    #[default]
-    Line,
-    #[doc = include_str!("progress.doc/Ring.md")]
-    Ring,
-}
-
-impl ProgressShape {
-    #[doc = include_str!("progress.doc/as_int.md")]
-    #[must_use]
-    pub const fn as_int(self) -> i64 {
-        match self {
-            Self::Line => 0,
-            Self::Ring => 1,
-        }
-    }
-
-    #[doc = include_str!("progress.doc/from_int.md")]
-    #[must_use]
-    pub const fn from_int(raw: i64) -> Self {
-        match raw {
-            1 => Self::Ring,
-            // Anything else is a line, which is the shape that needs no room
-            // and no policy — a control asked for a shape nobody modelled is
-            // better as a plain bar than as nothing at all.
-            _ => Self::Line,
-        }
-    }
-}
-
 impl Progress {
-    #[doc = include_str!("progress.doc/COMPONENT_ID.md")]
+    /// The component id an authored `<progress>` binds to.
     pub const COMPONENT_ID: ComponentId = ComponentId::from_raw(0x00D0_0007);
 
-    #[doc = include_str!("progress.doc/PAINTER.md")]
+    /// The built-in painter every progress names.
     pub const PAINTER: InternedSymbol = InternedSymbol::from_raw(0x00D1_0701);
 
-    #[doc = include_str!("progress.doc/PROP_VALUE.md")]
+    /// The fraction, as the painter reads it.
     pub const PROP_VALUE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0702);
-    #[doc = include_str!("progress.doc/PROP_SHAPE.md")]
+    /// The shape, as the painter reads it.
     pub const PROP_SHAPE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0703);
-    #[doc = include_str!("progress.doc/PROP_TRACKED.md")]
+    /// Whether the bar knows how far along it is.
     pub const PROP_TRACKED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0704);
-    #[doc = include_str!("progress.doc/PROP_PATH.md")]
+    /// SVG path data the bar runs along, in the canvas's own coordinates.
     pub const PROP_PATH: InternedSymbol = InternedSymbol::from_raw(0x00D1_0705);
 
-    #[doc = include_str!("progress.doc/new.md")]
+    /// A progress bar at `value`, clamped to 0..1; a non-finite value reads as zero.
     #[must_use]
     pub fn new(value: f32) -> Self {
         Self {
@@ -86,14 +55,14 @@ impl Progress {
         }
     }
 
-    #[doc = include_str!("progress.doc/along.md")]
+    #[doc = include_str!("../../docs/api/progress/progress.doc/along.md")]
     #[must_use]
     pub fn along(mut self, path_data: impl Into<Box<str>>) -> Self {
         self.path = Some(path_data.into());
         self
     }
 
-    #[doc = include_str!("progress.doc/indeterminate.md")]
+    #[doc = include_str!("../../docs/api/progress/progress.doc/indeterminate.md")]
     #[must_use]
     pub fn indeterminate() -> Self {
         Self {
@@ -104,26 +73,26 @@ impl Progress {
         }
     }
 
-    #[doc = include_str!("progress.doc/is_tracked.md")]
+    /// Whether the bar knows how far along it is.
     #[must_use]
     pub const fn is_tracked(&self) -> bool {
         self.tracked
     }
 
-    #[doc = include_str!("progress.doc/shaped.md")]
+    /// Returns the bar drawn along `shape`.
     #[must_use]
     pub fn shaped(mut self, shape: ProgressShape) -> Self {
         self.shape = shape;
         self
     }
 
-    #[doc = include_str!("progress.doc/value_2.md")]
+    /// How far along, from 0 to 1.
     #[must_use]
     pub const fn value(&self) -> f32 {
         self.value
     }
 
-    #[doc = include_str!("progress.doc/props.md")]
+    /// The host node's properties: its local name, and what the painter reads.
     #[must_use]
     pub fn props(&self) -> Vec<ViewProperty> {
         vec![
@@ -134,7 +103,7 @@ impl Progress {
         ]
     }
 
-    #[doc = include_str!("progress.doc/contents.md")]
+    #[doc = include_str!("../../docs/api/progress/progress.doc/contents.md")]
     #[must_use]
     pub fn contents(
         value: f32,
@@ -169,7 +138,7 @@ impl Progress {
         ])
     }
 
-    #[doc = include_str!("progress.doc/view.md")]
+    /// The bar as a view.
     #[must_use]
     pub fn view(&self) -> View {
         let mut node = ViewNode::element(Self::COMPONENT_ID);

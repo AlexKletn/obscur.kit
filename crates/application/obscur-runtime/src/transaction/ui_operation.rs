@@ -1,33 +1,33 @@
-#![doc = include_str!("ui_operation.doc/_module.md")]
+//! [`UiOperation`]: a single normalized UI mutation intent (spec §3.2).
 
 use obscur_identity::NodeId;
 
 use crate::invalidation::{Invalidation, InvalidationReason};
 
-#[doc = include_str!("ui_operation.doc/UiOperation.md")]
+#[doc = include_str!("../../docs/api/transaction/ui_operation.doc/UiOperation.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum UiOperation {
-    #[doc = include_str!("ui_operation.doc/ReplaceRoot.md")]
+    #[doc = include_str!("../../docs/api/transaction/ui_operation.doc/ReplaceRoot.md")]
     ReplaceRoot,
-    #[doc = include_str!("ui_operation.doc/Rerender.md")]
+    /// A component subtree rooted at `node` must be re-rendered.
     Rerender {
-        #[doc = include_str!("ui_operation.doc/node.md")]
+        /// The node at the root of the subtree to re-render.
         node: NodeId,
     },
-    #[doc = include_str!("ui_operation.doc/InvalidateStyle.md")]
+    /// A node's style must be recomputed.
     InvalidateStyle {
-        #[doc = include_str!("ui_operation.doc/node_2.md")]
+        /// The node whose style is now stale.
         node: NodeId,
     },
-    #[doc = include_str!("ui_operation.doc/InvalidateLayout.md")]
+    /// A node's layout must be recomputed.
     InvalidateLayout {
-        #[doc = include_str!("ui_operation.doc/node_3.md")]
+        /// The node whose layout is now stale.
         node: NodeId,
     },
 }
 
 impl UiOperation {
-    #[doc = include_str!("ui_operation.doc/invalidation.md")]
+    #[doc = include_str!("../../docs/api/transaction/ui_operation.doc/invalidation.md")]
     #[must_use]
     pub fn invalidation(self) -> Invalidation {
         match self {
@@ -44,7 +44,9 @@ impl UiOperation {
         }
     }
 
-    #[doc = include_str!("ui_operation.doc/target.md")]
+    /// Returns the node this operation targets, or `None` for
+    /// [`UiOperation::ReplaceRoot`], which applies to the whole tree rather than
+    /// a single node.
     #[must_use]
     pub const fn target(&self) -> Option<NodeId> {
         match self {
@@ -55,25 +57,25 @@ impl UiOperation {
         }
     }
 
-    #[doc = include_str!("ui_operation.doc/is_root_replacement.md")]
+    /// Returns `true` if this operation replaces the root (a whole-tree reconcile).
     #[must_use]
     pub const fn is_root_replacement(&self) -> bool {
         matches!(self, Self::ReplaceRoot)
     }
 
-    #[doc = include_str!("ui_operation.doc/is_rerender.md")]
+    /// Returns `true` if this operation requests a component subtree re-render.
     #[must_use]
     pub const fn is_rerender(&self) -> bool {
         matches!(self, Self::Rerender { .. })
     }
 
-    #[doc = include_str!("ui_operation.doc/is_style_invalidation.md")]
+    /// Returns `true` if this operation invalidates a node's style.
     #[must_use]
     pub const fn is_style_invalidation(&self) -> bool {
         matches!(self, Self::InvalidateStyle { .. })
     }
 
-    #[doc = include_str!("ui_operation.doc/is_layout_invalidation.md")]
+    /// Returns `true` if this operation invalidates a node's layout.
     #[must_use]
     pub const fn is_layout_invalidation(&self) -> bool {
         matches!(self, Self::InvalidateLayout { .. })

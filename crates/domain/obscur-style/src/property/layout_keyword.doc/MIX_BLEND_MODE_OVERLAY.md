@@ -1,1 +1,0 @@
-`mix-blend-mode: overlay`.

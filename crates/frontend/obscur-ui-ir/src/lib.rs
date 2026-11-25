@@ -1,4 +1,4 @@
-#![doc = include_str!("lib.doc/_module.md")]
+//! Versioned, validated UI intermediate representation.
 #![forbid(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 

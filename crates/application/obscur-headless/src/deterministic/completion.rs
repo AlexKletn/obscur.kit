@@ -1,36 +1,36 @@
-#![doc = include_str!("completion.doc/_module.md")]
+//! A single controlled async completion (spec §7.4, §3.3).
 
 use obscur_identity::OperationId;
 
-#[doc = include_str!("completion.doc/Completion.md")]
+#[doc = include_str!("../../docs/api/deterministic/completion.doc/Completion.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Completion<T> {
-    #[doc = include_str!("completion.doc/operation.md")]
+    /// The operation this completion resolves.
     operation: OperationId,
-    #[doc = include_str!("completion.doc/value.md")]
+    /// The delivered result value.
     value: T,
 }
 
 impl<T> Completion<T> {
-    #[doc = include_str!("completion.doc/new.md")]
+    /// Creates a completion pairing `operation` with its result `value`.
     #[must_use]
     pub fn new(operation: OperationId, value: T) -> Self {
         Self { operation, value }
     }
 
-    #[doc = include_str!("completion.doc/operation_2.md")]
+    /// Returns the operation this completion resolves.
     #[must_use]
     pub fn operation(&self) -> OperationId {
         self.operation
     }
 
-    #[doc = include_str!("completion.doc/value_2.md")]
+    /// Returns a reference to the delivered result value.
     #[must_use]
     pub fn value(&self) -> &T {
         &self.value
     }
 
-    #[doc = include_str!("completion.doc/into_value.md")]
+    /// Consumes the completion, returning its result value.
     #[must_use]
     pub fn into_value(self) -> T {
         self.value

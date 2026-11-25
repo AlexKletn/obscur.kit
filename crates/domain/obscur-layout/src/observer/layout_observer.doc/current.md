@@ -1,1 +1,0 @@
-The newly-committed box.

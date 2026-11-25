@@ -1,1 +1,0 @@
-The over-subscribed slot.

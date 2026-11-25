@@ -1,4 +1,6 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Menu control (spec §2.6, §6.7).
 
 mod menu;
-pub use menu::{Menu, MenuItem};
+pub use menu::Menu;
+mod menu_item;
+pub use menu_item::MenuItem;

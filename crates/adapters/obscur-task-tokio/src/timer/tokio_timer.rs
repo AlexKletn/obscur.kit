@@ -1,4 +1,4 @@
-#![doc = include_str!("tokio_timer.doc/_module.md")]
+#![doc = include_str!("../../docs/api/timer/tokio_timer.doc/_module.md")]
 
 use std::fmt;
 use std::sync::Arc;
@@ -7,17 +7,19 @@ use std::time::Duration;
 use obscur_task::Timer;
 use tokio::runtime::Handle;
 
-#[doc = include_str!("tokio_timer.doc/TokioTimer.md")]
+#[doc = include_str!("../../docs/api/timer/tokio_timer.doc/TokioTimer.md")]
 #[derive(Clone)]
 pub struct TokioTimer {
-    #[doc = include_str!("tokio_timer.doc/handle.md")]
+    /// The Tokio runtime handle wake tasks are spawned onto.
     handle: Handle,
-    #[doc = include_str!("tokio_timer.doc/wake.md")]
+    /// The action invoked after each scheduled delay elapses. Shared so the
+    /// timer stays [`Clone`] and each spawned task can hold its own reference.
     wake: Arc<dyn Fn() + Send + Sync + 'static>,
 }
 
 impl TokioTimer {
-    #[doc = include_str!("tokio_timer.doc/new.md")]
+    /// Creates a timer that, for each scheduled delay, wakes by calling `wake` on
+    /// the Tokio runtime behind `handle`.
     #[must_use]
     pub fn new(handle: Handle, wake: impl Fn() + Send + Sync + 'static) -> Self {
         Self {
@@ -26,7 +28,7 @@ impl TokioTimer {
         }
     }
 
-    #[doc = include_str!("tokio_timer.doc/handle_2.md")]
+    /// Returns the Tokio [`Handle`] wake tasks are spawned onto.
     #[must_use]
     pub fn handle(&self) -> &Handle {
         &self.handle
@@ -34,14 +36,14 @@ impl TokioTimer {
 }
 
 impl fmt::Debug for TokioTimer {
-    #[doc = include_str!("tokio_timer.doc/fmt.md")]
+    /// Formats without the wake closure, which is not itself `Debug`.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TokioTimer").finish_non_exhaustive()
     }
 }
 
 impl Timer for TokioTimer {
-    #[doc = include_str!("tokio_timer.doc/schedule.md")]
+    #[doc = include_str!("../../docs/api/timer/tokio_timer.doc/schedule.md")]
     fn schedule(&self, delay: Duration) {
         let wake = Arc::clone(&self.wake);
         self.handle.spawn(async move {

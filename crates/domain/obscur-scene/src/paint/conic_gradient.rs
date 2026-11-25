@@ -1,24 +1,26 @@
-#![doc = include_str!("conic_gradient.doc/_module.md")]
+//! A conic (angular / sweep) gradient brush.
 
 use obscur_geometry::Point;
 
 use super::{ExtendMode, GradientStop};
 
-#[doc = include_str!("conic_gradient.doc/ConicGradient.md")]
+#[doc = include_str!("../../docs/api/paint/conic_gradient.doc/ConicGradient.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConicGradient {
-    #[doc = include_str!("conic_gradient.doc/center.md")]
+    /// Center of the sweep.
     pub center: Point,
-    #[doc = include_str!("conic_gradient.doc/start_angle.md")]
+    /// Angle (radians) at which the sweep begins, mapping to offset `0.0`.
     pub start_angle: f32,
-    #[doc = include_str!("conic_gradient.doc/stops.md")]
+    /// Color stops, ordered by ascending offset.
     pub stops: Vec<GradientStop>,
-    #[doc = include_str!("conic_gradient.doc/extend.md")]
+    /// How the gradient extends beyond its `[0, 1]` range.
     pub extend: ExtendMode,
 }
 
 impl ConicGradient {
-    #[doc = include_str!("conic_gradient.doc/new.md")]
+    /// Creates a conic gradient centered at `center`, sweeping clockwise from
+    /// `start_angle` (radians), with `stops` and the default
+    /// [`ExtendMode::Pad`] extend mode.
     #[must_use]
     pub fn new(center: Point, start_angle: f32, stops: Vec<GradientStop>) -> Self {
         Self {
@@ -29,32 +31,32 @@ impl ConicGradient {
         }
     }
 
-    #[doc = include_str!("conic_gradient.doc/with_extend.md")]
+    /// Returns a copy of this gradient with its extend mode set to `mode`.
     #[must_use]
     pub fn with_extend(mut self, mode: ExtendMode) -> Self {
         self.extend = mode;
         self
     }
 
-    #[doc = include_str!("conic_gradient.doc/center_2.md")]
+    /// Returns the sweep's center point.
     #[must_use]
     pub const fn center(&self) -> Point {
         self.center
     }
 
-    #[doc = include_str!("conic_gradient.doc/start_angle_2.md")]
+    /// Returns the angle (radians) at which the sweep begins (offset `0.0`).
     #[must_use]
     pub const fn start_angle(&self) -> f32 {
         self.start_angle
     }
 
-    #[doc = include_str!("conic_gradient.doc/stops_2.md")]
+    /// Returns the gradient's color stops.
     #[must_use]
     pub fn stops(&self) -> &[GradientStop] {
         &self.stops
     }
 
-    #[doc = include_str!("conic_gradient.doc/extend_2.md")]
+    /// Returns the gradient's extend mode.
     #[must_use]
     pub const fn extend(&self) -> ExtendMode {
         self.extend

@@ -1,4 +1,7 @@
-#![doc = include_str!("command_dispatch.doc/_module.md")]
+//! One command's journey through §2.3 propagation and §2.6 routing:
+//! [`CommandDispatch`].
+
+use super::command_dispatch_outcome::CommandDispatchOutcome;
 
 use obscur_identity::{InternedSymbol, NodeId};
 use obscur_interaction::event::{EventDispatcher, UiEvent};
@@ -7,32 +10,22 @@ use obscur_view::view::{EVENT_CHANGE, EVENT_CLICK};
 
 use super::{AncestorChain, CommandTarget, HandlerRegistry};
 
-#[doc = include_str!("command_dispatch.doc/CommandDispatchOutcome.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct CommandDispatchOutcome {
-    #[doc = include_str!("command_dispatch.doc/claimed.md")]
-    pub(crate) claimed: bool,
-    #[doc = include_str!("command_dispatch.doc/anything_ran.md")]
-    pub(crate) anything_ran: bool,
-    #[doc = include_str!("command_dispatch.doc/default_prevented.md")]
-    pub(crate) default_prevented: bool,
-}
-
-#[doc = include_str!("command_dispatch.doc/CommandDispatch.md")]
+#[doc = include_str!("../../docs/api/runtime/command_dispatch.doc/CommandDispatch.md")]
 pub(crate) struct CommandDispatch<'a> {
-    #[doc = include_str!("command_dispatch.doc/tree.md")]
+    /// The retained tree the bubbling search and the route walk read.
     tree: &'a RetainedTree,
-    #[doc = include_str!("command_dispatch.doc/routing.md")]
+    /// Every §2.3 / §2.6 binding: the listeners the walk runs and the handlers
+    /// each link of the chain offers the command to.
     routing: &'a mut HandlerRegistry,
 }
 
 impl<'a> CommandDispatch<'a> {
-    #[doc = include_str!("command_dispatch.doc/new.md")]
+    /// Bundles the tree and the registry for the duration of one dispatch.
     pub(crate) fn new(tree: &'a RetainedTree, routing: &'a mut HandlerRegistry) -> Self {
         Self { tree, routing }
     }
 
-    #[doc = include_str!("command_dispatch.doc/binding_for.md")]
+    #[doc = include_str!("../../docs/api/runtime/command_dispatch.doc/binding_for.md")]
     pub(crate) fn binding_for(
         tree: &RetainedTree,
         target: NodeId,
@@ -47,7 +40,7 @@ impl<'a> CommandDispatch<'a> {
             })
     }
 
-    #[doc = include_str!("command_dispatch.doc/activation_command_for.md")]
+    #[doc = include_str!("../../docs/api/runtime/command_dispatch.doc/activation_command_for.md")]
     pub(crate) fn activation_command_for(
         tree: &RetainedTree,
         target: NodeId,
@@ -64,7 +57,7 @@ impl<'a> CommandDispatch<'a> {
         Self::binding_for(tree, target, EVENT_CHANGE)
     }
 
-    #[doc = include_str!("command_dispatch.doc/dispatch.md")]
+    #[doc = include_str!("../../docs/api/runtime/command_dispatch.doc/dispatch.md")]
     pub(crate) fn dispatch(
         &mut self,
         origin: Option<NodeId>,
@@ -107,7 +100,7 @@ impl<'a> CommandDispatch<'a> {
         }
     }
 
-    #[doc = include_str!("command_dispatch.doc/route.md")]
+    #[doc = include_str!("../../docs/api/runtime/command_dispatch.doc/route.md")]
     pub(crate) fn route(
         tree: &RetainedTree,
         routing: &HandlerRegistry,
@@ -137,7 +130,7 @@ impl<'a> CommandDispatch<'a> {
         route
     }
 
-    #[doc = include_str!("command_dispatch.doc/propagate.md")]
+    #[doc = include_str!("../../docs/api/runtime/command_dispatch.doc/propagate.md")]
     fn propagate(
         &mut self,
         origin: Option<NodeId>,

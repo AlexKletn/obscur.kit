@@ -1,14 +1,14 @@
-#![doc = include_str!("permission_state.doc/_module.md")]
+//! Current state of a permission grant.
 
-#[doc = include_str!("permission_state.doc/PermissionState.md")]
+/// The state of a permission for a capability (spec §8.57).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PermissionState {
-    #[doc = include_str!("permission_state.doc/Granted.md")]
+    /// Granted for use.
     Granted,
-    #[doc = include_str!("permission_state.doc/Denied.md")]
+    /// Explicitly denied.
     Denied,
-    #[doc = include_str!("permission_state.doc/Prompt.md")]
+    /// Not yet decided; a request would prompt.
     Prompt,
-    #[doc = include_str!("permission_state.doc/Unsupported.md")]
+    /// The underlying capability is unsupported here.
     Unsupported,
 }

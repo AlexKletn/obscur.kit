@@ -8,6 +8,32 @@ use support::{approx, at, drive, el, geom, view};
 
 const VW: f32 = 1000.0;
 
+#[test]
+fn locale_direction_reflows_existing_views_and_preserves_css_overrides() {
+    use obscur_kit::localization::locale::LanguageTag;
+    use support::{compile, runtime};
+
+    let v = view(vec![el(1, "c", vec![el(2, "i", vec![])])]);
+    let sheet = compile(".c { width: 300px; height: 60px } .i { width: 100px; height: 20px }");
+    let override_sheet = compile(
+        ".c { width: 300px; height: 60px; direction: ltr } .i { width: 100px; height: 20px }",
+    );
+    let mut rt = runtime(VW, VW);
+    rt.render_now(&v, std::slice::from_ref(&sheet));
+    let x = |rt: &obscur_kit::runtime::UiRuntime| {
+        geom(rt, at(rt, &[0, 0])).0 - geom(rt, at(rt, &[0])).0
+    };
+    approx(x(&rt), 0.0, "default LTR");
+    rt.set_locale(&LanguageTag::parse("ar").unwrap());
+    rt.render_now(&v, std::slice::from_ref(&sheet));
+    approx(x(&rt), 200.0, "locale-driven RTL");
+    rt.render_now(&v, &[override_sheet]);
+    approx(x(&rt), 0.0, "CSS direction overrides locale");
+    rt.set_locale(&LanguageTag::parse("ru").unwrap());
+    rt.render_now(&v, &[sheet]);
+    approx(x(&rt), 0.0, "back to locale-driven LTR");
+}
+
 #[doc = include_str!("spec_ch7_rtl.doc/child_left.md")]
 fn child_left(direction: &str, container_decl: &str, child_decl: &str) -> f32 {
     let css = format!(

@@ -1,43 +1,32 @@
-#![doc = include_str!("paragraph_word.doc/_module.md")]
+//! A paragraph's unbreakable unit: the tagged glyphs between two adjacent break
+//! opportunities, and the interior points at which it may still be split
+//! (spec §5.10).
 
 use crate::shaping::ShapedGlyph;
 
 use super::LineBreak;
 use super::break_offsets::BreakOffsets;
+use super::hyphen_point::HyphenPoint;
 use super::tagged_glyph::TaggedGlyph;
+use super::word_split::WordSplit;
 
-#[doc = include_str!("paragraph_word.doc/ParagraphWord.md")]
+/// A word: the tagged glyphs between two adjacent break opportunities, its
+/// advance width, whether a mandatory break follows it, and the interior
+/// hyphenation points at which it may be split. A word may contain glyphs from
+/// more than one font.
 pub(super) struct ParagraphWord {
     pub(super) glyphs: Vec<TaggedGlyph>,
     pub(super) width: f32,
-    #[doc = include_str!("paragraph_word.doc/trailing_ws.md")]
+    #[doc = include_str!("../../docs/api/layout/paragraph_word.doc/trailing_ws.md")]
     pub(super) trailing_ws: f32,
     pub(super) mandatory_break_after: bool,
-    #[doc = include_str!("paragraph_word.doc/hyphens.md")]
+    /// The in-word split points (from the hyphenator or author soft hyphens),
+    /// ascending by [`head_width`](HyphenPoint::head_width).
     hyphens: Vec<HyphenPoint>,
 }
 
-#[doc = include_str!("paragraph_word.doc/HyphenPoint.md")]
-#[derive(Clone, Copy)]
-struct HyphenPoint {
-    #[doc = include_str!("paragraph_word.doc/head_end.md")]
-    head_end: usize,
-    #[doc = include_str!("paragraph_word.doc/tail_start.md")]
-    tail_start: usize,
-    #[doc = include_str!("paragraph_word.doc/head_width.md")]
-    head_width: f32,
-    #[doc = include_str!("paragraph_word.doc/break_cluster.md")]
-    break_cluster: usize,
-}
-
-#[doc = include_str!("paragraph_word.doc/Split.md")]
-pub(super) struct Split {
-    pub(super) head: Vec<TaggedGlyph>,
-    pub(super) tail: ParagraphWord,
-}
-
 impl ParagraphWord {
-    #[doc = include_str!("paragraph_word.doc/split_stream.md")]
+    #[doc = include_str!("../../docs/api/layout/paragraph_word.doc/split_stream.md")]
     pub(super) fn split_stream(
         stream: &[TaggedGlyph],
         breaks: &[LineBreak],
@@ -84,7 +73,7 @@ impl ParagraphWord {
         words
     }
 
-    #[doc = include_str!("paragraph_word.doc/new.md")]
+    #[doc = include_str!("../../docs/api/layout/paragraph_word.doc/new.md")]
     pub(super) fn new(
         glyphs: Vec<TaggedGlyph>,
         mandatory_break_after: bool,
@@ -139,13 +128,13 @@ impl ParagraphWord {
         }
     }
 
-    #[doc = include_str!("paragraph_word.doc/split_at_hyphen.md")]
+    #[doc = include_str!("../../docs/api/layout/paragraph_word.doc/split_at_hyphen.md")]
     pub(super) fn split_at_hyphen(
         &self,
         limit: f32,
         hyphen_glyph: Option<ShapedGlyph>,
         offsets: &BreakOffsets,
-    ) -> Option<Split> {
+    ) -> Option<WordSplit> {
         let hyphen_adv = hyphen_glyph.map_or(0.0, |g| g.x_advance());
         // Points are ascending by head width; take the widest that still fits.
         let point = self
@@ -173,16 +162,16 @@ impl ParagraphWord {
             self.mandatory_break_after,
             offsets,
         );
-        Some(Split { head, tail })
+        Some(WordSplit { head, tail })
     }
 
-    #[doc = include_str!("paragraph_word.doc/emergency_split.md")]
+    #[doc = include_str!("../../docs/api/layout/paragraph_word.doc/emergency_split.md")]
     pub(super) fn emergency_split(
         &self,
         limit: f32,
         line_empty: bool,
         offsets: &BreakOffsets,
-    ) -> Option<Split> {
+    ) -> Option<WordSplit> {
         let glyphs = &self.glyphs;
         if glyphs.len() < 2 {
             return None;
@@ -226,7 +215,7 @@ impl ParagraphWord {
             self.mandatory_break_after,
             offsets,
         );
-        Some(Split { head, tail })
+        Some(WordSplit { head, tail })
     }
 }
 

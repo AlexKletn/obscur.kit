@@ -1,4 +1,4 @@
-#![doc = include_str!("app_commands.doc/_module.md")]
+//! The [`AppCommands`] application-level command fallback (spec §2.6, link 5).
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -8,44 +8,45 @@ use obscur_interaction::event::UiEvent;
 
 use super::{CommandHandler, IntoCommandHandler};
 
-#[doc = include_str!("app_commands.doc/AppCommands.md")]
+#[doc = include_str!("../../docs/api/runtime/app_commands.doc/AppCommands.md")]
 #[derive(Clone, Default)]
 pub struct AppCommands {
     handlers: Rc<RefCell<FastMap<InternedSymbol, CommandHandler>>>,
 }
 
 impl AppCommands {
-    #[doc = include_str!("app_commands.doc/new.md")]
+    /// Creates an empty application-level fallback registry.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    #[doc = include_str!("app_commands.doc/on_command.md")]
+    #[doc = include_str!("../../docs/api/runtime/app_commands.doc/on_command.md")]
     pub fn on_command<M>(&self, command: InternedSymbol, handler: impl IntoCommandHandler<M>) {
         self.handlers
             .borrow_mut()
             .insert(command, handler.into_command_handler());
     }
 
-    #[doc = include_str!("app_commands.doc/remove.md")]
+    /// Removes the application fallback for `command`, returning whether one was
+    /// registered.
     pub fn remove(&self, command: InternedSymbol) -> bool {
         self.handlers.borrow_mut().remove(&command).is_some()
     }
 
-    #[doc = include_str!("app_commands.doc/contains.md")]
+    /// Returns whether an application fallback is registered for `command`.
     #[must_use]
     pub fn contains(&self, command: InternedSymbol) -> bool {
         self.handlers.borrow().contains_key(&command)
     }
 
-    #[doc = include_str!("app_commands.doc/shares_registry_with.md")]
+    #[doc = include_str!("../../docs/api/runtime/app_commands.doc/shares_registry_with.md")]
     #[must_use]
     pub fn shares_registry_with(&self, other: &Self) -> bool {
         Rc::ptr_eq(&self.handlers, &other.handlers)
     }
 
-    #[doc = include_str!("app_commands.doc/dispatch.md")]
+    #[doc = include_str!("../../docs/api/runtime/app_commands.doc/dispatch.md")]
     pub(crate) fn dispatch(&self, command: InternedSymbol, event: &mut UiEvent) -> bool {
         // The borrow is released before returning; a handler cannot re-enter
         // this table because it is a closure over app state with no handle to the

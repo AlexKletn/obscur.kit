@@ -196,3 +196,35 @@ fn missing_image_src_paints_no_image_and_does_not_panic() {
     assert!(!has_image, "a missing asset paints no image");
     assert!(result.is_balanced());
 }
+
+#[test]
+fn image_object_fit_uses_the_content_box_with_percentage_padding() {
+    let dir = temp_asset_dir();
+    let sheet = compile(
+        ".img { width: 100px; height: 60px; box-sizing: border-box;
+                padding-left: 10%; padding-top: 5px; border: 2px solid red; }",
+    );
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
+    KitBootstrap::new().install_image_resources(&mut runtime, &dir);
+    let view = img_view();
+    let _ = runtime.render_now(&view, std::slice::from_ref(&sheet));
+    let _ = runtime.poll_resource_tasks();
+    let frame = runtime.render_now(&view, &[sheet]);
+    let (tile, region) = frame
+        .snapshot()
+        .display_list()
+        .commands()
+        .iter()
+        .find_map(|command| match command {
+            PaintCommand::DrawImage { tile, region, .. } => Some((tile, region)),
+            _ => None,
+        })
+        .expect("loaded image paints");
+
+    assert_eq!(tile, region, "fill sizes the image to its content region");
+    assert_eq!(region.origin.x, VIEWPORT * 0.1 + 2.0);
+    assert_eq!(region.origin.y, 7.0);
+    assert_eq!(region.size.width, 96.0 - VIEWPORT * 0.1);
+    assert_eq!(region.size.height, 51.0);
+    let _ = std::fs::remove_dir_all(dir);
+}

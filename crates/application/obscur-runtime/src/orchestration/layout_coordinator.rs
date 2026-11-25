@@ -1,4 +1,4 @@
-#![doc = include_str!("layout_coordinator.doc/_module.md")]
+//! Drives layout over the retained tree: [`LayoutCoordinator`].
 
 use obscur_geometry::{BoxConstraints, Point, Rect, Size};
 use obscur_identity::{FastMap, NodeId};
@@ -10,6 +10,7 @@ use obscur_tree::tree::RetainedTree;
 
 use super::arrange_cache::ArrangeCache;
 use super::arrange_pass::arrange;
+#[cfg(test)]
 use super::layout_eviction::invalidated_layout;
 use super::layout_style_mapping::layout_style_from;
 use super::measure_cache::MeasureCache;
@@ -18,27 +19,27 @@ use super::{
     resolve_named_grid_lines,
 };
 
-#[doc = include_str!("layout_coordinator.doc/LayoutBoxes.md")]
+#[doc = include_str!("../../docs/api/orchestration/layout_coordinator.doc/LayoutBoxes.md")]
 pub type LayoutBoxes = FastMap<NodeId, LayoutBox>;
 
-#[doc = include_str!("layout_coordinator.doc/LayoutStyles.md")]
+#[doc = include_str!("../../docs/api/orchestration/layout_coordinator.doc/LayoutStyles.md")]
 pub type LayoutStyles = FastMap<NodeId, LayoutStyle>;
 
-#[doc = include_str!("layout_coordinator.doc/MAX_DEPTH.md")]
+#[doc = include_str!("../../docs/api/orchestration/layout_coordinator.doc/MAX_DEPTH.md")]
 pub(super) const MAX_DEPTH: u32 = 256;
 
-#[doc = include_str!("layout_coordinator.doc/LayoutCoordinator.md")]
+#[doc = include_str!("../../docs/api/orchestration/layout_coordinator.doc/LayoutCoordinator.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct LayoutCoordinator;
 
 impl LayoutCoordinator {
-    #[doc = include_str!("layout_coordinator.doc/new.md")]
+    /// Creates a coordinator.
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    #[doc = include_str!("layout_coordinator.doc/layout_styles_from.md")]
+    #[doc = include_str!("../../docs/api/orchestration/layout_coordinator.doc/layout_styles_from.md")]
     #[must_use]
     pub fn layout_styles_from(
         &self,
@@ -58,7 +59,7 @@ impl LayoutCoordinator {
             .collect()
     }
 
-    #[doc = include_str!("layout_coordinator.doc/layout.md")]
+    #[doc = include_str!("../../docs/api/orchestration/layout_coordinator.doc/layout.md")]
     // The tree, the per-node side-tables, the viewport + scroll offset, and the
     // shaper are the cohesive inputs of one layout entry point.
     #[allow(clippy::too_many_arguments)]
@@ -87,7 +88,7 @@ impl LayoutCoordinator {
         )
     }
 
-    #[doc = include_str!("layout_coordinator.doc/grid_templates_from.md")]
+    #[doc = include_str!("../../docs/api/orchestration/layout_coordinator.doc/grid_templates_from.md")]
     #[must_use]
     pub fn grid_templates_from(
         &self,
@@ -99,7 +100,7 @@ impl LayoutCoordinator {
         grid_templates_from(computed, viewport, root_font_size, paragraph)
     }
 
-    #[doc = include_str!("layout_coordinator.doc/resolve_named_grid_areas.md")]
+    #[doc = include_str!("../../docs/api/orchestration/layout_coordinator.doc/resolve_named_grid_areas.md")]
     pub fn resolve_named_grid_areas(
         &self,
         styles: &mut LayoutStyles,
@@ -109,7 +110,7 @@ impl LayoutCoordinator {
         resolve_named_grid_areas(styles, tree, computed);
     }
 
-    #[doc = include_str!("layout_coordinator.doc/resolve_named_grid_lines.md")]
+    #[doc = include_str!("../../docs/api/orchestration/layout_coordinator.doc/resolve_named_grid_lines.md")]
     pub fn resolve_named_grid_lines(
         &self,
         styles: &mut LayoutStyles,
@@ -119,7 +120,7 @@ impl LayoutCoordinator {
         resolve_named_grid_lines(styles, tree, computed);
     }
 
-    #[doc = include_str!("layout_coordinator.doc/layout_with_hyphenator.md")]
+    #[doc = include_str!("../../docs/api/orchestration/layout_coordinator.doc/layout_with_hyphenator.md")]
     // The tree, the three per-node side-tables (styles, computed, grid templates),
     // the viewport + scroll offset, and the shaping inputs (paragraph + hyphenator)
     // are cohesive inputs of one layout entry point, not an incidental over-long
@@ -152,7 +153,7 @@ impl LayoutCoordinator {
         )
     }
 
-    #[doc = include_str!("layout_coordinator.doc/layout_editing.md")]
+    #[doc = include_str!("../../docs/api/orchestration/layout_coordinator.doc/layout_editing.md")]
     // The editing view is the one added optional input over `layout_with_hyphenator`;
     // the rest are the same cohesive layout inputs.
     #[allow(clippy::too_many_arguments)]
@@ -188,7 +189,7 @@ impl LayoutCoordinator {
         )
     }
 
-    #[doc = include_str!("layout_coordinator.doc/layout_invalidated.md")]
+    #[doc = include_str!("../../docs/api/orchestration/layout_coordinator.doc/layout_invalidated.md")]
     // The same cohesive layout inputs as `layout_editing`, plus the two this entry
     // point exists for.
     #[allow(clippy::too_many_arguments)]
@@ -212,7 +213,7 @@ impl LayoutCoordinator {
         // and drop everything when it cannot bound them (or when there is no set).
         // One classification feeds both caches, which is what keeps them consistent
         // with each other rather than by coincidence.
-        match dirty.and_then(|dirty| invalidated_layout(tree, dirty)) {
+        match dirty.and_then(|dirty| arrange.invalidated_layout(tree, dirty)) {
             Some(evicted) => {
                 cache.evict(&evicted.measures);
                 arrange.evict(&evicted.arranges);
@@ -237,7 +238,7 @@ impl LayoutCoordinator {
         )
     }
 
-    #[doc = include_str!("layout_coordinator.doc/arrange_all.md")]
+    #[doc = include_str!("../../docs/api/orchestration/layout_coordinator.doc/arrange_all.md")]
     // The cohesive layout inputs of one walk, plus the cache it measures through.
     #[allow(clippy::too_many_arguments)]
     fn arrange_all(
@@ -254,6 +255,7 @@ impl LayoutCoordinator {
         cache: &MeasureCache,
         arrange_cache: &ArrangeCache,
     ) -> LayoutBoxes {
+        cache.begin_pass();
         let mut boxes = LayoutBoxes::default();
         let Some(root) = tree.root() else {
             return boxes;
@@ -283,7 +285,6 @@ impl LayoutCoordinator {
             height: Dimension::Px(viewport.height),
             ..LayoutStyle::default()
         };
-        cache.begin_pass();
         arrange_cache.begin_pass();
         arrange(
             tree,
@@ -304,6 +305,7 @@ impl LayoutCoordinator {
             &cache,
             arrange_cache,
             Some(icb),
+            false,
         );
         // These boxes are what a later pass may serve an unchanged subtree from.
         arrange_cache.end_pass(&boxes);
@@ -433,11 +435,11 @@ mod tests {
         let styles = coordinator.layout_styles_from(&computed, TEST_VIEWPORT, TEST_ROOT_FONT, None);
         assert_eq!(styles.len(), 2);
         assert_eq!(
-            styles.get(&NodeId::from_raw(1)).map(|s| s.width),
+            styles.get(&NodeId::from_raw(1)).map(|s| s.width.clone()),
             Some(Dimension::Px(10.0))
         );
         assert_eq!(
-            styles.get(&NodeId::from_raw(2)).map(|s| s.width),
+            styles.get(&NodeId::from_raw(2)).map(|s| s.width.clone()),
             Some(Dimension::Auto)
         );
     }
@@ -504,7 +506,7 @@ mod tests {
                 ..LayoutStyle::default()
             },
         );
-        styles.insert(child_a, flex_item);
+        styles.insert(child_a, flex_item.clone());
         styles.insert(child_b, flex_item);
 
         let coordinator = LayoutCoordinator::new();
@@ -870,43 +872,43 @@ mod tests {
     }
 
     #[test]
-    fn absolute_child_with_both_insets_stretches_to_containing_block() {
-        // Scenario (c): `left` and `right` both set pin both edges, so the width
-        // stretches to the containing block regardless of the explicit width.
+    fn absolute_child_with_both_insets_stretches_only_auto_dimensions() {
         let mut tree = RetainedTree::new();
         let root = tree.alloc(NodeKind::Root);
         tree.set_root(root);
         let abs = add_child(&mut tree, root, 80);
-
-        // Explicit 999x999 is deliberately ignored on the pinned axes.
-        let abs_style = block(999.0, 999.0)
-            .with_position(Position::Absolute)
-            .with_inset(Inset::new(
-                Dimension::Px(0.0),
-                Dimension::Px(30.0),
-                Dimension::Px(0.0),
-                Dimension::Px(10.0),
-            ));
+        let inset = Inset::new(
+            Dimension::Px(0.0),
+            Dimension::Px(30.0),
+            Dimension::Px(0.0),
+            Dimension::Px(10.0),
+        );
 
         let mut styles = LayoutStyles::default();
         styles.insert(root, block(300.0, 300.0));
-        styles.insert(abs, abs_style);
+        for (style, expected) in [
+            (LayoutStyle::default(), Size::new(260.0, 300.0)),
+            (block(999.0, 999.0), Size::new(999.0, 999.0)),
+        ] {
+            styles.insert(
+                abs,
+                style
+                    .with_position(Position::Absolute)
+                    .with_inset(inset.clone()),
+            );
+            let boxes = LayoutCoordinator::new().layout(
+                &tree,
+                &styles,
+                &ComputedStyles::default(),
+                &GridTemplates::default(),
+                Size::new(300.0, 300.0),
+                (0.0, 0.0),
+                &test_paragraph(),
+            );
 
-        let coordinator = LayoutCoordinator::new();
-        let boxes = coordinator.layout(
-            &tree,
-            &styles,
-            &ComputedStyles::default(),
-            &GridTemplates::default(),
-            Size::new(300.0, 300.0),
-            (0.0, 0.0),
-            &test_paragraph(),
-        );
-
-        // Horizontal: x = 10, width = 300 - 10 - 30 = 260. Vertical: y = 0,
-        // height = 300 - 0 - 0 = 300.
-        assert_eq!(boxes[&abs].origin(), Point::new(10.0, 0.0));
-        assert_eq!(boxes[&abs].size(), Size::new(260.0, 300.0));
+            assert_eq!(boxes[&abs].origin(), Point::new(10.0, 0.0));
+            assert_eq!(boxes[&abs].size(), expected);
+        }
     }
 
     #[test]
@@ -2046,6 +2048,39 @@ mod tests {
         );
     }
 
+    #[test]
+    fn retained_topology_follows_text_moved_to_a_new_parent() {
+        let (mut tree, _computed, [root, wrapper, text, ..]) = flow_of_three_texts(None);
+        let other = add_child(&mut tree, root, 2);
+        let cache = ArrangeCache::new();
+        cache.retain_topology(&tree);
+        let mut dirty = LayoutInvalidation::new();
+        dirty.note_style_changed(other);
+        assert!(
+            !cache
+                .invalidated_layout(&tree, &dirty)
+                .unwrap()
+                .measures
+                .contains(&text)
+        );
+
+        tree.get_mut(wrapper)
+            .unwrap()
+            .children
+            .retain(|&node| node != text);
+        tree.get_mut(other).unwrap().children.push(text);
+        tree.get_mut(text)
+            .unwrap()
+            .set_logical_parent(LogicalParent::of(other));
+        cache.forget_topology();
+        cache.retain_topology(&tree);
+        let retained = cache.invalidated_layout(&tree, &dirty).unwrap();
+        let rebuilt = invalidated_layout(&tree, &dirty).unwrap();
+        assert!(retained.measures.contains(&text));
+        assert_eq!(retained.measures, rebuilt.measures);
+        assert_eq!(retained.arranges, rebuilt.arranges);
+    }
+
     // ---- §3.4 step 8: incremental ARRANGE ---------------------------------
     //
     // Every test below counts `ArrangeCache::arranged` rather than inspecting the
@@ -2053,6 +2088,71 @@ mod tests {
     // arrange and proves nothing about incrementality. The boxes are then checked
     // against a full pass as well, because an arrange that skips the wrong subtree
     // is not slow, it is *wrong*.
+
+    #[test]
+    fn resizing_an_absolute_clip_reuses_its_fixed_width_content() {
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let clip = add_child(&mut tree, root, 1);
+        let content = add_child(&mut tree, clip, 2);
+        let label = add_text_child(&mut tree, content, "Fixed size viewport content");
+
+        let mut styles = LayoutStyles::default();
+        styles.insert(root, block(400.0, 300.0));
+        styles.insert(clip, block(100.0, 200.0).with_position(Position::Absolute));
+        styles.insert(
+            content,
+            block(300.0, 200.0).with_position(Position::Absolute),
+        );
+        let coordinator = LayoutCoordinator::new();
+        let paragraph = test_paragraph();
+        let layout =
+            |styles: &LayoutStyles, caches: &Caches, dirty: Option<&LayoutInvalidation>| {
+                coordinator.layout_invalidated(
+                    &tree,
+                    styles,
+                    &ComputedStyles::default(),
+                    &GridTemplates::default(),
+                    Size::new(400.0, 300.0),
+                    (0.0, 0.0),
+                    &paragraph,
+                    None,
+                    None,
+                    &caches.measures,
+                    &caches.arranges,
+                    dirty,
+                )
+            };
+        let caches = Caches::default();
+        let before = layout(&styles, &caches, None);
+
+        styles.insert(clip, block(180.0, 200.0).with_position(Position::Absolute));
+        let mut dirty = LayoutInvalidation::new();
+        dirty.note_style_changed(clip);
+        let resized = layout(&styles, &caches, Some(&dirty));
+        assert_eq!(resized[&clip].size().width, 180.0);
+        assert_eq!(resized[&content], before[&content]);
+        assert_eq!(resized[&label], before[&label]);
+        assert!(caches.arranges.arranged(clip));
+        assert!(!caches.arranges.arranged(content));
+        assert!(!caches.measures.measured(label));
+        assert_eq!(resized, layout(&styles, &Caches::default(), None));
+
+        styles.insert(
+            content,
+            block(300.0, 200.0)
+                .with_position(Position::Absolute)
+                .with_width(Dimension::Percent(100.0)),
+        );
+        let responsive = layout(&styles, &caches, None);
+        styles.insert(clip, block(220.0, 200.0).with_position(Position::Absolute));
+        let resized = layout(&styles, &caches, Some(&dirty));
+        assert_eq!(responsive[&content].size().width, 180.0);
+        assert_eq!(resized[&content].size().width, 220.0);
+        assert!(caches.arranges.arranged(content));
+        assert_eq!(resized, layout(&styles, &Caches::default(), None));
+    }
 
     #[test]
     fn an_unchanged_frame_rearranges_nothing() {

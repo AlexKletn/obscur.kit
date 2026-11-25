@@ -1,28 +1,30 @@
-#![doc = include_str!("composition_event.doc/_module.md")]
+//! The typed IME composition lifecycle events (spec §5.12 IME).
 
 use super::Preedit;
 
-#[doc = include_str!("composition_event.doc/CompositionEvent.md")]
+#[doc = include_str!("../../docs/api/ime/composition_event.doc/CompositionEvent.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompositionEvent {
-    #[doc = include_str!("composition_event.doc/Start.md")]
+    /// Begin a composition session.
     Start,
-    #[doc = include_str!("composition_event.doc/Update.md")]
+    /// Update the live composition with a new preedit.
     Update(Preedit),
-    #[doc = include_str!("composition_event.doc/Commit.md")]
+    /// Commit the composition, finalizing the given text.
     Commit(Box<str>),
-    #[doc = include_str!("composition_event.doc/Cancel.md")]
+    /// Cancel the composition without committing.
     Cancel,
 }
 
 impl CompositionEvent {
-    #[doc = include_str!("composition_event.doc/is_terminal.md")]
+    /// Returns whether this event ends the session: true for
+    /// [`Commit`](Self::Commit) and [`Cancel`](Self::Cancel).
     #[must_use]
     pub const fn is_terminal(&self) -> bool {
         matches!(self, Self::Commit(_) | Self::Cancel)
     }
 
-    #[doc = include_str!("composition_event.doc/preedit.md")]
+    /// Returns the preedit carried by an [`Update`](Self::Update) event, or
+    /// `None` for the others.
     #[must_use]
     pub const fn preedit(&self) -> Option<&Preedit> {
         match self {
@@ -31,7 +33,8 @@ impl CompositionEvent {
         }
     }
 
-    #[doc = include_str!("composition_event.doc/committed_text.md")]
+    /// Returns the finalized text carried by a [`Commit`](Self::Commit) event, or
+    /// `None` for the others.
     #[must_use]
     pub fn committed_text(&self) -> Option<&str> {
         match self {

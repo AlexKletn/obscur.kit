@@ -1,4 +1,4 @@
-#![doc = include_str!("component_instance.doc/_module.md")]
+//! `ComponentInstance`: the runtime record of one mounted component.
 
 use obscur_identity::ComponentId;
 
@@ -6,7 +6,7 @@ use crate::component::InstanceId;
 use crate::lifecycle::LifecycleState;
 use crate::state::SubscriptionScope;
 
-#[doc = include_str!("component_instance.doc/ComponentInstance.md")]
+#[doc = include_str!("../../docs/api/component/component_instance.doc/ComponentInstance.md")]
 #[derive(Debug)]
 pub struct ComponentInstance {
     instance: InstanceId,
@@ -16,7 +16,8 @@ pub struct ComponentInstance {
 }
 
 impl ComponentInstance {
-    #[doc = include_str!("component_instance.doc/new.md")]
+    /// Creates a freshly constructed instance in [`LifecycleState::Created`]
+    /// with an empty subscription scope.
     #[must_use]
     pub fn new(instance: InstanceId, component: ComponentId) -> Self {
         Self {
@@ -27,37 +28,37 @@ impl ComponentInstance {
         }
     }
 
-    #[doc = include_str!("component_instance.doc/id.md")]
+    /// This instance's identity.
     #[must_use]
     pub const fn id(&self) -> InstanceId {
         self.instance
     }
 
-    #[doc = include_str!("component_instance.doc/component_id.md")]
+    /// The component kind this is an instance of.
     #[must_use]
     pub const fn component_id(&self) -> ComponentId {
         self.component
     }
 
-    #[doc = include_str!("component_instance.doc/state.md")]
+    /// The instance's current lifecycle phase.
     #[must_use]
     pub const fn state(&self) -> LifecycleState {
         self.state
     }
 
-    #[doc = include_str!("component_instance.doc/scope.md")]
+    /// Shared access to the instance's scoped subscriptions.
     #[must_use]
     pub const fn scope(&self) -> &SubscriptionScope {
         &self.scope
     }
 
-    #[doc = include_str!("component_instance.doc/scope_mut.md")]
+    /// Mutable access to the instance's scoped subscriptions.
     #[must_use]
     pub fn scope_mut(&mut self) -> &mut SubscriptionScope {
         &mut self.scope
     }
 
-    #[doc = include_str!("component_instance.doc/mount.md")]
+    #[doc = include_str!("../../docs/api/component/component_instance.doc/mount.md")]
     pub fn mount(&mut self) -> bool {
         if matches!(self.state, LifecycleState::Created) {
             self.state = LifecycleState::Mounted;
@@ -67,7 +68,7 @@ impl ComponentInstance {
         }
     }
 
-    #[doc = include_str!("component_instance.doc/begin_update.md")]
+    #[doc = include_str!("../../docs/api/component/component_instance.doc/begin_update.md")]
     pub fn begin_update(&mut self) -> bool {
         if matches!(self.state, LifecycleState::Mounted) {
             self.state = LifecycleState::Updating;
@@ -77,7 +78,7 @@ impl ComponentInstance {
         }
     }
 
-    #[doc = include_str!("component_instance.doc/end_update.md")]
+    #[doc = include_str!("../../docs/api/component/component_instance.doc/end_update.md")]
     pub fn end_update(&mut self) -> bool {
         if matches!(self.state, LifecycleState::Updating) {
             self.state = LifecycleState::Mounted;
@@ -87,7 +88,7 @@ impl ComponentInstance {
         }
     }
 
-    #[doc = include_str!("component_instance.doc/unmount.md")]
+    #[doc = include_str!("../../docs/api/component/component_instance.doc/unmount.md")]
     pub fn unmount(&mut self) -> bool {
         if self.state.is_active() {
             self.scope.clear();

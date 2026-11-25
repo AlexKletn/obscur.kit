@@ -1,8 +1,8 @@
-#![doc = include_str!("render_extension.doc/_module.md")]
+//! A privileged rendering extension gated behind a capability (spec §5.3).
 
 use crate::extension::{CustomPass, TrustedRenderContext};
 
-#[doc = include_str!("render_extension.doc/RenderExtension.md")]
+#[doc = include_str!("../../docs/api/extension/render_extension.doc/RenderExtension.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderExtension {
     name: Box<str>,
@@ -11,7 +11,8 @@ pub struct RenderExtension {
 }
 
 impl RenderExtension {
-    #[doc = include_str!("render_extension.doc/new.md")]
+    /// Creates an extension named `name` that requires the host to have granted
+    /// `required_capability`, carrying no passes yet.
     #[must_use]
     pub fn new(name: impl Into<Box<str>>, required_capability: impl Into<Box<str>>) -> Self {
         Self {
@@ -21,44 +22,45 @@ impl RenderExtension {
         }
     }
 
-    #[doc = include_str!("render_extension.doc/with_pass.md")]
+    /// Appends a custom pass, returning the updated extension.
     #[must_use]
     pub fn with_pass(mut self, pass: CustomPass) -> Self {
         self.passes.push(pass);
         self
     }
 
-    #[doc = include_str!("render_extension.doc/name.md")]
+    /// The extension name, used for diagnostics.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    #[doc = include_str!("render_extension.doc/required_capability.md")]
+    /// The capability id the host must have granted for this extension to run
+    /// (spec §5.3).
     #[must_use]
     pub fn required_capability(&self) -> &str {
         &self.required_capability
     }
 
-    #[doc = include_str!("render_extension.doc/passes.md")]
+    /// The custom passes this extension contributes.
     #[must_use]
     pub fn passes(&self) -> &[CustomPass] {
         &self.passes
     }
 
-    #[doc = include_str!("render_extension.doc/len.md")]
+    /// The number of custom passes.
     #[must_use]
     pub fn len(&self) -> usize {
         self.passes.len()
     }
 
-    #[doc = include_str!("render_extension.doc/is_empty.md")]
+    /// Whether this extension contributes no passes.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.passes.is_empty()
     }
 
-    #[doc = include_str!("render_extension.doc/is_permitted.md")]
+    #[doc = include_str!("../../docs/api/extension/render_extension.doc/is_permitted.md")]
     #[must_use]
     pub fn is_permitted(&self, ctx: &TrustedRenderContext) -> bool {
         if !ctx.has_capability(&self.required_capability) {

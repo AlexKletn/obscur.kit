@@ -1,8 +1,9 @@
-#![doc = include_str!("symbol_table.doc/_module.md")]
+//! `SymbolTable`: an arena of lexical scopes with a current-scope cursor
+//! (spec §2.10).
 
 use crate::symbol::{Scope, Symbol};
 
-#[doc = include_str!("symbol_table.doc/SymbolTable.md")]
+#[doc = include_str!("../../docs/api/symbol/symbol_table.doc/SymbolTable.md")]
 #[derive(Debug, Clone)]
 pub struct SymbolTable {
     scopes: Vec<Scope>,
@@ -16,7 +17,8 @@ impl Default for SymbolTable {
 }
 
 impl SymbolTable {
-    #[doc = include_str!("symbol_table.doc/new.md")]
+    /// Creates a table with a single empty root scope, with the cursor at the
+    /// root (index `0`).
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -25,7 +27,8 @@ impl SymbolTable {
         }
     }
 
-    #[doc = include_str!("symbol_table.doc/push_scope.md")]
+    /// Creates a child of the current scope, moves the cursor into it, and
+    /// returns its arena index.
     pub fn push_scope(&mut self) -> usize {
         let index = self.scopes.len();
         self.scopes.push(Scope::new(Some(self.current)));
@@ -33,7 +36,8 @@ impl SymbolTable {
         index
     }
 
-    #[doc = include_str!("symbol_table.doc/pop_scope.md")]
+    /// Moves the cursor to the current scope's parent, returning `false` (and
+    /// staying put) if already at the root.
     pub fn pop_scope(&mut self) -> bool {
         match self.scopes[self.current].parent() {
             Some(parent) => {
@@ -44,18 +48,20 @@ impl SymbolTable {
         }
     }
 
-    #[doc = include_str!("symbol_table.doc/current_index.md")]
+    /// Returns the arena index of the current scope.
     #[must_use]
     pub const fn current_index(&self) -> usize {
         self.current
     }
 
-    #[doc = include_str!("symbol_table.doc/define.md")]
+    /// Defines `symbol` in the current scope, returning `false` on a
+    /// duplicate-in-scope (see [`Scope::define`]).
     pub fn define(&mut self, symbol: Symbol) -> bool {
         self.scopes[self.current].define(symbol)
     }
 
-    #[doc = include_str!("symbol_table.doc/lookup.md")]
+    /// Looks up `name` lexically: searches the current scope, then walks the
+    /// `parent` links outward to the root, returning the first match.
     #[must_use]
     pub fn lookup(&self, name: &str) -> Option<&Symbol> {
         let mut cursor = Some(self.current);
@@ -69,19 +75,20 @@ impl SymbolTable {
         None
     }
 
-    #[doc = include_str!("symbol_table.doc/is_defined.md")]
+    /// Returns whether `name` resolves to a symbol in the current scope or any
+    /// enclosing scope.
     #[must_use]
     pub fn is_defined(&self, name: &str) -> bool {
         self.lookup(name).is_some()
     }
 
-    #[doc = include_str!("symbol_table.doc/scope_count.md")]
+    /// Returns the total number of scopes in the arena.
     #[must_use]
     pub fn scope_count(&self) -> usize {
         self.scopes.len()
     }
 
-    #[doc = include_str!("symbol_table.doc/enter_root.md")]
+    /// Resets the cursor to the root scope (index `0`).
     pub const fn enter_root(&mut self) {
         self.current = 0;
     }

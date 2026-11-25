@@ -1,18 +1,20 @@
-#![doc = include_str!("error.doc/_module.md")]
+//! `JsonError`: the failure produced when [`parse`](crate::json::parse) cannot
+//! read a JSON document.
 
 use std::fmt;
 
-#[doc = include_str!("error.doc/JsonError.md")]
+/// A JSON parse failure: a human-readable `message` and the zero-based `char`
+/// index into the input where the parser gave up.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JsonError {
-    #[doc = include_str!("error.doc/message.md")]
+    /// A human-readable description of what went wrong.
     pub message: String,
-    #[doc = include_str!("error.doc/position.md")]
+    /// The zero-based character index at which parsing failed.
     pub position: usize,
 }
 
 impl JsonError {
-    #[doc = include_str!("error.doc/new.md")]
+    /// Creates an error with `message` anchored at character `position`.
     #[must_use]
     pub fn new(message: impl Into<String>, position: usize) -> Self {
         Self {

@@ -1,28 +1,34 @@
-#![doc = include_str!("length_context.doc/_module.md")]
+#![doc = include_str!("../../docs/api/property/length_context.doc/_module.md")]
 
 use super::EnvironmentValues;
 
-#[doc = include_str!("length_context.doc/LengthContext.md")]
+#[doc = include_str!("../../docs/api/property/length_context.doc/LengthContext.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LengthContext {
-    #[doc = include_str!("length_context.doc/font_size.md")]
+    /// The element's own computed `font-size` in logical pixels (base for `em`).
     pub font_size: f32,
-    #[doc = include_str!("length_context.doc/root_font_size.md")]
+    /// The document root's computed `font-size` in logical pixels (base for
+    /// `rem`).
     pub root_font_size: f32,
-    #[doc = include_str!("length_context.doc/viewport_width.md")]
+    /// The viewport width in logical pixels (base for `vw`).
     pub viewport_width: f32,
-    #[doc = include_str!("length_context.doc/viewport_height.md")]
+    /// The viewport height in logical pixels (base for `vh`).
     pub viewport_height: f32,
-    #[doc = include_str!("length_context.doc/ch_width.md")]
+    /// The measured advance of the `0` glyph (base for `ch`), if it is known.
+    /// [`None`] means "not measurable here" — see [`ch_base`](Self::ch_base).
     pub ch_width: Option<f32>,
-    #[doc = include_str!("length_context.doc/percent_basis.md")]
+    /// The basis a `%` resolves against, if known at resolution time.
     pub percent_basis: Option<f32>,
-    #[doc = include_str!("length_context.doc/environment.md")]
+    /// The host-reported environment values `env()` reads (spec §6.15). All
+    /// zeroes unless a host set them — which is the right answer for a screen
+    /// with no cutout and no on-screen keyboard, not a placeholder for one.
     pub environment: EnvironmentValues,
+    query_unit_dimensions: [Option<f32>; 4],
+    vertical: bool,
 }
 
 impl LengthContext {
-    #[doc = include_str!("length_context.doc/new.md")]
+    #[doc = include_str!("../../docs/api/property/length_context.doc/new.md")]
     #[must_use]
     pub const fn new(
         font_size: f32,
@@ -38,79 +44,117 @@ impl LengthContext {
             ch_width: None,
             percent_basis: None,
             environment: EnvironmentValues::none(),
+            query_unit_dimensions: [None; 4],
+            vertical: false,
         }
     }
 
-    #[doc = include_str!("length_context.doc/with_environment.md")]
+    #[doc = include_str!("../../docs/api/property/length_context.doc/with_environment.md")]
     #[must_use]
     pub const fn with_environment(mut self, environment: EnvironmentValues) -> Self {
         self.environment = environment;
         self
     }
 
-    #[doc = include_str!("length_context.doc/with_percent_basis.md")]
+    pub(crate) const fn with_query_unit_dimensions(
+        mut self,
+        dimensions: [Option<f32>; 4],
+        vertical: bool,
+    ) -> Self {
+        self.query_unit_dimensions = dimensions;
+        self.vertical = vertical;
+        self
+    }
+
+    /// Returns a copy of this context with `percent_basis` set to `basis`.
     #[must_use]
     pub const fn with_percent_basis(mut self, basis: f32) -> Self {
         self.percent_basis = Some(basis);
         self
     }
 
-    #[doc = include_str!("length_context.doc/with_ch_width.md")]
+    #[doc = include_str!("../../docs/api/property/length_context.doc/with_ch_width.md")]
     #[must_use]
     pub const fn with_ch_width(mut self, width: f32) -> Self {
         self.ch_width = Some(width);
         self
     }
 
-    #[doc = include_str!("length_context.doc/ch_base.md")]
+    #[doc = include_str!("../../docs/api/property/length_context.doc/ch_base.md")]
     #[must_use]
     pub fn ch_base(&self) -> f32 {
         self.ch_width.unwrap_or(0.5 * self.font_size)
     }
 
-    #[doc = include_str!("length_context.doc/viewport_min.md")]
+    /// The smaller viewport dimension, in logical pixels (base for `vmin`).
     #[must_use]
     pub fn viewport_min(&self) -> f32 {
         self.viewport_width.min(self.viewport_height)
     }
 
-    #[doc = include_str!("length_context.doc/viewport_max.md")]
+    /// The larger viewport dimension, in logical pixels (base for `vmax`).
     #[must_use]
     pub fn viewport_max(&self) -> f32 {
         self.viewport_width.max(self.viewport_height)
     }
 
-    #[doc = include_str!("length_context.doc/container_width.md")]
+    /// The nearest eligible query container’s width size in logical pixels. If there is no eligible ancestor for this axis, use the viewport width. The engine’s logical viewport also serves as the small viewport.
     #[must_use]
     pub const fn container_width(&self) -> f32 {
-        self.viewport_width
+        match self.query_unit_dimensions[0] {
+            Some(size) => size,
+            None => self.viewport_width,
+        }
     }
 
-    #[doc = include_str!("length_context.doc/container_height.md")]
+    /// The nearest eligible query container’s height size in logical pixels. If there is no eligible ancestor for this axis, use the viewport height. The engine’s logical viewport also serves as the small viewport.
     #[must_use]
     pub const fn container_height(&self) -> f32 {
-        self.viewport_height
+        match self.query_unit_dimensions[1] {
+            Some(size) => size,
+            None => self.viewport_height,
+        }
     }
 
-    #[doc = include_str!("length_context.doc/container_inline.md")]
+    /// The nearest eligible query container’s inline size in logical pixels. If there is no eligible ancestor for this axis, use the viewport inline size in the subject’s writing mode. The engine’s logical viewport also serves as the small viewport.
     #[must_use]
     pub const fn container_inline(&self) -> f32 {
-        self.viewport_width
+        match self.query_unit_dimensions[2] {
+            Some(size) => size,
+            None => {
+                if self.vertical {
+                    self.viewport_height
+                } else {
+                    self.viewport_width
+                }
+            }
+        }
     }
 
-    #[doc = include_str!("length_context.doc/container_block.md")]
+    /// The nearest eligible query container’s block size in logical pixels. If there is no eligible ancestor for this axis, use the viewport block size in the subject’s writing mode. The engine’s logical viewport also serves as the small viewport.
     #[must_use]
     pub const fn container_block(&self) -> f32 {
-        self.viewport_height
+        match self.query_unit_dimensions[3] {
+            Some(size) => size,
+            None => {
+                if self.vertical {
+                    self.viewport_width
+                } else {
+                    self.viewport_height
+                }
+            }
+        }
     }
 
-    #[doc = include_str!("length_context.doc/container_min.md")]
+    /// The base a `cqmin` resolves against: the smaller of the `cqi` and `cqb`
+    /// bases (css-contain-3 §6).
     #[must_use]
     pub fn container_min(&self) -> f32 {
         self.container_inline().min(self.container_block())
     }
 
-    #[doc = include_str!("length_context.doc/container_max.md")]
+    /// The base a `cqmax` resolves against: the larger of the `cqi` and `cqb`
+    /// bases (css-contain-3 §6).
     #[must_use]
     pub fn container_max(&self) -> f32 {
         self.container_inline().max(self.container_block())

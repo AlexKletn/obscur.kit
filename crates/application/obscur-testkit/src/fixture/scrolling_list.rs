@@ -1,4 +1,4 @@
-#![doc = include_str!("scrolling_list.doc/_module.md")]
+//! The list a finger can drag.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -14,33 +14,33 @@ use obscur_view::view::{
 use crate::fixture::{ClassRule, TestFixture};
 use crate::selector::NodePath;
 
-#[doc = include_str!("scrolling_list.doc/ScrollingList.md")]
+#[doc = include_str!("../../docs/api/fixture/scrolling_list.doc/ScrollingList.md")]
 #[derive(Debug)]
 pub struct ScrollingList {
-    #[doc = include_str!("scrolling_list.doc/runtime.md")]
+    /// The runtime, with one frame already rendered.
     pub runtime: UiRuntime,
-    #[doc = include_str!("scrolling_list.doc/scroller.md")]
+    /// The scroll container node.
     pub scroller: NodeId,
-    #[doc = include_str!("scrolling_list.doc/rows.md")]
+    /// The six row nodes, top to bottom.
     pub rows: Vec<NodeId>,
-    #[doc = include_str!("scrolling_list.doc/tapped.md")]
+    /// Set when any row's click handler runs.
     pub tapped: Rc<Cell<bool>>,
 }
 
 impl ScrollingList {
-    #[doc = include_str!("scrolling_list.doc/CMD_ROW.md")]
+    /// The click command every row binds.
     pub const CMD_ROW: InternedSymbol = InternedSymbol::from_raw(0x0C);
 
-    #[doc = include_str!("scrolling_list.doc/ROWS.md")]
+    /// How many rows the list holds.
     pub const ROWS: u64 = 6;
 
-    #[doc = include_str!("scrolling_list.doc/ROW_HEIGHT.md")]
+    /// The height of one row, in px.
     pub const ROW_HEIGHT: f32 = 40.0;
 
-    #[doc = include_str!("scrolling_list.doc/SCROLLPORT_HEIGHT.md")]
+    #[doc = include_str!("../../docs/api/fixture/scrolling_list.doc/SCROLLPORT_HEIGHT.md")]
     pub const SCROLLPORT_HEIGHT: f32 = 120.0;
 
-    #[doc = include_str!("scrolling_list.doc/new.md")]
+    /// Renders the list with every row bound, and registers the row handler.
     #[must_use]
     pub fn new() -> Self {
         let mut runtime = TestFixture::runtime();
@@ -63,19 +63,19 @@ impl ScrollingList {
         }
     }
 
-    #[doc = include_str!("scrolling_list.doc/view.md")]
+    /// The list with no event bindings.
     #[must_use]
     pub fn view() -> View {
         Self::with_rows(|_, row| row)
     }
 
-    #[doc = include_str!("scrolling_list.doc/view_with_click.md")]
+    /// The list with every row bound to `command`.
     #[must_use]
     pub fn view_with_click(command: InternedSymbol) -> View {
         Self::with_rows(|_, row| row.with_event(ViewEventBinding::new(EVENT_CLICK, command)))
     }
 
-    #[doc = include_str!("scrolling_list.doc/sheet.md")]
+    /// The sheet that sizes the scroller, makes it scrollable, and sizes the rows.
     #[must_use]
     pub fn sheet() -> Stylesheet {
         Stylesheet::new(
@@ -90,7 +90,7 @@ impl ScrollingList {
         )
     }
 
-    #[doc = include_str!("scrolling_list.doc/nodes.md")]
+    /// The `(scroller, rows)` ids, after a frame has populated the tree.
     #[must_use]
     pub fn nodes(runtime: &UiRuntime) -> (NodeId, Vec<NodeId>) {
         (
@@ -99,7 +99,7 @@ impl ScrollingList {
         )
     }
 
-    #[doc = include_str!("scrolling_list.doc/with_rows.md")]
+    #[doc = include_str!("../../docs/api/fixture/scrolling_list.doc/with_rows.md")]
     #[must_use]
     pub fn with_rows(row: impl Fn(u64, ViewNode) -> ViewNode) -> View {
         let rows: Vec<ViewNode> = (0..Self::ROWS)

@@ -1,1 +1,0 @@
-Creates a rejection response.

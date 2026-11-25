@@ -1,1 +1,0 @@
-Supported with documented restrictions.

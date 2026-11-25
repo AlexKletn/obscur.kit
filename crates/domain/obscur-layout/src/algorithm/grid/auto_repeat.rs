@@ -1,17 +1,10 @@
-#![doc = include_str!("auto_repeat.doc/_module.md")]
+//! `AutoRepeat`: a `repeat(auto-fill | auto-fit, <track-list>)` pattern.
 
 use super::TrackSize;
 
-#[doc = include_str!("auto_repeat.doc/AutoRepeatMode.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AutoRepeatMode {
-    #[doc = include_str!("auto_repeat.doc/AutoFill.md")]
-    AutoFill,
-    #[doc = include_str!("auto_repeat.doc/AutoFit.md")]
-    AutoFit,
-}
+use super::AutoRepeatMode;
 
-#[doc = include_str!("auto_repeat.doc/AutoRepeat.md")]
+#[doc = include_str!("../../../docs/api/algorithm/grid/auto_repeat.doc/AutoRepeat.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct AutoRepeat {
     mode: AutoRepeatMode,
@@ -19,19 +12,19 @@ pub struct AutoRepeat {
 }
 
 impl AutoRepeat {
-    #[doc = include_str!("auto_repeat.doc/new.md")]
+    /// Builds an auto-repeat from its `mode` and its repeated `tracks` pattern.
     #[must_use]
     pub fn new(mode: AutoRepeatMode, tracks: Vec<TrackSize>) -> Self {
         Self { mode, tracks }
     }
 
-    #[doc = include_str!("auto_repeat.doc/mode.md")]
+    /// The auto-repeat mode (`auto-fill` keeps empty tracks; `auto-fit` collapses).
     #[must_use]
     pub const fn mode(&self) -> AutoRepeatMode {
         self.mode
     }
 
-    #[doc = include_str!("auto_repeat.doc/tracks.md")]
+    /// The repeated track pattern (one whole copy).
     #[must_use]
     pub fn tracks(&self) -> &[TrackSize] {
         &self.tracks

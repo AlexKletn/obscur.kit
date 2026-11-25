@@ -1,5 +1,6 @@
-#![doc = include_str!("resource_budget.doc/_module.md")]
+//! `ResourceBudget` (skeleton stub for the spec-defined entity; not yet implemented).
 
-#[doc = include_str!("resource_budget.doc/ResourceBudget.md")]
+/// Placeholder for the `ResourceBudget` entity. See the Obscur Kit 2 specs for its
+/// contract; this stub exists to materialise the target source layout.
 #[derive(Debug)]
 pub struct ResourceBudget;

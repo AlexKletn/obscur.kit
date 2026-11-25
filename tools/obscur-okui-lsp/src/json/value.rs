@@ -1,51 +1,54 @@
-#![doc = include_str!("value.doc/_module.md")]
+//! `JsonValue`: the hand-rolled JSON value model, with builder helpers, typed
+//! accessors and a [`Display`] serializer that emits compact, correctly-escaped
+//! JSON.
 
 use std::fmt::{self, Write as _};
 
-#[doc = include_str!("value.doc/JsonValue.md")]
+#[doc = include_str!("../../docs/api/json/value.doc/JsonValue.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum JsonValue {
-    #[doc = include_str!("value.doc/Null.md")]
+    /// The `null` literal.
     Null,
-    #[doc = include_str!("value.doc/Bool.md")]
+    /// A boolean (`true`/`false`).
     Bool(bool),
-    #[doc = include_str!("value.doc/Number.md")]
+    /// A number. JSON has a single numeric type; integers are stored exactly up
+    /// to `f64`'s 53-bit mantissa, which covers every LSP integer field.
     Number(f64),
-    #[doc = include_str!("value.doc/String.md")]
+    /// A string (unescaped, stored as native UTF-8).
     String(String),
-    #[doc = include_str!("value.doc/Array.md")]
+    /// An array of values.
     Array(Vec<JsonValue>),
-    #[doc = include_str!("value.doc/Object.md")]
+    /// An object, as an ordered list of key/value pairs.
     Object(Vec<(String, JsonValue)>),
 }
 
 impl JsonValue {
-    #[doc = include_str!("value.doc/string.md")]
+    /// Builds a string value.
     #[must_use]
     pub fn string(value: impl Into<String>) -> Self {
         Self::String(value.into())
     }
 
-    #[doc = include_str!("value.doc/int.md")]
+    /// Builds an integer number value.
     #[must_use]
     #[allow(clippy::cast_precision_loss)]
     pub fn int(value: i64) -> Self {
         Self::Number(value as f64)
     }
 
-    #[doc = include_str!("value.doc/object.md")]
+    /// Builds an object from an ordered iterator of key/value pairs.
     #[must_use]
     pub fn object<K: Into<String>>(entries: impl IntoIterator<Item = (K, JsonValue)>) -> Self {
         Self::Object(entries.into_iter().map(|(k, v)| (k.into(), v)).collect())
     }
 
-    #[doc = include_str!("value.doc/array.md")]
+    /// Builds an array from an iterator of values.
     #[must_use]
     pub fn array(items: impl IntoIterator<Item = JsonValue>) -> Self {
         Self::Array(items.into_iter().collect())
     }
 
-    #[doc = include_str!("value.doc/get.md")]
+    /// Returns the value for `key` if this is an object containing it.
     #[must_use]
     pub fn get(&self, key: &str) -> Option<&JsonValue> {
         match self {
@@ -54,7 +57,7 @@ impl JsonValue {
         }
     }
 
-    #[doc = include_str!("value.doc/as_str.md")]
+    /// Returns the string contents if this is a string.
     #[must_use]
     pub fn as_str(&self) -> Option<&str> {
         match self {
@@ -63,7 +66,7 @@ impl JsonValue {
         }
     }
 
-    #[doc = include_str!("value.doc/as_f64.md")]
+    /// Returns the number if this is a number.
     #[must_use]
     pub fn as_f64(&self) -> Option<f64> {
         match self {
@@ -72,14 +75,14 @@ impl JsonValue {
         }
     }
 
-    #[doc = include_str!("value.doc/as_i64.md")]
+    /// Returns the number truncated to `i64` if this is a number.
     #[must_use]
     #[allow(clippy::cast_possible_truncation)]
     pub fn as_i64(&self) -> Option<i64> {
         self.as_f64().map(|value| value as i64)
     }
 
-    #[doc = include_str!("value.doc/as_u32.md")]
+    /// Returns the number as a `u32` (clamped to `0..=u32::MAX`) if numeric.
     #[must_use]
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     pub fn as_u32(&self) -> Option<u32> {
@@ -87,7 +90,7 @@ impl JsonValue {
             .map(|value| value.max(0.0).min(f64::from(u32::MAX)) as u32)
     }
 
-    #[doc = include_str!("value.doc/as_array.md")]
+    /// Returns the elements if this is an array.
     #[must_use]
     pub fn as_array(&self) -> Option<&[JsonValue]> {
         match self {
@@ -131,7 +134,8 @@ impl fmt::Display for JsonValue {
     }
 }
 
-#[doc = include_str!("value.doc/write_number.md")]
+/// Writes a number: integral, finite values are emitted without a fractional
+/// part (so `1.0` renders as `1`); non-finite values degrade to `null`.
 fn write_number(f: &mut fmt::Formatter<'_>, value: f64) -> fmt::Result {
     if !value.is_finite() {
         return f.write_str("null");
@@ -143,7 +147,7 @@ fn write_number(f: &mut fmt::Formatter<'_>, value: f64) -> fmt::Result {
     write!(f, "{value}")
 }
 
-#[doc = include_str!("value.doc/write_string.md")]
+/// Writes a JSON string literal with the mandatory escapes.
 fn write_string(f: &mut fmt::Formatter<'_>, value: &str) -> fmt::Result {
     f.write_char('"')?;
     for ch in value.chars() {

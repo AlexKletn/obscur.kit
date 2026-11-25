@@ -1,12 +1,12 @@
-#![doc = include_str!("motion_driver.doc/_module.md")]
+#![doc = include_str!("../../docs/api/driver/motion_driver.doc/_module.md")]
 
-#[doc = include_str!("motion_driver.doc/MotionDriver.md")]
+#[doc = include_str!("../../docs/api/driver/motion_driver.doc/MotionDriver.md")]
 pub trait MotionDriver {
-    #[doc = include_str!("motion_driver.doc/progress.md")]
+    #[doc = include_str!("../../docs/api/driver/motion_driver.doc/progress.md")]
     #[must_use]
     fn progress(&self) -> f32;
 
-    #[doc = include_str!("motion_driver.doc/is_active.md")]
+    #[doc = include_str!("../../docs/api/driver/motion_driver.doc/is_active.md")]
     #[must_use]
     fn is_active(&self) -> bool {
         true

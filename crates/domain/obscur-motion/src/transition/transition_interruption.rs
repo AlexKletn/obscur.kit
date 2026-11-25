@@ -1,29 +1,35 @@
-#![doc = include_str!("transition_interruption.doc/_module.md")]
+//! The [`TransitionInterruption`] redirect policy for a transition (spec §4.17
+//! "interruption").
 
 use crate::track::KeyframeTrack;
 use crate::value::MotionValue;
 
-#[doc = include_str!("transition_interruption.doc/TransitionInterruption.md")]
+#[doc = include_str!("../../docs/api/transition/transition_interruption.doc/TransitionInterruption.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TransitionInterruption {
-    #[doc = include_str!("transition_interruption.doc/Restart.md")]
+    /// Discard the current transition and start the new one from its beginning
+    /// (spec §4.17). The element may visibly jump to the new start value.
     Restart,
-    #[doc = include_str!("transition_interruption.doc/Reverse.md")]
+    /// Turn the current transition around so it plays back toward its origin
+    /// (spec §4.17). Continues from the present value — used to *undo* an
+    /// in-flight enter/exit.
     Reverse,
-    #[doc = include_str!("transition_interruption.doc/Blend.md")]
+    /// Start the new transition *from* the element's current mid-animation value
+    /// (spec §4.17), producing a seamless redirect with no jump. The smoothest
+    /// option and the default.
     Blend,
-    #[doc = include_str!("transition_interruption.doc/Ignore.md")]
+    /// Let the current transition finish and drop the new one (spec §4.17).
     Ignore,
 }
 
 impl TransitionInterruption {
-    #[doc = include_str!("transition_interruption.doc/preserves_current_value.md")]
+    #[doc = include_str!("../../docs/api/transition/transition_interruption.doc/preserves_current_value.md")]
     #[must_use]
     pub const fn preserves_current_value(&self) -> bool {
         matches!(self, Self::Blend | Self::Reverse)
     }
 
-    #[doc = include_str!("transition_interruption.doc/resolve_track.md")]
+    #[doc = include_str!("../../docs/api/transition/transition_interruption.doc/resolve_track.md")]
     #[must_use]
     pub fn resolve_track(
         self,
@@ -41,7 +47,8 @@ impl TransitionInterruption {
 }
 
 impl Default for TransitionInterruption {
-    #[doc = include_str!("transition_interruption.doc/default.md")]
+    /// [`Blend`](Self::Blend) — the smoothest UI default: an incoming transition
+    /// redirects seamlessly from the element's current value (spec §4.17).
     fn default() -> Self {
         Self::Blend
     }

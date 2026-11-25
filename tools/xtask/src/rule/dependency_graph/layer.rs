@@ -1,32 +1,35 @@
-#![doc = include_str!("layer.doc/_module.md")]
+//! Architectural layer of a workspace crate and its allowed dependency
+//! directions (spec §2.11, §5.9).
 
-#[doc = include_str!("layer.doc/Layer.md")]
+/// One architectural layer, derived from a crate's location in the workspace
+/// (`crates/<layer>/…` or `tools/…`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Layer {
-    #[doc = include_str!("layer.doc/Foundation.md")]
+    /// `crates/foundation/*` — platform-neutral primitives.
     Foundation,
-    #[doc = include_str!("layer.doc/Domain.md")]
+    /// `crates/domain/*` — pure UI domain models and ports.
     Domain,
-    #[doc = include_str!("layer.doc/Application.md")]
+    /// `crates/application/*` — runtime, headless, testkit.
     Application,
-    #[doc = include_str!("layer.doc/Frontend.md")]
+    /// `crates/frontend/*` — IR, CSS, `.okui`, DSL macros.
     Frontend,
-    #[doc = include_str!("layer.doc/Components.md")]
+    /// `crates/components/*` — primitives, widgets, theme system.
     Components,
-    #[doc = include_str!("layer.doc/Adapters.md")]
+    /// `crates/adapters/*` — platform/GPU/IO implementations.
     Adapters,
-    #[doc = include_str!("layer.doc/Diagnostics.md")]
+    /// `crates/diagnostics/*` — devtools protocol and server.
     Diagnostics,
-    #[doc = include_str!("layer.doc/Plugin.md")]
+    /// `crates/plugin/*` — plugin model/host/executors.
     Plugin,
-    #[doc = include_str!("layer.doc/Facade.md")]
+    /// `crates/facade/*` — the `obscur-kit` umbrella crate.
     Facade,
-    #[doc = include_str!("layer.doc/Tools.md")]
+    /// `tools/*` — developer tools (xtask, lsp, cli, devtools).
     Tools,
 }
 
 impl Layer {
-    #[doc = include_str!("layer.doc/from_dir.md")]
+    /// Maps the directory name directly under `crates/` (or the synthetic
+    /// `tools` bucket) to a layer.
     pub(crate) fn from_dir(dir: &str) -> Option<Self> {
         Some(match dir {
             "foundation" => Self::Foundation,
@@ -43,7 +46,7 @@ impl Layer {
         })
     }
 
-    #[doc = include_str!("layer.doc/allows.md")]
+    #[doc = include_str!("../../../docs/api/rule/dependency_graph/layer.doc/allows.md")]
     pub(crate) fn allows(self, target: Self) -> bool {
         match self {
             // foundation -> foundation only.
@@ -92,7 +95,7 @@ impl Layer {
         }
     }
 
-    #[doc = include_str!("layer.doc/label.md")]
+    /// Human-readable label for diagnostic messages.
     pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Foundation => "foundation",

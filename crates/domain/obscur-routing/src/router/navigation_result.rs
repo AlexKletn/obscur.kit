@@ -1,28 +1,29 @@
-#![doc = include_str!("navigation_result.doc/_module.md")]
+//! The typed outcome of a router navigation (spec §6.13).
 
 use crate::route::RouteParams;
 
-#[doc = include_str!("navigation_result.doc/NavigationResult.md")]
+#[doc = include_str!("../../docs/api/router/navigation_result.doc/NavigationResult.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NavigationResult {
-    #[doc = include_str!("navigation_result.doc/Matched.md")]
+    /// A registered pattern matched: the path resolved to `target` with the
+    /// captured `params`.
     Matched {
-        #[doc = include_str!("navigation_result.doc/target.md")]
+        /// The application-chosen target id the pattern was registered under.
         target: Box<str>,
-        #[doc = include_str!("navigation_result.doc/params.md")]
+        /// The parameters captured from the matched path.
         params: RouteParams,
-        #[doc = include_str!("navigation_result.doc/path.md")]
+        /// The path that matched.
         path: Box<str>,
     },
-    #[doc = include_str!("navigation_result.doc/NotFound.md")]
+    /// No registered pattern matched the path (a deep-link miss).
     NotFound {
-        #[doc = include_str!("navigation_result.doc/path_2.md")]
+        /// The path that failed to resolve.
         path: Box<str>,
     },
 }
 
 impl NavigationResult {
-    #[doc = include_str!("navigation_result.doc/matched.md")]
+    /// Creates a [`Matched`](NavigationResult::Matched) result.
     #[must_use]
     pub fn matched(
         target: impl Into<Box<str>>,
@@ -36,19 +37,20 @@ impl NavigationResult {
         }
     }
 
-    #[doc = include_str!("navigation_result.doc/not_found.md")]
+    /// Creates a [`NotFound`](NavigationResult::NotFound) result for `path`.
     #[must_use]
     pub fn not_found(path: impl Into<Box<str>>) -> Self {
         Self::NotFound { path: path.into() }
     }
 
-    #[doc = include_str!("navigation_result.doc/is_matched.md")]
+    /// Returns whether this is a [`Matched`](NavigationResult::Matched) outcome.
     #[must_use]
     pub const fn is_matched(&self) -> bool {
         matches!(self, Self::Matched { .. })
     }
 
-    #[doc = include_str!("navigation_result.doc/target_2.md")]
+    /// Returns the resolved target id, or `None` for a
+    /// [`NotFound`](NavigationResult::NotFound) outcome.
     #[must_use]
     pub fn target(&self) -> Option<&str> {
         match self {
@@ -57,7 +59,8 @@ impl NavigationResult {
         }
     }
 
-    #[doc = include_str!("navigation_result.doc/params_2.md")]
+    /// Returns the captured params, or `None` for a
+    /// [`NotFound`](NavigationResult::NotFound) outcome.
     #[must_use]
     pub const fn params(&self) -> Option<&RouteParams> {
         match self {
@@ -66,7 +69,7 @@ impl NavigationResult {
         }
     }
 
-    #[doc = include_str!("navigation_result.doc/path_3.md")]
+    /// Returns the path this result concerns (matched or not found).
     #[must_use]
     pub fn path(&self) -> &str {
         match self {

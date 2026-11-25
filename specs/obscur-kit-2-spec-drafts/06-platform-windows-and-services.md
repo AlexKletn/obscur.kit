@@ -272,6 +272,84 @@ Supports:
 
 System gestures have priority by default.
 
+### 6.16.1 Semantic Back gesture API
+
+The interaction layer provides `BackGesture`. An application keeps a
+recognizer for its navigation surface and passes dispatched events to
+`update(event, scale)` when Back is available. The scale converts physical
+wheel deltas. Pointer coordinates in dispatched UI events are logical.
+
+A trusted rightward touch starting at the leading edge of the current
+left-to-right implementation, or a trusted horizontal native touchpad swipe or phased pixel-scroll
+sequence, can produce a `BackGestureUpdate` with source, phase and offset. The offset is
+rightward displacement in logical pixels. The first recognized update is
+`Started`, further movement reports `Updated`, and the sequence ends once
+with `Completed` or `Cancelled`. A platform cancellation never completes
+navigation. Events before recognition return no update. The recognizer's
+`offset()` is present only while a recognized gesture is active.
+
+The defaults use a 32 logical pixel touch region, an 8 logical pixel movement
+threshold, a horizontal-to-vertical ratio of 1.75, and a 72 logical pixel
+commit distance. Vertical movement remains available to scrolling. A system
+gesture can take priority by reserving the edge or cancelling the sequence.
+
+Applications decide whether Back is available, use the offset to drive their
+own transition, navigate only on `Completed`, and settle the preview on
+`Cancelled`. Window or navigation changes can explicitly cancel the sequence.
+
+### 6.16.2 Directional swipe and touch transforms
+
+`SwipeGesture` reports a locked direction, logical displacement, and
+contact count if available. Applications may restrict the direction and
+request an exact, nonzero number of contacts. Touchscreen input defaults to
+one contact and follows the centroid with multiple contacts. Native touchpad
+input uses the compositor's displacement and contact count when supplied.
+Phased pixel scroll provides no contact count.
+
+`TransformGesture` combines pinch and rotate. Touchscreen input uses two
+contacts and their logical midpoint. Native touchpad input uses the gesture's
+initial cursor anchor. Both provide the scale ratio to the initial separation
+and clockwise rotation from the initial angle in radians.
+
+Updates for swipe, transform and Back identify their source as touchscreen,
+native touchpad or phased scroll. The phased-scroll source conveys that
+the underlying device is unknown. Native touchpad input is delivered through
+`touchpadgesture` with the platform phase and measurements.
+
+Both recognizers report the same gesture lifecycle as Back. These values are
+input measurements. Application code assigns an action to them.
+
+### 6.16.3 UI feedback ports
+
+A component, application or embedding host may request a semantic cue
+through independently installed haptic and sound ports. Gesture recognition
+does not select a cue. The owner of the interaction selects an effect and
+timing, and the platform adapter applies device capabilities and user policy.
+Submission does not wait for playback. A missing adapter makes that channel
+silent. Gamepad rumble uses the gamepad API.
+
+### 6.16.4 Runtime routing
+
+A surface can opt into the runtime touch arena with `touchgesture`.
+Application handlers claim the attached contact group with `prevent_default`.
+A built-in scroll pan or long press that wins cancels the losing candidate
+stream before carrying out its action. The raw pointer stream remains
+available for observation.
+
+A surface can opt into the phased pixel-scroll arena with `scrollgesture`.
+The application contender and the vertical scroll target are anchored at
+sequence start. The winner keeps the sequence through its terminal phase.
+If scrolling wins, the runtime cancels the application candidate before
+applying buffered displacement. Native touchpad events keep their initial
+target and contact count through completion or cancellation.
+
+The host can deliver system predictive Back to the `systemback` binding
+selected at the start of the sequence. Progress is normalized and completion
+or cancellation is terminal. The window-system adapter is responsible for
+forwarding the system's cancellation and handling any raw input taken over
+by the system. Reserved and exclusion regions are negotiated separately
+through the platform port.
+
 ## 6.17 Capture and privacy
 
 Capabilities:

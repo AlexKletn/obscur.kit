@@ -1,1 +1,0 @@
-Contains size effects only.

@@ -1,19 +1,19 @@
-#![doc = include_str!("select_component.doc/_module.md")]
+#![doc = include_str!("../../docs/api/select/select_component.doc/_module.md")]
 
 use obscur_view::component::{Component, ComponentContext};
 use obscur_view::view::View;
 
 use super::{Select, SelectProps};
 
-#[doc = include_str!("select_component.doc/SelectComponent.md")]
+#[doc = include_str!("../../docs/api/select/select_component.doc/SelectComponent.md")]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SelectComponent;
 
 impl Component for SelectComponent {
-    #[doc = include_str!("select_component.doc/Props.md")]
+    /// The authored surface: [`SelectProps`](super::SelectProps).
     type Props = SelectProps;
 
-    #[doc = include_str!("select_component.doc/render.md")]
+    #[doc = include_str!("../../docs/api/select/select_component.doc/render.md")]
     fn render(&mut self, _ctx: &mut ComponentContext<'_>, props: &Self::Props) -> View {
         View::from_fragment(Select::contents(&props.options, props.selected, props.open))
     }

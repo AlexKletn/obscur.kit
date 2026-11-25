@@ -1,1 +1,0 @@
-A `radial-gradient(...)` layer.

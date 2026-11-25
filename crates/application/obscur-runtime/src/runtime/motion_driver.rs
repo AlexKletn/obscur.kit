@@ -1,8 +1,12 @@
-#![doc = include_str!("motion_driver.doc/_module.md")]
+//! [`MotionDriver`]: the timelines the runtime runs, and the CSS rules that start
+//! them (spec §4.17).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
-use super::PresentationUndo;
+use super::{
+    PresentationUndo, animation_start::AnimationStart, transition_run::TransitionRun,
+    transition_start::TransitionStart,
+};
 use obscur_identity::{FastMap, FastSet, NodeId};
 use obscur_motion::scheduler::MotionScheduler;
 use obscur_motion::timeline::{Timeline, TimelineId};
@@ -10,40 +14,46 @@ use obscur_motion::track::{Keyframe, KeyframeTrack};
 use obscur_motion::transition::TransitionInterruption;
 use obscur_motion::value::MotionValue;
 use obscur_style::computed::{ComputedStyle, ComputedValue};
+use obscur_style::matching::MediaEnvironment;
 use obscur_style::property::{Length, PropertyId, PropertyValue, Transform};
 use obscur_style::selector::SelectorMatcher;
 use obscur_tree::tree::RetainedTree;
 
 use crate::orchestration::{
-    AnimatedKind, AnimationBinding, ComputedStyles, CssMotionRules, CssTransitionRule,
+    AnimatedKind, AnimationBinding, ComputedStyles, CssMotionRules, CssTransitionRule, LayoutBoxes,
     MotionCoordinator, MotionPlayback, PseudoStates, TreeElement,
 };
 
-#[doc = include_str!("motion_driver.doc/MotionDriver.md")]
+#[doc = include_str!("../../docs/api/runtime/motion_driver.doc/MotionDriver.md")]
 #[derive(Debug)]
 pub(crate) struct MotionDriver {
-    #[doc = include_str!("motion_driver.doc/motion.md")]
+    /// The live timelines. A finished timeline is pruned from here, which is why
+    /// [`settled_progress`](Self::settled_progress) exists.
     motion: MotionScheduler,
-    #[doc = include_str!("motion_driver.doc/animations.md")]
+    #[doc = include_str!("../../docs/api/runtime/motion_driver.doc/animations.md")]
     animations: Vec<AnimationBinding>,
-    #[doc = include_str!("motion_driver.doc/presentation_overlays.md")]
-    presentation_overlays: Vec<(NodeId, PropertyId, PropertyValue)>,
-    #[doc = include_str!("motion_driver.doc/next_timeline.md")]
+    /// This frame's group-compositing overlay (`opacity` / `transform`), rebuilt
+    /// from the live timelines every frame because these values reach paint
+    /// without ever entering computed style (spec §4.17, NG-MOTION-01).
+    presentation_overlays: Vec<(NodeId, PropertyId, MotionValue)>,
+    /// The next timeline id to mint.
     next_timeline: TimelineId,
-    #[doc = include_str!("motion_driver.doc/settled_progress.md")]
+    #[doc = include_str!("../../docs/api/runtime/motion_driver.doc/settled_progress.md")]
     settled_progress: FastMap<TimelineId, f32>,
-    #[doc = include_str!("motion_driver.doc/css_motion.md")]
+    /// The authored `transition` / `@keyframes` rules this runtime drives.
     css_motion: CssMotionRules,
-    #[doc = include_str!("motion_driver.doc/transition_targets.md")]
+    css_rules_changed: bool,
+    #[doc = include_str!("../../docs/api/runtime/motion_driver.doc/transition_targets.md")]
     transition_targets: FastMap<(NodeId, PropertyId), MotionValue>,
-    #[doc = include_str!("motion_driver.doc/transition_runs.md")]
+    #[doc = include_str!("../../docs/api/runtime/motion_driver.doc/transition_runs.md")]
     transition_runs: FastMap<(NodeId, PropertyId), TransitionRun>,
-    #[doc = include_str!("motion_driver.doc/css_animations_started.md")]
-    css_animations_started: FastSet<(NodeId, PropertyId)>,
+    #[doc = include_str!("../../docs/api/runtime/motion_driver.doc/css_animations_started.md")]
+    css_animations_started: FastMap<(NodeId, PropertyId), (usize, TimelineId)>,
+    css_transition_timelines: FastMap<(NodeId, PropertyId), TimelineId>,
 }
 
 impl MotionDriver {
-    #[doc = include_str!("motion_driver.doc/new.md")]
+    /// A driver with no rules installed and nothing running.
     pub(crate) fn new() -> Self {
         Self {
             motion: MotionScheduler::new(),
@@ -52,13 +62,15 @@ impl MotionDriver {
             next_timeline: TimelineId::from_raw(0),
             settled_progress: HashMap::default(),
             css_motion: CssMotionRules::new(),
+            css_rules_changed: false,
             transition_targets: HashMap::default(),
             transition_runs: HashMap::default(),
-            css_animations_started: HashSet::default(),
+            css_animations_started: HashMap::default(),
+            css_transition_timelines: HashMap::default(),
         }
     }
 
-    #[doc = include_str!("motion_driver.doc/advance.md")]
+    #[doc = include_str!("../../docs/api/runtime/motion_driver.doc/advance.md")]
     pub(crate) fn advance(&mut self, delta: f32) -> bool {
         for finished in self.motion.advance(delta) {
             self.settled_progress
@@ -67,26 +79,35 @@ impl MotionDriver {
         self.motion.needs_frame()
     }
 
-    #[doc = include_str!("motion_driver.doc/set_css_rules.md")]
+    #[doc = include_str!("../../docs/api/runtime/motion_driver.doc/set_css_rules.md")]
     pub(crate) fn set_css_rules(&mut self, rules: CssMotionRules) {
         self.css_motion = rules;
+        self.css_rules_changed = true;
         self.transition_targets.clear();
         self.transition_runs.clear();
-        self.css_animations_started.clear();
+        let timelines: Vec<_> = self
+            .css_animations_started
+            .drain()
+            .map(|(_, (_, id))| id)
+            .chain(self.css_transition_timelines.drain().map(|(_, id)| id))
+            .collect();
+        for id in timelines {
+            self.cancel_animation(id);
+        }
     }
 
-    #[doc = include_str!("motion_driver.doc/active_count.md")]
+    /// How many motion timelines are currently running (spec §7.6 `Animations`).
     pub(crate) fn active_count(&self) -> usize {
         self.motion.active_count()
     }
 
-    #[doc = include_str!("motion_driver.doc/binding_count.md")]
+    #[doc = include_str!("../../docs/api/runtime/motion_driver.doc/binding_count.md")]
     #[cfg(test)]
     pub(crate) fn binding_count(&self) -> usize {
         self.animations.len()
     }
 
-    #[doc = include_str!("motion_driver.doc/bookkeeping_counts.md")]
+    #[doc = include_str!("../../docs/api/runtime/motion_driver.doc/bookkeeping_counts.md")]
     #[cfg(test)]
     pub(crate) fn bookkeeping_counts(&self) -> (usize, usize, usize, usize) {
         (
@@ -97,7 +118,7 @@ impl MotionDriver {
         )
     }
 
-    #[doc = include_str!("motion_driver.doc/retain_live.md")]
+    #[doc = include_str!("../../docs/api/runtime/motion_driver.doc/retain_live.md")]
     fn retain_live(&mut self, tree: &RetainedTree) {
         // Borrowed out of `self` first so the retain closure below touches only
         // the scheduler field: `animations` and `motion` are disjoint, which is
@@ -118,21 +139,25 @@ impl MotionDriver {
         });
         // Reachable only through a surviving binding's `timeline()`, so the
         // bindings that just survived are the whole of what can still be read.
-        let live: FastSet<TimelineId> = self
-            .animations
-            .iter()
-            .map(AnimationBinding::timeline)
-            .collect();
-        self.settled_progress.retain(|id, _| live.contains(id));
+        if !self.settled_progress.is_empty() {
+            let live: FastSet<TimelineId> = self
+                .animations
+                .iter()
+                .map(AnimationBinding::timeline)
+                .collect();
+            self.settled_progress.retain(|id, _| live.contains(id));
+        }
         self.transition_targets
             .retain(|(node, _), _| tree.contains(*node));
         self.transition_runs
             .retain(|(node, _), _| tree.contains(*node));
         self.css_animations_started
-            .retain(|(node, _)| tree.contains(*node));
+            .retain(|(node, _), _| tree.contains(*node));
+        self.css_transition_timelines
+            .retain(|(node, _), _| tree.contains(*node));
     }
 
-    #[doc = include_str!("motion_driver.doc/animate_with.md")]
+    #[doc = include_str!("../../docs/api/runtime/motion_driver.doc/animate_with.md")]
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn animate_with(
         &mut self,
@@ -213,20 +238,61 @@ impl MotionDriver {
         id
     }
 
-    #[doc = include_str!("motion_driver.doc/timeline_progress.md")]
-    fn timeline_progress(&self, id: TimelineId) -> f32 {
+    /// Pauses a live timeline at the supplied progress.
+    pub(crate) fn scrub(&mut self, id: TimelineId, progress: f32) -> bool {
+        let Some(timeline) = self.motion.timeline_mut(id) else {
+            return false;
+        };
+        if !timeline.state().is_active() {
+            return false;
+        }
+        timeline.scrub(progress);
+        true
+    }
+
+    /// Resumes a paused timeline.
+    pub(crate) fn resume(&mut self, id: TimelineId) -> bool {
+        let Some(timeline) = self.motion.timeline_mut(id) else {
+            return false;
+        };
+        if timeline.state() != obscur_motion::timeline::TimelineState::Paused {
+            return false;
+        }
+        timeline.resume();
+        true
+    }
+
+    /// Remove the binding, active timeline, and retained endpoint for an animation.
+    pub(crate) fn cancel_animation(&mut self, id: TimelineId) -> bool {
+        let Some(index) = self
+            .animations
+            .iter()
+            .position(|binding| binding.timeline() == id)
+        else {
+            return false;
+        };
+        self.animations.remove(index);
+        self.motion.remove(id);
+        self.settled_progress.remove(&id);
+        true
+    }
+
+    /// Returns the progress to sample a binding's track at: the live timeline's
+    /// progress while it is in the scheduler, otherwise the progress it settled
+    /// at when it finished (falling back to the track's end).
+    pub(crate) fn timeline_progress(&self, id: TimelineId) -> f32 {
         self.motion.active().get(id).map_or_else(
             || self.settled_progress.get(&id).copied().unwrap_or(1.0),
             Timeline::progress,
         )
     }
 
-    #[doc = include_str!("motion_driver.doc/active_animations.md")]
+    #[doc = include_str!("../../docs/api/runtime/motion_driver.doc/active_animations.md")]
     pub(crate) fn active_animations(&self) -> usize {
         self.active_count()
     }
 
-    #[doc = include_str!("motion_driver.doc/apply_overlay.md")]
+    #[doc = include_str!("../../docs/api/runtime/motion_driver.doc/apply_overlay.md")]
     pub(crate) fn apply_overlay(
         &mut self,
         computed: &mut ComputedStyles,
@@ -236,7 +302,7 @@ impl MotionDriver {
         // values (`opacity`/`transform`) never touch computed style, so they
         // cannot be stashed-and-restored like the computed overlay — they are
         // re-derived from the live timelines every frame.
-        let mut presentation: Vec<(NodeId, PropertyId, PropertyValue)> = Vec::new();
+        let mut presentation: Vec<(NodeId, PropertyId, MotionValue)> = Vec::new();
         for binding in &self.animations {
             // Inside the start delay the animation is not yet running: it applies
             // its first-iteration start value only under a `backwards`/`both`
@@ -269,9 +335,7 @@ impl MotionDriver {
             // transform track presents as a matrix even when the caller labelled
             // its kind `Number`.
             if is_presentation_property(binding.property()) {
-                if let Some(value) = lower_presentation(binding.property(), sampled) {
-                    presentation.push((binding.node(), binding.property(), value));
-                }
+                presentation.push((binding.node(), binding.property(), sampled));
                 continue;
             }
 
@@ -296,8 +360,32 @@ impl MotionDriver {
         self.presentation_overlays = presentation;
     }
 
-    #[doc = include_str!("motion_driver.doc/apply_presentation.md")]
-    pub(crate) fn apply_presentation(&self, computed: &mut ComputedStyles) -> PresentationUndo {
+    /// Presents the first value of a transform track created after layout in the current frame.
+    pub(crate) fn queue_initial_transform(&mut self, node: NodeId, value: MotionValue) {
+        self.presentation_overlays
+            .push((node, PropertyId::Transform, value));
+    }
+
+    /// Returns the transform sample retained for the last composed frame.
+    pub(crate) fn presented_transform(
+        &self,
+        node: NodeId,
+        size: obscur_geometry::Size,
+    ) -> Option<obscur_geometry::AffineTransform> {
+        self.presentation_overlays
+            .iter()
+            .rev()
+            .filter(|(target, property, _)| *target == node && *property == PropertyId::Transform)
+            .find_map(|(_, _, value)| value.transform_with_basis(size))
+            .map(|coeffs| obscur_geometry::AffineTransform { coeffs })
+    }
+
+    #[doc = include_str!("../../docs/api/runtime/motion_driver.doc/apply_presentation.md")]
+    pub(crate) fn apply_presentation(
+        &self,
+        computed: &mut ComputedStyles,
+        boxes: &LayoutBoxes,
+    ) -> PresentationUndo {
         // The map is NOT cloned. It used to be, and one live transition anywhere
         // in the tree was enough to deep-copy every node's style — two hash maps
         // per node, each owning heap for font stacks, gradient stops, shadows and
@@ -306,7 +394,10 @@ impl MotionDriver {
         // `undo` carries precisely enough to put it back.
         let mut undo = PresentationUndo::default();
         for (node, property, value) in &self.presentation_overlays {
-            let Some(sampled) = ComputedValue::from_concrete(value.clone()) else {
+            let size = boxes.get(node).map(|layout| layout.size());
+            let Some(sampled) =
+                lower_presentation(*property, *value, size).and_then(ComputedValue::from_concrete)
+            else {
                 continue;
             };
             let fresh = !computed.contains_key(node);
@@ -317,7 +408,7 @@ impl MotionDriver {
         undo
     }
 
-    #[doc = include_str!("motion_driver.doc/restore_presentation.md")]
+    #[doc = include_str!("../../docs/api/runtime/motion_driver.doc/restore_presentation.md")]
     pub(crate) fn restore_presentation(computed: &mut ComputedStyles, undo: PresentationUndo) {
         // Reverse order, because two overlays on the same property would
         // otherwise restore the older value over the newer one.
@@ -336,12 +427,14 @@ impl MotionDriver {
         }
     }
 
-    #[doc = include_str!("motion_driver.doc/drive_css.md")]
+    #[doc = include_str!("../../docs/api/runtime/motion_driver.doc/drive_css.md")]
     pub(crate) fn drive_css(
         &mut self,
         computed: &ComputedStyles,
         tree: &RetainedTree,
         pseudo: &PseudoStates,
+        environment: &MediaEnvironment<'_>,
+        style_inputs_changed: bool,
     ) -> bool {
         // Swept against the tree this frame's cascade was resolved from, in the
         // pass that already holds it — this costs one hash lookup per live
@@ -352,7 +445,11 @@ impl MotionDriver {
         // binding behind, and `apply_overlay` walks all of them every frame: a
         // leak that shows up as frame time before it shows up as memory.
         self.retain_live(tree);
+        let rules_changed = std::mem::take(&mut self.css_rules_changed);
         if self.css_motion.is_empty() {
+            return false;
+        }
+        if !(style_inputs_changed || rules_changed || always_match_css_motion()) {
             return false;
         }
 
@@ -360,7 +457,8 @@ impl MotionDriver {
         // `self.pseudo`, and the change-detection baselines.
         let mut target_updates: Vec<((NodeId, PropertyId), MotionValue)> = Vec::new();
         let mut transitions_to_start: Vec<TransitionStart> = Vec::new();
-        let mut animations_to_start: Vec<AnimationStart> = Vec::new();
+        let mut matched_transitions = FastSet::default();
+        let mut matched_animations = FastMap::default();
 
         // Node outer, rule inner. `TreeElement::with_pseudo` walks to build the
         // element a selector is matched against, and with the loops the other way
@@ -373,20 +471,47 @@ impl MotionDriver {
                 continue;
             }
             let element = TreeElement::with_pseudo(tree, id, pseudo);
-            for rule in self.css_motion.transitions() {
-                let Some(kind) = animated_kind_for(rule.property()) else {
+            let environment = environment.for_subject(id);
+            let transitions = self.css_motion.transitions();
+            let winning_declaration = transitions
+                .iter()
+                .filter_map(|rule| {
+                    let (order, important) = rule.cascade()?;
+                    if !rule.applies(&environment) {
+                        return None;
+                    }
+                    let specificity = SelectorMatcher::matches_list(rule.selectors(), &element)?;
+                    Some((important, specificity, order))
+                })
+                .max()
+                .map(|(_, _, order)| order);
+            for rule in transitions.iter().rev() {
+                let Some(property) = rule.property() else {
                     continue;
                 };
-                if SelectorMatcher::matches_list(rule.selectors(), &element).is_none() {
+                let selected = match rule.cascade() {
+                    Some((order, _)) => winning_declaration == Some(order),
+                    None => {
+                        rule.applies(&environment)
+                            && SelectorMatcher::matches_list(rule.selectors(), &element).is_some()
+                    }
+                };
+                if !selected {
                     continue;
                 }
+                let Some(kind) = animated_kind_for(property) else {
+                    continue;
+                };
                 let Some(new_value) = computed
                     .get(&id)
-                    .and_then(|style| motion_value_of(style, rule.property(), kind))
+                    .and_then(|style| motion_value_of(style, property, kind))
                 else {
                     continue;
                 };
-                let key = (id, rule.property());
+                let key = (id, property);
+                if !matched_transitions.insert(key) {
+                    continue;
+                }
                 match self.transition_targets.get(&key) {
                     // A real change of a watched property: start a transition from
                     // the previous target to the new one, unless the duration is
@@ -401,7 +526,7 @@ impl MotionDriver {
                                 self.resolve_reversing(key, previous, new_value, rule);
                             transitions_to_start.push(TransitionStart {
                                 node: id,
-                                property: rule.property(),
+                                property,
                                 from: previous,
                                 to: new_value,
                                 duration,
@@ -419,20 +544,63 @@ impl MotionDriver {
                 }
             }
 
-            for rule in self.css_motion.keyframes() {
-                if SelectorMatcher::matches_list(rule.selectors(), &element).is_none() {
+            let mut matched_definitions = FastSet::default();
+            for (index, rule) in self.css_motion.keyframes().iter().enumerate().rev() {
+                if !rule.applies(&environment)
+                    || SelectorMatcher::matches_list(rule.selectors(), &element).is_none()
+                {
+                    continue;
+                }
+                if rule
+                    .definition_group()
+                    .is_some_and(|group| !matched_definitions.insert(group))
+                {
                     continue;
                 }
                 for (property, track) in rule.tracks() {
                     let Some(kind) = animated_kind_for(*property) else {
                         continue;
                     };
-                    if self.css_animations_started.contains(&(id, *property)) {
-                        continue;
-                    }
-                    animations_to_start.push(AnimationStart {
-                        node: id,
-                        property: *property,
+                    matched_animations
+                        .entry((id, *property))
+                        .or_insert((index, rule, track, kind));
+                }
+            }
+        }
+
+        let mut obsolete = Vec::new();
+        self.css_transition_timelines.retain(|key, id| {
+            if matched_transitions.contains(key) {
+                true
+            } else {
+                obsolete.push(*id);
+                false
+            }
+        });
+        self.transition_targets
+            .retain(|key, _| matched_transitions.contains(key));
+        self.transition_runs
+            .retain(|key, _| matched_transitions.contains(key));
+        self.css_animations_started.retain(|key, (index, id)| {
+            if matched_animations
+                .get(key)
+                .is_some_and(|(active, ..)| active == index)
+            {
+                true
+            } else {
+                obsolete.push(*id);
+                false
+            }
+        });
+        let animations_to_start: Vec<_> = matched_animations
+            .into_iter()
+            .filter(|(key, _)| !self.css_animations_started.contains_key(key))
+            .map(|((node, property), (index, rule, track, kind))| {
+                (
+                    index,
+                    AnimationStart {
+                        node,
+                        property,
                         track: track.clone(),
                         duration: rule.duration_secs(),
                         kind,
@@ -443,15 +611,18 @@ impl MotionDriver {
                             alternates: rule.alternates(),
                             fill: rule.fill(),
                         },
-                    });
-                }
-            }
-        }
+                    },
+                )
+            })
+            .collect();
 
         // Stage 2: apply. Mutating `self` (baselines + `animate`).
         // Read before the vectors are consumed: whether anything started is what
         // tells the caller this frame owes an animation frame.
         let started = !transitions_to_start.is_empty() || !animations_to_start.is_empty();
+        for id in obsolete {
+            self.cancel_animation(id);
+        }
         for (key, value) in target_updates {
             self.transition_targets.insert(key, value);
         }
@@ -462,7 +633,7 @@ impl MotionDriver {
             ]);
             self.transition_runs
                 .insert((start.node, start.property), start.run);
-            self.animate_with(
+            let timeline = self.animate_with(
                 start.node,
                 start.property,
                 track,
@@ -471,11 +642,12 @@ impl MotionDriver {
                 TransitionInterruption::Blend,
                 MotionPlayback::delayed(start.delay),
             );
+            self.css_transition_timelines
+                .insert((start.node, start.property), timeline);
         }
-        for start in animations_to_start {
-            self.css_animations_started
-                .insert((start.node, start.property));
-            self.animate_with(
+        for (index, start) in animations_to_start {
+            let key = (start.node, start.property);
+            let timeline = self.animate_with(
                 start.node,
                 start.property,
                 start.track,
@@ -484,11 +656,12 @@ impl MotionDriver {
                 TransitionInterruption::Restart,
                 start.playback,
             );
+            self.css_animations_started.insert(key, (index, timeline));
         }
         started
     }
 
-    #[doc = include_str!("motion_driver.doc/resolve_reversing.md")]
+    #[doc = include_str!("../../docs/api/runtime/motion_driver.doc/resolve_reversing.md")]
     fn resolve_reversing(
         &self,
         key: (NodeId, PropertyId),
@@ -538,7 +711,8 @@ impl MotionDriver {
         (matching_duration, matching_delay, run)
     }
 
-    #[doc = include_str!("motion_driver.doc/running_transition_progress.md")]
+    /// The current progress `[0, 1]` of the transition timeline running for
+    /// `key`, or [`None`] when no binding is registered for it.
     fn running_transition_progress(&self, key: (NodeId, PropertyId)) -> Option<f32> {
         let binding = self
             .animations
@@ -547,7 +721,8 @@ impl MotionDriver {
         Some(self.timeline_progress(binding.timeline()))
     }
 
-    #[doc = include_str!("motion_driver.doc/running_transition_value.md")]
+    /// The current sampled value of the transition running for `key`, or [`None`]
+    /// when no binding is registered for it (or its track is empty).
     fn running_transition_value(&self, key: (NodeId, PropertyId)) -> Option<MotionValue> {
         let binding = self
             .animations
@@ -558,47 +733,14 @@ impl MotionDriver {
     }
 }
 
-#[doc = include_str!("motion_driver.doc/TransitionStart.md")]
-struct TransitionStart {
-    node: NodeId,
-    property: PropertyId,
-    from: MotionValue,
-    to: MotionValue,
-    #[doc = include_str!("motion_driver.doc/duration.md")]
-    duration: f32,
-    #[doc = include_str!("motion_driver.doc/delay.md")]
-    delay: f32,
-    easing: obscur_motion::track::Easing,
-    kind: AnimatedKind,
-    #[doc = include_str!("motion_driver.doc/run.md")]
-    run: TransitionRun,
+fn always_match_css_motion() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var_os("OBSCUR_FULL_CSS_MOTION_MATCH").is_some_and(|value| value == "1")
+    })
 }
 
-#[doc = include_str!("motion_driver.doc/TransitionRun.md")]
-#[derive(Debug, Clone, Copy)]
-struct TransitionRun {
-    #[doc = include_str!("motion_driver.doc/reversing_adjusted_start.md")]
-    reversing_adjusted_start: MotionValue,
-    #[doc = include_str!("motion_driver.doc/reversing_factor.md")]
-    reversing_factor: f32,
-    #[doc = include_str!("motion_driver.doc/easing.md")]
-    easing: obscur_motion::track::Easing,
-    #[doc = include_str!("motion_driver.doc/end_value.md")]
-    end_value: MotionValue,
-}
-
-#[doc = include_str!("motion_driver.doc/AnimationStart.md")]
-struct AnimationStart {
-    node: NodeId,
-    property: PropertyId,
-    track: KeyframeTrack,
-    duration: f32,
-    kind: AnimatedKind,
-    #[doc = include_str!("motion_driver.doc/playback.md")]
-    playback: MotionPlayback,
-}
-
-#[doc = include_str!("motion_driver.doc/animated_kind_for.md")]
+#[doc = include_str!("../../docs/api/runtime/motion_driver.doc/animated_kind_for.md")]
 fn animated_kind_for(property: PropertyId) -> Option<AnimatedKind> {
     match property {
         PropertyId::Opacity | PropertyId::FlexGrow | PropertyId::FlexShrink => {
@@ -619,6 +761,8 @@ fn animated_kind_for(property: PropertyId) -> Option<AnimatedKind> {
         | PropertyId::PaddingBottom
         | PropertyId::PaddingLeft
         | PropertyId::Gap
+        | PropertyId::RowGap
+        | PropertyId::ColumnGap
         | PropertyId::FlexBasis
         | PropertyId::FontSize => Some(AnimatedKind::LengthPx),
         // `transform` animates as post-layout motion (spec §4.17). The motion
@@ -638,22 +782,31 @@ fn animated_kind_for(property: PropertyId) -> Option<AnimatedKind> {
     }
 }
 
-#[doc = include_str!("motion_driver.doc/is_presentation_property.md")]
+/// Whether `property` is a **group-compositing** property that motion applies as
+/// a presentation value at paint time and never writes into computed style
+/// (spec §4.17 post-layout motion): `opacity` (a `PushLayer` group alpha) and
+/// `transform` (a `PushTransform` bracketing the subtree). Both are paint-only —
+/// they move paint without ever re-running layout.
 fn is_presentation_property(property: PropertyId) -> bool {
     matches!(property, PropertyId::Opacity | PropertyId::Transform)
 }
 
-#[doc = include_str!("motion_driver.doc/lower_presentation.md")]
-fn lower_presentation(property: PropertyId, value: MotionValue) -> Option<PropertyValue> {
+#[doc = include_str!("../../docs/api/runtime/motion_driver.doc/lower_presentation.md")]
+fn lower_presentation(
+    property: PropertyId,
+    value: MotionValue,
+    size: Option<obscur_geometry::Size>,
+) -> Option<PropertyValue> {
     match property {
         PropertyId::Transform => value
             .as_transform()
+            .or_else(|| value.transform_with_basis(size?))
             .map(|matrix| PropertyValue::Transform(Transform::new(matrix))),
         _ => value.as_scalar().map(PropertyValue::Number),
     }
 }
 
-#[doc = include_str!("motion_driver.doc/motion_value_of.md")]
+#[doc = include_str!("../../docs/api/runtime/motion_driver.doc/motion_value_of.md")]
 fn motion_value_of(
     style: &ComputedStyle,
     property: PropertyId,
@@ -690,6 +843,7 @@ mod tests {
     use obscur_motion::transition::TransitionInterruption;
     use obscur_motion::value::MotionValue;
     use obscur_style::computed::{ComputedStyle, ComputedValue};
+    use obscur_style::matching::MediaEnvironment;
     use obscur_style::property::{PropertyId, PropertyValue};
     use obscur_style::selector::{ComplexSelector, CompoundSelector, SelectorList, SimpleSelector};
     use obscur_tree::node::NodeKind;
@@ -816,7 +970,7 @@ mod tests {
             start(&mut driver, row);
             assert_eq!(driver.binding_count(), 1, "one row, one binding");
             tree.remove(row);
-            driver.drive_css(&empty, &tree, &pseudo);
+            driver.drive_css(&empty, &tree, &pseudo, &MediaEnvironment::unbounded(), true);
             assert_eq!(
                 driver.binding_count(),
                 0,
@@ -861,13 +1015,25 @@ mod tests {
         number(&mut style, PropertyId::FlexGrow, 0.0);
         let mut computed = ComputedStyles::default();
         computed.insert(node, style.clone());
-        // First observation records the baseline and starts the keyframe animation.
-        driver.drive_css(&computed, &tree, &pseudo);
+        // Newly installed rules are matched even when the style inputs did not change.
+        assert!(driver.drive_css(
+            &computed,
+            &tree,
+            &pseudo,
+            &MediaEnvironment::unbounded(),
+            false
+        ));
         // A real change of the watched property starts the transition and records
         // its reversing run.
         number(&mut style, PropertyId::FlexGrow, 1.0);
         computed.insert(node, style);
-        driver.drive_css(&computed, &tree, &pseudo);
+        driver.drive_css(
+            &computed,
+            &tree,
+            &pseudo,
+            &MediaEnvironment::unbounded(),
+            true,
+        );
 
         let (_, targets, runs, started) = driver.bookkeeping_counts();
         assert_eq!((targets, runs, started), (1, 1, 1), "all three recorded");
@@ -878,7 +1044,13 @@ mod tests {
         );
 
         tree.remove(node);
-        driver.drive_css(&computed, &tree, &pseudo);
+        driver.drive_css(
+            &computed,
+            &tree,
+            &pseudo,
+            &MediaEnvironment::unbounded(),
+            true,
+        );
         assert_eq!(
             driver.bookkeeping_counts(),
             (0, 0, 0, 0),
@@ -895,6 +1067,8 @@ mod tests {
             &ComputedStyles::default(),
             &obscur_tree::tree::RetainedTree::new(),
             &crate::orchestration::PseudoStates::new(),
+            &MediaEnvironment::unbounded(),
+            false,
         ));
     }
 }

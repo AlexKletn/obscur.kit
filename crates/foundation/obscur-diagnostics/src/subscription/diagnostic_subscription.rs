@@ -1,30 +1,14 @@
-#![doc = include_str!("diagnostic_subscription.doc/_module.md")]
+//! A live subscription to the diagnostics channel.
 
 use std::collections::VecDeque;
 
-use super::diagnostic_buffer_policy::{DiagnosticBufferPolicy, OverflowStrategy};
 use super::diagnostic_filter::DiagnosticFilter;
+use super::{DiagnosticBufferPolicy, OverflowStrategy};
 use crate::diagnostic::Diagnostic;
 
-#[doc = include_str!("diagnostic_subscription.doc/SubscriptionId.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct SubscriptionId(u64);
+use super::SubscriptionId;
 
-impl SubscriptionId {
-    #[doc = include_str!("diagnostic_subscription.doc/new.md")]
-    #[must_use]
-    pub const fn new(raw: u64) -> Self {
-        Self(raw)
-    }
-
-    #[doc = include_str!("diagnostic_subscription.doc/raw.md")]
-    #[must_use]
-    pub const fn raw(self) -> u64 {
-        self.0
-    }
-}
-
-#[doc = include_str!("diagnostic_subscription.doc/DiagnosticSubscription.md")]
+#[doc = include_str!("../../docs/api/subscription/diagnostic_subscription.doc/DiagnosticSubscription.md")]
 #[derive(Debug, Clone)]
 pub struct DiagnosticSubscription {
     id: SubscriptionId,
@@ -35,7 +19,8 @@ pub struct DiagnosticSubscription {
 }
 
 impl DiagnosticSubscription {
-    #[doc = include_str!("diagnostic_subscription.doc/new_2.md")]
+    /// Creates an enabled subscription with the given id, filter and buffer
+    /// policy.
     #[must_use]
     pub fn new(
         id: SubscriptionId,
@@ -51,36 +36,37 @@ impl DiagnosticSubscription {
         }
     }
 
-    #[doc = include_str!("diagnostic_subscription.doc/id.md")]
+    /// Returns this subscription's id.
     #[must_use]
     pub fn id(&self) -> SubscriptionId {
         self.id
     }
 
-    #[doc = include_str!("diagnostic_subscription.doc/filter.md")]
+    /// Returns this subscription's filter.
     #[must_use]
     pub fn filter(&self) -> DiagnosticFilter {
         self.filter
     }
 
-    #[doc = include_str!("diagnostic_subscription.doc/policy.md")]
+    /// Returns this subscription's buffer policy.
     #[must_use]
     pub fn policy(&self) -> DiagnosticBufferPolicy {
         self.policy
     }
 
-    #[doc = include_str!("diagnostic_subscription.doc/is_enabled.md")]
+    /// Returns whether this subscription is currently enabled.
     #[must_use]
     pub fn is_enabled(&self) -> bool {
         self.enabled
     }
 
-    #[doc = include_str!("diagnostic_subscription.doc/set_enabled.md")]
+    /// Enables or disables this subscription. A disabled subscription rejects
+    /// all offered diagnostics (spec §7.8 "disabled").
     pub fn set_enabled(&mut self, enabled: bool) {
         self.enabled = enabled;
     }
 
-    #[doc = include_str!("diagnostic_subscription.doc/offer.md")]
+    #[doc = include_str!("../../docs/api/subscription/diagnostic_subscription.doc/offer.md")]
     pub fn offer(&mut self, diagnostic: &Diagnostic) -> bool {
         if !self.enabled || !self.filter.admits(diagnostic) {
             return false;
@@ -121,18 +107,19 @@ impl DiagnosticSubscription {
         }
     }
 
-    #[doc = include_str!("diagnostic_subscription.doc/drain.md")]
+    /// Removes and returns all buffered diagnostics in arrival order, leaving
+    /// the buffer empty.
     pub fn drain(&mut self) -> Vec<Diagnostic> {
         self.buffer.drain(..).collect()
     }
 
-    #[doc = include_str!("diagnostic_subscription.doc/len.md")]
+    /// Returns the number of buffered diagnostics.
     #[must_use]
     pub fn len(&self) -> usize {
         self.buffer.len()
     }
 
-    #[doc = include_str!("diagnostic_subscription.doc/is_empty.md")]
+    /// Returns whether the buffer is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.buffer.is_empty()

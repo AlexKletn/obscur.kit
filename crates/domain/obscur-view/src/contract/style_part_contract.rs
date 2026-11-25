@@ -1,24 +1,24 @@
-#![doc = include_str!("style_part_contract.doc/_module.md")]
+//! `StylePartContract`: an exported style part and its states (spec §2.12).
 
 use obscur_identity::InternedSymbol;
 
-#[doc = include_str!("style_part_contract.doc/StylePartContract.md")]
+#[doc = include_str!("../../docs/api/contract/style_part_contract.doc/StylePartContract.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StylePartContract {
-    #[doc = include_str!("style_part_contract.doc/name.md")]
+    /// Interned name of the exported style part.
     pub name: InternedSymbol,
-    #[doc = include_str!("style_part_contract.doc/states.md")]
+    /// Interned names of the visual states this part can expose.
     pub states: Vec<InternedSymbol>,
 }
 
 impl StylePartContract {
-    #[doc = include_str!("style_part_contract.doc/new.md")]
+    /// Creates a style part contract with `name` exposing `states`.
     #[must_use]
     pub fn new(name: InternedSymbol, states: Vec<InternedSymbol>) -> Self {
         Self { name, states }
     }
 
-    #[doc = include_str!("style_part_contract.doc/stateless.md")]
+    /// Creates a style part contract that exposes no visual states.
     #[must_use]
     pub const fn stateless(name: InternedSymbol) -> Self {
         Self {
@@ -27,7 +27,7 @@ impl StylePartContract {
         }
     }
 
-    #[doc = include_str!("style_part_contract.doc/exposes.md")]
+    /// Returns whether the part exports the given visual `state`.
     #[must_use]
     pub fn exposes(&self, state: InternedSymbol) -> bool {
         self.states.contains(&state)

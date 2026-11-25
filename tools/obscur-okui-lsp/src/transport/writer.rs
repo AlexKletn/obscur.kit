@@ -1,8 +1,8 @@
-#![doc = include_str!("writer.doc/_module.md")]
+//! `write_message`: writes one `Content-Length`-framed LSP message to a writer.
 
 use std::io::{self, Write};
 
-#[doc = include_str!("writer.doc/write_message.md")]
+#[doc = include_str!("../../docs/api/transport/writer.doc/write_message.md")]
 pub fn write_message<W: Write>(writer: &mut W, body: &str) -> io::Result<()> {
     write!(writer, "Content-Length: {}\r\n\r\n", body.len())?;
     writer.write_all(body.as_bytes())?;

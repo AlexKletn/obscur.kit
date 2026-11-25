@@ -1,11 +1,11 @@
-#![doc = include_str!("radial_shape.doc/_module.md")]
+//! The shape of a style-local `radial-gradient(...)` (spec §5.2).
 
-#[doc = include_str!("radial_shape.doc/RadialShape.md")]
+#[doc = include_str!("../../docs/api/property/radial_shape.doc/RadialShape.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RadialShape {
-    #[doc = include_str!("radial_shape.doc/Circle.md")]
+    /// A circular ending shape (a single radius on both axes).
     Circle,
-    #[doc = include_str!("radial_shape.doc/Ellipse.md")]
+    /// An elliptical ending shape (the CSS default).
     #[default]
     Ellipse,
 }

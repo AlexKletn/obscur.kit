@@ -1,1 +1,0 @@
-Highest supported version (inclusive).

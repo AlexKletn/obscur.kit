@@ -276,3 +276,33 @@ fn ordinary_pointer_input_is_untouched_when_no_drag_is_in_flight() {
     assert!(runtime.drag_session().is_none());
     assert!(runtime.take_drag_outcome().is_none());
 }
+
+#[test]
+fn a_stationary_drag_autoscrolls_at_the_edge_and_stops_on_cancel() {
+    let sheet = compile(
+        ".page { width: 100px; height: 80px; overflow: auto }
+         .source { height: 50px } .sink { height: 250px }",
+    );
+    let sheets = [sheet];
+    let view = view();
+    let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
+    rt.render_now(&view, &sheets);
+    let root = rt.tree().root().unwrap();
+    let page = rt.tree().get(root).unwrap().child_nodes()[0];
+    let source = rt.tree().get(page).unwrap().child_nodes()[0];
+
+    assert!(rt.begin_drag(text_drag(source)));
+    rt.handle_pointer(at(PointerEventKind::Move, 75.0));
+    assert!(rt.run_due_frame(&view, &sheets).is_some());
+    assert!(rt.has_pending_frame());
+    rt.advance_motion(0.016);
+    let offset = rt.scroll_top(page);
+    assert!(offset > 0.0);
+
+    rt.advance_motion(0.016);
+    assert!(rt.scroll_top(page) > offset);
+    rt.handle_pointer(at(PointerEventKind::Cancel, 75.0));
+    let cancelled_at = rt.scroll_top(page);
+    rt.advance_motion(0.016);
+    assert_eq!(rt.scroll_top(page), cancelled_at);
+}

@@ -1,4 +1,4 @@
-#![doc = include_str!("clip_converter.doc/_module.md")]
+#![doc = include_str!("../../docs/api/conversion/clip_converter.doc/_module.md")]
 
 use obscur_scene::clip::{Clip, ClipShape};
 use obscur_scene::path::Path;
@@ -6,23 +6,25 @@ use vello::kurbo::{BezPath, Rect as KurboRect, Shape};
 
 use super::path_converter::PathConverter;
 
-#[doc = include_str!("clip_converter.doc/UNBOUNDED_HALF_EXTENT.md")]
+/// Half-extent of the outline standing in for "no geometric bound". Vello has no
+/// unbounded clip shape, so a clip that confines nothing is expressed as a rect
+/// far larger than any real surface.
 const UNBOUNDED_HALF_EXTENT: f64 = 1.0e9;
 
-#[doc = include_str!("clip_converter.doc/ClipConverter.md")]
+#[doc = include_str!("../../docs/api/conversion/clip_converter.doc/ClipConverter.md")]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ClipConverter {
     path: PathConverter,
 }
 
 impl ClipConverter {
-    #[doc = include_str!("clip_converter.doc/new.md")]
+    /// Creates a clip converter using the given path converter.
     #[must_use]
     pub const fn new(path: PathConverter) -> Self {
         Self { path }
     }
 
-    #[doc = include_str!("clip_converter.doc/shape.md")]
+    /// Converts an obscur-scene [`Clip`] into a kurbo [`BezPath`] clip shape.
     #[must_use]
     pub fn shape(&self, clip: &Clip) -> BezPath {
         match clip {
@@ -31,20 +33,36 @@ impl ClipConverter {
                 self.path.convert(&Path::rounded_rect(*rect, *radii))
             }
             Clip::Shape(ClipShape::Path(path)) => self.path.convert(path),
-            Clip::Mask(_) => Self::unbounded(),
+            Clip::Mask(_) | Clip::ImageMask { .. } => Self::unbounded(),
         }
     }
 
-    #[doc = include_str!("clip_converter.doc/unbounded.md")]
+    #[doc = include_str!("../../docs/api/conversion/clip_converter.doc/unbounded.md")]
     #[must_use]
     pub fn unbounded() -> BezPath {
-        KurboRect::new(
-            -UNBOUNDED_HALF_EXTENT,
-            -UNBOUNDED_HALF_EXTENT,
-            UNBOUNDED_HALF_EXTENT,
-            UNBOUNDED_HALF_EXTENT,
-        )
-        .to_path(0.1)
+        Self::unbounded_ref().clone()
+    }
+
+    #[doc = include_str!("../../docs/api/conversion/clip_converter.doc/unbounded_ref.md")]
+    #[must_use]
+    pub fn unbounded_ref() -> &'static BezPath {
+        // Not a cache. The value depends on nothing — no argument, no state, no
+        // frame — so there is no key it could be wrong about and nothing that could
+        // invalidate it. It is a constant that `const` cannot express because
+        // building it allocates. Callers that only need to *look* at the outline
+        // (a layer with no clip: the common case, once per group-opacity layer per
+        // frame) take this; `unbounded` above clones for callers that need an owned
+        // path.
+        static UNBOUNDED: std::sync::LazyLock<BezPath> = std::sync::LazyLock::new(|| {
+            KurboRect::new(
+                -UNBOUNDED_HALF_EXTENT,
+                -UNBOUNDED_HALF_EXTENT,
+                UNBOUNDED_HALF_EXTENT,
+                UNBOUNDED_HALF_EXTENT,
+            )
+            .to_path(0.1)
+        });
+        &UNBOUNDED
     }
 }
 
@@ -99,5 +117,21 @@ mod tests {
     fn mask_clip_matches_the_unbounded_outline() {
         let bez = ClipConverter::default().shape(&Clip::mask(Mask::alpha()));
         assert_eq!(bez.elements(), ClipConverter::unbounded().elements());
+    }
+
+    /// The borrowed outline and the owned one are the same shape — the whole
+    /// point of building it once. A divergence here would clip differently
+    /// depending on which accessor a call site happened to use.
+    #[test]
+    fn the_borrowed_unbounded_outline_is_the_owned_one() {
+        assert_eq!(
+            ClipConverter::unbounded_ref().elements(),
+            ClipConverter::unbounded().elements()
+        );
+        // And it is genuinely one allocation, not one per call.
+        assert!(std::ptr::eq(
+            ClipConverter::unbounded_ref(),
+            ClipConverter::unbounded_ref()
+        ));
     }
 }

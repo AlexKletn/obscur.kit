@@ -1,4 +1,4 @@
-#![doc = include_str!("style_resolver.doc/_module.md")]
+#![doc = include_str!("../../docs/api/computed/style_resolver.doc/_module.md")]
 
 use std::rc::Rc;
 
@@ -9,37 +9,38 @@ use crate::computed::effective_custom_properties::{effective_custom_properties, 
 use crate::computed::initial_value::{INITIAL_FONT_SIZE, initial_value_of};
 use crate::computed::logical_cascade::{cascaded_for, resolves_rtl, resolves_writing_mode};
 use crate::computed::relative_font_weight::resolve_relative_weight;
-use crate::computed::substituted_value::substituted_value;
-use crate::computed::{ComputedStyle, ComputedValue, CustomValueParser, ResolutionContext};
-use crate::property::{
-    InheritedProperty, Length, LengthContext, PropertyId, PropertyValue, WritingMode,
+use crate::computed::substituted_value::{
+    substituted_container, substituted_container_template, substituted_flex_flow, substituted_gap,
+    substituted_value, substituted_variable_template,
 };
+use crate::computed::{ComputedStyle, ComputedValue, CustomValueParser, ResolutionContext};
+use crate::property::{InheritedProperty, Length, PropertyId, PropertyValue, WritingMode};
 use obscur_identity::{FastMap, InternedSymbol};
 
-#[doc = include_str!("style_resolver.doc/StyleResolver.md")]
+#[doc = include_str!("../../docs/api/computed/style_resolver.doc/StyleResolver.md")]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct StyleResolver;
 
 impl StyleResolver {
-    #[doc = include_str!("style_resolver.doc/new.md")]
+    /// Creates a resolver.
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    #[doc = include_str!("style_resolver.doc/computed_properties.md")]
+    /// Returns the set of properties this resolver computes.
     #[must_use]
     pub const fn computed_properties() -> &'static [PropertyId] {
         COMPUTED_PROPERTIES
     }
 
-    #[doc = include_str!("style_resolver.doc/initial_value.md")]
+    #[doc = include_str!("../../docs/api/computed/style_resolver.doc/initial_value.md")]
     #[must_use]
     pub fn initial_value(self, property: PropertyId) -> Option<ComputedValue> {
         initial_value_of(property)
     }
 
-    #[doc = include_str!("style_resolver.doc/font_size_of.md")]
+    #[doc = include_str!("../../docs/api/computed/style_resolver.doc/font_size_of.md")]
     #[must_use]
     pub fn font_size_of(style: &ComputedStyle) -> f32 {
         style
@@ -49,7 +50,7 @@ impl StyleResolver {
             .map_or(INITIAL_FONT_SIZE, |px| px.0)
     }
 
-    #[doc = include_str!("style_resolver.doc/resolve.md")]
+    #[doc = include_str!("../../docs/api/computed/style_resolver.doc/resolve.md")]
     #[must_use]
     pub fn resolve(
         self,
@@ -132,13 +133,7 @@ impl StyleResolver {
             ComputedValue::length(Length::px(font_size)),
         );
 
-        let lengths = LengthContext::new(
-            font_size,
-            ctx.root_font_size,
-            ctx.viewport_width,
-            ctx.viewport_height,
-        )
-        .with_environment(ctx.environment);
+        let lengths = ctx.lengths(font_size, wm.is_vertical());
 
         // Steps 2–4: compute each property, then absolutize the lengths it
         // carries against the context `font-size` just completed.
@@ -196,7 +191,7 @@ impl StyleResolver {
         style
     }
 
-    #[doc = include_str!("style_resolver.doc/resolve_font_size.md")]
+    #[doc = include_str!("../../docs/api/computed/style_resolver.doc/resolve_font_size.md")]
     fn resolve_font_size(
         self,
         cascaded: &ResolvedDeclarations,
@@ -232,18 +227,10 @@ impl StyleResolver {
         // measured advance; measuring it would need the parent's glyph metrics
         // threaded through the expression walk, and `font-size: calc(… 1ch …)` is
         // vanishingly rare next to the units this unlocks.
+        let lengths = ctx.lengths(parent_font_size, wm.is_vertical());
         let specified = match declared.as_ref().map(ComputedValue::value) {
             Some(PropertyValue::Calc(expr)) => expr
-                .resolve(
-                    &LengthContext::new(
-                        parent_font_size,
-                        ctx.root_font_size,
-                        ctx.viewport_width,
-                        ctx.viewport_height,
-                    )
-                    .with_percent_basis(parent_font_size)
-                    .with_environment(ctx.environment),
-                )
+                .resolve(&lengths.with_percent_basis(parent_font_size))
                 .map(Length::px),
             _ => declared.and_then(|value| value.as_length()),
         };
@@ -255,17 +242,10 @@ impl StyleResolver {
             .filter(|length| length.is_ch())
             .and(ctx.metrics)
             .and_then(|metrics| metrics.zero_advance(&Self::font_context_of(parent)));
-        absolute_font_size(
-            specified,
-            parent_font_size,
-            ctx.root_font_size,
-            ctx.viewport_width,
-            ctx.viewport_height,
-            parent_ch_width,
-        )
+        absolute_font_size(specified, lengths, parent_ch_width)
     }
 
-    #[doc = include_str!("style_resolver.doc/font_context_of.md")]
+    #[doc = include_str!("../../docs/api/computed/style_resolver.doc/font_context_of.md")]
     fn font_context_of(parent: Option<&ComputedStyle>) -> ComputedStyle {
         parent.cloned().unwrap_or_else(|| {
             let mut initial = ComputedStyle::new();
@@ -277,7 +257,8 @@ impl StyleResolver {
         })
     }
 
-    #[doc = include_str!("style_resolver.doc/resolve_property.md")]
+    /// Resolves one property to a computed value, or [`None`] if it is left
+    /// unresolved (deferred keyword initial).
     // Eight arguments, one over the threshold, and the eighth is the port the
     // substitution step needs; bundling the other seven into a struct to hide
     // that would cost every caller a construction and the reader a hop.
@@ -294,7 +275,6 @@ impl StyleResolver {
     ) -> Option<ComputedValue> {
         match cascaded_for(cascaded, property, rtl, wm) {
             Some(raw) => {
-                let value = substitute(raw, custom);
                 // CSS Variables 1 §3: a substitution that is invalid AT
                 // COMPUTED-VALUE TIME makes the property compute to `unset` —
                 // the inherited value where it inherits, the initial value
@@ -305,10 +285,41 @@ impl StyleResolver {
                 // than as the family the parent set. Only a value that arrived
                 // through a reference is judged here; an ordinary declaration
                 // was judged by the parser that lowered it.
-                let value = if matches!(raw, PropertyValue::CustomRef(_)) {
-                    substituted_value(property, value, custom_values)
-                } else {
-                    value
+                //
+                // The two spellings are separated so each pays only its own
+                // price: a declaration that is not a reference is the value, and
+                // copying it is all this step owes it — walking the substitution
+                // chain for it copied the same thing one step earlier.
+                let value = match raw {
+                    PropertyValue::CustomRef(_) => substitute(raw, custom)
+                        .map_or(PropertyValue::Unset, |resolved| {
+                            substituted_value(property, resolved, custom_values)
+                        }),
+                    PropertyValue::ContainerRef { name, fallback } => substituted_container(
+                        property,
+                        *name,
+                        fallback.as_deref(),
+                        custom,
+                        custom_values,
+                    )
+                    .unwrap_or(PropertyValue::Unset),
+                    PropertyValue::ContainerTemplate(components) => {
+                        substituted_container_template(property, components, custom, custom_values)
+                            .unwrap_or(PropertyValue::Unset)
+                    }
+                    PropertyValue::GapTemplate(components) => {
+                        substituted_gap(property, components, custom, custom_values)
+                            .unwrap_or(PropertyValue::Unset)
+                    }
+                    PropertyValue::FlexFlowTemplate(components) => {
+                        substituted_flex_flow(property, components, custom, custom_values)
+                            .unwrap_or(PropertyValue::Unset)
+                    }
+                    PropertyValue::VariableTemplate(components) => {
+                        substituted_variable_template(property, components, custom, custom_values)
+                            .unwrap_or(PropertyValue::Unset)
+                    }
+                    _ => raw.clone(),
                 };
                 // A relative `font-weight` (`bolder` / `lighter`) resolves here,
                 // at the computed-value step, against the parent's already-
@@ -330,7 +341,8 @@ impl StyleResolver {
         }
     }
 
-    #[doc = include_str!("style_resolver.doc/resolve_specified.md")]
+    /// Resolves a substituted specified value (never a [`PropertyValue::CustomRef`])
+    /// against the CSS-wide keywords.
     fn resolve_specified(
         self,
         property: PropertyId,
@@ -352,7 +364,7 @@ impl StyleResolver {
         }
     }
 
-    #[doc = include_str!("style_resolver.doc/inherited_from.md")]
+    #[doc = include_str!("../../docs/api/computed/style_resolver.doc/inherited_from.md")]
     fn inherited_from(
         self,
         property: PropertyId,

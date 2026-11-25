@@ -1,39 +1,41 @@
-#![doc = include_str!("stylesheet_handle.doc/_module.md")]
+//! A type-safe handle denoting a CSS stylesheet resource (spec §5.15).
 
 use obscur_identity::ResourceId;
 
 use crate::handle::{ResourceHandle, ResourceKind};
 
-#[doc = include_str!("stylesheet_handle.doc/StylesheetHandle.md")]
+#[doc = include_str!("../../docs/api/handle/stylesheet_handle.doc/StylesheetHandle.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[must_use]
 pub struct StylesheetHandle(ResourceId);
 
 impl StylesheetHandle {
-    #[doc = include_str!("stylesheet_handle.doc/new.md")]
+    /// Creates a stylesheet handle for the given resource id.
     pub const fn new(id: ResourceId) -> Self {
         Self(id)
     }
 
-    #[doc = include_str!("stylesheet_handle.doc/id.md")]
+    /// Returns the resource identity this handle refers to.
     #[must_use]
     pub const fn id(self) -> ResourceId {
         self.0
     }
 
-    #[doc = include_str!("stylesheet_handle.doc/kind.md")]
+    /// Returns the [`ResourceKind`] this handle type denotes
+    /// ([`ResourceKind::Stylesheet`]).
     #[must_use]
     pub const fn kind() -> ResourceKind {
         ResourceKind::Stylesheet
     }
 
-    #[doc = include_str!("stylesheet_handle.doc/into_handle.md")]
+    /// Converts this typed handle into a generic [`ResourceHandle`].
     #[must_use]
     pub const fn into_handle(self) -> ResourceHandle {
         ResourceHandle::new(self.0, ResourceKind::Stylesheet)
     }
 
-    #[doc = include_str!("stylesheet_handle.doc/from_handle.md")]
+    /// Recovers a `StylesheetHandle` from a generic [`ResourceHandle`], or
+    /// `None` if the handle does not denote a stylesheet.
     #[must_use]
     pub const fn from_handle(handle: ResourceHandle) -> Option<Self> {
         match handle.kind() {

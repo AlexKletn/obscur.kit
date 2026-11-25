@@ -8,10 +8,10 @@ use std::sync::Arc;
 use obscur_kit::css::compiler::StylesheetCompiler;
 use obscur_kit::css::parser::StylesheetParser;
 use obscur_kit::css::source::CssSource;
-use obscur_kit::geometry::{Point, Size};
+use obscur_kit::geometry::Size;
 use obscur_kit::identity::RuntimeId;
 use obscur_kit::interaction::command::KeyEvent;
-use obscur_kit::interaction::pointer::{PointerDevice, PointerEvent, PointerId};
+use obscur_kit::interaction::pointer::{PointerButton, PointerButtons, PointerEvent, PointerId};
 use obscur_kit::render::frame::{FrameSubmission, RenderFrame};
 use obscur_kit::render::renderer::RendererId;
 use obscur_kit::render_vello::renderer::{VelloDevice, VelloRenderer, VelloSurface};
@@ -151,14 +151,18 @@ impl UiKitWindow {
     }
 
     #[doc = include_str!("uikit_window.doc/pointer_button_event.md")]
-    #[allow(clippy::cast_possible_truncation)]
     fn pointer_button_event(&self, state: ElementState) -> PointerEvent {
-        PointerEvent::new(
-            PointerId::MOUSE,
-            PointerDevice::Mouse,
-            PointerConverter::kind(state),
-            Point::new(self.cursor.0 as f32, self.cursor.1 as f32),
-        )
+        let converter = PointerConverter::new();
+        let position = winit::dpi::PhysicalPosition::new(self.cursor.0, self.cursor.1);
+        let button = PointerButton::Primary;
+        let mut held = PointerButtons::new();
+        match state {
+            ElementState::Pressed => {
+                held.press(button);
+                converter.pressed(PointerId::MOUSE, position, button, held)
+            }
+            ElementState::Released => converter.released(PointerId::MOUSE, position, button, held),
+        }
     }
 
     #[doc = include_str!("uikit_window.doc/sync_viewport.md")]

@@ -1,4 +1,5 @@
-#![doc = include_str!("resource_outcome.doc/_module.md")]
+//! [`ResourceOutcome`]: what one finished resource-load task produced, and the
+//! load that produces it.
 
 use obscur_resources::handle::{ResourceHandle, ResourceKind};
 use obscur_resources::port::{ResourceDecoder, ResourceLoader, VectorDecoder};
@@ -7,17 +8,17 @@ use obscur_resources::state::{ResourceError, ResourceVersion};
 use obscur_scene::color::AlphaMode;
 use obscur_scene::paint::{SceneImage, SceneVector};
 
-#[doc = include_str!("resource_outcome.doc/ResourceOutcome.md")]
+#[doc = include_str!("../../docs/api/runtime/resource_outcome.doc/ResourceOutcome.md")]
 #[derive(Debug)]
 pub(crate) enum ResourceOutcome {
-    #[doc = include_str!("resource_outcome.doc/Image.md")]
+    /// A raster image load, keyed by the authored URL/path.
     Image {
         key: Box<str>,
         handle: ResourceHandle,
         version: ResourceVersion,
         result: Result<SceneImage, ResourceError>,
     },
-    #[doc = include_str!("resource_outcome.doc/Vector.md")]
+    /// A vector document load, keyed the same way.
     Vector {
         key: Box<str>,
         handle: ResourceHandle,
@@ -27,7 +28,31 @@ pub(crate) enum ResourceOutcome {
 }
 
 impl ResourceOutcome {
-    #[doc = include_str!("resource_outcome.doc/load_image.md")]
+    /// Constructs a failed outcome with the identity of the original resource request.
+    pub(crate) fn failed(
+        key: Box<str>,
+        handle: ResourceHandle,
+        version: ResourceVersion,
+        error: ResourceError,
+    ) -> Self {
+        if handle.kind() == ResourceKind::Svg {
+            Self::Vector {
+                key,
+                handle,
+                version,
+                result: Err(error),
+            }
+        } else {
+            Self::Image {
+                key,
+                handle,
+                version,
+                result: Err(error),
+            }
+        }
+    }
+
+    #[doc = include_str!("../../docs/api/runtime/resource_outcome.doc/load_image.md")]
     pub(crate) fn load_image(
         loader: &dyn ResourceLoader,
         decoder: &dyn ResourceDecoder,
@@ -44,7 +69,7 @@ impl ResourceOutcome {
         }
     }
 
-    #[doc = include_str!("resource_outcome.doc/load_vector.md")]
+    #[doc = include_str!("../../docs/api/runtime/resource_outcome.doc/load_vector.md")]
     pub(crate) fn load_vector(
         loader: &dyn ResourceLoader,
         decoder: &dyn VectorDecoder,
@@ -64,7 +89,7 @@ impl ResourceOutcome {
     }
 }
 
-#[doc = include_str!("resource_outcome.doc/load_and_decode_image.md")]
+#[doc = include_str!("../../docs/api/runtime/resource_outcome.doc/load_and_decode_image.md")]
 fn load_and_decode_image(
     loader: &dyn ResourceLoader,
     decoder: &dyn ResourceDecoder,
@@ -80,7 +105,8 @@ fn load_and_decode_image(
     Err(last_error)
 }
 
-#[doc = include_str!("resource_outcome.doc/decode_one_image.md")]
+/// Loads and decodes exactly one image source — one rung of the
+/// [`load_and_decode_image`] ladder.
 fn decode_one_image(
     loader: &dyn ResourceLoader,
     decoder: &dyn ResourceDecoder,
@@ -93,14 +119,25 @@ fn decode_one_image(
     let size = decoded.metadata().intrinsic_size().ok_or_else(|| {
         ResourceError::DecodeFailed("decoded image carries no intrinsic size".into())
     })?;
-    // The decoder records the intrinsic size as whole-pixel counts stored in an
-    // `f32` (exact for any real image dimension); truncating back to `u32` is
-    // lossless, and clamping at 0 rejects a nonsensical negative. A wrong count is
-    // caught by `SceneImage::new`'s byte-length guard below, not silently accepted.
+    if size.width == 0.0 || size.height == 0.0 {
+        return Err(ResourceError::DecodeFailed(
+            "decoded image has zero extent".into(),
+        ));
+    }
+    // Float-to-integer casts saturate and truncate. Validate the decoder's
+    // pixel counts first so the byte-length check uses the actual dimensions.
+    let valid_extent = |extent: f32| {
+        extent >= 1.0 && f64::from(extent) <= f64::from(u32::MAX) && extent.fract() == 0.0
+    };
+    if !valid_extent(size.width) || !valid_extent(size.height) {
+        return Err(ResourceError::DecodeFailed(
+            "decoded image intrinsic size is not a valid pixel extent".into(),
+        ));
+    }
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let width = size.width.max(0.0) as u32;
+    let width = size.width as u32;
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    let height = size.height.max(0.0) as u32;
+    let height = size.height as u32;
     SceneImage::new(width, height, decoded.data().clone(), AlphaMode::Straight).ok_or_else(|| {
         ResourceError::DecodeFailed("decoded image bytes do not match its intrinsic size".into())
     })
@@ -159,8 +196,13 @@ mod tests {
             _kind: ResourceKind,
             _bytes: &[u8],
         ) -> Result<DecodedResource, ResourceError> {
+            let bytes: &[u8] = if self.claimed.width == 0.0 || self.claimed.height == 0.0 {
+                &[]
+            } else {
+                &[0xFF, 0x00, 0x00, 0xFF]
+            };
             Ok(DecodedResource::new(
-                Arc::from(&[0xFF, 0x00, 0x00, 0xFF][..]),
+                Arc::from(bytes),
                 ResourceMetadata::new().with_intrinsic_size(self.claimed),
             ))
         }
@@ -219,6 +261,33 @@ mod tests {
         let error = load_and_decode_image(&loader, &liar, &candidates)
             .expect_err("the byte-length guard rejects it");
         assert!(matches!(error, ResourceError::DecodeFailed(_)));
+    }
+
+    /// Rejects zero and invalid host-reported pixel extents before constructing a scene image.
+    #[test]
+    fn invalid_image_extents_fail_before_caching() {
+        let candidates = dpi_variants("logo.png", 1.0);
+        let loader = PathLoader(vec!["logo.png"]);
+        for claimed in [Size::new(0.0, 1.0), Size::new(1.0, 0.0)] {
+            let error = load_and_decode_image(&loader, &OnePixelDecoder { claimed }, &candidates)
+                .expect_err("zero pixels must fail even with a matching empty buffer");
+            assert_eq!(
+                error,
+                ResourceError::DecodeFailed("decoded image has zero extent".into())
+            );
+        }
+
+        for width in [f32::NAN, f32::INFINITY, -1.0, 1.5, 4_294_967_296.0] {
+            let claimed = Size::new(width, 1.0);
+            let error = load_and_decode_image(&loader, &OnePixelDecoder { claimed }, &candidates)
+                .expect_err("invalid width must fail before integer conversion");
+            assert_eq!(
+                error,
+                ResourceError::DecodeFailed(
+                    "decoded image intrinsic size is not a valid pixel extent".into(),
+                )
+            );
+        }
     }
 
     #[test]

@@ -1,8 +1,10 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Transition module.
 mod layout_transition;
 pub use layout_transition::LayoutTransition;
 mod shared_element_transition;
-pub use shared_element_transition::{SharedElementKey, SharedElementTransition};
+pub use shared_element_transition::SharedElementTransition;
+mod shared_element_key;
+pub use shared_element_key::SharedElementKey;
 mod transition_direction;
 pub use transition_direction::TransitionDirection;
 mod transition_interruption;

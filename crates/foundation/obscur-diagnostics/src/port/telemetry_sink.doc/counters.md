@@ -1,1 +1,0 @@
-Counters recorded, in order.

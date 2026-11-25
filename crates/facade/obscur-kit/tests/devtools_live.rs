@@ -30,6 +30,80 @@ use obscur_kit::view::component::{
 };
 use obscur_kit::view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
+#[test]
+fn external_client_selects_a_live_button_by_accessible_name() {
+    use obscur_kit::{
+        devtools_protocol::message::StableSelector,
+        view::view::{AUTOMATION_ID, LOCAL_NAME, TEST_ID},
+    };
+
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(120.0, 80.0));
+    let button = ViewNode::element(ComponentId::from_raw(23))
+        .with_prop(ViewProperty::new(
+            LOCAL_NAME,
+            ViewValue::Text("button".into()),
+        ))
+        .with_prop(ViewProperty::new(TEST_ID, ViewValue::Text("save".into())))
+        .with_prop(ViewProperty::new(
+            AUTOMATION_ID,
+            ViewValue::Text("commit".into()),
+        ))
+        .with_children(ViewFragment::from_nodes(vec![ViewNode::text("Save")]));
+    runtime.render_now(&View::single(button), &[]);
+    let source = inspect_source_from(&runtime);
+    let listener = SocketListener::bind_loopback().unwrap();
+    let address = listener.local_addr().unwrap().unwrap();
+    let worker = thread::spawn(move || {
+        let mut auth = Authenticator::new();
+        auth.register_token("selector-test", ScopeSet::all_read());
+        let mut endpoint = DevToolsEndpoint::new(auth, RuntimeBridge::new(source));
+        endpoint.enable();
+        SocketTransport::new(listener.accept().unwrap())
+            .serve(&mut endpoint)
+            .unwrap();
+    });
+    let mut client = SocketClient::connect_loopback(address).unwrap();
+    let request = HandshakeRequest::new(
+        VersionRange::exact(ProtocolVersion::CURRENT),
+        "selector-test",
+    );
+    assert!(client.handshake(&request).unwrap().is_accepted());
+    let request = CommandMessage::new(
+        CommandId::new(7),
+        CommandKind::SelectSemantic {
+            role: "Button".into(),
+            name: Some("Save".into()),
+        },
+    );
+    let ClientBound::Snapshot(snapshot) = client.command(&request).unwrap() else {
+        panic!("expected an accessibility selector response");
+    };
+    assert_eq!(snapshot.target, Inspectable::Accessibility);
+    assert_eq!(snapshot.payload.entity_count, 1);
+    assert_eq!(snapshot.payload.entity_ids.len(), 1);
+    let node = snapshot.payload.entity_ids[0];
+    for (offset, selector) in [
+        StableSelector::TestId("save".into()),
+        StableSelector::AutomationId("commit".into()),
+        StableSelector::Component(23),
+        StableSelector::Node(node),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let command = CommandMessage::new(
+            CommandId::new(8 + offset as u64),
+            CommandKind::SelectStableId(selector),
+        );
+        let ClientBound::Snapshot(result) = client.command(&command).unwrap() else {
+            panic!("expected a stable selector response");
+        };
+        assert_eq!(result.payload.entity_ids, [node]);
+    }
+    drop(client);
+    worker.join().unwrap();
+}
+
 #[doc = include_str!("devtools_live.doc/GUARDED.md")]
 const GUARDED: ComponentId = ComponentId::from_raw(0x00C0_FFEE);
 
@@ -700,18 +774,38 @@ fn a_request_reply_host_denies_the_subscription_it_cannot_service() {
 }
 
 #[test]
-fn event_flow_and_plugin_state_stay_honest_defaults() {
-    // Not an oversight, and not a synthesised answer: the runtime keeps no
-    // dispatch log to report a flow from, and the plugin tier is a declared-
-    // deferred skeleton. An inspector is told nothing rather than told a
-    // confident fiction about state that does not exist.
+fn event_flow_records_bounded_command_metadata_when_enabled() {
+    use obscur_kit::devtools_server::bridge::InspectSource;
+    use obscur_kit::interaction::event::UiEvent;
+
     let sheet = compile(".row { width: 520px; height: 200px }");
     let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(520.0, 200.0));
     runtime.render_now(&view(), std::slice::from_ref(&sheet));
 
-    let source = inspect_source_from(&runtime);
-    for target in [Inspectable::EventFlow, Inspectable::PluginState] {
-        let payload = obscur_kit::devtools_server::bridge::InspectSource::snapshot(&source, target);
-        assert_eq!(payload.entity_count, 0, "{target:?} claims nothing");
+    assert_eq!(
+        inspect_source_from(&runtime)
+            .snapshot(Inspectable::EventFlow)
+            .entity_count,
+        0
+    );
+    runtime.set_command_trace_enabled(true);
+    for _ in 0..130 {
+        runtime.dispatch_command(InternedSymbol::from_raw(900));
     }
+    let command = InternedSymbol::from_raw(901);
+    runtime.on_command(command, |event: &mut UiEvent| event.prevent_default());
+    runtime.dispatch_command(command);
+    let payload = inspect_source_from(&runtime).snapshot(Inspectable::EventFlow);
+    assert_eq!(payload.entity_count, 128);
+    assert!(
+        payload
+            .detail
+            .lines()
+            .last()
+            .unwrap()
+            .contains("command=901 handled=true default_prevented=true")
+    );
+
+    runtime.set_command_trace_enabled(false);
+    assert!(runtime.command_trace().is_none());
 }

@@ -1,5 +1,6 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Shaping module.
 mod caching_shaper;
+mod shape_key;
 pub use caching_shaper::CachingShaper;
 mod face_source_key;
 mod glyph_run;
@@ -13,6 +14,7 @@ mod script_tag;
 pub use script_tag::ScriptTag;
 mod shape_cache;
 mod shaped_glyph;
+mod style_group;
 pub use shaped_glyph::ShapedGlyph;
 mod shaped_run;
 pub use shaped_run::ShapedRun;
@@ -27,6 +29,10 @@ pub use text_direction::TextDirection;
 mod text_item;
 pub use text_item::TextItem;
 mod text_itemizer;
-pub use text_itemizer::{SingleRunItemizer, TextItemizer};
+pub use text_itemizer::TextItemizer;
+mod single_run_itemizer;
+pub use single_run_itemizer::SingleRunItemizer;
 mod text_shaper;
-pub use text_shaper::{MockTextShaper, TextShaper};
+pub use text_shaper::TextShaper;
+mod mock_text_shaper;
+pub use mock_text_shaper::MockTextShaper;

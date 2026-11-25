@@ -1,33 +1,21 @@
-#![doc = include_str!("haptic_request.doc/_module.md")]
+//! The [`HapticRequest`] describing haptic feedback and its [`HapticPattern`]
+//! shape (spec §6.16 haptics).
 
-#[doc = include_str!("haptic_request.doc/HapticPattern.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum HapticPattern {
-    #[doc = include_str!("haptic_request.doc/Click.md")]
-    Click,
-    #[doc = include_str!("haptic_request.doc/DoubleClick.md")]
-    DoubleClick,
-    #[doc = include_str!("haptic_request.doc/Tick.md")]
-    Tick,
-    #[doc = include_str!("haptic_request.doc/Buzz.md")]
-    Buzz,
-    #[doc = include_str!("haptic_request.doc/Custom.md")]
-    Custom,
-}
+use super::HapticPattern;
 
-#[doc = include_str!("haptic_request.doc/HapticRequest.md")]
+#[doc = include_str!("../../docs/api/gamepad/haptic_request.doc/HapticRequest.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HapticRequest {
-    #[doc = include_str!("haptic_request.doc/intensity.md")]
+    /// The feedback intensity in `0.0..=1.0`.
     pub intensity: f32,
-    #[doc = include_str!("haptic_request.doc/duration_millis.md")]
+    /// The effect duration in milliseconds.
     pub duration_millis: u32,
-    #[doc = include_str!("haptic_request.doc/pattern.md")]
+    /// The shape of the effect.
     pub pattern: HapticPattern,
 }
 
 impl HapticRequest {
-    #[doc = include_str!("haptic_request.doc/new.md")]
+    /// Creates a request for `pattern` at full intensity for 20 milliseconds.
     #[must_use]
     pub const fn new(pattern: HapticPattern) -> Self {
         Self {
@@ -37,39 +25,41 @@ impl HapticRequest {
         }
     }
 
-    #[doc = include_str!("haptic_request.doc/with_intensity.md")]
+    /// Returns this request with its intensity set, clamped to `0.0..=1.0`
+    /// (fluent).
     #[must_use]
     pub fn with_intensity(mut self, intensity: f32) -> Self {
         self.intensity = intensity.clamp(0.0, 1.0);
         self
     }
 
-    #[doc = include_str!("haptic_request.doc/with_duration.md")]
+    /// Returns this request with its duration set, in milliseconds (fluent).
     #[must_use]
     pub const fn with_duration(mut self, duration_millis: u32) -> Self {
         self.duration_millis = duration_millis;
         self
     }
 
-    #[doc = include_str!("haptic_request.doc/intensity_2.md")]
+    /// Returns the feedback intensity in `0.0..=1.0`.
     #[must_use]
     pub const fn intensity(&self) -> f32 {
         self.intensity
     }
 
-    #[doc = include_str!("haptic_request.doc/duration_millis_2.md")]
+    /// Returns the effect duration in milliseconds.
     #[must_use]
     pub const fn duration_millis(&self) -> u32 {
         self.duration_millis
     }
 
-    #[doc = include_str!("haptic_request.doc/pattern_2.md")]
+    /// Returns the shape of the effect.
     #[must_use]
     pub const fn pattern(&self) -> HapticPattern {
         self.pattern
     }
 
-    #[doc = include_str!("haptic_request.doc/is_silent.md")]
+    /// Returns whether this request would produce no perceptible feedback
+    /// (intensity `<= 0.0` or zero duration).
     #[must_use]
     pub fn is_silent(&self) -> bool {
         self.intensity <= 0.0 || self.duration_millis == 0

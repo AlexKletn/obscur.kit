@@ -1,17 +1,15 @@
-#![doc = include_str!("caret_geometry.doc/_module.md")]
+#![doc = include_str!("../../docs/api/orchestration/caret_geometry.doc/_module.md")]
 
 use obscur_identity::NodeId;
-use obscur_style::computed::ComputedStyle;
-use obscur_text::font::{FontAttributes, FontFallback};
 use obscur_text::layout::{ParagraphLayout, ParagraphLine};
 use obscur_text::selection::CaretAffinity;
 use obscur_text::shaping::TextDirection;
 use obscur_tree::tree::RetainedTree;
 
-use super::paragraph_shaping::{ParagraphShaping, font_size_of, font_size_of_style};
-use super::{ComputedStyles, LayoutBoxes, attributes_for, direction_for, families_for};
+use super::paragraph_shaping::{ParagraphShaping, font_size_of};
+use super::{ComputedStyles, LayoutBoxes};
 
-#[doc = include_str!("caret_geometry.doc/boundary_after_forced_break.md")]
+#[doc = include_str!("../../docs/api/orchestration/caret_geometry.doc/boundary_after_forced_break.md")]
 fn boundary_after_forced_break(content: &str, index: usize) -> bool {
     let index = index.min(content.len());
     if !content.is_char_boundary(index) {
@@ -25,100 +23,12 @@ fn boundary_after_forced_break(content: &str, index: usize) -> bool {
     })
 }
 
-#[doc = include_str!("caret_geometry.doc/caret_offset_x.md")]
-// The shaping inputs mirror `shape_lines`/`shape_hyphen`: cohesive positional
-// arguments of a leaf helper, `attributes` by reference to match the
-// `shape_paragraph` convention this pass uses throughout.
-#[allow(clippy::too_many_arguments, clippy::trivially_copy_pass_by_ref)]
-pub(super) fn caret_offset_x(
-    shaping: &ParagraphShaping,
-    content: &str,
-    fallback: &FontFallback,
-    attributes: &FontAttributes,
-    direction: TextDirection,
-    font_size: f32,
-    index: usize,
-) -> f32 {
-    shaping
-        .paragraph()
-        .shape_paragraph(
-            content,
-            fallback,
-            attributes,
-            shaping.default_face(),
-            font_size,
-            direction,
-        )
-        .iter()
-        .flat_map(|run| run.run().glyphs().iter().copied())
-        .filter(|glyph| glyph.cluster() < index)
-        .map(|glyph| glyph.x_advance())
-        .sum()
-}
-
-#[doc = include_str!("caret_geometry.doc/caret_offset_at_x.md")]
-#[must_use]
-pub(crate) fn caret_offset_at_x(
-    shaping: &ParagraphShaping,
-    content: &str,
-    style: Option<&ComputedStyle>,
-    local_x: f32,
-) -> usize {
-    let fallback = families_for(style);
-    let attributes = attributes_for(style);
-    let direction = direction_for(style);
-    let font_size = font_size_of_style(style);
-    let mut pen = 0.0_f32;
-    for glyph in shaping
-        .paragraph()
-        .shape_paragraph(
-            content,
-            &fallback,
-            &attributes,
-            shaping.default_face(),
-            font_size,
-            direction,
-        )
-        .iter()
-        .flat_map(|run| run.run().glyphs().iter().copied())
-    {
-        let advance = glyph.x_advance();
-        // The boundary just left of this glyph sits at `pen`; cross to the next
-        // boundary only once `local_x` is past this glyph's midpoint.
-        if local_x <= pen + advance / 2.0 {
-            return glyph.cluster();
-        }
-        pen += advance;
-    }
-    // Past every glyph: the caret lands at the end of the text.
-    content.len()
-}
-
-#[doc = include_str!("caret_geometry.doc/caret_advance_x.md")]
-#[must_use]
-pub(crate) fn caret_advance_x(
-    shaping: &ParagraphShaping,
-    content: &str,
-    style: Option<&ComputedStyle>,
-    index: usize,
-) -> f32 {
-    let fallback = families_for(style);
-    let attributes = attributes_for(style);
-    let direction = direction_for(style);
-    let font_size = font_size_of_style(style);
-    caret_offset_x(
-        shaping,
-        content,
-        &fallback,
-        &attributes,
-        direction,
-        font_size,
-        index,
-    )
-}
-
-#[doc = include_str!("caret_geometry.doc/line_of_byte.md")]
-fn line_of_byte(layout: &ParagraphLayout, index: usize) -> usize {
+/// The line index a caret byte `index` sits on within a wrapped `layout`
+/// (spec §5.10): the first line whose byte range **ends past** `index`, else
+/// the last line — so a caret at a soft-wrap/`\n` boundary sits at the start of
+/// the *next* line and a caret at the text end sits on the final line. A
+/// single-line layout always resolves to line `0`.
+pub(crate) fn line_of_byte(layout: &ParagraphLayout, index: usize) -> usize {
     let lines = layout.lines();
     lines
         .iter()
@@ -126,7 +36,7 @@ fn line_of_byte(layout: &ParagraphLayout, index: usize) -> usize {
         .unwrap_or_else(|| lines.len().saturating_sub(1))
 }
 
-#[doc = include_str!("caret_geometry.doc/line_start_byte.md")]
+#[doc = include_str!("../../docs/api/orchestration/caret_geometry.doc/line_start_byte.md")]
 fn line_start_byte(layout: &ParagraphLayout, li: usize) -> usize {
     let lines = layout.lines();
     match lines.get(li) {
@@ -136,37 +46,84 @@ fn line_start_byte(layout: &ParagraphLayout, li: usize) -> usize {
     }
 }
 
-#[doc = include_str!("caret_geometry.doc/line_caret_x.md")]
-pub(super) fn line_caret_x(line: &ParagraphLine, index: usize) -> f32 {
-    line.segments()
-        .iter()
-        .flat_map(|segment| segment.run().glyphs().iter().copied())
-        .filter(|glyph| glyph.cluster() < index)
-        .map(|glyph| glyph.x_advance())
-        .sum()
-}
-
-#[doc = include_str!("caret_geometry.doc/byte_at_line_local_x.md")]
-fn byte_at_line_local_x(line: &ParagraphLine, line_end: usize, local_x: f32) -> usize {
-    let mut pen = 0.0_f32;
-    for glyph in line
-        .segments()
-        .iter()
-        .flat_map(|segment| segment.run().glyphs().iter())
-    {
-        let advance = glyph.x_advance();
-        // The boundary just left of this glyph sits at `pen`; cross to the next
-        // boundary only once `local_x` is past this glyph's midpoint.
-        if local_x <= pen + advance / 2.0 {
-            return glyph.cluster();
+// Visit source cluster boundaries in paint order, including both edges at
+// a bidi transition. A cluster may contain several glyphs with one byte offset.
+fn visit_line_clusters(
+    line: &ParagraphLine,
+    mut visit: impl FnMut(usize, usize, f32, f32) -> bool,
+) {
+    let mut pen = 0.0;
+    for segment in line.segments() {
+        let run = segment.run();
+        let mut clusters = run
+            .glyphs()
+            .chunk_by(|a, b| a.cluster() == b.cluster())
+            .peekable();
+        let rtl = run.direction() == TextDirection::RightToLeft;
+        let mut previous = None;
+        while let Some(glyphs) = clusters.next() {
+            let start = glyphs[0].cluster();
+            let end = if rtl {
+                previous.unwrap_or(run.source().end)
+            } else {
+                clusters
+                    .peek()
+                    .map_or(run.source().end, |next| next[0].cluster())
+            };
+            let (left, right) = if rtl { (end, start) } else { (start, end) };
+            let next_pen = pen + glyphs.iter().map(|glyph| glyph.x_advance()).sum::<f32>();
+            if !visit(left, right, pen, next_pen) {
+                return;
+            }
+            pen = next_pen;
+            previous = Some(start);
         }
-        pen += advance;
     }
-    // Past every glyph on this line: clamp to the line's end byte.
-    line_end
 }
 
-#[doc = include_str!("caret_geometry.doc/caret_line_geometry.md")]
+/// Returns the caret's x within the line, before its alignment offset. Glyph
+/// clusters are visited in paint order with the same advances used for rendering.
+/// An RTL cluster's logical start is at its right edge. At a bidi boundary the
+/// caret uses the leading edge of the cluster at the requested byte, with the
+/// preceding cluster's trailing edge as the fallback.
+pub(crate) fn line_caret_x(line: &ParagraphLine, index: usize) -> f32 {
+    let mut trailing_edge = (None, 0.0);
+    let mut leading_x = None;
+    visit_line_clusters(line, |left, right, from, to| {
+        let (start, leading, trailing) = if left <= right {
+            (left, from, to)
+        } else {
+            (right, to, from)
+        };
+        if index == start {
+            leading_x = Some(leading);
+            return false;
+        }
+        if index > start && trailing_edge.0.is_none_or(|previous| start > previous) {
+            trailing_edge = (Some(start), trailing);
+        }
+        true
+    });
+    leading_x.unwrap_or(trailing_edge.1)
+}
+
+/// Maps x within a line to a byte offset using the nearest painted cluster edge.
+/// The midpoint resolves to the left edge. Clicks beyond the text use the
+/// outermost visual edge, whose byte offset depends on the run's direction.
+fn byte_at_line_local_x(line: &ParagraphLine, local_x: f32) -> usize {
+    let mut byte = line.range().end;
+    visit_line_clusters(line, |left, right, from, to| {
+        if local_x <= from + (to - from) / 2.0 {
+            byte = left;
+            return false;
+        }
+        byte = right;
+        local_x > to
+    });
+    byte
+}
+
+#[doc = include_str!("../../docs/api/orchestration/caret_geometry.doc/caret_line_geometry.md")]
 pub(super) fn caret_line_geometry(
     shaping: &ParagraphShaping,
     layout: &ParagraphLayout,
@@ -190,7 +147,7 @@ pub(super) fn caret_line_geometry(
     )
 }
 
-#[doc = include_str!("caret_geometry.doc/caret_line_geometry_affinity.md")]
+#[doc = include_str!("../../docs/api/orchestration/caret_geometry.doc/caret_line_geometry_affinity.md")]
 pub(super) fn caret_line_geometry_affinity(
     shaping: &ParagraphShaping,
     layout: &ParagraphLayout,
@@ -218,7 +175,7 @@ pub(super) fn caret_line_geometry_affinity(
     caret_line_geometry(shaping, layout, font_size, index)
 }
 
-#[doc = include_str!("caret_geometry.doc/caret_offset_at_point.md")]
+#[doc = include_str!("../../docs/api/orchestration/caret_geometry.doc/caret_offset_at_point.md")]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn caret_offset_at_point(
     shaping: &ParagraphShaping,
@@ -231,11 +188,10 @@ pub(crate) fn caret_offset_at_point(
     local_x: f32,
     local_y: f32,
 ) -> usize {
-    let style = computed.get(&node);
-    let layout = shaping.shape_text_lines(tree, computed, boxes, node, content, box_width);
+    let layout = shaping.shape_editable_lines(tree, computed, boxes, node, content, box_width);
     let lines = layout.lines();
     if lines.is_empty() {
-        return caret_offset_at_x(shaping, content, style, local_x);
+        return 0;
     }
     // The line whose box contains `local_y` (top ≤ y < top+height), else the
     // last line (a click below the text lands on the final line).
@@ -243,25 +199,18 @@ pub(crate) fn caret_offset_at_point(
         .iter()
         .position(|line| local_y < line.top() + line.height())
         .unwrap_or(lines.len() - 1);
-    byte_at_line_x(shaping, &layout, li, content, style, local_x)
+    byte_at_line_x(&layout, li, content, local_x)
 }
 
-#[doc = include_str!("caret_geometry.doc/byte_at_line_x.md")]
-fn byte_at_line_x(
-    shaping: &ParagraphShaping,
-    layout: &ParagraphLayout,
-    li: usize,
-    content: &str,
-    style: Option<&ComputedStyle>,
-    target_x: f32,
-) -> usize {
+#[doc = include_str!("../../docs/api/orchestration/caret_geometry.doc/byte_at_line_x.md")]
+fn byte_at_line_x(layout: &ParagraphLayout, li: usize, content: &str, target_x: f32) -> usize {
     let Some(line) = layout.lines().get(li) else {
-        return caret_offset_at_x(shaping, content, style, target_x);
+        return 0;
     };
     let line_start = line_start_byte(layout, li);
     // Undo the line's alignment offset, then resolve against this line's own
     // spaced/tabbed advances (the exact inverse of the painted caret x).
-    let byte = byte_at_line_local_x(line, line.range().end, target_x - line.x_offset());
+    let byte = byte_at_line_local_x(line, target_x - line.x_offset());
     // The maximum caret byte that stays on this line: the line's end, minus a
     // trailing `\n` (whose caret belongs before it, on this line).
     let end = line.range().end.max(line_start).min(content.len());
@@ -276,7 +225,7 @@ fn byte_at_line_x(
     byte.clamp(line_start, line_max)
 }
 
-#[doc = include_str!("caret_geometry.doc/caret_line_move.md")]
+#[doc = include_str!("../../docs/api/orchestration/caret_geometry.doc/caret_line_move.md")]
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn caret_line_move(
     shaping: &ParagraphShaping,
@@ -289,8 +238,7 @@ pub(crate) fn caret_line_move(
     index: usize,
     down: bool,
 ) -> Option<usize> {
-    let style = computed.get(&node);
-    let layout = shaping.shape_text_lines(tree, computed, boxes, node, content, box_width);
+    let layout = shaping.shape_editable_lines(tree, computed, boxes, node, content, box_width);
     let cur = line_of_byte(&layout, index);
     let target = if down {
         let next = cur + 1;
@@ -307,12 +255,10 @@ pub(crate) fn caret_line_move(
         .get(cur)
         .map_or(0.0, |line| line_caret_x(line, index));
     let target_x = layout.lines()[target].x_offset() + within_line;
-    Some(byte_at_line_x(
-        shaping, &layout, target, content, style, target_x,
-    ))
+    Some(byte_at_line_x(&layout, target, content, target_x))
 }
 
-#[doc = include_str!("caret_geometry.doc/caret_visual_line_bound.md")]
+#[doc = include_str!("../../docs/api/orchestration/caret_geometry.doc/caret_visual_line_bound.md")]
 #[allow(clippy::too_many_arguments)]
 #[must_use]
 pub(crate) fn caret_visual_line_bound(
@@ -326,7 +272,7 @@ pub(crate) fn caret_visual_line_bound(
     index: usize,
     to_end: bool,
 ) -> usize {
-    let layout = shaping.shape_text_lines(tree, computed, boxes, node, content, box_width);
+    let layout = shaping.shape_editable_lines(tree, computed, boxes, node, content, box_width);
     let li = line_of_byte(&layout, index);
     if to_end {
         layout
@@ -338,7 +284,7 @@ pub(crate) fn caret_visual_line_bound(
     }
 }
 
-#[doc = include_str!("caret_geometry.doc/caret_line_scroll_geometry.md")]
+#[doc = include_str!("../../docs/api/orchestration/caret_geometry.doc/caret_line_scroll_geometry.md")]
 #[must_use]
 pub(crate) fn caret_line_scroll_geometry(
     shaping: &ParagraphShaping,
@@ -351,7 +297,7 @@ pub(crate) fn caret_line_scroll_geometry(
     index: usize,
 ) -> (f32, f32, f32) {
     let font_size = font_size_of(computed, node);
-    let layout = shaping.shape_text_lines(tree, computed, boxes, node, content, box_width);
+    let layout = shaping.shape_editable_lines(tree, computed, boxes, node, content, box_width);
     let (top, height, _x_offset, _x) = caret_line_geometry(shaping, &layout, font_size, index);
     // The scrollable content height is the bottom-most wrapped line's edge
     // (never less than the caret's own line, so a single line is exact).
@@ -360,4 +306,50 @@ pub(crate) fn caret_line_scroll_geometry(
         .last()
         .map_or(top + height, |line| line.top() + line.height());
     (top, height, content_height)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use obscur_text::font::FontId;
+    use obscur_text::layout::{TextAlignment, TextOverflow, WhiteSpace};
+    use obscur_text::shaping::{GlyphRun, ShapedGlyph, ShapedRun};
+    use obscur_text::span::TextRange;
+
+    #[test]
+    fn wrapped_caret_follows_visual_rtl_cluster_edges() {
+        let range = TextRange::new(0, 6);
+        let run = GlyphRun::new(
+            vec![
+                ShapedGlyph::new(1, 4, 3.0),
+                ShapedGlyph::new(2, 4, 7.0),
+                ShapedGlyph::new(3, 2, 10.0),
+                ShapedGlyph::new(4, 0, 10.0),
+            ],
+            TextDirection::RightToLeft,
+            12.0,
+            range,
+        );
+        let layout = ParagraphLayout::wrap(
+            &[ShapedRun::new(FontId::new(0), run).with_level(1)],
+            "אבג",
+            30.0,
+            12.0,
+            9.0,
+            TextAlignment::Start,
+            TextOverflow::Visible,
+            WhiteSpace::Normal,
+        );
+        let line = &layout.lines()[0];
+        assert_eq!(line.range(), range);
+        assert_eq!(line_caret_x(line, 0), 30.0);
+        assert_eq!(line_caret_x(line, 2), 20.0);
+        assert_eq!(line_caret_x(line, 4), 10.0);
+        assert_eq!(line_caret_x(line, 6), 0.0);
+        assert_eq!(byte_at_line_local_x(line, -1.0), 6);
+        assert_eq!(byte_at_line_local_x(line, 4.0), 6);
+        assert_eq!(byte_at_line_local_x(line, 7.0), 4);
+        assert_eq!(byte_at_line_local_x(line, 16.0), 2);
+        assert_eq!(byte_at_line_local_x(line, 31.0), 0);
+    }
 }

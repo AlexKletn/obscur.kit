@@ -1,22 +1,23 @@
-#![doc = include_str!("name_resolver.doc/_module.md")]
+//! `NameResolver`: resolves the identifiers referenced by a document's
+//! expressions against a [`SymbolTable`] (spec §2.10).
 
 use obscur_okui_syntax::ast::{Document, Element};
 
 use crate::resolution::ResolutionError;
 use crate::symbol::{Symbol, SymbolTable};
 
-#[doc = include_str!("name_resolver.doc/NameResolver.md")]
+#[doc = include_str!("../../docs/api/resolution/name_resolver.doc/NameResolver.md")]
 #[derive(Debug, Clone, Default)]
 pub struct NameResolver;
 
 impl NameResolver {
-    #[doc = include_str!("name_resolver.doc/new.md")]
+    /// Creates a name resolver.
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    #[doc = include_str!("name_resolver.doc/resolve.md")]
+    #[doc = include_str!("../../docs/api/resolution/name_resolver.doc/resolve.md")]
     #[must_use]
     pub fn resolve(&self, document: &Document, table: &mut SymbolTable) -> Vec<ResolutionError> {
         let mut errors = Vec::new();
@@ -26,7 +27,8 @@ impl NameResolver {
         errors
     }
 
-    #[doc = include_str!("name_resolver.doc/resolve_element.md")]
+    /// Resolves a single element: checks its attribute references, then recurses
+    /// into its children, opening a loop-local scope for a `<For>`.
     fn resolve_element(
         &self,
         element: &Element,
@@ -35,8 +37,8 @@ impl NameResolver {
     ) {
         // Check the leading reference of every dynamic attribute expression. A
         // literal string attribute has no `value_expression`, so no reference
-        // check is performed for it. This covers `each`/`key`/`cond` alongside
-        // ordinary attributes, all resolved in the current (enclosing) scope.
+        // check is performed for it. Resolve `each` and ordinary attributes
+        // in the enclosing scope before introducing the loop's bindings.
         for attribute in element.attributes() {
             // An `on:<event>` value is NOT a value expression: the lowering takes
             // its raw text as the handler *name* and hashes it into a command
@@ -49,7 +51,9 @@ impl NameResolver {
             // Handler names belong to
             // [`CommandValidator`](crate::validation::CommandValidator), which judges
             // both spellings against the commands the caller declared (§2.13).
-            if attribute.is_event() {
+            if attribute.is_event()
+                || (element.is_loop() && matches!(attribute.name().as_deref(), Some("as" | "key")))
+            {
                 continue;
             }
             let Some(expression) = attribute.value_expression() else {
@@ -65,15 +69,32 @@ impl NameResolver {
         }
 
         if element.is_loop() {
-            // A `<For>` requires a `key` attribute for stable item identity.
+            // Both loop forms require a key for stable item identity.
             if element.attribute("key").is_none() {
                 let offset = element.syntax().offset().unwrap_or(0);
                 errors.push(ResolutionError::missing_loop_key(offset));
             }
-            // The body sees the loop-local bindings `item` and `index`.
+            // The key and body share the alias and the index.
             table.push_scope();
-            table.define(Symbol::loop_local("item"));
+            let alias = element.attribute("as").and_then(|attribute| {
+                attribute
+                    .value_expression()
+                    .map(|expr| expr.text())
+                    .or_else(|| attribute.string_value())
+            });
+            table.define(Symbol::loop_local(
+                alias.as_deref().unwrap_or("item").trim(),
+            ));
             table.define(Symbol::loop_local("index"));
+            if let Some(expression) = element
+                .attribute("key")
+                .and_then(|attr| attr.value_expression())
+                && let Some(root) = Self::root_reference(&expression.text())
+                && !table.is_defined(root)
+            {
+                let offset = expression.syntax().offset().unwrap_or(0);
+                errors.push(ResolutionError::unknown_name(root, offset));
+            }
             self.resolve_children(element, table, errors);
             table.pop_scope();
         } else {
@@ -83,7 +104,8 @@ impl NameResolver {
         }
     }
 
-    #[doc = include_str!("name_resolver.doc/resolve_children.md")]
+    /// Recurses into the element-shaped content children of `element`; non-element
+    /// children (text, bare expressions) are skipped.
     fn resolve_children(
         &self,
         element: &Element,
@@ -97,9 +119,12 @@ impl NameResolver {
         }
     }
 
-    #[doc = include_str!("name_resolver.doc/root_reference.md")]
+    #[doc = include_str!("../../docs/api/resolution/name_resolver.doc/root_reference.md")]
     fn root_reference(expression_text: &str) -> Option<&str> {
-        let text = expression_text.trim_start();
+        let text = expression_text.trim();
+        if matches!(text, "true" | "false" | "null" | "none") {
+            return None;
+        }
         let mut end = 0;
         for (index, ch) in text.char_indices() {
             if ch.is_alphanumeric() || ch == '_' {

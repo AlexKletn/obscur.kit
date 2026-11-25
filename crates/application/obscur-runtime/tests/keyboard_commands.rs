@@ -380,9 +380,7 @@ fn enter_on_focused_button_fires_its_click_command_via_activate() {
         Some(LogicalKey::named(NamedKey::Enter)),
     ));
     assert_eq!(enter.target(), Some(b));
-    // No shortcut is bound, so nothing resolved through the router...
-    assert_eq!(enter.command(), None);
-    // ...but Enter activated the focused button's click command.
+    assert_eq!(enter.command(), Some(CMD_B));
     assert_eq!(
         counter.get(),
         1,
@@ -447,4 +445,74 @@ fn button_click_still_fires_event_click_after_activation_change() {
         "click still resolves EVENT_CLICK"
     );
     assert_eq!(counter.get(), 1);
+}
+
+#[test]
+fn arrows_and_gamepad_use_the_same_opt_in_spatial_focus() {
+    use obscur_interaction::event::UiEvent;
+    use obscur_interaction::gamepad::{GamepadButton, GamepadEvent, GamepadEventKind, GamepadId};
+    use obscur_view::view::EVENT_GAMEPAD;
+
+    let InteractionPanel {
+        mut runtime,
+        ran_a,
+        ran_b,
+        ..
+    } = InteractionPanel::new();
+    let button = |component, class: &str, command| {
+        ViewNode::element(ComponentId::from_raw(component))
+            .with_prop(ViewProperty::new(CLASS, ViewValue::Text(class.into())))
+            .with_prop(ViewProperty::new(
+                obscur_view::view::LOCAL_NAME,
+                ViewValue::Text("button".into()),
+            ))
+            .with_event(ViewEventBinding::new(
+                obscur_view::view::EVENT_CLICK,
+                command,
+            ))
+    };
+    let view = View::single(
+        ViewNode::element(ComponentId::from_raw(100))
+            .with_prop(ViewProperty::new(CLASS, ViewValue::Text("panel".into())))
+            .with_children(ViewFragment::from_nodes(vec![
+                button(101, "a", InteractionPanel::CMD_A),
+                button(102, "b", InteractionPanel::CMD_B),
+            ])),
+    );
+    let _ = runtime.render_now(&view, &[InteractionPanel::sheet()]);
+    let (_, a, b) = InteractionPanel::nodes(&runtime);
+    let arrow = KeyEvent::press(
+        PhysicalKey::ArrowDown,
+        Some(LogicalKey::Named(NamedKey::ArrowDown)),
+    );
+    assert!(runtime.focus_node(Some(a)));
+    runtime.handle_key(arrow);
+    assert_eq!(runtime.focused(), Some(a));
+
+    runtime.set_spatial_navigation(true);
+    runtime.handle_key(arrow);
+    assert_eq!(runtime.focused(), Some(b));
+    assert!(runtime.is_focus_visible());
+    runtime.handle_key(arrow);
+    assert_eq!(
+        runtime.focused(),
+        Some(b),
+        "directional focus does not wrap"
+    );
+
+    let pad = GamepadId::from_raw(4);
+    let press = |button| GamepadEvent::new(pad, GamepadEventKind::ButtonDown(button));
+    runtime.handle_gamepad(press(GamepadButton::DpadUp));
+    assert_eq!(runtime.focused(), Some(a));
+    assert!(runtime.is_focus_visible());
+    assert!(runtime.handle_gamepad(press(GamepadButton::South)));
+    assert!(ran_a.get());
+    assert!(!ran_b.get());
+
+    runtime.on_command(EVENT_GAMEPAD, move |event: &mut UiEvent| {
+        assert_eq!(event.gamepad().map(|event| event.gamepad()), Some(pad));
+        event.prevent_default();
+    });
+    assert!(runtime.handle_gamepad(press(GamepadButton::DpadDown)));
+    assert_eq!(runtime.focused(), Some(a));
 }

@@ -1,19 +1,25 @@
-#![doc = include_str!("face_metrics.doc/_module.md")]
+//! The [`FaceMetrics`] table carrying a registry's real per-face vertical
+//! metrics to the shaper (spec §5.10).
 
 use std::sync::Arc;
 
 use obscur_text::font::{FontId, FontMetrics};
 use obscur_text::shaping::LineMetrics;
 
-#[doc = include_str!("face_metrics.doc/FaceMetrics.md")]
+#[doc = include_str!("../docs/api/face_metrics.doc/FaceMetrics.md")]
 #[derive(Debug, Clone, Default)]
 pub struct FaceMetrics {
-    #[doc = include_str!("face_metrics.doc/faces.md")]
+    /// Per-face design metrics in registration order, indexed by
+    /// [`FontId::index`]; `None` for a face whose real metrics could not be read.
+    /// The whole table is optional so [`empty`](FaceMetrics::empty) — the state of
+    /// a shaper that was handed no registry — is `const`-constructible.
     faces: Option<Arc<[Option<FontMetrics>]>>,
 }
 
 impl FaceMetrics {
-    #[doc = include_str!("face_metrics.doc/new.md")]
+    /// Creates a table from per-face metrics in registration order, where index
+    /// `i` holds the metrics of [`FontId::new(i)`](FontId::new) and `None` marks a
+    /// face whose real metrics are unavailable.
     #[must_use]
     pub fn new(faces: impl Into<Arc<[Option<FontMetrics>]>>) -> Self {
         Self {
@@ -21,19 +27,21 @@ impl FaceMetrics {
         }
     }
 
-    #[doc = include_str!("face_metrics.doc/empty.md")]
+    /// Creates the empty table: every lookup misses, so a shaper wired with it
+    /// falls back for every font.
     #[must_use]
     pub const fn empty() -> Self {
         Self { faces: None }
     }
 
-    #[doc = include_str!("face_metrics.doc/get.md")]
+    /// Returns `font`'s design metrics, or `None` when the id names no face in
+    /// this snapshot or that face's metrics could not be read.
     #[must_use]
     pub fn get(&self, font: FontId) -> Option<FontMetrics> {
         self.faces.as_ref()?.get(font.index()).copied().flatten()
     }
 
-    #[doc = include_str!("face_metrics.doc/line_metrics.md")]
+    #[doc = include_str!("../docs/api/face_metrics.doc/line_metrics.md")]
     #[must_use]
     pub fn line_metrics(&self, font: FontId, font_size: f32) -> Option<LineMetrics> {
         let metrics = self.get(font)?;
@@ -48,13 +56,15 @@ impl FaceMetrics {
         ))
     }
 
-    #[doc = include_str!("face_metrics.doc/len.md")]
+    /// Returns the number of faces in the snapshot, including those with no
+    /// readable metrics.
     #[must_use]
     pub fn len(&self) -> usize {
         self.faces.as_ref().map_or(0, |faces| faces.len())
     }
 
-    #[doc = include_str!("face_metrics.doc/is_empty.md")]
+    /// Returns whether the snapshot holds no faces at all — the state of a shaper
+    /// that was never handed a registry's metrics.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.len() == 0

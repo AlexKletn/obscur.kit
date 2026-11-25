@@ -1,14 +1,15 @@
-#![doc = include_str!("value_lowering.doc/_module.md")]
+#![doc = include_str!("../../docs/api/compiler/value_lowering.doc/_module.md")]
 
+use super::CssSymbolInterner;
 use super::calc_lowering::lower_math_function;
 use super::color_lowering::{color_from_function, named_color, parse_hex_color};
 use super::property_compiler::narrow_f32;
-use super::stylesheet_compiler::CssSymbolInterner;
 use crate::parser::ParsedValue;
 use obscur_identity::InternedSymbol;
 use obscur_style::property::{EnvVar, Length, PropertyValue, layout_keyword};
 
-#[doc = include_str!("value_lowering.doc/css_wide_keyword.md")]
+/// Maps a CSS-wide keyword (`inherit` / `initial` / `unset`) to its
+/// [`PropertyValue`], case-insensitively; [`None`] for any other keyword.
 pub(super) fn css_wide_keyword(keyword: &str) -> Option<PropertyValue> {
     if keyword.eq_ignore_ascii_case("inherit") {
         Some(PropertyValue::Inherit)
@@ -21,7 +22,7 @@ pub(super) fn css_wide_keyword(keyword: &str) -> Option<PropertyValue> {
     }
 }
 
-#[doc = include_str!("value_lowering.doc/lower_value.md")]
+#[doc = include_str!("../../docs/api/compiler/value_lowering.doc/lower_value.md")]
 pub(super) fn lower_value(
     values: &[ParsedValue],
     interner: &mut CssSymbolInterner,
@@ -29,7 +30,7 @@ pub(super) fn lower_value(
     values.first().and_then(|v| lower_component(v, interner))
 }
 
-#[doc = include_str!("value_lowering.doc/lower_component.md")]
+/// Lowers one component value into a [`PropertyValue`], or [`None`].
 pub(super) fn lower_component(
     value: &ParsedValue,
     interner: &mut CssSymbolInterner,
@@ -48,7 +49,7 @@ pub(super) fn lower_component(
     }
 }
 
-#[doc = include_str!("value_lowering.doc/lower_keyword.md")]
+#[doc = include_str!("../../docs/api/compiler/value_lowering.doc/lower_keyword.md")]
 fn lower_keyword(keyword: &str, interner: &mut CssSymbolInterner) -> PropertyValue {
     if let Some(wide) = css_wide_keyword(keyword) {
         return wide;
@@ -65,7 +66,7 @@ fn lower_keyword(keyword: &str, interner: &mut CssSymbolInterner) -> PropertyVal
     PropertyValue::Keyword(interner.intern(keyword))
 }
 
-#[doc = include_str!("value_lowering.doc/dimension_length.md")]
+#[doc = include_str!("../../docs/api/compiler/value_lowering.doc/dimension_length.md")]
 pub(crate) fn dimension_length(value: f64, unit: &str) -> Option<Length> {
     let n = narrow_f32(value);
     if unit.eq_ignore_ascii_case("px") {
@@ -87,7 +88,7 @@ pub(crate) fn dimension_length(value: f64, unit: &str) -> Option<Length> {
     } else if unit.eq_ignore_ascii_case("vmax") {
         Some(Length::Vmax(n))
     } else if let Some(per_unit) = absolute_px_per_unit(unit) {
-        Some(Length::px(n * per_unit))
+        Some(Length::px(narrow_f32(value * f64::from(per_unit))))
     } else if unit.eq_ignore_ascii_case("cqw") {
         Some(Length::Cqw(n))
     } else if unit.eq_ignore_ascii_case("cqh") {
@@ -105,11 +106,11 @@ pub(crate) fn dimension_length(value: f64, unit: &str) -> Option<Length> {
     }
 }
 
-#[doc = include_str!("value_lowering.doc/absolute_px_per_unit.md")]
+#[doc = include_str!("../../docs/api/compiler/value_lowering.doc/absolute_px_per_unit.md")]
 fn absolute_px_per_unit(unit: &str) -> Option<f32> {
-    #[doc = include_str!("value_lowering.doc/PX_PER_IN.md")]
+    /// `1in = 96px`.
     const PX_PER_IN: f32 = 96.0;
-    #[doc = include_str!("value_lowering.doc/PX_PER_CM.md")]
+    /// `1cm = 96px/2.54`.
     const PX_PER_CM: f32 = PX_PER_IN / 2.54;
 
     if unit.eq_ignore_ascii_case("cm") {
@@ -129,12 +130,12 @@ fn absolute_px_per_unit(unit: &str) -> Option<f32> {
     }
 }
 
-#[doc = include_str!("value_lowering.doc/lower_dimension.md")]
+/// Lowers a dimension into a [`PropertyValue::Length`], via [`dimension_length`].
 fn lower_dimension(value: f64, unit: &str) -> Option<PropertyValue> {
     dimension_length(value, unit).map(PropertyValue::Length)
 }
 
-#[doc = include_str!("value_lowering.doc/lower_function.md")]
+#[doc = include_str!("../../docs/api/compiler/value_lowering.doc/lower_function.md")]
 fn lower_function(
     name: &str,
     args: &[ParsedValue],
@@ -152,7 +153,7 @@ fn lower_function(
     lower_math_function(name, args).map(PropertyValue::Calc)
 }
 
-#[doc = include_str!("value_lowering.doc/var_reference.md")]
+#[doc = include_str!("../../docs/api/compiler/value_lowering.doc/var_reference.md")]
 fn var_reference(args: &[ParsedValue]) -> Option<PropertyValue> {
     args.iter().find_map(|arg| match arg {
         // The reference is minted from the NAME, never from this sheet's
@@ -168,7 +169,7 @@ fn var_reference(args: &[ParsedValue]) -> Option<PropertyValue> {
     })
 }
 
-#[doc = include_str!("value_lowering.doc/custom_ref.md")]
+#[doc = include_str!("../../docs/api/compiler/value_lowering.doc/custom_ref.md")]
 pub(super) fn custom_ref(value: &ParsedValue) -> Option<PropertyValue> {
     match value {
         ParsedValue::Function { name, args } if name.eq_ignore_ascii_case("var") => {
@@ -178,7 +179,7 @@ pub(super) fn custom_ref(value: &ParsedValue) -> Option<PropertyValue> {
     }
 }
 
-#[doc = include_str!("value_lowering.doc/sole_custom_ref.md")]
+#[doc = include_str!("../../docs/api/compiler/value_lowering.doc/sole_custom_ref.md")]
 pub(super) fn sole_custom_ref(values: &[ParsedValue]) -> Option<PropertyValue> {
     match values {
         [only] => custom_ref(only),
@@ -186,7 +187,7 @@ pub(super) fn sole_custom_ref(values: &[ParsedValue]) -> Option<PropertyValue> {
     }
 }
 
-#[doc = include_str!("value_lowering.doc/lower_env.md")]
+#[doc = include_str!("../../docs/api/compiler/value_lowering.doc/lower_env.md")]
 fn lower_env(args: &[ParsedValue], interner: &mut CssSymbolInterner) -> Option<PropertyValue> {
     let mut components = args.iter().filter(|arg| !matches!(arg, ParsedValue::Comma));
     let name = match components.next()? {
@@ -201,7 +202,8 @@ fn lower_env(args: &[ParsedValue], interner: &mut CssSymbolInterner) -> Option<P
         .and_then(|fallback| lower_component(fallback, interner))
 }
 
-#[doc = include_str!("value_lowering.doc/angle_to_degrees.md")]
+/// Converts an `<angle>` dimension into degrees on the CSS convention, accepting
+/// `deg` / `grad` / `rad` / `turn`; any other unit yields [`None`].
 pub(super) fn angle_to_degrees(value: f64, unit: &str) -> Option<f32> {
     let v = narrow_f32(value);
     if unit.eq_ignore_ascii_case("deg") {
@@ -210,9 +212,9 @@ pub(super) fn angle_to_degrees(value: f64, unit: &str) -> Option<f32> {
         // 400 grad = 360 deg.
         Some(v * 0.9)
     } else if unit.eq_ignore_ascii_case("rad") {
-        Some(v.to_degrees())
+        Some(narrow_f32(value.to_degrees()))
     } else if unit.eq_ignore_ascii_case("turn") {
-        Some(v * 360.0)
+        Some(narrow_f32(value * 360.0))
     } else {
         None
     }
@@ -256,14 +258,11 @@ mod tests {
     }
 
     #[test]
-    fn lowers_plain_keyword_to_interned_symbol() {
-        // `visibility` is not a closed-set layout property, so its keyword is
-        // interned normally (unlike `display`, which maps to a reserved symbol).
-        let (d, interner) = standard("visibility: hidden");
-        let PropertyValue::Keyword(symbol) = d.value().clone() else {
-            panic!("expected keyword");
-        };
-        assert_eq!(interner.resolve(symbol), Some("hidden"));
+    fn lowers_visibility_to_reserved_keyword() {
+        assert_eq!(
+            value_of("visibility: hidden"),
+            PropertyValue::Keyword(obscur_style::property::layout_keyword::VISIBILITY_HIDDEN),
+        );
     }
 
     #[test]

@@ -1,5 +1,5 @@
-#![doc = include_str!("physical_space.doc/_module.md")]
+//! Device pixels relative to the rendering surface.
 
-#[doc = include_str!("physical_space.doc/PhysicalSpace.md")]
-#[derive(Debug)]
+/// Device pixels relative to the rendering surface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PhysicalSpace;

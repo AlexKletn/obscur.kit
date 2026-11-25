@@ -1,13 +1,14 @@
-#![doc = include_str!("expression.doc/_module.md")]
+//! `Expression`: the typed AST view of an `{expr}` interpolation (spec §2.10).
 
 use crate::syntax::{SyntaxKind, SyntaxNode};
 
-#[doc = include_str!("expression.doc/Expression.md")]
+#[doc = include_str!("../../docs/api/ast/expression.doc/Expression.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Expression(SyntaxNode);
 
 impl Expression {
-    #[doc = include_str!("expression.doc/cast.md")]
+    /// Casts a syntax node to an `Expression`, returning `Some` iff its kind is
+    /// [`Expression`](SyntaxKind::Expression).
     #[must_use]
     pub fn cast(node: SyntaxNode) -> Option<Self> {
         if node.kind() == SyntaxKind::Expression {
@@ -17,13 +18,13 @@ impl Expression {
         }
     }
 
-    #[doc = include_str!("expression.doc/syntax.md")]
+    /// Returns the wrapped syntax node.
     #[must_use]
     pub const fn syntax(&self) -> &SyntaxNode {
         &self.0
     }
 
-    #[doc = include_str!("expression.doc/text.md")]
+    #[doc = include_str!("../../docs/api/ast/expression.doc/text.md")]
     #[must_use]
     pub fn text(&self) -> String {
         let tokens: Vec<_> = self.0.tokens().collect();
@@ -38,7 +39,8 @@ impl Expression {
         tokens[start..end].iter().map(|t| t.text()).collect()
     }
 
-    #[doc = include_str!("expression.doc/is_empty.md")]
+    /// Returns `true` if the expression has no content between its braces (no
+    /// non-brace tokens).
     #[must_use]
     pub fn is_empty(&self) -> bool {
         !self

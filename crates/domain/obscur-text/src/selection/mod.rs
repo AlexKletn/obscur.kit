@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Selection module.
 mod caret;
 pub use caret::Caret;
 mod caret_affinity;

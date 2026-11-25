@@ -1,19 +1,19 @@
-#![doc = include_str!("button_component.doc/_module.md")]
+#![doc = include_str!("../../docs/api/button/button_component.doc/_module.md")]
 
 use obscur_view::component::{Component, ComponentContext};
 use obscur_view::view::{View, ViewNode};
 
 use super::{Button, ButtonProps};
 
-#[doc = include_str!("button_component.doc/ButtonComponent.md")]
+#[doc = include_str!("../../docs/api/button/button_component.doc/ButtonComponent.md")]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ButtonComponent;
 
 impl Component for ButtonComponent {
-    #[doc = include_str!("button_component.doc/Props.md")]
+    /// The authored surface: [`ButtonProps`](super::ButtonProps).
     type Props = ButtonProps;
 
-    #[doc = include_str!("button_component.doc/render.md")]
+    #[doc = include_str!("../../docs/api/button/button_component.doc/render.md")]
     fn render(&mut self, _ctx: &mut ComponentContext<'_>, props: &Self::Props) -> View {
         View::single(ViewNode::slot("").with_children(Button::contents(&props.label)))
     }

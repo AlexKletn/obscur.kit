@@ -1,16 +1,23 @@
-#![doc = include_str!("custom_value.doc/_module.md")]
+#![doc = include_str!("../../docs/api/compiler/custom_value.doc/_module.md")]
 
+use std::cell::RefCell;
 use std::fmt::Write as _;
 
-use obscur_style::property::{PropertyId, PropertyValue};
+use obscur_identity::FastMap;
+use obscur_style::computed::CustomValueParser;
+use obscur_style::matching::StyleRangeValue;
+use obscur_style::property::{Length, PropertyId, PropertyValue};
 
 use crate::parser::{ParsedValue, ValueParser};
 use crate::source::CssSource;
 
+use super::CssSymbolInterner;
+use super::condition_lowering::lower_style_literal;
 use super::property_compiler::lower_for_property;
-use super::stylesheet_compiler::CssSymbolInterner;
+use super::shorthand_expansion::{container_values, flex_flow_values, pair_values};
+use super::value_lowering::dimension_length;
 
-#[doc = include_str!("custom_value.doc/custom_value_text.md")]
+#[doc = include_str!("../../docs/api/compiler/custom_value.doc/custom_value_text.md")]
 pub(super) fn custom_value_text(values: &[ParsedValue]) -> Box<str> {
     let mut out = String::new();
     for value in values {
@@ -22,7 +29,7 @@ pub(super) fn custom_value_text(values: &[ParsedValue]) -> Box<str> {
     out.into_boxed_str()
 }
 
-#[doc = include_str!("custom_value.doc/lower_custom_value.md")]
+#[doc = include_str!("../../docs/api/compiler/custom_value.doc/lower_custom_value.md")]
 #[must_use]
 pub fn lower_custom_value(property: PropertyId, tokens: &str) -> Option<PropertyValue> {
     let values = ValueParser::new()
@@ -40,7 +47,161 @@ pub fn lower_custom_value(property: PropertyId, tokens: &str) -> Option<Property
     lower_for_property(property, &values, &mut interner)
 }
 
-#[doc = include_str!("custom_value.doc/write_component.md")]
+#[doc = include_str!("../../docs/api/compiler/custom_value.doc/LoweredByText.md")]
+type LoweredByText = FastMap<Box<str>, Option<PropertyValue>>;
+
+type LoweredContainers = FastMap<Box<str>, Option<(PropertyValue, PropertyValue)>>;
+
+#[doc = include_str!("../../docs/api/compiler/custom_value.doc/CustomValueCache.md")]
+#[derive(Debug, Default)]
+pub struct CustomValueCache {
+    #[doc = include_str!("../../docs/api/compiler/custom_value.doc/lowered.md")]
+    lowered: RefCell<FastMap<PropertyId, LoweredByText>>,
+    style_properties: RefCell<FastMap<PropertyId, LoweredByText>>,
+    containers: RefCell<LoweredContainers>,
+    gaps: RefCell<FastMap<Box<str>, Option<[PropertyValue; 2]>>>,
+    flex_flows: RefCell<FastMap<Box<str>, Option<[PropertyValue; 2]>>>,
+    ranges: RefCell<FastMap<Box<str>, Option<StyleRangeValue>>>,
+}
+
+impl CustomValueCache {
+    /// An empty cache, which answers exactly as [`lower_custom_value`] does.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl CustomValueParser for CustomValueCache {
+    fn parse(&self, property: PropertyId, tokens: &str) -> Option<PropertyValue> {
+        // Borrowed and released before the parse below: `lower_custom_value`
+        // does not reach back into the cache, but holding a `Ref` across a call
+        // that could is how a `RefCell` comes to panic later.
+        if let Some(hit) = self
+            .lowered
+            .borrow()
+            .get(&property)
+            .and_then(|by_text| by_text.get(tokens))
+        {
+            return hit.clone();
+        }
+        let lowered = lower_custom_value(property, tokens);
+        // A miss is remembered too. `None` is the answer for every `var()` whose
+        // text no grammar of this property accepts, and a stylesheet that has
+        // one asks about it on every node exactly as often as a hit.
+        self.lowered
+            .borrow_mut()
+            .entry(property)
+            .or_default()
+            .insert(tokens.into(), lowered.clone());
+        lowered
+    }
+
+    fn parse_style_property(&self, property: PropertyId, tokens: &str) -> Option<PropertyValue> {
+        if let Some(hit) = self
+            .style_properties
+            .borrow()
+            .get(&property)
+            .and_then(|by_text| by_text.get(tokens))
+        {
+            return hit.clone();
+        }
+        let lowered = ValueParser::new()
+            .parse(&CssSource::anonymous(tokens))
+            .ok()
+            .and_then(|values| lower_style_literal(property, &values));
+        self.style_properties
+            .borrow_mut()
+            .entry(property)
+            .or_default()
+            .insert(tokens.into(), lowered.clone());
+        lowered
+    }
+
+    fn parse_style_range(&self, tokens: &str) -> Option<StyleRangeValue> {
+        if let Some(hit) = self.ranges.borrow().get(tokens) {
+            return hit.clone();
+        }
+        let value = ValueParser::new()
+            .parse(&CssSource::anonymous(tokens))
+            .ok()
+            .and_then(|values| lower_style_range(&values));
+        self.ranges
+            .borrow_mut()
+            .insert(tokens.into(), value.clone());
+        value
+    }
+
+    fn parse_gap(&self, tokens: &str) -> Option<[PropertyValue; 2]> {
+        if let Some(hit) = self.gaps.borrow().get(tokens) {
+            return hit.clone();
+        }
+        let lowered = ValueParser::new()
+            .parse(&CssSource::anonymous(tokens))
+            .ok()
+            .and_then(|values| {
+                pair_values(
+                    PropertyId::RowGap,
+                    PropertyId::ColumnGap,
+                    &values,
+                    &mut CssSymbolInterner::new(),
+                )
+            });
+        self.gaps
+            .borrow_mut()
+            .insert(tokens.into(), lowered.clone());
+        lowered
+    }
+
+    fn parse_flex_flow(&self, tokens: &str) -> Option<[PropertyValue; 2]> {
+        if let Some(hit) = self.flex_flows.borrow().get(tokens) {
+            return hit.clone();
+        }
+        let lowered = ValueParser::new()
+            .parse(&CssSource::anonymous(tokens))
+            .ok()
+            .and_then(|values| flex_flow_values(&values));
+        self.flex_flows
+            .borrow_mut()
+            .insert(tokens.into(), lowered.clone());
+        lowered
+    }
+
+    fn parse_container(&self, tokens: &str) -> Option<(PropertyValue, PropertyValue)> {
+        if let Some(hit) = self.containers.borrow().get(tokens) {
+            return hit.clone();
+        }
+        let lowered = ValueParser::new()
+            .parse(&CssSource::anonymous(tokens))
+            .ok()
+            .and_then(|values| container_values(&values, &mut CssSymbolInterner::new()));
+        self.containers
+            .borrow_mut()
+            .insert(tokens.into(), lowered.clone());
+        lowered
+    }
+}
+
+pub(super) fn lower_style_range(values: &[ParsedValue]) -> Option<StyleRangeValue> {
+    use super::property_compiler::narrow_f32;
+    match values {
+        [ParsedValue::Number(value)] => Some(StyleRangeValue::Number(narrow_f32(*value))),
+        [ParsedValue::Percentage(value)] => Some(StyleRangeValue::Percent(narrow_f32(*value))),
+        [ParsedValue::Dimension { value, unit }] => {
+            let length = dimension_length(*value, unit)?;
+            Some(match length {
+                Length::Px(px) => StyleRangeValue::Pixels(px.0),
+                length => StyleRangeValue::Relative(length),
+            })
+        }
+        [ParsedValue::Function { name, args }] => {
+            super::calc_lowering::lower_range_math(name, args)
+        }
+        _ => None,
+    }
+}
+
+#[doc = include_str!("../../docs/api/compiler/custom_value.doc/write_component.md")]
 fn write_component(out: &mut String, value: &ParsedValue) {
     match value {
         ParsedValue::Keyword(word) => out.push_str(word),
@@ -186,5 +347,60 @@ mod tests {
             None
         );
         assert_eq!(lower_custom_value(PropertyId::Transform, "sideways"), None);
+    }
+
+    #[test]
+    fn the_cache_answers_what_the_bare_lowering_answers() {
+        // The whole contract. Anything the cache says that the function does
+        // not is a stylesheet reading differently depending on whether it was
+        // read before, which is worse than the cost it saves.
+        let cache = CustomValueCache::new();
+        for (property, text) in [
+            (PropertyId::FontFamily, "Inter, sans-serif"),
+            (PropertyId::Color, "#ff0000"),
+            (PropertyId::Width, "12px"),
+            (PropertyId::BoxShadow, "0 2px 4px #000000"),
+            (PropertyId::OverflowX, "hidden"),
+            // The same text on a property whose grammar rejects it, and a word
+            // no grammar has: both are answers worth remembering too.
+            (PropertyId::FontFamily, "12px"),
+            (PropertyId::OverflowX, "sideways"),
+        ] {
+            assert_eq!(
+                cache.parse(property, text),
+                lower_custom_value(property, text),
+                "{property:?} {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn asking_twice_reads_the_answer_back_rather_than_parsing_again() {
+        let cache = CustomValueCache::new();
+        let first = cache.parse(PropertyId::FontFamily, "Inter, sans-serif");
+        let second = cache.parse(PropertyId::FontFamily, "Inter, sans-serif");
+        assert_eq!(first, second);
+        assert_eq!(
+            cache.lowered.borrow()[&PropertyId::FontFamily].len(),
+            1,
+            "one entry, not one per ask"
+        );
+    }
+
+    #[test]
+    fn one_text_is_remembered_per_property_it_was_asked_against() {
+        // `12px` is a width and is no family, and the cache may not let the
+        // first question it was asked answer the second.
+        let cache = CustomValueCache::new();
+        assert_eq!(
+            cache.parse(PropertyId::Width, "12px"),
+            Some(PropertyValue::Length(Length::px(12.0)))
+        );
+        assert_eq!(cache.parse(PropertyId::FontFamily, "12px"), None);
+        assert_eq!(
+            cache.parse(PropertyId::Width, "12px"),
+            Some(PropertyValue::Length(Length::px(12.0))),
+            "and the first answer survived the second question"
+        );
     }
 }

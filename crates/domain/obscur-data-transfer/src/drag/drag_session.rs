@@ -1,37 +1,13 @@
-#![doc = include_str!("drag_session.doc/_module.md")]
+//! The active drag state machine and its lifecycle (spec §6.21 drag and drop —
+//! enter/leave/over/drop/cancel).
 
 use crate::drag::{DragEffect, DragSource, DropTarget};
 use obscur_geometry::Point;
 use obscur_identity::NodeId;
 
-#[doc = include_str!("drag_session.doc/DragPhase.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum DragPhase {
-    #[doc = include_str!("drag_session.doc/Started.md")]
-    Started,
-    #[doc = include_str!("drag_session.doc/Over.md")]
-    Over,
-    #[doc = include_str!("drag_session.doc/Dropped.md")]
-    Dropped,
-    #[doc = include_str!("drag_session.doc/Cancelled.md")]
-    Cancelled,
-}
+use super::DragPhase;
 
-impl DragPhase {
-    #[doc = include_str!("drag_session.doc/is_terminal.md")]
-    #[must_use]
-    pub const fn is_terminal(self) -> bool {
-        matches!(self, Self::Dropped | Self::Cancelled)
-    }
-
-    #[doc = include_str!("drag_session.doc/is_active.md")]
-    #[must_use]
-    pub const fn is_active(self) -> bool {
-        matches!(self, Self::Started | Self::Over)
-    }
-}
-
-#[doc = include_str!("drag_session.doc/DragSession.md")]
+#[doc = include_str!("../../docs/api/drag/drag_session.doc/DragSession.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct DragSession {
     source: DragSource,
@@ -42,7 +18,8 @@ pub struct DragSession {
 }
 
 impl DragSession {
-    #[doc = include_str!("drag_session.doc/start.md")]
+    /// Starts a session from `source` at the origin, over nothing, with no
+    /// effect and phase [`Started`](DragPhase::Started) (spec §6.21).
     #[must_use]
     pub fn start(source: DragSource) -> DragSession {
         Self {
@@ -54,7 +31,7 @@ impl DragSession {
         }
     }
 
-    #[doc = include_str!("drag_session.doc/move_to.md")]
+    #[doc = include_str!("../../docs/api/drag/drag_session.doc/move_to.md")]
     pub fn move_to(&mut self, position: Point) {
         if self.phase.is_terminal() {
             return;
@@ -62,7 +39,7 @@ impl DragSession {
         self.position = position;
     }
 
-    #[doc = include_str!("drag_session.doc/enter.md")]
+    #[doc = include_str!("../../docs/api/drag/drag_session.doc/enter.md")]
     pub fn enter(&mut self, target: &DropTarget, preferred: DragEffect) {
         if self.phase.is_terminal() {
             return;
@@ -78,7 +55,7 @@ impl DragSession {
         }
     }
 
-    #[doc = include_str!("drag_session.doc/leave.md")]
+    #[doc = include_str!("../../docs/api/drag/drag_session.doc/leave.md")]
     pub fn leave(&mut self) {
         if self.phase.is_terminal() {
             return;
@@ -88,7 +65,7 @@ impl DragSession {
         self.phase = DragPhase::Started;
     }
 
-    #[doc = include_str!("drag_session.doc/drop.md")]
+    #[doc = include_str!("../../docs/api/drag/drag_session.doc/drop.md")]
     pub fn drop(&mut self) -> bool {
         if self.phase.is_terminal() {
             return false;
@@ -102,7 +79,7 @@ impl DragSession {
         }
     }
 
-    #[doc = include_str!("drag_session.doc/cancel.md")]
+    #[doc = include_str!("../../docs/api/drag/drag_session.doc/cancel.md")]
     pub fn cancel(&mut self) {
         if self.phase.is_terminal() {
             return;
@@ -112,43 +89,43 @@ impl DragSession {
         self.effect = DragEffect::None;
     }
 
-    #[doc = include_str!("drag_session.doc/phase.md")]
+    /// Returns the current lifecycle phase (spec §6.21).
     #[must_use]
     pub const fn phase(&self) -> DragPhase {
         self.phase
     }
 
-    #[doc = include_str!("drag_session.doc/position.md")]
+    /// Returns the current pointer position (spec §6.21).
     #[must_use]
     pub const fn position(&self) -> Point {
         self.position
     }
 
-    #[doc = include_str!("drag_session.doc/over.md")]
+    /// Returns the drop target currently under the pointer, if any (spec §6.21).
     #[must_use]
     pub const fn over(&self) -> Option<NodeId> {
         self.over
     }
 
-    #[doc = include_str!("drag_session.doc/effect.md")]
+    /// Returns the currently negotiated effect (spec §6.21).
     #[must_use]
     pub const fn effect(&self) -> DragEffect {
         self.effect
     }
 
-    #[doc = include_str!("drag_session.doc/source.md")]
+    /// Returns the drag source this session was started from (spec §6.21).
     #[must_use]
     pub const fn source(&self) -> &DragSource {
         &self.source
     }
 
-    #[doc = include_str!("drag_session.doc/is_active_2.md")]
+    /// Returns whether the session is still active (spec §6.21).
     #[must_use]
     pub const fn is_active(&self) -> bool {
         self.phase.is_active()
     }
 
-    #[doc = include_str!("drag_session.doc/is_terminal_2.md")]
+    /// Returns whether the session has reached a terminal phase (spec §6.21).
     #[must_use]
     pub const fn is_terminal(&self) -> bool {
         self.phase.is_terminal()
@@ -164,16 +141,6 @@ mod tests {
     fn source() -> DragSource {
         let payload = TransferPayload::new(DataOffer::text("x"));
         DragSource::new(NodeId::from_raw(2), payload)
-    }
-
-    #[test]
-    fn phase_predicates() {
-        assert!(DragPhase::Started.is_active());
-        assert!(DragPhase::Over.is_active());
-        assert!(!DragPhase::Dropped.is_active());
-        assert!(DragPhase::Dropped.is_terminal());
-        assert!(DragPhase::Cancelled.is_terminal());
-        assert!(!DragPhase::Started.is_terminal());
     }
 
     #[test]

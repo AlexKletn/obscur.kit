@@ -1,56 +1,68 @@
-#![doc = include_str!("window_operation_result.doc/_module.md")]
+//! Typed outcome of a dynamic window property operation (spec §6.2).
 
 use obscur_capability::SupportLevel;
 
-#[doc = include_str!("window_operation_result.doc/WindowOperationResult.md")]
+#[doc = include_str!("../../docs/api/request/window_operation_result.doc/WindowOperationResult.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WindowOperationResult {
-    #[doc = include_str!("window_operation_result.doc/Performed.md")]
+    /// The operation was satisfied; the [`SupportLevel`] records *how* it was
+    /// satisfied per spec §6.2 (`Native`, `Emulated`, or `Limited` for the
+    /// *conditional* category).
     Performed(SupportLevel),
-    #[doc = include_str!("window_operation_result.doc/Unsupported.md")]
+    /// The platform does not offer the operation at all (spec §6.2
+    /// *unsupported*). Distinct from a runtime [`WindowOperationResult::Failed`]:
+    /// the operation was never attempted because it is unavailable.
     Unsupported,
-    #[doc = include_str!("window_operation_result.doc/Failed.md")]
+    /// The operation was attempted but failed at runtime, carrying a
+    /// human-readable reason (spec §6.2). This is not a support-level category:
+    /// the platform offers the operation, but this particular attempt did not
+    /// succeed.
     Failed(Box<str>),
 }
 
 impl WindowOperationResult {
-    #[doc = include_str!("window_operation_result.doc/native.md")]
+    /// A [`WindowOperationResult::Performed`] with [`SupportLevel::Native`]:
+    /// the operation was satisfied natively (spec §6.2).
     #[must_use]
     pub const fn native() -> Self {
         Self::Performed(SupportLevel::Native)
     }
 
-    #[doc = include_str!("window_operation_result.doc/emulated.md")]
+    /// A [`WindowOperationResult::Performed`] with [`SupportLevel::Emulated`]:
+    /// the operation was satisfied through emulation (spec §6.2).
     #[must_use]
     pub const fn emulated() -> Self {
         Self::Performed(SupportLevel::Emulated)
     }
 
-    #[doc = include_str!("window_operation_result.doc/conditional.md")]
+    /// A [`WindowOperationResult::Performed`] with [`SupportLevel::Limited`]:
+    /// the operation was satisfied conditionally, with documented restrictions
+    /// (the spec §6.2 *conditional* category).
     #[must_use]
     pub const fn conditional() -> Self {
         Self::Performed(SupportLevel::Limited)
     }
 
-    #[doc = include_str!("window_operation_result.doc/failed.md")]
+    /// A [`WindowOperationResult::Failed`] carrying the given reason (spec §6.2).
     #[must_use]
     pub fn failed(reason: impl Into<Box<str>>) -> Self {
         Self::Failed(reason.into())
     }
 
-    #[doc = include_str!("window_operation_result.doc/is_success.md")]
+    /// Returns whether the operation was satisfied (any
+    /// [`WindowOperationResult::Performed`] outcome).
     #[must_use]
     pub const fn is_success(&self) -> bool {
         matches!(self, Self::Performed(_))
     }
 
-    #[doc = include_str!("window_operation_result.doc/is_unsupported.md")]
+    /// Returns whether the operation is unsupported on this platform.
     #[must_use]
     pub const fn is_unsupported(&self) -> bool {
         matches!(self, Self::Unsupported)
     }
 
-    #[doc = include_str!("window_operation_result.doc/support_level.md")]
+    #[doc = include_str!("../../docs/api/request/window_operation_result.doc/support_level.md")]
     #[must_use]
     pub const fn support_level(&self) -> Option<SupportLevel> {
         match self {
@@ -60,7 +72,8 @@ impl WindowOperationResult {
         }
     }
 
-    #[doc = include_str!("window_operation_result.doc/failure_reason.md")]
+    /// Returns the failure reason for a [`WindowOperationResult::Failed`]
+    /// outcome, else `None`.
     #[must_use]
     pub fn failure_reason(&self) -> Option<&str> {
         match self {

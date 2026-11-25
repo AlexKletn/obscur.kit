@@ -1,1 +1,0 @@
-Opens the menu.

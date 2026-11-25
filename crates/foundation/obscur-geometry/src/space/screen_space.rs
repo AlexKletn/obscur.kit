@@ -1,5 +1,5 @@
-#![doc = include_str!("screen_space.doc/_module.md")]
+//! Desktop coordinates in physical pixels.
 
-#[doc = include_str!("screen_space.doc/ScreenSpace.md")]
-#[derive(Debug)]
+/// Coordinates in desktop physical pixels. The host supplies the desktop origin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScreenSpace;

@@ -1,20 +1,21 @@
-#![doc = include_str!("box_constraints.doc/_module.md")]
+//! Min/max box constraints for the measure pass.
 
 use crate::primitive::Size;
 
-#[doc = include_str!("box_constraints.doc/BoxConstraints.md")]
+/// Lower and upper bounds on a box's logical size, passed down during the
+/// measure phase of layout (spec §4.2).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BoxConstraints {
-    #[doc = include_str!("box_constraints.doc/min.md")]
+    /// Minimum size.
     pub min: Size,
-    #[doc = include_str!("box_constraints.doc/max.md")]
+    /// Maximum size. Components may be [`f32::INFINITY`] for unbounded axes.
     pub max: Size,
-    #[doc = include_str!("box_constraints.doc/percent_basis.md")]
+    #[doc = include_str!("../../docs/api/constraint/box_constraints.doc/percent_basis.md")]
     pub percent_basis: Option<Size>,
 }
 
 impl BoxConstraints {
-    #[doc = include_str!("box_constraints.doc/loose.md")]
+    /// Constraints that admit any size from zero up to `max`.
     #[must_use]
     pub const fn loose(max: Size) -> Self {
         Self {
@@ -24,28 +25,30 @@ impl BoxConstraints {
         }
     }
 
-    #[doc = include_str!("box_constraints.doc/with_percent_basis.md")]
+    #[doc = include_str!("../../docs/api/constraint/box_constraints.doc/with_percent_basis.md")]
     #[must_use]
     pub const fn with_percent_basis(mut self, basis: Size) -> Self {
         self.percent_basis = Some(basis);
         self
     }
 
-    #[doc = include_str!("box_constraints.doc/percent_width.md")]
+    /// The width a percentage resolves against: the containing block's content
+    /// width when known, else the upper bound (the pre-existing behaviour).
     #[must_use]
     pub fn percent_width(self) -> f32 {
         self.percent_basis
             .map_or(self.max.width, |basis| basis.width)
     }
 
-    #[doc = include_str!("box_constraints.doc/percent_height.md")]
+    /// The height a percentage resolves against — see
+    /// [`percent_width`](Self::percent_width).
     #[must_use]
     pub fn percent_height(self) -> f32 {
         self.percent_basis
             .map_or(self.max.height, |basis| basis.height)
     }
 
-    #[doc = include_str!("box_constraints.doc/tight.md")]
+    /// Constraints that force exactly `size`.
     #[must_use]
     pub const fn tight(size: Size) -> Self {
         Self {
@@ -55,7 +58,7 @@ impl BoxConstraints {
         }
     }
 
-    #[doc = include_str!("box_constraints.doc/constrain.md")]
+    /// Clamps a desired size into these constraints.
     #[must_use]
     pub fn constrain(self, desired: Size) -> Size {
         Size::new(
@@ -64,7 +67,7 @@ impl BoxConstraints {
         )
     }
 
-    #[doc = include_str!("box_constraints.doc/constrain_allowing_overflow.md")]
+    #[doc = include_str!("../../docs/api/constraint/box_constraints.doc/constrain_allowing_overflow.md")]
     #[must_use]
     pub fn constrain_allowing_overflow(self, desired: Size) -> Size {
         Size::new(
@@ -74,7 +77,7 @@ impl BoxConstraints {
     }
 }
 
-#[doc = include_str!("box_constraints.doc/resolve_axis.md")]
+#[doc = include_str!("../../docs/api/constraint/box_constraints.doc/resolve_axis.md")]
 fn resolve_axis(desired: f32, min: f32, max: f32) -> f32 {
     if min >= max && max > 0.0 {
         max

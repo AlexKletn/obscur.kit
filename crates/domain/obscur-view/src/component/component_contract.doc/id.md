@@ -1,1 +1,0 @@
-Stable component identity.

@@ -1,61 +1,36 @@
-#![doc = include_str!("caching_shaper.doc/_module.md")]
+//! A backend-agnostic caching decorator for the [`TextShaper`] port (spec §5.10).
+
+use super::shape_key::ShapeKey;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use crate::font::{FontAttributes, FontFamily};
-use crate::shaping::face_source_key::FaceSourceKey;
-use crate::shaping::{GlyphRun, LineMetrics, ShapingRequest, TextDirection, TextShaper};
+use crate::shaping::{GlyphRun, LineMetrics, ShapingRequest, TextShaper};
 
-#[doc = include_str!("caching_shaper.doc/ShapeKey.md")]
-#[derive(Clone, PartialEq, Eq, Hash)]
-struct ShapeKey {
-    text: Box<str>,
-    font_size_bits: u32,
-    direction: TextDirection,
-    language: Option<Box<str>>,
-    family: FontFamily,
-    attributes: FontAttributes,
-    source: FaceSourceKey,
-}
-
-impl ShapeKey {
-    #[doc = include_str!("caching_shaper.doc/from_request.md")]
-    fn from_request(request: &ShapingRequest) -> Self {
-        let face = request.face();
-        Self {
-            text: request.text().into(),
-            font_size_bits: request.font_size().to_bits(),
-            direction: request.direction(),
-            language: request.language().map(Into::into),
-            family: face.family().clone(),
-            attributes: *face.attributes(),
-            source: FaceSourceKey::from_source(face.source()),
-        }
-    }
-}
-
-#[doc = include_str!("caching_shaper.doc/CachingShaper.md")]
+#[doc = include_str!("../../docs/api/shaping/caching_shaper.doc/CachingShaper.md")]
 pub struct CachingShaper {
-    #[doc = include_str!("caching_shaper.doc/inner.md")]
+    /// The wrapped shaper doing the real work on a cache miss.
     inner: Box<dyn TextShaper>,
-    #[doc = include_str!("caching_shaper.doc/cache.md")]
+    /// Memoized shaped runs, keyed by every input that affects the output.
     cache: RefCell<HashMap<ShapeKey, GlyphRun>>,
-    #[doc = include_str!("caching_shaper.doc/capacity.md")]
+    /// The maximum number of cached runs before a flush.
     capacity: usize,
 }
 
 impl CachingShaper {
-    #[doc = include_str!("caching_shaper.doc/MAX_ENTRIES.md")]
+    /// The default cache capacity: the number of distinct shaped runs kept
+    /// before the cache is flushed.
     pub const MAX_ENTRIES: usize = 1024;
 
-    #[doc = include_str!("caching_shaper.doc/new.md")]
+    /// Wraps `inner` in a cache with the default capacity
+    /// ([`MAX_ENTRIES`](Self::MAX_ENTRIES)).
     #[must_use]
     pub fn new(inner: Box<dyn TextShaper>) -> Self {
         Self::with_capacity(inner, Self::MAX_ENTRIES)
     }
 
-    #[doc = include_str!("caching_shaper.doc/with_capacity.md")]
+    /// Wraps `inner` in a cache holding at most `capacity` runs (a `capacity` of
+    /// zero is treated as one, so a single entry can always be cached).
     #[must_use]
     pub fn with_capacity(inner: Box<dyn TextShaper>, capacity: usize) -> Self {
         Self {
@@ -65,13 +40,13 @@ impl CachingShaper {
         }
     }
 
-    #[doc = include_str!("caching_shaper.doc/len.md")]
+    /// Returns the number of currently cached runs (for tests and diagnostics).
     #[must_use]
     pub fn len(&self) -> usize {
         self.cache.borrow().len()
     }
 
-    #[doc = include_str!("caching_shaper.doc/is_empty.md")]
+    /// Returns whether the cache currently holds no runs.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.cache.borrow().is_empty()
@@ -109,8 +84,10 @@ impl TextShaper for CachingShaper {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::font::{FontAttributes, FontFamily};
     use crate::font::{FontFace, FontMetrics, FontSource, GenericFamily};
     use crate::shaping::MockTextShaper;
+    use crate::shaping::TextDirection;
     use std::cell::Cell;
 
     fn mono_face() -> FontFace {

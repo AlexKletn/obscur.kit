@@ -1,4 +1,5 @@
-#![doc = include_str!("mod.doc/_module.md")]
+#![doc = include_str!("../../docs/api/renderer/mod.doc/_module.md")]
+mod damage_stats;
 mod filter_layer_pass;
 mod premultiply_blit;
 mod segmented_compositor;
@@ -14,3 +15,9 @@ mod vello_renderer;
 pub use vello_renderer::VelloRenderer;
 mod vello_surface;
 pub use vello_surface::VelloSurface;
+#[cfg(feature = "hybrid")]
+mod hybrid_renderer;
+#[cfg(feature = "lyon")]
+mod lyon;
+
+mod readback_layout;

@@ -1,13 +1,9 @@
-#![doc = include_str!("dependency_direction.doc/_module.md")]
+//! Rule: pure crates never depend on platform/adapter crates (spec §5.6).
 
-use std::fs;
-use std::path::Path;
-
-use crate::violation::{Violation, collect};
+use super::dependency_graph::{graph::WorkspaceGraph, layer::Layer};
+use crate::violation::Violation;
 
 const RULE: &str = "dependency-direction";
-
-const PURE_DIRS: &[&str] = &["crates/foundation", "crates/domain", "crates/application"];
 
 // Platform/GPU/IO implementation crates that must stay behind adapters (spec
 // §5.6). NOTE: `taffy` is deliberately NOT here — it is a pure-Rust layout
@@ -26,33 +22,53 @@ const BANNED_DEPS: &[&str] = &[
     "raw-window-handle",
 ];
 
-#[doc = include_str!("dependency_direction.doc/check.md")]
-pub(crate) fn check(root: &Path) -> Vec<Violation> {
-    let mut out = Vec::new();
-    for dir in PURE_DIRS {
-        let mut manifests = Vec::new();
-        collect(&root.join(dir), "Cargo.toml", &mut manifests);
-        for manifest in manifests {
-            let Ok(text) = fs::read_to_string(&manifest) else {
-                continue;
-            };
-            for line in text.lines() {
-                let trimmed = line.trim_start();
-                for dep in BANNED_DEPS {
-                    if trimmed.starts_with(dep)
-                        && trimmed[dep.len()..]
-                            .trim_start()
-                            .starts_with(['=', '.', ' '])
-                    {
-                        out.push(Violation::new(
-                            RULE,
-                            &manifest,
-                            format!("pure crate must not depend on '{dep}' (use an adapter)"),
-                        ));
-                    }
-                }
+/// Checks resolved dependencies of the workspace's pure layers.
+pub(crate) fn check(graph: &WorkspaceGraph) -> Vec<Violation> {
+    let mut violations = Vec::new();
+    for krate in &graph.nodes {
+        if !matches!(
+            krate.layer,
+            Layer::Foundation | Layer::Domain | Layer::Application
+        ) {
+            continue;
+        }
+        for dependency in krate.deps.iter().chain(&krate.dev_deps) {
+            if BANNED_DEPS.contains(&dependency.as_str()) {
+                violations.push(Violation::new(
+                    RULE,
+                    &krate.manifest,
+                    format!("pure crate must not depend on '{dependency}' (use an adapter)"),
+                ));
             }
         }
     }
-    out
+    violations
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn rejects_an_inherited_platform_package_in_target_dev_dependencies() {
+        let workspace = tempfile::tempdir().unwrap();
+        let root = workspace.path();
+        let member = root.join("crates/domain/model");
+        std::fs::create_dir_all(&member).unwrap();
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[workspace.dependencies]\ngraphics = { package = 'wgpu', version = '29' }",
+        )
+        .unwrap();
+        let manifest = member.join("Cargo.toml");
+        std::fs::write(
+            &manifest,
+            "[package]\nname = 'obscur-model'\n[target.'cfg(unix)'.dev-dependencies]\ngraphics.workspace = true",
+        )
+        .unwrap();
+
+        let violations = crate::rule::dependency_graph::check(root);
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].rule, super::RULE);
+        assert_eq!(violations[0].file, manifest);
+        assert!(violations[0].detail.contains("'wgpu'"));
+    }
 }

@@ -1,10 +1,11 @@
-#![doc = include_str!("hover_transition.doc/_module.md")]
+//! The [`HoverTransition`] — the enter/leave diff between two hover chains
+//! (hover enter/leave).
 
 use obscur_identity::NodeId;
 
 use super::HoverChain;
 
-#[doc = include_str!("hover_transition.doc/HoverTransition.md")]
+#[doc = include_str!("../../docs/api/hover/hover_transition.doc/HoverTransition.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HoverTransition {
     entered: Vec<NodeId>,
@@ -12,7 +13,7 @@ pub struct HoverTransition {
 }
 
 impl HoverTransition {
-    #[doc = include_str!("hover_transition.doc/between.md")]
+    #[doc = include_str!("../../docs/api/hover/hover_transition.doc/between.md")]
     #[must_use]
     pub fn between(old: &HoverChain, new: &HoverChain) -> Self {
         let entered = new
@@ -30,25 +31,25 @@ impl HoverTransition {
         Self { entered, left }
     }
 
-    #[doc = include_str!("hover_transition.doc/entered.md")]
+    /// The newly-hovered nodes, in the new chain's order.
     #[must_use]
     pub fn entered(&self) -> &[NodeId] {
         &self.entered
     }
 
-    #[doc = include_str!("hover_transition.doc/left.md")]
+    /// The exited nodes, in the old chain's order.
     #[must_use]
     pub fn left(&self) -> &[NodeId] {
         &self.left
     }
 
-    #[doc = include_str!("hover_transition.doc/is_empty.md")]
+    /// Returns whether the hover is unchanged (nothing entered or left).
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entered.is_empty() && self.left.is_empty()
     }
 
-    #[doc = include_str!("hover_transition.doc/has_changes.md")]
+    /// Returns whether there is any enter or leave to fire.
     #[must_use]
     pub fn has_changes(&self) -> bool {
         !self.is_empty()

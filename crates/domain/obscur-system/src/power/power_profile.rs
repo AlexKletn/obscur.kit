@@ -1,32 +1,8 @@
-#![doc = include_str!("power_profile.doc/_module.md")]
+#![doc = include_str!("../../docs/api/power/power_profile.doc/_module.md")]
 
-#[doc = include_str!("power_profile.doc/PowerSource.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub enum PowerSource {
-    #[doc = include_str!("power_profile.doc/Ac.md")]
-    #[default]
-    Ac,
-    #[doc = include_str!("power_profile.doc/Battery.md")]
-    Battery,
-    #[doc = include_str!("power_profile.doc/Unknown.md")]
-    Unknown,
-}
+use super::{PowerSource, ThermalState};
 
-#[doc = include_str!("power_profile.doc/ThermalState.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
-pub enum ThermalState {
-    #[doc = include_str!("power_profile.doc/Nominal.md")]
-    #[default]
-    Nominal,
-    #[doc = include_str!("power_profile.doc/Fair.md")]
-    Fair,
-    #[doc = include_str!("power_profile.doc/Serious.md")]
-    Serious,
-    #[doc = include_str!("power_profile.doc/Critical.md")]
-    Critical,
-}
-
-#[doc = include_str!("power_profile.doc/PowerProfile.md")]
+#[doc = include_str!("../../docs/api/power/power_profile.doc/PowerProfile.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PowerProfile {
     source: PowerSource,
@@ -36,10 +12,12 @@ pub struct PowerProfile {
 }
 
 impl PowerProfile {
-    #[doc = include_str!("power_profile.doc/LOW_BATTERY_THRESHOLD.md")]
+    /// The battery charge below which a battery-powered device is treated as
+    /// constrained (20%).
     pub const LOW_BATTERY_THRESHOLD: f32 = 0.2;
 
-    #[doc = include_str!("power_profile.doc/new.md")]
+    /// Creates the plugged-in baseline: on AC, no battery reading, low-power mode
+    /// off, and nominal thermal state (spec §7.11).
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -50,35 +28,36 @@ impl PowerProfile {
         }
     }
 
-    #[doc = include_str!("power_profile.doc/on_source.md")]
+    /// Sets the power source (spec §7.11).
     #[must_use]
     pub const fn on_source(mut self, source: PowerSource) -> Self {
         self.source = source;
         self
     }
 
-    #[doc = include_str!("power_profile.doc/with_battery_level.md")]
+    /// Sets the battery charge level, clamped to `0.0..=1.0` (spec §7.11).
     #[must_use]
     pub fn with_battery_level(mut self, level: f32) -> Self {
         self.battery_level = Some(level.clamp(0.0, 1.0));
         self
     }
 
-    #[doc = include_str!("power_profile.doc/low_power_mode.md")]
+    /// Sets whether the OS low-power / battery-saver mode is engaged
+    /// (spec §7.11).
     #[must_use]
     pub const fn low_power_mode(mut self, enabled: bool) -> Self {
         self.low_power_mode = enabled;
         self
     }
 
-    #[doc = include_str!("power_profile.doc/with_thermal.md")]
+    /// Sets the thermal pressure state (spec §7.11).
     #[must_use]
     pub const fn with_thermal(mut self, thermal: ThermalState) -> Self {
         self.thermal = thermal;
         self
     }
 
-    #[doc = include_str!("power_profile.doc/is_constrained.md")]
+    #[doc = include_str!("../../docs/api/power/power_profile.doc/is_constrained.md")]
     #[must_use]
     pub fn is_constrained(&self) -> bool {
         let low_battery = matches!(self.source, PowerSource::Battery)
@@ -86,31 +65,32 @@ impl PowerProfile {
         self.low_power_mode || low_battery || self.thermal >= ThermalState::Serious
     }
 
-    #[doc = include_str!("power_profile.doc/on_battery.md")]
+    /// Returns whether the device is running on battery (spec §7.11).
     #[must_use]
     pub const fn on_battery(&self) -> bool {
         matches!(self.source, PowerSource::Battery)
     }
 
-    #[doc = include_str!("power_profile.doc/source.md")]
+    /// Returns the current power source (spec §7.11).
     #[must_use]
     pub const fn source(&self) -> PowerSource {
         self.source
     }
 
-    #[doc = include_str!("power_profile.doc/battery_level.md")]
+    /// Returns the battery charge level in `0.0..=1.0`, or `None` if unknown or
+    /// on AC (spec §7.11).
     #[must_use]
     pub const fn battery_level(&self) -> Option<f32> {
         self.battery_level
     }
 
-    #[doc = include_str!("power_profile.doc/is_low_power_mode.md")]
+    /// Returns whether OS low-power / battery-saver mode is engaged (spec §7.11).
     #[must_use]
     pub const fn is_low_power_mode(&self) -> bool {
         self.low_power_mode
     }
 
-    #[doc = include_str!("power_profile.doc/thermal.md")]
+    /// Returns the current thermal pressure state (spec §7.11).
     #[must_use]
     pub const fn thermal(&self) -> ThermalState {
         self.thermal
@@ -197,12 +177,5 @@ mod tests {
             PowerProfile::new().with_battery_level(-0.3).battery_level(),
             Some(0.0)
         );
-    }
-
-    #[test]
-    fn thermal_states_are_ordered() {
-        assert!(ThermalState::Nominal < ThermalState::Fair);
-        assert!(ThermalState::Fair < ThermalState::Serious);
-        assert!(ThermalState::Serious < ThermalState::Critical);
     }
 }

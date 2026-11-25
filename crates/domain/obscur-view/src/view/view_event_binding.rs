@@ -1,30 +1,31 @@
-#![doc = include_str!("view_event_binding.doc/_module.md")]
+//! `ViewEventBinding`: binds an event to an action that flows up.
 
 use obscur_identity::InternedSymbol;
 
-#[doc = include_str!("view_event_binding.doc/ViewEventBinding.md")]
+#[doc = include_str!("../../docs/api/view/view_event_binding.doc/ViewEventBinding.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ViewEventBinding {
-    #[doc = include_str!("view_event_binding.doc/event.md")]
+    /// Interned name of the event this binding listens for.
     event: InternedSymbol,
-    #[doc = include_str!("view_event_binding.doc/command.md")]
+    /// Interned handle of the semantic command invoked when the event fires.
+    /// This is the action that flows *up* to the runtime.
     command: InternedSymbol,
 }
 
 impl ViewEventBinding {
-    #[doc = include_str!("view_event_binding.doc/new.md")]
+    /// Binds `event` to the `command` it should invoke.
     #[must_use]
     pub const fn new(event: InternedSymbol, command: InternedSymbol) -> Self {
         Self { event, command }
     }
 
-    #[doc = include_str!("view_event_binding.doc/event_2.md")]
+    /// Returns the interned event name.
     #[must_use]
     pub const fn event(&self) -> InternedSymbol {
         self.event
     }
 
-    #[doc = include_str!("view_event_binding.doc/command_2.md")]
+    /// Returns the interned command invoked when the event fires.
     #[must_use]
     pub const fn command(&self) -> InternedSymbol {
         self.command

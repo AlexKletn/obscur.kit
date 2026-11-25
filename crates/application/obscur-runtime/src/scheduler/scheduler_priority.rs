@@ -1,26 +1,26 @@
-#![doc = include_str!("scheduler_priority.doc/_module.md")]
+//! Scheduler priority bands (spec §3.6): [`SchedulerPriority`].
 
 use crate::frame::FrameReason;
 
-#[doc = include_str!("scheduler_priority.doc/SchedulerPriority.md")]
+#[doc = include_str!("../../docs/api/scheduler/scheduler_priority.doc/SchedulerPriority.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SchedulerPriority {
-    #[doc = include_str!("scheduler_priority.doc/Input.md")]
+    /// §3.6 (1): input, focus, pointer and IME work — the most urgent band.
     Input,
-    #[doc = include_str!("scheduler_priority.doc/Commit.md")]
+    /// §3.6 (2): committing a UI transaction.
     Commit,
-    #[doc = include_str!("scheduler_priority.doc/CurrentFrame.md")]
+    /// §3.6 (3): the current frame's animation, layout and paint.
     CurrentFrame,
-    #[doc = include_str!("scheduler_priority.doc/ResourceCompletion.md")]
+    /// §3.6 (4): completion of an asynchronous resource load.
     ResourceCompletion,
-    #[doc = include_str!("scheduler_priority.doc/Background.md")]
+    #[doc = include_str!("../../docs/api/scheduler/scheduler_priority.doc/Background.md")]
     Background,
-    #[doc = include_str!("scheduler_priority.doc/Diagnostics.md")]
+    /// §3.6 (6): telemetry and development diagnostics — the least urgent band.
     Diagnostics,
 }
 
 impl SchedulerPriority {
-    #[doc = include_str!("scheduler_priority.doc/from_reason.md")]
+    #[doc = include_str!("../../docs/api/scheduler/scheduler_priority.doc/from_reason.md")]
     #[must_use]
     pub const fn from_reason(reason: FrameReason) -> Self {
         match reason {
@@ -37,13 +37,13 @@ impl SchedulerPriority {
         }
     }
 
-    #[doc = include_str!("scheduler_priority.doc/is_more_urgent_than.md")]
+    #[doc = include_str!("../../docs/api/scheduler/scheduler_priority.doc/is_more_urgent_than.md")]
     #[must_use]
     pub const fn is_more_urgent_than(self, other: Self) -> bool {
         (self as u8) < (other as u8)
     }
 
-    #[doc = include_str!("scheduler_priority.doc/rank.md")]
+    #[doc = include_str!("../../docs/api/scheduler/scheduler_priority.doc/rank.md")]
     #[must_use]
     pub const fn rank(self) -> u8 {
         self as u8

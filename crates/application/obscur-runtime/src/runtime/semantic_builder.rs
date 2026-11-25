@@ -1,4 +1,6 @@
-#![doc = include_str!("semantic_builder.doc/_module.md")]
+//! Derives the semantic accessibility tree from the retained UI tree (§7.1).
+
+use super::inherited_state::InheritedState;
 
 use std::collections::BTreeSet;
 
@@ -10,47 +12,33 @@ use obscur_identity::{InternedSymbol, NodeId};
 use obscur_tree::node::{NodeFlags, NodeKind, RetainedNode};
 use obscur_tree::tree::RetainedTree;
 use obscur_view::view::{
-    EVENT_CHANGE, EVENT_CLICK, EVENT_INPUT, SLIDER_HIGH, SLIDER_LOW, SLIDER_RANGED, SliderScale,
-    ViewProperty, ViewValue,
+    EVENT_CHANGE, EVENT_CLICK, SLIDER_HIGH, SLIDER_LOW, SLIDER_RANGED, SliderScale, ViewProperty,
+    ViewValue,
 };
 
-#[doc = include_str!("semantic_builder.doc/InheritedState.md")]
-#[derive(Debug, Clone, Copy, Default)]
-struct InheritedState {
-    #[doc = include_str!("semantic_builder.doc/disabled.md")]
-    disabled: bool,
-    #[doc = include_str!("semantic_builder.doc/readonly.md")]
-    readonly: bool,
-    #[doc = include_str!("semantic_builder.doc/editable.md")]
-    editable: bool,
-}
-
-impl InheritedState {
-    #[doc = include_str!("semantic_builder.doc/extend.md")]
-    fn extend(self, node: &RetainedNode) -> Self {
-        let attributes = node.attributes();
-        Self {
-            disabled: self.disabled || attributes.is_disabled(),
-            readonly: self.readonly || attributes.is_readonly(),
-            editable: self.editable || node.command_for_event(EVENT_INPUT).is_some(),
-        }
-    }
-}
-
-#[doc = include_str!("semantic_builder.doc/SemanticTreeBuilder.md")]
+#[doc = include_str!("../../docs/api/runtime/semantic_builder.doc/SemanticTreeBuilder.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SemanticTreeBuilder;
 
 impl SemanticTreeBuilder {
-    #[doc = include_str!("semantic_builder.doc/PROGRESS_VALUE.md")]
+    #[doc = include_str!("../../docs/api/runtime/semantic_builder.doc/PROGRESS_VALUE.md")]
     const PROGRESS_VALUE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0702);
 
-    #[doc = include_str!("semantic_builder.doc/PROGRESS_TRACKED.md")]
+    #[doc = include_str!("../../docs/api/runtime/semantic_builder.doc/PROGRESS_TRACKED.md")]
     const PROGRESS_TRACKED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0704);
 
-    #[doc = include_str!("semantic_builder.doc/build.md")]
+    #[doc = include_str!("../../docs/api/runtime/semantic_builder.doc/build.md")]
     #[must_use]
     pub fn build(tree: &RetainedTree, focused: Option<NodeId>) -> SemanticTree {
+        Self::build_visible(tree, focused, |_| true)
+    }
+
+    /// Builds the accessibility tree from visible nodes, promoting visible descendants past hidden ancestors.
+    pub(crate) fn build_visible(
+        tree: &RetainedTree,
+        focused: Option<NodeId>,
+        visible: impl Fn(NodeId) -> bool,
+    ) -> SemanticTree {
         let mut semantic = SemanticTree::new();
         if let Some(root) = tree.root() {
             let mut visited = BTreeSet::new();
@@ -59,7 +47,7 @@ impl SemanticTreeBuilder {
                 tree,
                 root,
                 None,
-                focused,
+                (focused, &visible),
                 inherited,
                 &mut visited,
                 &mut semantic,
@@ -71,18 +59,23 @@ impl SemanticTreeBuilder {
         semantic
     }
 
-    #[doc = include_str!("semantic_builder.doc/snapshot.md")]
+    /// Builds a [`SemanticTree`] and captures it as an immutable
+    /// [`SemanticSnapshot`] for hand-off to an
+    /// [`AccessibilityBridge`](obscur_accessibility::port::AccessibilityBridge).
     #[must_use]
     pub fn snapshot(tree: &RetainedTree, focused: Option<NodeId>) -> SemanticSnapshot {
         SemanticSnapshot::from_tree(&Self::build(tree, focused))
     }
 
-    #[doc = include_str!("semantic_builder.doc/walk.md")]
+    /// Recursively inserts `id` and its descendants into `semantic`, linking each
+    /// under `parent` and folding `id`'s own structural state into the
+    /// `inherited` state its subtree sees. The `visited` set guards against a
+    /// malformed (cyclic) retained tree by inserting each node at most once.
     fn walk(
         tree: &RetainedTree,
         id: NodeId,
         parent: Option<NodeId>,
-        focused: Option<NodeId>,
+        projection: (Option<NodeId>, &impl Fn(NodeId) -> bool),
         inherited: InheritedState,
         visited: &mut BTreeSet<NodeId>,
         semantic: &mut SemanticTree,
@@ -97,19 +90,42 @@ impl SemanticTreeBuilder {
         // each node's logical parent, so this inheritance sees exactly the chain
         // the runtime's `is_within_disabled` gate walks upwards.
         let inherited = inherited.extend(node);
-        semantic.insert(Self::map_node(tree, id, node, focused, inherited), parent);
+        let (focused, visible) = projection;
+        let child_parent = if visible(id) {
+            let mapped = Self::map_node(tree, id, node, focused, inherited, visible);
+            semantic.insert(mapped, parent);
+            Some(id)
+        } else if parent.is_none() {
+            // Keep one structural root even when CSS hides the document root.
+            semantic.insert(SemanticNode::new(id, SemanticRole::Group), None);
+            Some(id)
+        } else {
+            parent
+        };
         for &child in node.child_nodes() {
-            Self::walk(tree, child, Some(id), focused, inherited, visited, semantic);
+            Self::walk(
+                tree,
+                child,
+                child_parent,
+                projection,
+                inherited,
+                visited,
+                semantic,
+            );
         }
     }
 
-    #[doc = include_str!("semantic_builder.doc/map_node.md")]
+    /// Maps a single retained `node` (identified by `id`) to its
+    /// [`SemanticNode`], deriving role, accessible name, value, state and actions
+    /// from the node's kind, attributes, event bindings and flags, plus the
+    /// `inherited` structural state of its ancestors.
     fn map_node(
         tree: &RetainedTree,
         id: NodeId,
         node: &RetainedNode,
         focused: Option<NodeId>,
         inherited: InheritedState,
+        visible: &impl Fn(NodeId) -> bool,
     ) -> SemanticNode {
         let role = Self::role_of(node);
 
@@ -122,6 +138,19 @@ impl SemanticTreeBuilder {
         state.disabled = inherited.disabled;
         state.readonly = inherited.readonly;
         state.checked = Self::checked_state(role, node);
+
+        if role == SemanticRole::Row {
+            let flag = |name| {
+                node.props().iter().find_map(|prop| {
+                    match (prop.name() == InternedSymbol::named(name), prop.value()) {
+                        (true, ViewValue::Bool(value)) => Some(*value),
+                        _ => None,
+                    }
+                })
+            };
+            state.selected = flag("aria-selected").unwrap_or(false);
+            state.expanded = flag("aria-expanded");
+        }
 
         let mut semantic = SemanticNode::new(id, role).with_state(state);
 
@@ -138,7 +167,7 @@ impl SemanticTreeBuilder {
             semantic = semantic
                 .with_name(content)
                 .with_value(SemanticValue::text(content));
-        } else if let Some(name) = Self::element_name(tree, node) {
+        } else if let Some(name) = Self::element_name(tree, node, visible) {
             semantic = semantic.with_name(name);
         }
 
@@ -150,7 +179,7 @@ impl SemanticTreeBuilder {
         semantic
     }
 
-    #[doc = include_str!("semantic_builder.doc/value_of.md")]
+    #[doc = include_str!("../../docs/api/runtime/semantic_builder.doc/value_of.md")]
     fn value_of(role: SemanticRole, node: &RetainedNode) -> SemanticValue {
         match role {
             SemanticRole::Slider => Self::slider_value(node.props()),
@@ -159,7 +188,7 @@ impl SemanticTreeBuilder {
         }
     }
 
-    #[doc = include_str!("semantic_builder.doc/slider_value.md")]
+    #[doc = include_str!("../../docs/api/runtime/semantic_builder.doc/slider_value.md")]
     fn slider_value(props: &[ViewProperty]) -> SemanticValue {
         let Some(low) = Self::number_prop(props, SLIDER_LOW) else {
             return SemanticValue::None;
@@ -173,7 +202,7 @@ impl SemanticTreeBuilder {
         }
     }
 
-    #[doc = include_str!("semantic_builder.doc/progress_value.md")]
+    #[doc = include_str!("../../docs/api/runtime/semantic_builder.doc/progress_value.md")]
     fn progress_value(props: &[ViewProperty]) -> SemanticValue {
         // An untracked bar carries a value of zero — it has to carry something —
         // and that zero is not a position. Reading it would announce "not
@@ -188,7 +217,7 @@ impl SemanticTreeBuilder {
         })
     }
 
-    #[doc = include_str!("semantic_builder.doc/is_tracked.md")]
+    #[doc = include_str!("../../docs/api/runtime/semantic_builder.doc/is_tracked.md")]
     fn is_tracked(props: &[ViewProperty]) -> bool {
         // Absent means tracked, the same default the painter takes: only an
         // explicit denial makes a bar indeterminate.
@@ -197,7 +226,7 @@ impl SemanticTreeBuilder {
         })
     }
 
-    #[doc = include_str!("semantic_builder.doc/number_prop.md")]
+    #[doc = include_str!("../../docs/api/runtime/semantic_builder.doc/number_prop.md")]
     fn number_prop(props: &[ViewProperty], name: InternedSymbol) -> Option<f32> {
         props
             .iter()
@@ -213,7 +242,8 @@ impl SemanticTreeBuilder {
             .filter(|v| v.is_finite())
     }
 
-    #[doc = include_str!("semantic_builder.doc/flag_prop.md")]
+    /// Reads `name` off `props` as a boolean, defaulting to `false` when the
+    /// property is absent or is not a boolean.
     fn flag_prop(props: &[ViewProperty], name: InternedSymbol) -> bool {
         props
             .iter()
@@ -221,13 +251,17 @@ impl SemanticTreeBuilder {
             .is_some_and(|p| matches!(p.value(), ViewValue::Bool(true)))
     }
 
-    #[doc = include_str!("semantic_builder.doc/checked_state.md")]
+    /// The [`checked`](SemanticState::checked) tri-state for `node`: the same
+    /// `:checked` attribute the CSS matcher reads, but reported only for a role
+    /// that is genuinely checkable — a `None` here means "not checkable", which
+    /// would be a lie for a button, so a non-checkable role never claims a
+    /// two-state at all.
     fn checked_state(role: SemanticRole, node: &RetainedNode) -> Option<bool> {
         matches!(role, SemanticRole::Checkbox | SemanticRole::RadioButton)
             .then(|| node.attributes().is_checked())
     }
 
-    #[doc = include_str!("semantic_builder.doc/actions_of.md")]
+    #[doc = include_str!("../../docs/api/runtime/semantic_builder.doc/actions_of.md")]
     fn actions_of(
         node: &RetainedNode,
         state: SemanticState,
@@ -246,13 +280,18 @@ impl SemanticTreeBuilder {
         actions
     }
 
-    #[doc = include_str!("semantic_builder.doc/is_activatable.md")]
+    /// Whether `node`'s own bindings make it activatable, mirroring the runtime's
+    /// `UiRuntime::activation_command_for`: a bound [`EVENT_CLICK`] activates,
+    /// and so does a bound [`EVENT_CHANGE`] — but only on a **non-editable**
+    /// control, since a checkbox's click *is* its change while a text field's
+    /// `change` fires on commit (blur / Enter), not on the click.
     fn is_activatable(node: &RetainedNode, inherited: InheritedState) -> bool {
         node.command_for_event(EVENT_CLICK).is_some()
             || (!inherited.editable && node.command_for_event(EVENT_CHANGE).is_some())
     }
 
-    #[doc = include_str!("semantic_builder.doc/role_of.md")]
+    /// Chooses a [`SemanticRole`] for a retained node from its kind and, for
+    /// elements, its CSS *type* / local name.
     pub(crate) fn role_of(node: &RetainedNode) -> SemanticRole {
         match node.kind() {
             // The structural root and system-generated synthetic parts are both
@@ -266,7 +305,9 @@ impl SemanticTreeBuilder {
         }
     }
 
-    #[doc = include_str!("semantic_builder.doc/role_for_local_name.md")]
+    /// Maps an element's local name (CSS type selector target) onto a
+    /// [`SemanticRole`], falling back to [`SemanticRole::Group`] for names with no
+    /// established semantics — inventing no role the tree does not name.
     fn role_for_local_name(local_name: &str) -> SemanticRole {
         match local_name {
             "button" => SemanticRole::Button,
@@ -282,6 +323,7 @@ impl SemanticTreeBuilder {
             "list" | "ul" | "ol" => SemanticRole::List,
             "listitem" | "li" => SemanticRole::ListItem,
             "table" => SemanticRole::Table,
+            "treegrid" => SemanticRole::TreeGrid,
             "row" | "tr" => SemanticRole::Row,
             // No `ColumnHeader` role exists to map `th` onto, so it takes the
             // nearest true one: a header cell is a cell. Naming it `Group` — the
@@ -302,11 +344,18 @@ impl SemanticTreeBuilder {
         }
     }
 
-    #[doc = include_str!("semantic_builder.doc/element_name.md")]
-    fn element_name(tree: &RetainedTree, node: &RetainedNode) -> Option<String> {
+    /// Derives an element's accessible name from its direct text children, joining
+    /// their non-empty trimmed contents with a single space. Returns `None` when
+    /// the element has no text children with content.
+    fn element_name(
+        tree: &RetainedTree,
+        node: &RetainedNode,
+        visible: &impl Fn(NodeId) -> bool,
+    ) -> Option<String> {
         let parts: Vec<String> = node
             .child_nodes()
             .iter()
+            .filter(|&&child| visible(child))
             .filter_map(|&child| tree.get(child).and_then(|c| c.kind().text()).map(str::trim))
             .filter(|text| !text.is_empty())
             .map(str::to_owned)
@@ -323,6 +372,7 @@ impl SemanticTreeBuilder {
 mod tests {
     use super::*;
     use obscur_identity::{ComponentId, InternedSymbol};
+    use obscur_view::view::EVENT_INPUT;
     use obscur_view::view::{
         CHECKED, CLASS, DISABLED, LOCAL_NAME, READONLY, SLIDER_MAX, SLIDER_MIN, StyleAttributes,
         ViewEventBinding, ViewProperty, ViewValue,

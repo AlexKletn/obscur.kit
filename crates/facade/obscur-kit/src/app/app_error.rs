@@ -1,27 +1,49 @@
-#![doc = include_str!("app_error.doc/_module.md")]
+//! [`AppError`] — why [`App::run`](super::App::run) could not start or complete.
 
 use crate::screen::ScreenError;
+#[cfg(feature = "shell-layer")]
+use crate::shell_layer::error::LayerShellError;
+use crate::view::component::RegistryError;
 
-#[doc = include_str!("app_error.doc/AppError.md")]
+/// Why [`App::run`](super::App::run) could not start or complete.
 #[derive(Debug)]
 pub enum AppError {
-    #[doc = include_str!("app_error.doc/ScreenParse.md")]
+    /// An `.okui` [`screen`](super::App::screen) did not parse; carries one message
+    /// per parse error.
     ScreenParse(Vec<String>),
-    #[doc = include_str!("app_error.doc/ScreenCompile.md")]
+    /// An `.okui` [`screen`](super::App::screen) parsed but failed to compile;
+    /// carries one message per compile diagnostic.
     ScreenCompile(Vec<String>),
-    #[doc = include_str!("app_error.doc/EventLoop.md")]
-    EventLoop(String),
-    #[doc = include_str!("app_error.doc/Window.md")]
+    /// A component could not be registered during startup.
+    ComponentRegistration(RegistryError),
+    /// The winit event loop could not be built or run.
+    #[cfg(feature = "window-winit")]
+    EventLoop(winit::error::EventLoopError),
+    /// The requested window configuration is invalid.
     Window(String),
-    #[doc = include_str!("app_error.doc/Gpu.md")]
+    /// The OS window could not be created.
+    #[cfg(feature = "window-winit")]
+    WindowCreation(winit::error::OsError),
+    /// No usable GPU adapter/device/surface (as in a headless environment).
     Gpu(String),
-    #[doc = include_str!("app_error.doc/LayerUnsupported.md")]
+    /// The GPU backend could not create a presentation surface.
+    GpuSurface(wgpu::CreateSurfaceError),
+    /// No compatible GPU adapter could be selected.
+    GpuAdapter(wgpu::RequestAdapterError),
+    /// The selected adapter could not provide a device.
+    GpuDevice(wgpu::RequestDeviceError),
+    /// The renderer could not initialize with the selected GPU device.
+    GpuRenderer(obscur_render_vello::error::VelloRenderError),
+    /// The OS refused to start the GPU surface acquisition thread.
+    SurfaceAcquireThread(std::io::Error),
+    #[doc = include_str!("../../docs/api/app/app_error.doc/LayerUnsupported.md")]
     LayerUnsupported,
-    #[doc = include_str!("app_error.doc/Layer.md")]
-    Layer(String),
-    #[doc = include_str!("app_error.doc/NoWindowBackend.md")]
+    /// The platform has desktop surfaces, and this one could not be created.
+    #[cfg(feature = "shell-layer")]
+    Layer(LayerShellError),
+    #[doc = include_str!("../../docs/api/app/app_error.doc/NoWindowBackend.md")]
     NoWindowBackend,
-    #[doc = include_str!("app_error.doc/FrameAwareLayerRoot.md")]
+    #[doc = include_str!("../../docs/api/app/app_error.doc/FrameAwareLayerRoot.md")]
     FrameAwareLayerRoot,
 }
 
@@ -38,14 +60,28 @@ impl std::fmt::Display for AppError {
                     diagnostics.join("; ")
                 )
             }
-            Self::EventLoop(reason) => write!(f, "could not build the event loop: {reason}"),
+            Self::ComponentRegistration(error) => {
+                write!(f, "could not register an application component: {error}")
+            }
+            #[cfg(feature = "window-winit")]
+            Self::EventLoop(error) => write!(f, "window event loop failed: {error}"),
             Self::Window(reason) => write!(f, "could not create the window: {reason}"),
+            #[cfg(feature = "window-winit")]
+            Self::WindowCreation(error) => write!(f, "could not create the window: {error}"),
             Self::Gpu(reason) => write!(f, "no usable GPU adapter/device/surface: {reason}"),
+            Self::GpuSurface(error) => write!(f, "could not create a GPU surface: {error}"),
+            Self::GpuAdapter(error) => write!(f, "could not select a GPU adapter: {error}"),
+            Self::GpuDevice(error) => write!(f, "could not request a GPU device: {error}"),
+            Self::GpuRenderer(error) => write!(f, "could not initialize the GPU renderer: {error}"),
+            Self::SurfaceAcquireThread(error) => {
+                write!(f, "could not start surface acquisition: {error}")
+            }
             Self::LayerUnsupported => f.write_str(
                 "this desktop has no layer surfaces, so `App::layer` cannot open a panel \
                  (expected on GNOME, and on any platform without a desktop-surface backend)",
             ),
-            Self::Layer(reason) => write!(f, "could not create the layer surface: {reason}"),
+            #[cfg(feature = "shell-layer")]
+            Self::Layer(error) => write!(f, "could not create the layer surface: {error}"),
             Self::NoWindowBackend => f.write_str(
                 "this build has no windowing backend: enable `window-winit`, or call \
                  `App::layer` to open a desktop surface instead",
@@ -58,10 +94,31 @@ impl std::fmt::Display for AppError {
     }
 }
 
-impl std::error::Error for AppError {}
+impl std::error::Error for AppError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::ComponentRegistration(error) => Some(error),
+            Self::SurfaceAcquireThread(error) => Some(error),
+            Self::GpuSurface(error) => Some(error),
+            Self::GpuAdapter(error) => Some(error),
+            Self::GpuDevice(error) => Some(error),
+            Self::GpuRenderer(error) => Some(error),
+            #[cfg(feature = "window-winit")]
+            Self::EventLoop(error) => Some(error),
+            #[cfg(feature = "window-winit")]
+            Self::WindowCreation(error) => Some(error),
+            #[cfg(feature = "shell-layer")]
+            Self::Layer(error) => Some(error),
+            _ => None,
+        }
+    }
+}
 
 impl From<ScreenError> for AppError {
-    #[doc = include_str!("app_error.doc/from.md")]
+    /// Carries a screen front-end failure into the one error type a windowed
+    /// application sees, keeping the parse/compile split (and the diagnostics)
+    /// intact — the `.okui` front end is display-free and has its own error type, so
+    /// this is the only place the two meet.
     fn from(error: ScreenError) -> Self {
         match error {
             ScreenError::Parse(messages) => Self::ScreenParse(messages),
@@ -71,19 +128,67 @@ impl From<ScreenError> for AppError {
 }
 
 #[cfg(feature = "shell-layer")]
-impl From<crate::shell_layer::error::LayerShellError> for AppError {
-    #[doc = include_str!("app_error.doc/from_layer.md")]
-    fn from(error: crate::shell_layer::error::LayerShellError) -> Self {
+impl From<LayerShellError> for AppError {
+    /// Keeps the one distinction that matters: *this platform cannot*, as against
+    /// *this attempt failed*.
+    fn from(error: LayerShellError) -> Self {
         match error {
-            crate::shell_layer::error::LayerShellError::Unsupported => Self::LayerUnsupported,
-            other => Self::Layer(other.to_string()),
+            LayerShellError::Unsupported => Self::LayerUnsupported,
+            other => Self::Layer(other),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::error::Error;
+    use std::io;
+
     use super::{AppError, ScreenError};
+
+    #[test]
+    fn a_surface_acquisition_startup_failure_keeps_the_io_error() {
+        let error = AppError::SurfaceAcquireThread(io::Error::from(io::ErrorKind::WouldBlock));
+        let kind = error
+            .source()
+            .and_then(|source| source.downcast_ref::<io::Error>())
+            .map(io::Error::kind);
+
+        assert_eq!(kind, Some(io::ErrorKind::WouldBlock));
+    }
+
+    #[cfg(feature = "window-winit")]
+    #[test]
+    fn an_event_loop_failure_keeps_the_winit_error() {
+        use winit::error::EventLoopError;
+
+        let error = AppError::EventLoop(EventLoopError::RecreationAttempt);
+        let source = error
+            .source()
+            .and_then(|source| source.downcast_ref::<EventLoopError>());
+
+        assert!(matches!(source, Some(EventLoopError::RecreationAttempt)));
+    }
+
+    #[test]
+    fn a_renderer_startup_failure_keeps_the_full_error_chain() {
+        use obscur_render_vello::error::VelloRenderError;
+
+        let error = AppError::GpuRenderer(VelloRenderError::RendererInitialization(
+            vello::Error::NoCompatibleDevice,
+        ));
+        let backend_error = error
+            .source()
+            .and_then(|source| source.downcast_ref::<VelloRenderError>());
+        let vello_error = backend_error
+            .and_then(Error::source)
+            .and_then(|source| source.downcast_ref::<vello::Error>());
+
+        assert!(matches!(
+            vello_error,
+            Some(vello::Error::NoCompatibleDevice)
+        ));
+    }
 
     #[test]
     fn the_two_configuration_mistakes_say_what_to_do_instead() {
@@ -101,6 +206,25 @@ mod tests {
         // The one a host is expected to branch on and fall back to a window.
         let text = AppError::LayerUnsupported.to_string();
         assert!(text.contains("no layer surfaces"), "{text}");
+    }
+
+    #[cfg(feature = "shell-layer")]
+    #[test]
+    fn a_layer_surface_failure_preserves_the_adapter_error() {
+        use super::LayerShellError;
+
+        let error = AppError::from(LayerShellError::Dispatch("broken pipe".into()));
+        let source = error
+            .source()
+            .and_then(|source| source.downcast_ref::<LayerShellError>());
+
+        assert!(
+            matches!(source, Some(LayerShellError::Dispatch(reason)) if reason == "broken pipe")
+        );
+        assert!(matches!(
+            AppError::from(LayerShellError::Unsupported),
+            AppError::LayerUnsupported
+        ));
     }
 
     #[test]

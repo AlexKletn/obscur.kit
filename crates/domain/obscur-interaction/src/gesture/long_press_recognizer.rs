@@ -1,8 +1,9 @@
-#![doc = include_str!("long_press_recognizer.doc/_module.md")]
+//! The [`LongPressRecognizer`] — a contact held still past a threshold (spec
+//! §6.16 `LongPress`).
 
 use super::{GestureKind, GestureRecognizer, RecognizerId, RecognizerState};
 
-#[doc = include_str!("long_press_recognizer.doc/LongPressRecognizer.md")]
+#[doc = include_str!("../../docs/api/gesture/long_press_recognizer.doc/LongPressRecognizer.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LongPressRecognizer {
     recognizer: GestureRecognizer,
@@ -11,7 +12,8 @@ pub struct LongPressRecognizer {
 }
 
 impl LongPressRecognizer {
-    #[doc = include_str!("long_press_recognizer.doc/new.md")]
+    /// Arms a long press that recognizes after `threshold` seconds of a contact
+    /// held still.
     #[must_use]
     pub fn new(id: RecognizerId, threshold: f32) -> Self {
         Self {
@@ -21,9 +23,9 @@ impl LongPressRecognizer {
         }
     }
 
-    #[doc = include_str!("long_press_recognizer.doc/advance.md")]
+    #[doc = include_str!("../../docs/api/gesture/long_press_recognizer.doc/advance.md")]
     pub fn advance(&mut self, seconds: f32) -> bool {
-        if self.recognizer.state().is_terminal() || seconds <= 0.0 {
+        if self.recognizer.state().is_terminal() || !seconds.is_finite() || seconds <= 0.0 {
             return false;
         }
         self.held += seconds;
@@ -34,36 +36,38 @@ impl LongPressRecognizer {
         true
     }
 
-    #[doc = include_str!("long_press_recognizer.doc/moved.md")]
+    #[doc = include_str!("../../docs/api/gesture/long_press_recognizer.doc/moved.md")]
     pub fn moved(&mut self, distance: f32, slop: f32) {
         if distance > slop {
             self.recognizer.fail();
         }
     }
 
-    #[doc = include_str!("long_press_recognizer.doc/end.md")]
+    /// Fails the long press: the contact lifted before the threshold, so it was a
+    /// tap.
     pub fn end(&mut self) {
         self.recognizer.fail();
     }
 
-    #[doc = include_str!("long_press_recognizer.doc/cancel.md")]
+    /// Cancels the long press — the system took the sequence, or another
+    /// recognizer won it.
     pub fn cancel(&mut self) {
         self.recognizer.cancel();
     }
 
-    #[doc = include_str!("long_press_recognizer.doc/is_recognized.md")]
+    /// Whether the hold has been recognized.
     #[must_use]
     pub fn is_recognized(&self) -> bool {
         self.recognizer.state() == RecognizerState::Recognized
     }
 
-    #[doc = include_str!("long_press_recognizer.doc/is_pending.md")]
+    /// Whether the hold is still a candidate — neither recognized nor ruled out.
     #[must_use]
     pub fn is_pending(&self) -> bool {
         self.recognizer.state() == RecognizerState::Possible
     }
 
-    #[doc = include_str!("long_press_recognizer.doc/state.md")]
+    /// The recognizer's lifecycle state.
     #[must_use]
     pub fn state(&self) -> RecognizerState {
         self.recognizer.state()

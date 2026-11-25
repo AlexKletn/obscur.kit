@@ -1,23 +1,24 @@
-#![doc = include_str!("version_stamp.doc/_module.md")]
+//! Version stamp used to detect changed snapshots between frames.
 
-#[doc = include_str!("version_stamp.doc/VersionStamp.md")]
+/// A coarse version stamp attached to snapshots and cached derivations so a
+/// consumer can cheaply tell whether its input changed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct VersionStamp(u64);
 
 impl VersionStamp {
-    #[doc = include_str!("version_stamp.doc/from_raw.md")]
+    /// Wraps a raw version value.
     #[must_use]
     pub const fn from_raw(raw: u64) -> Self {
         Self(raw)
     }
 
-    #[doc = include_str!("version_stamp.doc/raw.md")]
+    /// Returns the raw version value.
     #[must_use]
     pub const fn raw(self) -> u64 {
         self.0
     }
 
-    #[doc = include_str!("version_stamp.doc/bump.md")]
+    /// Returns the next version stamp, wrapping on overflow.
     #[must_use]
     pub const fn bump(self) -> Self {
         Self(self.0.wrapping_add(1))

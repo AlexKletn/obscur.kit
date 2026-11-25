@@ -1,4 +1,4 @@
-#![doc = include_str!("default_stylesheet.doc/_module.md")]
+#![doc = include_str!("../docs/api/default_stylesheet.doc/_module.md")]
 
 use crate::css::compiler::StylesheetCompiler;
 use crate::css::parser::StylesheetParser;
@@ -8,7 +8,7 @@ use crate::style::matching::Stylesheet;
 
 pub use obscur_theme_system::stylesheet::ua_css;
 
-#[doc = include_str!("default_stylesheet.doc/ua_stylesheet.md")]
+#[doc = include_str!("../docs/api/default_stylesheet.doc/ua_stylesheet.md")]
 #[must_use]
 pub fn ua_stylesheet() -> Stylesheet {
     let source = CssSource::anonymous(ua_css());

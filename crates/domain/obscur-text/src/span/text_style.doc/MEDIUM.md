@@ -1,1 +1,0 @@
-Medium weight (`500`).

@@ -1,40 +1,42 @@
-#![doc = include_str!("dialog_result.doc/_module.md")]
+//! The outcome of presenting a dialog (spec §6.9 — dialog providers).
 
 use crate::document::{DirectoryHandle, DocumentHandle};
 
-#[doc = include_str!("dialog_result.doc/DialogResult.md")]
+#[doc = include_str!("../../docs/api/dialog/dialog_result.doc/DialogResult.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum DialogResult {
-    #[doc = include_str!("dialog_result.doc/Files.md")]
+    /// The user selected zero or more files (an open result; possibly empty).
     Files(Vec<DocumentHandle>),
-    #[doc = include_str!("dialog_result.doc/Saved.md")]
+    /// The user chose a destination for a save request.
     Saved(DocumentHandle),
-    #[doc = include_str!("dialog_result.doc/Folder.md")]
+    /// The user selected a folder.
     Folder(DirectoryHandle),
-    #[doc = include_str!("dialog_result.doc/Confirmed.md")]
+    /// The user answered a message/confirmation — the button they chose.
     Confirmed(bool),
-    #[doc = include_str!("dialog_result.doc/Dismissed.md")]
+    /// The user closed the dialog without making a choice.
     Dismissed,
-    #[doc = include_str!("dialog_result.doc/Denied.md")]
+    /// The request was denied by permission policy.
     Denied,
-    #[doc = include_str!("dialog_result.doc/Unsupported.md")]
+    /// The provider does not support this kind of dialog.
     Unsupported,
 }
 
 impl DialogResult {
-    #[doc = include_str!("dialog_result.doc/is_dismissed.md")]
+    /// Returns whether the user dismissed the dialog without choosing
+    /// (spec §6.9).
     #[must_use]
     pub const fn is_dismissed(&self) -> bool {
         matches!(self, Self::Dismissed)
     }
 
-    #[doc = include_str!("dialog_result.doc/is_denied.md")]
+    /// Returns whether the request was denied by permission policy (spec §6.9).
     #[must_use]
     pub const fn is_denied(&self) -> bool {
         matches!(self, Self::Denied)
     }
 
-    #[doc = include_str!("dialog_result.doc/files.md")]
+    /// Returns the selected files, or `None` when the result is not a
+    /// [`Files`](Self::Files) outcome (spec §6.9).
     #[must_use]
     pub fn files(&self) -> Option<&[DocumentHandle]> {
         match self {
@@ -43,7 +45,8 @@ impl DialogResult {
         }
     }
 
-    #[doc = include_str!("dialog_result.doc/confirmed.md")]
+    /// Returns the confirmation answer, or `None` when the result is not a
+    /// [`Confirmed`](Self::Confirmed) outcome (spec §6.9).
     #[must_use]
     pub const fn confirmed(&self) -> Option<bool> {
         match self {

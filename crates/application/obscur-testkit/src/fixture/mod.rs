@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+#![doc = include_str!("../../docs/api/fixture/mod.doc/_module.md")]
 mod button_element;
 mod class_rule;
 mod counter_panel;

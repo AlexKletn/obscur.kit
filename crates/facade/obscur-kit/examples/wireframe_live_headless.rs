@@ -418,7 +418,7 @@ fn click(runtime: &mut UiRuntime, state: &Rc<RefCell<WireState>>, sheets: &[Styl
 
 #[doc = include_str!("wireframe_live_headless.doc/pointer.md")]
 fn pointer(kind: PointerEventKind, p: Point) -> PointerEvent {
-    PointerEvent::new(PointerId::MOUSE, PointerDevice::Mouse, kind, p)
+    PointerEvent::new(PointerId::MOUSE, PointerDevice::Mouse, kind, p).as_trusted()
 }
 
 #[doc = include_str!("wireframe_live_headless.doc/type_text.md")]

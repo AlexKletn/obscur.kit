@@ -1,5 +1,5 @@
-#![doc = include_str!("local_space.doc/_module.md")]
+//! Logical coordinates relative to a node’s layout-box origin.
 
-#[doc = include_str!("local_space.doc/LocalSpace.md")]
-#[derive(Debug)]
+/// Logical coordinates relative to a node’s layout-box origin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LocalSpace;

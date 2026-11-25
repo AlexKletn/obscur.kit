@@ -1,11 +1,11 @@
-#![doc = include_str!("layer_state.doc/_module.md")]
+//! The Wayland dispatch state behind a layer surface.
 
 use obscur_geometry::{Point, ScaleFactor, Size};
 use obscur_interaction::pointer::{
     PointerButton, PointerButtons, PointerDevice, PointerEvent, PointerEventKind, PointerId,
 };
 use obscur_windowing::display::DisplayId;
-use obscur_windowing::layer::{LayerDisplay, LayerSurfaceEvent};
+use obscur_windowing::layer::{LayerDisplay, LayerPopupEvent, LayerSurfaceEvent};
 use smithay_client_toolkit::compositor::CompositorHandler;
 use smithay_client_toolkit::output::{OutputHandler, OutputState};
 use smithay_client_toolkit::registry::{ProvidesRegistryState, RegistryState};
@@ -14,6 +14,7 @@ use smithay_client_toolkit::seat::pointer::{
 };
 use smithay_client_toolkit::seat::touch::TouchHandler;
 use smithay_client_toolkit::seat::{Capability, SeatHandler, SeatState};
+use smithay_client_toolkit::shell::WaylandSurface;
 use smithay_client_toolkit::shell::wlr_layer::{
     LayerShellHandler, LayerSurface, LayerSurfaceConfigure,
 };
@@ -22,7 +23,7 @@ use smithay_client_toolkit::{
     delegate_touch, registry_handlers,
 };
 use std::collections::HashMap;
-use wayland_client::protocol::{wl_output, wl_pointer, wl_seat, wl_surface, wl_touch};
+use wayland_client::protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_surface, wl_touch};
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle};
 use wayland_protocols::wp::fractional_scale::v1::client::{
     wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1,
@@ -36,77 +37,141 @@ use wayland_protocols::wp::viewporter::client::{
     wp_viewport::WpViewport, wp_viewporter::WpViewporter,
 };
 
-use crate::event::{LayerInput, Presented};
+use super::feedback_tag::FeedbackTag;
+use crate::event::{Discarded, LayerInput, PopupActivation, Presented};
 
-#[doc = include_str!("layer_state.doc/BTN_LEFT.md")]
+/// The left mouse button's Linux input code, which `wl_pointer` reports verbatim.
 const BTN_LEFT: u32 = 0x110;
-#[doc = include_str!("layer_state.doc/BTN_RIGHT.md")]
+/// The right button.
 const BTN_RIGHT: u32 = 0x111;
-#[doc = include_str!("layer_state.doc/BTN_MIDDLE.md")]
+/// The middle button.
 const BTN_MIDDLE: u32 = 0x112;
 
-#[doc = include_str!("layer_state.doc/LayerState.md")]
+#[doc = include_str!("../../docs/api/surface/layer_state.doc/LayerState.md")]
 pub struct LayerState {
     pub(super) registry_state: RegistryState,
     pub(super) seat_state: SeatState,
+    pub(super) pointing_capabilities_dirty: bool,
     pub(super) output_state: OutputState,
+    pub(super) popup: Option<super::layer_popup::LayerPopup>,
     pub(super) layer: Option<LayerSurface>,
-    #[doc = include_str!("layer_state.doc/surface_events.md")]
+    pub(super) popup_events: Vec<LayerPopupEvent>,
+    pub(super) popup_shm: Option<smithay_client_toolkit::shm::Shm>,
+    #[doc = include_str!("../../docs/api/surface/layer_state.doc/surface_events.md")]
     pub(super) surface_events: Vec<LayerSurfaceEvent>,
-    #[doc = include_str!("layer_state.doc/input.md")]
-    pub(super) input: Vec<LayerInput>,
-    #[doc = include_str!("layer_state.doc/size.md")]
+    #[doc = include_str!("../../docs/api/surface/layer_state.doc/input.md")]
+    pub(super) input: Vec<(LayerInput, Option<PopupActivation>)>,
+    /// The size the compositor last configured, in logical pixels.
     pub(super) size: Size,
-    #[doc = include_str!("layer_state.doc/scale.md")]
+    /// The latest application size to use on axes left to the client.
+    pub(super) preferred_size: Size,
+    /// The output scale the surface is on.
     pub(super) scale: f32,
-    #[doc = include_str!("layer_state.doc/closed.md")]
+    /// Set once the compositor closes the surface.
     pub(super) closed: bool,
-    #[doc = include_str!("layer_state.doc/configured.md")]
+    /// Whether a configure has arrived, so the host knows when it may first draw.
     pub(super) configured: bool,
     pointer: Option<wl_pointer::WlPointer>,
+    pub(super) keyboard: Option<(wl_seat::WlSeat, wl_keyboard::WlKeyboard)>,
+    pub(super) ime: super::layer_ime::LayerIme,
+    pub(super) keyboard_target: Option<super::layer_keyboard::KeyboardTarget>,
+    pub(super) consuming_menu_escape: bool,
+    pub(super) seat_modifiers: obscur_interaction::command::Modifiers,
+    pub(super) keyboard_loop: Option<calloop::LoopHandle<'static, Self>>,
     touch: Option<wl_touch::WlTouch>,
-    #[doc = include_str!("layer_state.doc/touch_positions.md")]
+    /// The last position of each live touch contact, because `wl_touch.up`
+    /// carries an id and a time but **no coordinates** — and an `Up` at the
+    /// origin would read as a drag to the top-left corner.
     touch_positions: HashMap<i32, Point>,
-    #[doc = include_str!("layer_state.doc/held.md")]
+    popup_touches: HashMap<i32, (wl_surface::WlSurface, Point)>,
+    /// Buttons currently held, so a `Move` carries the same held set a drag needs.
     held: PointerButtons,
-    #[doc = include_str!("layer_state.doc/cursor.md")]
+    /// The last pointer position, so a button press reports where it happened
+    /// (`wl_pointer.button` carries no coordinates either).
     cursor: Point,
-    #[doc = include_str!("layer_state.doc/fractional.md")]
+    /// The fractional-scale object for this surface, when the compositor offers
+    /// the protocol. Its presence is what decides whether [`scale`](Self::scale)
+    /// can be non-integral.
     pub(super) fractional: Option<WpFractionalScaleV1>,
-    #[doc = include_str!("layer_state.doc/viewport.md")]
+    /// The viewport that maps the fractional buffer onto the logical size.
     pub(super) viewport: Option<WpViewport>,
-    #[doc = include_str!("layer_state.doc/presentation.md")]
+    /// Bound when the compositor offers `wp_presentation`; absent when it does not,
+    /// which costs the timings and nothing else.
     pub(super) presentation: Option<WpPresentation>,
-    #[doc = include_str!("layer_state.doc/presented.md")]
+    /// Frames the compositor has reported as shown, oldest first. Drained by
+    /// `LayerWindow::take_presented`.
     pub(super) presented: Vec<Presented>,
-    #[doc = include_str!("layer_state.doc/feedbacks_asked.md")]
+    #[doc = include_str!("../../docs/api/surface/layer_state.doc/discarded.md")]
+    pub(super) discarded: Vec<Discarded>,
+    /// How many feedbacks have been asked for, which is what numbers them: a
+    /// feedback binds to the next commit, so order is the only association there is.
     pub(super) feedbacks_asked: u64,
+    #[doc = include_str!("../../docs/api/surface/layer_state.doc/commits.md")]
+    pub(super) commits: std::cell::Cell<u64>,
+    #[doc = include_str!("../../docs/api/surface/layer_state.doc/frame_callbacks.md")]
+    pub(super) frame_callbacks: u64,
+    /// Whether the compositor has said, since the last frame was asked for, that it is
+    /// ready to composite this surface again.
+    pub(super) frame_ready: bool,
 }
 
 impl LayerState {
+    pub(super) fn push_input(&mut self, input: LayerInput) {
+        self.input.push((input, None));
+    }
+
+    pub(super) fn mark_input_activation(&mut self, seat: &wl_seat::WlSeat, serial: u32) {
+        if let Some(layer) = self.layer.as_ref()
+            && let Some((_, activation)) = self.input.last_mut()
+        {
+            *activation = Some(PopupActivation {
+                seat: seat.clone(),
+                serial,
+                parent: layer.wl_surface().clone(),
+            });
+        }
+    }
+
     pub(super) fn new(
         registry_state: RegistryState,
         seat_state: SeatState,
         output_state: OutputState,
         size: Size,
+        keyboard_loop: Option<calloop::LoopHandle<'static, Self>>,
     ) -> Self {
         Self {
             registry_state,
             seat_state,
+            pointing_capabilities_dirty: true,
             output_state,
             layer: None,
+            popup: None,
+            popup_events: Vec::new(),
+            popup_shm: None,
             surface_events: Vec::new(),
             input: Vec::new(),
             presentation: None,
             presented: Vec::new(),
+            discarded: Vec::new(),
             feedbacks_asked: 0,
+            commits: std::cell::Cell::new(0),
+            frame_callbacks: 0,
+            frame_ready: false,
             size,
+            preferred_size: size,
             scale: 1.0,
             closed: false,
             configured: false,
             pointer: None,
+            keyboard: None,
+            ime: super::layer_ime::LayerIme::default(),
+            keyboard_target: None,
+            consuming_menu_escape: false,
+            seat_modifiers: obscur_interaction::command::Modifiers::new(),
+            keyboard_loop,
             touch: None,
             touch_positions: HashMap::new(),
+            popup_touches: HashMap::new(),
             held: PointerButtons::new(),
             cursor: Point::new(0.0, 0.0),
             fractional: None,
@@ -114,53 +179,79 @@ impl LayerState {
         }
     }
 
-    #[doc = include_str!("layer_state.doc/layer.md")]
+    #[doc = include_str!("../../docs/api/surface/layer_state.doc/layer.md")]
     pub(super) fn layer(&self) -> &LayerSurface {
         self.layer
             .as_ref()
             .expect("a layer surface, created before the window was handed out")
     }
 
-    #[doc = include_str!("layer_state.doc/displays.md")]
+    #[doc = include_str!("../../docs/api/surface/layer_state.doc/commit.md")]
+    pub(super) fn commit(&self) {
+        self.layer().wl_surface().commit();
+        self.commits.set(self.commits.get() + 1);
+    }
+
+    #[doc = include_str!("../../docs/api/surface/layer_state.doc/ask_when_drawable.md")]
+    pub(super) fn ask_when_drawable(&mut self, qh: &QueueHandle<Self>) {
+        let surface = self.layer().wl_surface().clone();
+        // Bound to the surface's *next* commit, exactly as a presentation
+        // feedback is, and asked in the same breath for the same reason: the
+        // next commit is the frame. The compositor answers when it is ready to
+        // composite this surface again — and answers **not at all** while it is
+        // not compositing it, which is the one signal in the whole protocol that
+        // says "a frame built now would not be seen".
+        surface.frame(qh, surface.clone());
+        self.frame_ready = false;
+    }
+
+    pub(super) fn mark_closed(&mut self) {
+        if self.closed {
+            return;
+        }
+        self.dismiss_popup();
+        self.closed = true;
+        self.surface_events.push(LayerSurfaceEvent::CloseRequested);
+    }
+
+    #[doc = include_str!("../../docs/api/surface/layer_state.doc/displays.md")]
     pub(super) fn displays(&self) -> Vec<LayerDisplay> {
         self.output_state
             .outputs()
-            .enumerate()
-            .map(|(index, output)| {
-                let name = self
-                    .output_state
-                    .info(&output)
-                    .and_then(|info| info.name)
-                    .unwrap_or_else(|| format!("output-{index}"));
-                LayerDisplay::new(Self::display_id(index), name)
+            .filter_map(|output| {
+                let info = self.output_state.info(&output)?;
+                let id = Self::display_id(info.id);
+                let name = info.name.unwrap_or_else(|| format!("output-{}", info.id));
+                Some(LayerDisplay::new(id, name))
             })
             .collect()
     }
 
-    #[doc = include_str!("layer_state.doc/output_with_id.md")]
+    #[doc = include_str!("../../docs/api/surface/layer_state.doc/output_with_id.md")]
     pub(super) fn output_with_id(&self, id: DisplayId) -> Option<wl_output::WlOutput> {
-        self.output_state
-            .outputs()
-            .enumerate()
-            .find(|(index, _)| Self::display_id(*index) == id)
-            .map(|(_, output)| output)
+        self.output_state.outputs().find(|output| {
+            self.output_state
+                .info(output)
+                .is_some_and(|info| Self::display_id(info.id) == id)
+        })
     }
 
-    #[doc = include_str!("layer_state.doc/display_id.md")]
-    pub(super) fn display_id(index: usize) -> DisplayId {
-        // One past the index, so no display ever answers to the zero a caller
-        // reaches for when it means "unset".
-        DisplayId::from_raw(index as u64 + 1)
+    #[doc = include_str!("../../docs/api/surface/layer_state.doc/display_id.md")]
+    fn display_id(global_name: u32) -> DisplayId {
+        // Keep zero reserved for callers that use it as an unset handle.
+        DisplayId::from_raw(u64::from(global_name) + 1)
     }
 
-    #[doc = include_str!("layer_state.doc/push_pointer.md")]
+    /// Pushes a converted pointer event, stamped with `time_ms` in microseconds.
     fn push_pointer(&mut self, event: PointerEvent) {
-        self.input.push(LayerInput::Pointer(event));
+        self.push_input(LayerInput::Pointer(event));
     }
 }
 
-#[doc = include_str!("layer_state.doc/button_of.md")]
-fn button_of(code: u32) -> Option<PointerButton> {
+/// The kit button for a Linux input code, or [`None`] for one the kit has no
+/// name for — an extra thumb button is dropped rather than mapped onto a button
+/// that means something else.
+pub(super) fn button_of(code: u32) -> Option<PointerButton> {
     match code {
         BTN_LEFT => Some(PointerButton::Primary),
         BTN_RIGHT => Some(PointerButton::Secondary),
@@ -174,13 +265,13 @@ impl CompositorHandler for LayerState {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _surface: &wl_surface::WlSurface,
+        surface: &wl_surface::WlSurface,
         new_factor: i32,
     ) {
         // A surface with a fractional-scale object gets its scale from there;
         // the integer event still arrives and would round 1.5 up to 2, undoing
         // the whole point of binding the protocol.
-        if self.fractional.is_some() {
+        if !self.is_panel_surface(surface) || self.fractional.is_some() {
             return;
         }
         #[allow(clippy::cast_precision_loss)]
@@ -208,6 +299,14 @@ impl CompositorHandler for LayerState {
         _surface: &wl_surface::WlSurface,
         _time: u32,
     ) {
+        // The compositor is about to composite this surface again, and this is
+        // the only thing it ever says that means that. A surface it is not
+        // compositing — hidden, animating from a snapshot, on another workspace
+        // — gets no callback at all, so silence here is information too: it is
+        // the difference between a frame that was slow and a frame that was
+        // never going to be seen.
+        self.frame_callbacks += 1;
+        self.frame_ready = true;
     }
 
     fn surface_enter(
@@ -241,8 +340,7 @@ impl OutputHandler for LayerState {
 
 impl LayerShellHandler for LayerState {
     fn closed(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _layer: &LayerSurface) {
-        self.closed = true;
-        self.surface_events.push(LayerSurfaceEvent::CloseRequested);
+        self.mark_closed();
     }
 
     fn configure(
@@ -253,21 +351,13 @@ impl LayerShellHandler for LayerState {
         configure: LayerSurfaceConfigure,
         _serial: u32,
     ) {
-        // A zero on an axis means the compositor left the choice to us; keep what
-        // was asked for rather than collapsing the surface to nothing.
+        if self.closed {
+            return;
+        }
         let (width, height) = configure.new_size;
-        #[allow(clippy::cast_precision_loss)]
         let size = Size::new(
-            if width == 0 {
-                self.size.width
-            } else {
-                width as f32
-            },
-            if height == 0 {
-                self.size.height
-            } else {
-                height as f32
-            },
+            configured_axis(width, self.preferred_size.width, self.size.width),
+            configured_axis(height, self.preferred_size.height, self.size.height),
         );
         // The first configure is what makes the surface drawable; every one
         // after it is the compositor changing the geometry underneath a surface
@@ -280,6 +370,28 @@ impl LayerShellHandler for LayerState {
         self.size = size;
         self.configured = true;
         self.surface_events.push(event);
+    }
+}
+
+#[allow(clippy::cast_precision_loss)]
+fn configured_axis(suggested_px: u32, preferred_px: f32, previous_px: f32) -> f32 {
+    match suggested_px {
+        // Keep the last usable size when neither side gave an explicit extent.
+        0 if preferred_px == 0.0 => previous_px,
+        0 => preferred_px,
+        suggested_px => suggested_px as f32,
+    }
+}
+
+#[cfg(test)]
+mod configure_tests {
+    use super::configured_axis;
+
+    #[test]
+    fn zero_configure_uses_latest_preferred_extent() {
+        assert_eq!(configured_axis(0, 32.0, 24.0), 32.0);
+        assert_eq!(configured_axis(0, 0.0, 24.0), 24.0);
+        assert_eq!(configured_axis(40, 32.0, 24.0), 40.0);
     }
 }
 
@@ -297,7 +409,10 @@ impl SeatHandler for LayerState {
         seat: wl_seat::WlSeat,
         capability: Capability,
     ) {
+        self.pointing_capabilities_dirty |=
+            matches!(capability, Capability::Pointer | Capability::Touch);
         match capability {
+            Capability::Keyboard => self.bind_keyboard(qh, seat),
             Capability::Pointer if self.pointer.is_none() => {
                 self.pointer = self.seat_state.get_pointer(qh, &seat).ok();
             }
@@ -311,11 +426,14 @@ impl SeatHandler for LayerState {
     fn remove_capability(
         &mut self,
         _conn: &Connection,
-        _qh: &QueueHandle<Self>,
-        _seat: wl_seat::WlSeat,
+        qh: &QueueHandle<Self>,
+        seat: wl_seat::WlSeat,
         capability: Capability,
     ) {
+        self.pointing_capabilities_dirty |=
+            matches!(capability, Capability::Pointer | Capability::Touch);
         match capability {
+            Capability::Keyboard => self.remove_keyboard(qh, &seat),
             Capability::Pointer => {
                 if let Some(pointer) = self.pointer.take() {
                     pointer.release();
@@ -330,7 +448,10 @@ impl SeatHandler for LayerState {
         }
     }
 
-    fn remove_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {}
+    fn remove_seat(&mut self, _: &Connection, qh: &QueueHandle<Self>, seat: wl_seat::WlSeat) {
+        self.pointing_capabilities_dirty = true;
+        self.remove_keyboard(qh, &seat);
+    }
 }
 
 impl PointerHandler for LayerState {
@@ -338,10 +459,14 @@ impl PointerHandler for LayerState {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _pointer: &wl_pointer::WlPointer,
+        pointer: &wl_pointer::WlPointer,
         events: &[SctkPointerEvent],
     ) {
         for event in events {
+            if !self.is_panel_surface(&event.surface) {
+                self.popup_pointer(event);
+                continue;
+            }
             let at = point_of(event.position, self.scale);
             match event.kind {
                 SctkPointerKind::Enter { .. } => {
@@ -355,12 +480,24 @@ impl PointerHandler for LayerState {
                     self.cursor = at;
                     self.push_event(PointerEventKind::Move, at, time);
                 }
-                SctkPointerKind::Press { time, button, .. } => {
+                SctkPointerKind::Press {
+                    time,
+                    button,
+                    serial,
+                } => {
+                    if self.popup.as_ref().is_some_and(|popup| popup.grabbed) {
+                        self.dismiss_popup();
+                    }
                     self.cursor = at;
                     if let Some(button) = button_of(button) {
                         self.held.press(button);
                     }
                     self.push_event(PointerEventKind::Down, at, time);
+                    if let Some(data) =
+                        pointer.data::<smithay_client_toolkit::seat::pointer::PointerData>()
+                    {
+                        self.mark_input_activation(data.seat(), serial);
+                    }
                 }
                 SctkPointerKind::Release { time, button, .. } => {
                     self.cursor = at;
@@ -382,7 +519,7 @@ impl PointerHandler for LayerState {
                         vertical.absolute as f32
                     };
                     if delta != 0.0 {
-                        self.input.push(LayerInput::Scroll {
+                        self.push_input(LayerInput::Scroll {
                             delta_y: delta * self.scale,
                             at: self.cursor,
                         });
@@ -393,11 +530,11 @@ impl PointerHandler for LayerState {
     }
 }
 
-#[doc = include_str!("layer_state.doc/WHEEL_NOTCH.md")]
+/// Logical pixels a discrete wheel notch scrolls, matching the windowed runner.
 const WHEEL_NOTCH: f32 = 48.0;
 
 impl LayerState {
-    #[doc = include_str!("layer_state.doc/push_event.md")]
+    /// Builds and pushes a mouse pointer event at `at`, stamped from `time_ms`.
     fn push_event(&mut self, kind: PointerEventKind, at: Point, time_ms: u32) {
         let event = PointerEvent::new(PointerId::MOUSE, PointerDevice::Mouse, kind, at)
             .with_buttons(self.held)
@@ -412,16 +549,28 @@ impl TouchHandler for LayerState {
         &mut self,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
-        _touch: &wl_touch::WlTouch,
-        _serial: u32,
+        touch: &wl_touch::WlTouch,
+        serial: u32,
         time: u32,
-        _surface: wl_surface::WlSurface,
+        surface: wl_surface::WlSurface,
         id: i32,
         position: (f64, f64),
     ) {
+        if !self.is_panel_surface(&surface) {
+            let at = point_of(position, 1.0);
+            self.popup_touch(&surface, id, PointerEventKind::Down, at, time);
+            self.popup_touches.insert(id, (surface, at));
+            return;
+        }
+        if self.popup.as_ref().is_some_and(|popup| popup.grabbed) {
+            self.dismiss_popup();
+        }
         let at = point_of(position, self.scale);
         self.touch_positions.insert(id, at);
         self.push_touch(id, PointerEventKind::Down, at, time, true);
+        if let Some(data) = touch.data::<smithay_client_toolkit::seat::touch::TouchData>() {
+            self.mark_input_activation(data.seat(), serial);
+        }
     }
 
     fn up(
@@ -433,6 +582,10 @@ impl TouchHandler for LayerState {
         time: u32,
         id: i32,
     ) {
+        if let Some((surface, at)) = self.popup_touches.remove(&id) {
+            self.popup_touch(&surface, id, PointerEventKind::Up, at, time);
+            return;
+        }
         // No coordinates on `up`: use the contact's last known position, or the
         // origin only if it never moved anywhere (which cannot happen after a
         // `down`).
@@ -452,6 +605,13 @@ impl TouchHandler for LayerState {
         id: i32,
         position: (f64, f64),
     ) {
+        if let Some((surface, last)) = self.popup_touches.get_mut(&id) {
+            let at = point_of(position, 1.0);
+            *last = at;
+            let surface = surface.clone();
+            self.popup_touch(&surface, id, PointerEventKind::Move, at, time);
+            return;
+        }
         let at = point_of(position, self.scale);
         self.touch_positions.insert(id, at);
         self.push_touch(id, PointerEventKind::Move, at, time, true);
@@ -481,6 +641,10 @@ impl TouchHandler for LayerState {
     fn cancel(&mut self, _conn: &Connection, _qh: &QueueHandle<Self>, _touch: &wl_touch::WlTouch) {
         // Every live contact is gone at once, and each must be told — a contact
         // left believing it is down would hold a capture forever.
+        let popup_touches = core::mem::take(&mut self.popup_touches);
+        for (id, (surface, at)) in popup_touches {
+            self.popup_touch(&surface, id, PointerEventKind::Cancel, at, 0);
+        }
         let live: Vec<(i32, Point)> = self.touch_positions.drain().collect();
         for (id, at) in live {
             self.push_touch(id, PointerEventKind::Cancel, at, 0, false);
@@ -488,14 +652,14 @@ impl TouchHandler for LayerState {
     }
 }
 
-#[doc = include_str!("layer_state.doc/point_of.md")]
+#[doc = include_str!("../../docs/api/surface/layer_state.doc/point_of.md")]
 fn point_of(position: (f64, f64), scale: f32) -> Point {
     #[allow(clippy::cast_possible_truncation)]
     Point::new(position.0 as f32 * scale, position.1 as f32 * scale)
 }
 
 impl LayerState {
-    #[doc = include_str!("layer_state.doc/push_touch.md")]
+    #[doc = include_str!("../../docs/api/surface/layer_state.doc/push_touch.md")]
     fn push_touch(&mut self, id: i32, kind: PointerEventKind, at: Point, time_ms: u32, down: bool) {
         let mut held = PointerButtons::new();
         if down {
@@ -511,7 +675,8 @@ impl LayerState {
     }
 }
 
-#[doc = include_str!("layer_state.doc/FRACTIONAL_DENOMINATOR.md")]
+/// The denominator `wp_fractional_scale_v1` reports its scale in: the event
+/// carries `scale × 120`, so 1.5 arrives as 180.
 const FRACTIONAL_DENOMINATOR: f32 = 120.0;
 
 impl Dispatch<WpFractionalScaleV1, ()> for LayerState {
@@ -577,12 +742,12 @@ impl Dispatch<WpPresentation, ()> for LayerState {
     }
 }
 
-impl Dispatch<WpPresentationFeedback, u64> for LayerState {
+impl Dispatch<WpPresentationFeedback, FeedbackTag> for LayerState {
     fn event(
         state: &mut Self,
         _proxy: &WpPresentationFeedback,
         event: wp_presentation_feedback::Event,
-        seq: &u64,
+        tag: &FeedbackTag,
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
     ) {
@@ -592,22 +757,33 @@ impl Dispatch<WpPresentationFeedback, u64> for LayerState {
                 tv_sec_lo,
                 tv_nsec,
                 refresh,
-                ..
+                seq_hi,
+                seq_lo,
+                flags,
             } => {
-                let seconds = (u64::from(tv_sec_hi) << 32) | u64::from(tv_sec_lo);
                 state.presented.push(Presented {
-                    at_micros: seconds * 1_000_000 + u64::from(tv_nsec) / 1_000,
+                    at_micros: obscur_wayland_effects::presentation_timestamp_micros(
+                        tv_sec_hi, tv_sec_lo, tv_nsec,
+                    ),
                     refresh_nanos: refresh,
-                    seq: *seq,
+                    seq: tag.seq,
+                    // The screen's own counter, which used to go into `..` along
+                    // with the flags. Without it, "the panel never turned over"
+                    // and "we never handed it anything" are the same reading.
+                    msc: (u64::from(seq_hi) << 32) | u64::from(seq_lo),
+                    flags: flags.into(),
                 });
             }
-            // The frame was never shown — superseded by a later one, or the
-            // surface went off screen. Said out loud rather than counted by its
-            // absence: "no presentations at all" and "every presentation
-            // discarded" are different faults and were indistinguishable while
-            // this arm was empty.
+            // The frame was never shown — superseded by a later commit, or the
+            // surface was not being composited. Recorded rather than printed
+            // from here: the runner prints it next to the presentations, on the
+            // same stream and in the same order, and the two causes are only
+            // told apart by the commit count that travels with it.
             wp_presentation_feedback::Event::Discarded => {
-                eprintln!("obscur-shell-layer: frame {seq} was never shown");
+                state.discarded.push(Discarded {
+                    seq: tag.seq,
+                    commits_since_ask: state.commits.get().saturating_sub(tag.commits_at_ask),
+                });
             }
             _ => {}
         }
@@ -651,6 +827,7 @@ delegate_registry!(LayerState);
 delegate_compositor!(LayerState);
 delegate_output!(LayerState);
 delegate_seat!(LayerState);
+smithay_client_toolkit::delegate_keyboard!(LayerState);
 delegate_pointer!(LayerState);
 delegate_touch!(LayerState);
 smithay_client_toolkit::delegate_layer!(LayerState);

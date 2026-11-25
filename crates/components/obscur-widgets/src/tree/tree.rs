@@ -1,51 +1,18 @@
-#![doc = include_str!("tree.doc/_module.md")]
+//! `Tree`: a headless hierarchical tree with expansion and single selection
+//! (spec §2.6).
 
-use std::collections::BTreeSet;
+use super::TreeNode;
+
+use std::collections::{BTreeSet, HashSet};
 
 use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_primitives::Text;
 use obscur_view::view::{View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-#[doc = include_str!("tree.doc/TreeNode.md")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TreeNode {
-    label: Box<str>,
-    depth: u16,
-    has_children: bool,
-}
+use super::TreeExpansionState;
 
-impl TreeNode {
-    #[doc = include_str!("tree.doc/new.md")]
-    #[must_use]
-    pub fn new(label: impl Into<Box<str>>, depth: u16, has_children: bool) -> Self {
-        Self {
-            label: label.into(),
-            depth,
-            has_children,
-        }
-    }
-
-    #[doc = include_str!("tree.doc/label.md")]
-    #[must_use]
-    pub fn label(&self) -> &str {
-        &self.label
-    }
-
-    #[doc = include_str!("tree.doc/depth.md")]
-    #[must_use]
-    pub const fn depth(&self) -> u16 {
-        self.depth
-    }
-
-    #[doc = include_str!("tree.doc/has_children.md")]
-    #[must_use]
-    pub const fn has_children(&self) -> bool {
-        self.has_children
-    }
-}
-
-#[doc = include_str!("tree.doc/Tree.md")]
+#[doc = include_str!("../../docs/api/tree/tree.doc/Tree.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tree {
     nodes: Vec<TreeNode>,
@@ -54,22 +21,76 @@ pub struct Tree {
 }
 
 impl Tree {
-    #[doc = include_str!("tree.doc/COMPONENT_ID.md")]
+    /// Captures expanded branches with stable IDs. Ambiguous or empty IDs reject
+    /// the snapshot.
+    #[must_use]
+    pub fn capture_expansion_state(&self) -> Option<TreeExpansionState> {
+        if !self.has_unique_node_ids() {
+            return None;
+        }
+        let mut ids: Vec<_> = self
+            .expanded
+            .iter()
+            .filter_map(|&index| self.nodes.get(index)?.id.clone())
+            .collect();
+        ids.sort_unstable();
+        Some(TreeExpansionState::capture(ids))
+    }
+
+    /// Replaces the expansion state of branches with stable IDs. Removed nodes and
+    /// IDs that now refer to leaves are ignored. Unkeyed branches retain their
+    /// current expansion. An invalid snapshot leaves the tree unchanged.
+    pub fn restore_expansion_state(&mut self, state: &TreeExpansionState) -> bool {
+        let Some(ids) = state.ids().filter(|_| self.has_unique_node_ids()) else {
+            return false;
+        };
+        let mut expanded_ids = HashSet::with_capacity(ids.len());
+        if !ids
+            .iter()
+            .all(|id| !id.trim().is_empty() && expanded_ids.insert(id.as_ref()))
+        {
+            return false;
+        }
+        self.expanded
+            .retain(|&index| self.nodes[index].id.is_none());
+        self.expanded
+            .extend(self.nodes.iter().enumerate().filter_map(|(index, node)| {
+                (node.has_children
+                    && node
+                        .id
+                        .as_deref()
+                        .is_some_and(|id| expanded_ids.contains(id)))
+                .then_some(index)
+            }));
+        true
+    }
+
+    fn has_unique_node_ids(&self) -> bool {
+        let mut seen = HashSet::new();
+        self.nodes
+            .iter()
+            .filter_map(|node| node.id.as_deref())
+            .all(|id| !id.trim().is_empty() && seen.insert(id))
+    }
+
+    #[doc = include_str!("../../docs/api/tree/tree.doc/COMPONENT_ID.md")]
     pub const COMPONENT_ID: ComponentId = ComponentId::from_raw(0x00D0_0009);
 
-    #[doc = include_str!("tree.doc/TREE_ITEM_ID.md")]
+    /// Stable component id for the per-node child element.
     const TREE_ITEM_ID: ComponentId = ComponentId::from_raw(0x00D0_0019);
 
-    #[doc = include_str!("tree.doc/PROP_ROLE.md")]
+    /// Interned name of the semantic-role property (`role`); shares the
+    /// `0x00D1_NNXX` scheme with `NN = 09` (tree): role=`00`, depth=`01`,
+    /// expanded=`02`, selected=`03` (on item children).
     const PROP_ROLE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0900);
-    #[doc = include_str!("tree.doc/PROP_DEPTH.md")]
+    /// Interned name of the per-item `depth` property.
     const PROP_DEPTH: InternedSymbol = InternedSymbol::from_raw(0x00D1_0901);
-    #[doc = include_str!("tree.doc/PROP_EXPANDED.md")]
+    /// Interned name of the per-item `expanded` state property (parents only).
     const PROP_EXPANDED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0902);
-    #[doc = include_str!("tree.doc/PROP_SELECTED.md")]
+    /// Interned name of the per-item `selected` state property.
     const PROP_SELECTED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0903);
 
-    #[doc = include_str!("tree.doc/new_2.md")]
+    /// Creates an empty tree with nothing expanded or selected.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -79,14 +100,14 @@ impl Tree {
         }
     }
 
-    #[doc = include_str!("tree.doc/node.md")]
+    /// Appends a single node, returning the updated tree (fluent builder).
     #[must_use]
     pub fn node(mut self, node: TreeNode) -> Self {
         self.nodes.push(node);
         self
     }
 
-    #[doc = include_str!("tree.doc/with_nodes.md")]
+    /// Appends every node from `nodes`, returning the updated tree.
     #[must_use]
     pub fn with_nodes<I>(mut self, nodes: I) -> Self
     where
@@ -96,7 +117,9 @@ impl Tree {
         self
     }
 
-    #[doc = include_str!("tree.doc/expand.md")]
+    /// Expands the parent node at `index`, returning `true` on success. Returns
+    /// `false` (leaving state untouched) when `index` is out of range or the
+    /// node has no children.
     pub fn expand(&mut self, index: usize) -> bool {
         if self.nodes.get(index).is_some_and(TreeNode::has_children) {
             self.expanded.insert(index);
@@ -106,12 +129,15 @@ impl Tree {
         }
     }
 
-    #[doc = include_str!("tree.doc/collapse.md")]
+    /// Collapses the parent node at `index`, returning `true` when it was
+    /// previously expanded; otherwise returns `false`.
     pub fn collapse(&mut self, index: usize) -> bool {
         self.expanded.remove(&index)
     }
 
-    #[doc = include_str!("tree.doc/toggle_expanded.md")]
+    /// Toggles the expansion of the parent node at `index`, returning the new
+    /// expanded state. A no-op returning `false` when `index` is out of range or
+    /// the node has no children.
     pub fn toggle_expanded(&mut self, index: usize) -> bool {
         if self.expanded.contains(&index) {
             self.expanded.remove(&index);
@@ -121,13 +147,14 @@ impl Tree {
         }
     }
 
-    #[doc = include_str!("tree.doc/is_expanded.md")]
+    /// Returns whether the node at `index` is expanded.
     #[must_use]
     pub fn is_expanded(&self, index: usize) -> bool {
         self.expanded.contains(&index)
     }
 
-    #[doc = include_str!("tree.doc/select.md")]
+    /// Selects the node at `index`, returning `true` on success. Returns `false`
+    /// (leaving state untouched) when `index` is out of range.
     pub fn select(&mut self, index: usize) -> bool {
         if index < self.nodes.len() {
             self.selected = Some(index);
@@ -137,13 +164,13 @@ impl Tree {
         }
     }
 
-    #[doc = include_str!("tree.doc/selected_index.md")]
+    /// Returns the selected node index, if any.
     #[must_use]
     pub const fn selected_index(&self) -> Option<usize> {
         self.selected
     }
 
-    #[doc = include_str!("tree.doc/visible_nodes.md")]
+    #[doc = include_str!("../../docs/api/tree/tree.doc/visible_nodes.md")]
     #[must_use]
     pub fn visible_nodes(&self) -> Vec<usize> {
         let mut visible = Vec::new();
@@ -164,25 +191,32 @@ impl Tree {
         visible
     }
 
-    #[doc = include_str!("tree.doc/len.md")]
+    /// Returns the node at its logical index, including collapsed descendants.
+    #[must_use]
+    pub fn node_at(&self, index: usize) -> Option<&TreeNode> {
+        self.nodes.get(index)
+    }
+
+    /// Returns the number of nodes.
     #[must_use]
     pub fn len(&self) -> usize {
         self.nodes.len()
     }
 
-    #[doc = include_str!("tree.doc/is_empty.md")]
+    /// Returns whether the tree has no nodes.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
     }
 
-    #[doc = include_str!("tree.doc/semantic_role.md")]
+    /// Returns the accessible role of this control ([`SemanticRole::List`], the
+    /// closest role — see the type docs).
     #[must_use]
     pub const fn semantic_role(&self) -> SemanticRole {
         SemanticRole::List
     }
 
-    #[doc = include_str!("tree.doc/view.md")]
+    #[doc = include_str!("../../docs/api/tree/tree.doc/view.md")]
     #[must_use]
     pub fn view(&self) -> View {
         let children: Vec<ViewNode> = self

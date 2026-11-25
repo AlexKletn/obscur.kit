@@ -1,46 +1,20 @@
-#![doc = include_str!("migration_registry.doc/_module.md")]
+//! `MigrationRegistry`: chains registered migrations to bring a document up to a
+//! target version (spec §2.5 migrations).
 
 use crate::document::UiIrDocument;
 use crate::migration::UiIrMigration;
 use crate::version::UiIrVersion;
 
-#[doc = include_str!("migration_registry.doc/MigrationError.md")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MigrationError {
-    #[doc = include_str!("migration_registry.doc/NoPath.md")]
-    NoPath {
-        #[doc = include_str!("migration_registry.doc/from.md")]
-        from: UiIrVersion,
-        #[doc = include_str!("migration_registry.doc/to.md")]
-        to: UiIrVersion,
-    },
-}
+use super::MigrationError;
 
-impl std::fmt::Display for MigrationError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::NoPath { from, to } => write!(
-                f,
-                "no migration path from {}.{} to {}.{}",
-                from.major(),
-                from.minor(),
-                to.major(),
-                to.minor()
-            ),
-        }
-    }
-}
-
-impl std::error::Error for MigrationError {}
-
-#[doc = include_str!("migration_registry.doc/MigrationRegistry.md")]
+#[doc = include_str!("../../docs/api/migration/migration_registry.doc/MigrationRegistry.md")]
 #[derive(Debug, Default)]
 pub struct MigrationRegistry {
     migrations: Vec<Box<dyn UiIrMigration>>,
 }
 
 impl MigrationRegistry {
-    #[doc = include_str!("migration_registry.doc/new.md")]
+    /// Creates an empty registry.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -48,24 +22,24 @@ impl MigrationRegistry {
         }
     }
 
-    #[doc = include_str!("migration_registry.doc/register.md")]
+    /// Registers `migration`.
     pub fn register(&mut self, migration: Box<dyn UiIrMigration>) {
         self.migrations.push(migration);
     }
 
-    #[doc = include_str!("migration_registry.doc/len.md")]
+    /// Returns the number of registered migrations.
     #[must_use]
     pub fn len(&self) -> usize {
         self.migrations.len()
     }
 
-    #[doc = include_str!("migration_registry.doc/is_empty.md")]
+    /// Returns whether no migrations are registered.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.migrations.is_empty()
     }
 
-    #[doc = include_str!("migration_registry.doc/migration_from.md")]
+    /// Finds a registered migration whose `from_version` matches `version`.
     fn migration_from(&self, version: UiIrVersion) -> Option<&dyn UiIrMigration> {
         self.migrations
             .iter()
@@ -73,7 +47,7 @@ impl MigrationRegistry {
             .find(|migration| migration.from_version() == version)
     }
 
-    #[doc = include_str!("migration_registry.doc/migrate.md")]
+    #[doc = include_str!("../../docs/api/migration/migration_registry.doc/migrate.md")]
     pub fn migrate(
         &self,
         doc: UiIrDocument,
@@ -104,7 +78,8 @@ impl MigrationRegistry {
         })
     }
 
-    #[doc = include_str!("migration_registry.doc/can_migrate.md")]
+    /// Returns whether a chain of registered migrations reaches `to` from
+    /// `from`, without applying anything.
     #[must_use]
     pub fn can_migrate(&self, from: UiIrVersion, to: UiIrVersion) -> bool {
         let mut current = from;

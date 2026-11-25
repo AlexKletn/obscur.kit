@@ -1,24 +1,26 @@
-#![doc = include_str!("inline_styles.doc/_module.md")]
+#![doc = include_str!("../../docs/api/orchestration/inline_styles.doc/_module.md")]
 
 use std::collections::{HashMap, HashSet};
 
 use obscur_diagnostics::DiagnosticSink;
+use obscur_identity::NodeId;
 use obscur_style::cascade::{CascadeOrigin, CascadePriority, ResolvedDeclarations};
+use obscur_style::invalidation::StyleInvalidation;
 use obscur_style::matching::InlineStyle;
 use obscur_style::selector::SelectorSpecificity;
 use obscur_tree::tree::RetainedTree;
 
 use super::{InlineStyleOutcome, StyleInputs};
 
-#[doc = include_str!("inline_styles.doc/InlineStyleCompiler.md")]
+#[doc = include_str!("../../docs/api/orchestration/inline_styles.doc/InlineStyleCompiler.md")]
 pub type InlineStyleCompiler = Box<dyn Fn(&str) -> InlineStyleOutcome>;
 
-#[doc = include_str!("inline_styles.doc/InlineStyles.md")]
+/// The installed compiler and what it has already answered.
 #[derive(Default)]
 pub(crate) struct InlineStyles {
-    #[doc = include_str!("inline_styles.doc/compiler.md")]
+    /// The port, if one was installed.
     compiler: Option<InlineStyleCompiler>,
-    #[doc = include_str!("inline_styles.doc/compiled.md")]
+    /// One compiled block per distinct `style` string.
     compiled: HashMap<Box<str>, InlineStyle>,
 }
 
@@ -32,24 +34,25 @@ impl std::fmt::Debug for InlineStyles {
 }
 
 impl InlineStyles {
-    #[doc = include_str!("inline_styles.doc/new.md")]
+    /// An empty cache with no compiler installed.
     pub(crate) fn new() -> Self {
         Self::default()
     }
 
-    #[doc = include_str!("inline_styles.doc/install.md")]
+    /// Installs the compiler, discarding whatever the previous one answered — a stale
+    /// answer is worse than none.
     pub(crate) fn install(&mut self, compiler: InlineStyleCompiler) {
         // Whatever was compiled by the old one is not this one's answer.
         self.compiled.clear();
         self.compiler = Some(compiler);
     }
 
-    #[doc = include_str!("inline_styles.doc/is_installed.md")]
+    /// Whether a compiler was installed at all.
     pub(crate) fn is_installed(&self) -> bool {
         self.compiler.is_some()
     }
 
-    #[doc = include_str!("inline_styles.doc/block_for.md")]
+    #[doc = include_str!("../../docs/api/orchestration/inline_styles.doc/block_for.md")]
     pub(crate) fn block_for(
         &mut self,
         text: &str,
@@ -74,7 +77,9 @@ impl InlineStyles {
         Some(block)
     }
 
-    #[doc = include_str!("inline_styles.doc/apply_all.md")]
+    /// Folds every node's inline style into freshly matched declarations on a full
+    /// restyle and prunes compiled blocks no longer referenced by the tree.
+    /// Incremental restyles reapply inline declarations only where matching changed.
     pub(crate) fn apply_all(
         &mut self,
         tree: &RetainedTree,
@@ -84,53 +89,84 @@ impl InlineStyles {
         if !self.is_installed() {
             return;
         }
-        let mut live: HashSet<&str> = HashSet::new();
+        let mut live = HashSet::new();
         for (node, retained) in tree.iter() {
-            let Some(text) = retained.attributes().inline_style() else {
-                continue;
-            };
-            live.insert(text);
-            let Some(block) = self.block_for(text, diagnostics) else {
-                continue;
-            };
-            if block.is_empty() {
-                continue;
-            }
-            // Folded into the node's own resolved map. Applying it twice is
-            // harmless — same origin, same order, same value — which is what
-            // lets the incremental restyle path re-apply to every styled node
-            // rather than having to work out which ones it rematched.
-            let mut resolved = inputs.cascaded_for(node).clone();
-            apply(&mut resolved, &block);
-            inputs.set_cascaded(node, resolved);
-            if !block.custom_properties().is_empty() {
-                // Written over whatever the sheets cascaded for this node, with
-                // no comparison to make: the inline origin is above every
-                // authored one (§4.14), and a custom property carries no
-                // `!important` of its own for the one exception to apply to.
-                let mut custom = inputs.custom_for(node).clone();
-                for property in block.custom_properties() {
-                    custom.insert(property.name(), property.value().clone());
-                }
-                inputs.set_custom(node, custom);
+            if let Some(text) = retained.attributes().inline_style() {
+                live.insert(text);
+                self.apply_node(node, text, inputs, diagnostics);
             }
         }
-        // Swept against the tree that was just walked, so the cache cannot
-        // outgrow the markup. An application that computes its attribute — a
-        // dragged panel writing `style="width: 412px"` every frame — would
-        // otherwise leave one dead entry per pixel it passed through, and the
-        // cache would be a leak wearing a cache's name.
         self.compiled.retain(|text, _| live.contains(text.as_ref()));
     }
 
-    #[doc = include_str!("inline_styles.doc/cached.md")]
+    pub(crate) fn apply_invalidated(
+        &mut self,
+        tree: &RetainedTree,
+        inputs: &mut StyleInputs,
+        diagnostics: &dyn DiagnosticSink,
+        dirty: &StyleInvalidation,
+        reconciled: bool,
+    ) {
+        if !self.is_installed() {
+            return;
+        }
+        for (&node, _) in dirty {
+            if let Some(text) = tree
+                .get(node)
+                .and_then(|node| node.attributes().inline_style())
+            {
+                self.apply_node(node, text, inputs, diagnostics);
+            }
+        }
+        if reconciled && !self.compiled.is_empty() {
+            self.retain_live(tree);
+        }
+    }
+
+    fn apply_node(
+        &mut self,
+        node: NodeId,
+        text: &str,
+        inputs: &mut StyleInputs,
+        diagnostics: &dyn DiagnosticSink,
+    ) {
+        let Some(block) = self.block_for(text, diagnostics) else {
+            return;
+        };
+        if block.is_empty() {
+            return;
+        }
+
+        let mut resolved = inputs.cascaded_for(node).clone();
+        apply(&mut resolved, &block);
+        inputs.set_cascaded(node, resolved);
+        if !block.custom_properties().is_empty() {
+            // Inline custom properties win over the declarations from sheets.
+            let mut custom = inputs.custom_for(node).clone();
+            for property in block.custom_properties() {
+                custom.insert(property.name(), property.value().clone());
+            }
+            inputs.set_custom(node, custom);
+        }
+    }
+
+    fn retain_live(&mut self, tree: &RetainedTree) {
+        // Dynamic inline attributes can produce a fresh string on every edit.
+        let live: HashSet<&str> = tree
+            .iter()
+            .filter_map(|(_, node)| node.attributes().inline_style())
+            .collect();
+        self.compiled.retain(|text, _| live.contains(text.as_ref()));
+    }
+
+    /// How many distinct strings have been compiled.
     #[cfg(test)]
     pub(crate) fn cached(&self) -> usize {
         self.compiled.len()
     }
 }
 
-#[doc = include_str!("inline_styles.doc/apply.md")]
+#[doc = include_str!("../../docs/api/orchestration/inline_styles.doc/apply.md")]
 pub(crate) fn apply(resolved: &mut ResolvedDeclarations, block: &InlineStyle) {
     for (order, declaration) in block.declarations().iter().enumerate() {
         let priority = CascadePriority::new(

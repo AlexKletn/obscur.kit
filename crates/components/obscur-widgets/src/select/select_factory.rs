@@ -1,4 +1,4 @@
-#![doc = include_str!("select_factory.doc/_module.md")]
+//! The registry entry that mints `select` components (spec §2.2).
 
 use obscur_identity::ComponentId;
 use obscur_view::component::{
@@ -7,27 +7,28 @@ use obscur_view::component::{
 
 use super::{Select, SelectComponent, SelectProps};
 
-#[doc = include_str!("select_factory.doc/SelectFactory.md")]
+#[doc = include_str!("../../docs/api/select/select_factory.doc/SelectFactory.md")]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SelectFactory;
 
 impl ComponentFactory for SelectFactory {
-    #[doc = include_str!("select_factory.doc/component_id.md")]
+    #[doc = include_str!("../../docs/api/select/select_factory.doc/component_id.md")]
     fn component_id(&self) -> ComponentId {
         Select::COMPONENT_ID
     }
 
-    #[doc = include_str!("select_factory.doc/contract.md")]
+    #[doc = include_str!("../../docs/api/select/select_factory.doc/contract.md")]
     fn contract(&self) -> ComponentContract {
         SelectProps::contract()
     }
 
-    #[doc = include_str!("select_factory.doc/create_instance.md")]
+    /// A fresh instance handle for one mounted `<select>`.
     fn create_instance(&self, instance: InstanceId) -> ComponentInstance {
         ComponentInstance::new(instance, Select::COMPONENT_ID)
     }
 
-    #[doc = include_str!("select_factory.doc/create_component.md")]
+    /// A fresh [`SelectComponent`](super::SelectComponent) behind the erased handle
+    /// the registry stores.
     fn create_component(&self) -> Box<dyn ErasedComponent> {
         Box::new(SelectComponent)
     }

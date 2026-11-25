@@ -1,16 +1,16 @@
-#![doc = include_str!("important_flag.doc/_module.md")]
+//! Whether a declaration carries `!important`: [`ImportantFlag`] (§4.14).
 
-#[doc = include_str!("important_flag.doc/ImportantFlag.md")]
+#[doc = include_str!("../../docs/api/cascade/important_flag.doc/ImportantFlag.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ImportantFlag {
-    #[doc = include_str!("important_flag.doc/Normal.md")]
+    /// A normal (non-`!important`) declaration.
     Normal,
-    #[doc = include_str!("important_flag.doc/Important.md")]
+    /// An `!important` declaration.
     Important,
 }
 
 impl ImportantFlag {
-    #[doc = include_str!("important_flag.doc/is_important.md")]
+    /// Returns `true` when this declaration is `!important`.
     #[must_use]
     pub const fn is_important(self) -> bool {
         matches!(self, Self::Important)

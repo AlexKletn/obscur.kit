@@ -1,2 +1,14 @@
+mod host_call;
 mod wasm_executor;
 pub use wasm_executor::WasmExecutor;
+mod wasm_limits;
+pub use wasm_limits::WasmLimits;
+mod wasm_message_limits;
+pub use wasm_message_limits::WasmMessageLimits;
+mod wasm_plugin_instance;
+pub use wasm_plugin_instance::WasmPluginInstance;
+mod instance_lifetime;
+mod managed_wasm_handle;
+mod managed_wasm_plugin;
+pub use managed_wasm_handle::ManagedWasmHandle;
+pub use managed_wasm_plugin::ManagedWasmPlugin;

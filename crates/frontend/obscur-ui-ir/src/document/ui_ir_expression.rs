@@ -1,76 +1,57 @@
-#![doc = include_str!("ui_ir_expression.doc/_module.md")]
+//! `UiIrExpression`: a value binding in the IR — a literal or dynamic
+//! reference (spec §2.5).
 
-#[doc = include_str!("ui_ir_expression.doc/UiIrValue.md")]
-#[derive(Debug, Clone, PartialEq)]
-pub enum UiIrValue {
-    #[doc = include_str!("ui_ir_expression.doc/Null.md")]
-    Null,
-    #[doc = include_str!("ui_ir_expression.doc/Bool.md")]
-    Bool(bool),
-    #[doc = include_str!("ui_ir_expression.doc/Int.md")]
-    Int(i64),
-    #[doc = include_str!("ui_ir_expression.doc/Float.md")]
-    Float(f64),
-    #[doc = include_str!("ui_ir_expression.doc/Text.md")]
-    Text(Box<str>),
-}
+use super::UiIrValue;
 
-impl UiIrValue {
-    #[doc = include_str!("ui_ir_expression.doc/is_null.md")]
-    #[must_use]
-    pub const fn is_null(&self) -> bool {
-        matches!(self, Self::Null)
-    }
-}
-
-#[doc = include_str!("ui_ir_expression.doc/UiIrExpression.md")]
+#[doc = include_str!("../../docs/api/document/ui_ir_expression.doc/UiIrExpression.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum UiIrExpression {
-    #[doc = include_str!("ui_ir_expression.doc/Literal.md")]
+    /// A literal, baked-in value.
     Literal(UiIrValue),
-    #[doc = include_str!("ui_ir_expression.doc/Binding.md")]
+    /// A path into component state or props, e.g. `"user.name"`, resolved at
+    /// runtime.
     Binding(Box<str>),
-    #[doc = include_str!("ui_ir_expression.doc/Call.md")]
+    /// A function or formatter call applied to argument expressions.
     Call {
-        #[doc = include_str!("ui_ir_expression.doc/name.md")]
+        /// The name of the function or formatter being called.
         name: Box<str>,
-        #[doc = include_str!("ui_ir_expression.doc/args.md")]
+        /// The argument expressions, in order.
         args: Vec<UiIrExpression>,
     },
 }
 
 impl UiIrExpression {
-    #[doc = include_str!("ui_ir_expression.doc/literal.md")]
+    /// Creates a literal expression from `value`.
     #[must_use]
     pub const fn literal(value: UiIrValue) -> Self {
         Self::Literal(value)
     }
 
-    #[doc = include_str!("ui_ir_expression.doc/text.md")]
+    /// Creates a literal text expression.
     #[must_use]
     pub fn text(value: impl Into<Box<str>>) -> Self {
         Self::Literal(UiIrValue::Text(value.into()))
     }
 
-    #[doc = include_str!("ui_ir_expression.doc/bool.md")]
+    /// Creates a literal boolean expression.
     #[must_use]
     pub const fn bool(value: bool) -> Self {
         Self::Literal(UiIrValue::Bool(value))
     }
 
-    #[doc = include_str!("ui_ir_expression.doc/int.md")]
+    /// Creates a literal integer expression.
     #[must_use]
     pub const fn int(value: i64) -> Self {
         Self::Literal(UiIrValue::Int(value))
     }
 
-    #[doc = include_str!("ui_ir_expression.doc/binding.md")]
+    /// Creates a binding expression from a path into component state or props.
     #[must_use]
     pub fn binding(path: impl Into<Box<str>>) -> Self {
         Self::Binding(path.into())
     }
 
-    #[doc = include_str!("ui_ir_expression.doc/call.md")]
+    /// Creates a call expression applying `name` to `args`.
     #[must_use]
     pub fn call(name: impl Into<Box<str>>, args: Vec<UiIrExpression>) -> Self {
         Self::Call {
@@ -79,13 +60,14 @@ impl UiIrExpression {
         }
     }
 
-    #[doc = include_str!("ui_ir_expression.doc/is_literal.md")]
+    /// Returns whether this expression is a [`Literal`](UiIrExpression::Literal).
     #[must_use]
     pub const fn is_literal(&self) -> bool {
         matches!(self, Self::Literal(_))
     }
 
-    #[doc = include_str!("ui_ir_expression.doc/as_literal.md")]
+    /// Returns the literal value if this expression is a
+    /// [`Literal`](UiIrExpression::Literal), otherwise `None`.
     #[must_use]
     pub const fn as_literal(&self) -> Option<&UiIrValue> {
         match self {
@@ -94,7 +76,8 @@ impl UiIrExpression {
         }
     }
 
-    #[doc = include_str!("ui_ir_expression.doc/as_binding.md")]
+    /// Returns the binding path if this expression is a
+    /// [`Binding`](UiIrExpression::Binding), otherwise `None`.
     #[must_use]
     pub fn as_binding(&self) -> Option<&str> {
         match self {

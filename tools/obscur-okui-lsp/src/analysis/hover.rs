@@ -1,18 +1,19 @@
-#![doc = include_str!("hover.doc/_module.md")]
+//! `Hover`: the result of a `textDocument/hover` query — a label for the
+//! innermost element under the cursor.
 
 use crate::diagnostics::Range;
 
-#[doc = include_str!("hover.doc/Hover.md")]
+#[doc = include_str!("../../docs/api/analysis/hover.doc/Hover.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hover {
-    #[doc = include_str!("hover.doc/contents.md")]
+    /// The human-readable hover text.
     pub contents: Box<str>,
-    #[doc = include_str!("hover.doc/range.md")]
+    /// The source range the hover describes.
     pub range: Range,
 }
 
 impl Hover {
-    #[doc = include_str!("hover.doc/new.md")]
+    /// Creates a hover with `contents` over `range`.
     #[must_use]
     pub fn new(contents: impl Into<Box<str>>, range: Range) -> Self {
         Self {

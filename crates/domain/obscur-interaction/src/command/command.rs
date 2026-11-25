@@ -1,24 +1,26 @@
-#![doc = include_str!("command.doc/_module.md")]
+//! The [`Command`] unified action descriptor (spec §6.7).
 
 use obscur_identity::InternedSymbol;
 
 use crate::command::Shortcut;
 
-#[doc = include_str!("command.doc/Command.md")]
+#[doc = include_str!("../../docs/api/command/command.doc/Command.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Command {
-    #[doc = include_str!("command.doc/id.md")]
+    /// The stable command symbol linking every surface to this action; the same
+    /// symbol shortcuts resolve to and handlers are registered for.
     id: InternedSymbol,
-    #[doc = include_str!("command.doc/title.md")]
+    /// The human-readable title shown in menus, palettes, and toolbars.
     title: Box<str>,
-    #[doc = include_str!("command.doc/shortcut.md")]
+    /// The keyboard shortcut, if any, that triggers this command.
     shortcut: Option<Shortcut>,
-    #[doc = include_str!("command.doc/icon.md")]
+    /// The icon name/id, if any, for toolbar and menu presentation.
     icon: Option<Box<str>>,
 }
 
 impl Command {
-    #[doc = include_str!("command.doc/new.md")]
+    /// Creates a command with the app-owned command symbol `id` and
+    /// human-readable `title`, with no shortcut or icon.
     #[must_use]
     pub fn new(id: InternedSymbol, title: impl Into<Box<str>>) -> Self {
         Self {
@@ -29,39 +31,39 @@ impl Command {
         }
     }
 
-    #[doc = include_str!("command.doc/with_shortcut.md")]
+    /// Returns this command with its keyboard `shortcut` set.
     #[must_use]
     pub fn with_shortcut(mut self, shortcut: Shortcut) -> Self {
         self.shortcut = Some(shortcut);
         self
     }
 
-    #[doc = include_str!("command.doc/with_icon.md")]
+    /// Returns this command with its `icon` name/id set.
     #[must_use]
     pub fn with_icon(mut self, icon: impl Into<Box<str>>) -> Self {
         self.icon = Some(icon.into());
         self
     }
 
-    #[doc = include_str!("command.doc/id_2.md")]
+    /// Returns the stable command symbol every surface routes.
     #[must_use]
     pub const fn id(&self) -> InternedSymbol {
         self.id
     }
 
-    #[doc = include_str!("command.doc/title_2.md")]
+    /// Returns the human-readable title.
     #[must_use]
     pub fn title(&self) -> &str {
         &self.title
     }
 
-    #[doc = include_str!("command.doc/shortcut_2.md")]
+    /// Returns the keyboard shortcut, if any.
     #[must_use]
     pub const fn shortcut(&self) -> Option<Shortcut> {
         self.shortcut
     }
 
-    #[doc = include_str!("command.doc/icon_2.md")]
+    /// Returns the icon name/id, if any.
     #[must_use]
     pub fn icon(&self) -> Option<&str> {
         self.icon.as_deref()

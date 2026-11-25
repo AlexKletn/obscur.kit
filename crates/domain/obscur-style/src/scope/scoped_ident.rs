@@ -1,9 +1,9 @@
-#![doc = include_str!("scoped_ident.doc/_module.md")]
+#![doc = include_str!("../../docs/api/scope/scoped_ident.doc/_module.md")]
 
 use crate::scope::ScopeId;
 use obscur_identity::InternedSymbol;
 
-#[doc = include_str!("scoped_ident.doc/ScopedIdent.md")]
+#[doc = include_str!("../../docs/api/scope/scoped_ident.doc/ScopedIdent.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ScopedIdent {
     scope: ScopeId,
@@ -11,19 +11,19 @@ pub struct ScopedIdent {
 }
 
 impl ScopedIdent {
-    #[doc = include_str!("scoped_ident.doc/new.md")]
+    /// Creates a scoped identifier binding `local` to `scope`.
     #[must_use]
     pub const fn new(scope: ScopeId, local: InternedSymbol) -> Self {
         Self { scope, local }
     }
 
-    #[doc = include_str!("scoped_ident.doc/scope.md")]
+    /// Returns the scope that owns this identifier.
     #[must_use]
     pub const fn scope(self) -> ScopeId {
         self.scope
     }
 
-    #[doc = include_str!("scoped_ident.doc/local.md")]
+    /// Returns the local (unqualified) identifier.
     #[must_use]
     pub const fn local(self) -> InternedSymbol {
         self.local

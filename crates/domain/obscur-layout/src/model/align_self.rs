@@ -1,25 +1,31 @@
-#![doc = include_str!("align_self.doc/_module.md")]
+//! Per-item grid alignment override (`justify-self` / `align-self`).
 
 use crate::model::AlignItems;
 
-#[doc = include_str!("align_self.doc/AlignSelf.md")]
+#[doc = include_str!("../../docs/api/model/align_self.doc/AlignSelf.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum AlignSelf {
-    #[doc = include_str!("align_self.doc/Auto.md")]
+    /// Inherit the container's items default for this axis (the initial value).
     #[default]
     Auto,
-    #[doc = include_str!("align_self.doc/Start.md")]
+    /// Align the item toward the start of the cell.
     Start,
-    #[doc = include_str!("align_self.doc/End.md")]
+    /// Align the item toward the end of the cell.
     End,
-    #[doc = include_str!("align_self.doc/Center.md")]
+    /// Center the item within the cell.
     Center,
-    #[doc = include_str!("align_self.doc/Stretch.md")]
+    /// Aligns the first baseline with the other items in its baseline-sharing group.
+    Baseline,
+    /// Aligns the last baseline with its baseline-sharing group.
+    LastBaseline,
+    /// Stretch the item to fill the cell.
     Stretch,
 }
 
 impl AlignSelf {
-    #[doc = include_str!("align_self.doc/resolve.md")]
+    /// Resolves the effective per-axis alignment against the container's items
+    /// default: [`Auto`](Self::Auto) yields the container's value, every other
+    /// value maps to the matching [`AlignItems`] variant.
     #[must_use]
     pub const fn resolve(self, container: AlignItems) -> AlignItems {
         match self {
@@ -27,6 +33,8 @@ impl AlignSelf {
             Self::Start => AlignItems::Start,
             Self::End => AlignItems::End,
             Self::Center => AlignItems::Center,
+            Self::Baseline => AlignItems::Baseline,
+            Self::LastBaseline => AlignItems::LastBaseline,
             Self::Stretch => AlignItems::Stretch,
         }
     }

@@ -1,23 +1,24 @@
-#![doc = include_str!("font_resolve_request.doc/_module.md")]
+//! A transient request to resolve a font for one itemized run (spec §5.10).
 
 use crate::font::{FontAttributes, FontFallback};
 use crate::shaping::ScriptTag;
 
-#[doc = include_str!("font_resolve_request.doc/FontResolveRequest.md")]
+#[doc = include_str!("../../docs/api/font/font_resolve_request.doc/FontResolveRequest.md")]
 #[derive(Debug, Clone, Copy)]
 pub struct FontResolveRequest<'a> {
-    #[doc = include_str!("font_resolve_request.doc/families.md")]
+    /// The ordered fallback chain to search for a covering family.
     families: &'a FontFallback,
-    #[doc = include_str!("font_resolve_request.doc/attributes.md")]
+    /// The weight/slant/width attributes the resolved face should match.
     attributes: &'a FontAttributes,
-    #[doc = include_str!("font_resolve_request.doc/text.md")]
+    /// The run's source text (already itemized to a single script).
     text: &'a str,
-    #[doc = include_str!("font_resolve_request.doc/script.md")]
+    /// The run's resolved script.
     script: ScriptTag,
 }
 
 impl<'a> FontResolveRequest<'a> {
-    #[doc = include_str!("font_resolve_request.doc/new.md")]
+    /// Creates a request to resolve a face for `text` (written in `script`) from
+    /// `families`, matching `attributes`.
     #[must_use]
     pub const fn new(
         families: &'a FontFallback,
@@ -33,25 +34,25 @@ impl<'a> FontResolveRequest<'a> {
         }
     }
 
-    #[doc = include_str!("font_resolve_request.doc/families_2.md")]
+    /// Returns the ordered fallback chain to search.
     #[must_use]
     pub const fn families(&self) -> &'a FontFallback {
         self.families
     }
 
-    #[doc = include_str!("font_resolve_request.doc/attributes_2.md")]
+    /// Returns the attributes the resolved face should match.
     #[must_use]
     pub const fn attributes(&self) -> &'a FontAttributes {
         self.attributes
     }
 
-    #[doc = include_str!("font_resolve_request.doc/text_2.md")]
+    /// Returns the run's source text.
     #[must_use]
     pub const fn text(&self) -> &'a str {
         self.text
     }
 
-    #[doc = include_str!("font_resolve_request.doc/script_2.md")]
+    /// Returns the run's resolved script.
     #[must_use]
     pub const fn script(&self) -> ScriptTag {
         self.script

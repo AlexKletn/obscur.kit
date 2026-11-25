@@ -1,18 +1,18 @@
-#![doc = include_str!("layout_invalidation.doc/_module.md")]
+//! An accumulator of pending relayouts, keyed by node and typed reason.
 
 use crate::context::LayoutContext;
 use crate::invalidation::{LayoutInvalidationReason, PropagationResult};
 use obscur_identity::{FastMap, NodeId};
 use std::collections::HashMap;
 
-#[doc = include_str!("layout_invalidation.doc/LayoutInvalidation.md")]
+#[doc = include_str!("../../docs/api/invalidation/layout_invalidation.doc/LayoutInvalidation.md")]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LayoutInvalidation {
     pending: FastMap<NodeId, LayoutInvalidationReason>,
 }
 
 impl LayoutInvalidation {
-    #[doc = include_str!("layout_invalidation.doc/new.md")]
+    /// Creates an empty accumulator with no pending relayouts.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -20,53 +20,54 @@ impl LayoutInvalidation {
         }
     }
 
-    #[doc = include_str!("layout_invalidation.doc/invalidate.md")]
+    #[doc = include_str!("../../docs/api/invalidation/layout_invalidation.doc/invalidate.md")]
     pub fn invalidate(&mut self, node: NodeId, reason: LayoutInvalidationReason) {
         self.pending.entry(node).or_insert(reason);
     }
 
-    #[doc = include_str!("layout_invalidation.doc/is_invalidated.md")]
+    /// Whether `node` is currently pending recomputation.
     #[must_use]
     pub fn is_invalidated(&self, node: NodeId) -> bool {
         self.pending.contains_key(&node)
     }
 
-    #[doc = include_str!("layout_invalidation.doc/reason.md")]
+    /// The reason `node` was invalidated, if it is pending.
     #[must_use]
     pub fn reason(&self, node: NodeId) -> Option<LayoutInvalidationReason> {
         self.pending.get(&node).copied()
     }
 
-    #[doc = include_str!("layout_invalidation.doc/len.md")]
+    /// The number of distinct nodes pending recomputation.
     #[must_use]
     pub fn len(&self) -> usize {
         self.pending.len()
     }
 
-    #[doc = include_str!("layout_invalidation.doc/is_empty.md")]
+    /// Whether nothing is pending.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.pending.is_empty()
     }
 
-    #[doc = include_str!("layout_invalidation.doc/iter.md")]
+    /// Iterates over the pending `(node, reason)` entries without consuming.
     pub fn iter(&self) -> impl Iterator<Item = (&NodeId, &LayoutInvalidationReason)> {
         self.pending.iter()
     }
 
-    #[doc = include_str!("layout_invalidation.doc/take.md")]
+    /// Removes and returns the pending map, leaving this accumulator empty.
     #[must_use]
     pub fn take(&mut self) -> FastMap<NodeId, LayoutInvalidationReason> {
         std::mem::take(&mut self.pending)
     }
 
-    #[doc = include_str!("layout_invalidation.doc/drain.md")]
+    /// Alias for [`take`](Self::take): drains the pending map, leaving this
+    /// accumulator empty.
     #[must_use]
     pub fn drain(&mut self) -> FastMap<NodeId, LayoutInvalidationReason> {
         self.take()
     }
 
-    #[doc = include_str!("layout_invalidation.doc/note_constraints_changed.md")]
+    #[doc = include_str!("../../docs/api/invalidation/layout_invalidation.doc/note_constraints_changed.md")]
     pub fn note_constraints_changed(&mut self, ctx: &LayoutContext) -> bool {
         if ctx.should_remeasure(true, None) {
             self.invalidate(ctx.node(), LayoutInvalidationReason::ConstraintsChanged);
@@ -76,7 +77,7 @@ impl LayoutInvalidation {
         }
     }
 
-    #[doc = include_str!("layout_invalidation.doc/note_child_changed.md")]
+    #[doc = include_str!("../../docs/api/invalidation/layout_invalidation.doc/note_child_changed.md")]
     pub fn note_child_changed(&mut self, ctx: &LayoutContext, child: NodeId) -> bool {
         if ctx.should_remeasure(false, Some(child)) {
             self.invalidate(ctx.node(), LayoutInvalidationReason::ChildSizeChanged);
@@ -86,12 +87,12 @@ impl LayoutInvalidation {
         }
     }
 
-    #[doc = include_str!("layout_invalidation.doc/note_style_changed.md")]
+    #[doc = include_str!("../../docs/api/invalidation/layout_invalidation.doc/note_style_changed.md")]
     pub fn note_style_changed(&mut self, node: NodeId) {
         self.invalidate(node, LayoutInvalidationReason::StyleChanged);
     }
 
-    #[doc = include_str!("layout_invalidation.doc/note_upward.md")]
+    #[doc = include_str!("../../docs/api/invalidation/layout_invalidation.doc/note_upward.md")]
     pub fn note_upward(
         &mut self,
         parent_ctx: &LayoutContext,

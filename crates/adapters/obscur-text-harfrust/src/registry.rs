@@ -1,4 +1,9 @@
-#![doc = include_str!("registry.doc/_module.md")]
+//! The [`FontRegistry`] adapter implementing [`FontResolver`] with real,
+//! `cmap`-coverage-driven font fallback (spec §5.10).
+
+mod registered_font;
+
+use registered_font::RegisteredFont;
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -13,22 +18,24 @@ use read_fonts::{FontRef as ReadFontRef, TableProvider};
 
 use crate::face_metrics::FaceMetrics;
 
-#[doc = include_str!("registry.doc/FontRegistry.md")]
+#[doc = include_str!("../docs/api/registry.doc/FontRegistry.md")]
 #[derive(Clone, Default)]
 pub struct FontRegistry {
     fonts: Vec<RegisteredFont>,
-    #[doc = include_str!("registry.doc/discovered.md")]
+    #[doc = include_str!("../docs/api/registry.doc/discovered.md")]
     discovered: Rc<RefCell<Vec<RegisteredFont>>>,
-    #[doc = include_str!("registry.doc/undelivered.md")]
+    /// Discovered faces the renderer has not been handed yet — drained by
+    /// [`take_undelivered_faces`](Self::take_undelivered_faces).
     undelivered: UndeliveredFaces,
-    #[doc = include_str!("registry.doc/asked_families.md")]
+    #[doc = include_str!("../docs/api/registry.doc/asked_families.md")]
     asked_families: Rc<RefCell<Vec<Box<str>>>>,
-    #[doc = include_str!("registry.doc/fallback.md")]
+    /// The host lookup, when one is wired.
     fallback: Option<Arc<dyn SystemFontFallback>>,
 }
 
 impl std::fmt::Debug for FontRegistry {
-    #[doc = include_str!("registry.doc/fmt.md")]
+    /// Reports whether a host fallback is attached, not what it is — a port is
+    /// opaque, and "is one attached?" is the question a missing-glyph bug asks.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FontRegistry")
             .field("fonts", &self.fonts)
@@ -43,27 +50,19 @@ impl std::fmt::Debug for FontRegistry {
     }
 }
 
-#[doc = include_str!("registry.doc/UndeliveredFaces.md")]
+/// Faces discovered at shape time and not yet handed to a renderer, as
+/// `(id, bytes)`. Shared across clones for the same reason `discovered` is.
 type UndeliveredFaces = Rc<RefCell<Vec<(FontId, Arc<[u8]>)>>>;
 
-#[doc = include_str!("registry.doc/RegisteredFont.md")]
-#[derive(Debug, Clone)]
-struct RegisteredFont {
-    id: FontId,
-    family: FontFamily,
-    attributes: FontAttributes,
-    bytes: Arc<[u8]>,
-    metrics: Option<FontMetrics>,
-}
-
 impl FontRegistry {
-    #[doc = include_str!("registry.doc/new.md")]
+    /// Creates an empty registry; every [`resolve`](FontResolver::resolve)
+    /// returns `None` until a font is registered.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    #[doc = include_str!("registry.doc/register.md")]
+    #[doc = include_str!("../docs/api/registry.doc/register.md")]
     pub fn register(
         &mut self,
         family: FontFamily,
@@ -85,20 +84,20 @@ impl FontRegistry {
         id
     }
 
-    #[doc = include_str!("registry.doc/with_system_fallback.md")]
+    #[doc = include_str!("../docs/api/registry.doc/with_system_fallback.md")]
     #[must_use]
     pub fn with_system_fallback(mut self, fallback: Arc<dyn SystemFontFallback>) -> Self {
         self.fallback = Some(fallback);
         self
     }
 
-    #[doc = include_str!("registry.doc/take_undelivered_faces.md")]
+    #[doc = include_str!("../docs/api/registry.doc/take_undelivered_faces.md")]
     #[must_use]
     pub fn take_undelivered_faces(&self) -> Vec<(FontId, Arc<[u8]>)> {
         std::mem::take(&mut self.undelivered.borrow_mut())
     }
 
-    #[doc = include_str!("registry.doc/discover.md")]
+    #[doc = include_str!("../docs/api/registry.doc/discover.md")]
     fn discover(&self, text: &str) -> Option<usize> {
         let fallback = self.fallback.as_ref()?;
         // The first character no face — registered or already discovered — can
@@ -136,7 +135,7 @@ impl FontRegistry {
         Some(discovered.len() - 1)
     }
 
-    #[doc = include_str!("registry.doc/discover_family.md")]
+    #[doc = include_str!("../docs/api/registry.doc/discover_family.md")]
     fn discover_family(
         &self,
         family: &FontFamily,
@@ -195,13 +194,14 @@ impl FontRegistry {
         candidate.covers(text).then_some(candidate)
     }
 
-    #[doc = include_str!("registry.doc/next_id.md")]
+    /// The next free [`FontId`]: registered faces occupy `0..fonts.len()` and
+    /// discovered ones continue from there.
     fn next_id(&self) -> FontId {
         let used = self.fonts.len() + self.discovered.borrow().len();
         FontId::new(u32::try_from(used).unwrap_or(u32::MAX))
     }
 
-    #[doc = include_str!("registry.doc/face_metrics.md")]
+    #[doc = include_str!("../docs/api/registry.doc/face_metrics.md")]
     #[must_use]
     pub fn face_metrics(&self) -> FaceMetrics {
         FaceMetrics::new(
@@ -212,13 +212,13 @@ impl FontRegistry {
         )
     }
 
-    #[doc = include_str!("registry.doc/len.md")]
+    /// Returns the number of registered fonts.
     #[must_use]
     pub fn len(&self) -> usize {
         self.fonts.len()
     }
 
-    #[doc = include_str!("registry.doc/is_empty.md")]
+    /// Returns whether no fonts are registered.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.fonts.is_empty()
@@ -292,36 +292,10 @@ impl FontResolver for FontRegistry {
     }
 }
 
-impl RegisteredFont {
-    #[doc = include_str!("registry.doc/covers_char.md")]
-    fn covers_char(&self, character: char) -> bool {
-        let Ok(font) = ReadFontRef::new(&self.bytes) else {
-            return false;
-        };
-        let Ok(cmap) = font.cmap() else {
-            return false;
-        };
-        cmap.map_codepoint(character)
-            .is_some_and(|gid| gid.to_u32() != 0)
-    }
-
-    fn covers(&self, text: &str) -> bool {
-        let Ok(font) = ReadFontRef::new(&self.bytes) else {
-            return false;
-        };
-        let Ok(cmap) = font.cmap() else {
-            return false;
-        };
-        text.chars()
-            .filter(|ch| !is_ignorable(*ch))
-            .all(|ch| cmap.map_codepoint(ch).is_some_and(|gid| gid.to_u32() != 0))
-    }
-}
-
-#[doc = include_str!("registry.doc/IDEALIZED_METRICS.md")]
+#[doc = include_str!("../docs/api/registry.doc/IDEALIZED_METRICS.md")]
 const IDEALIZED_METRICS: FontMetrics = FontMetrics::new(1000, 800.0, -200.0, 0.0);
 
-#[doc = include_str!("registry.doc/read_metrics.md")]
+#[doc = include_str!("../docs/api/registry.doc/read_metrics.md")]
 fn read_metrics(bytes: &[u8]) -> Option<FontMetrics> {
     let font = ReadFontRef::new(bytes).ok()?;
     let units_per_em = font.head().ok()?.units_per_em();
@@ -337,10 +311,11 @@ fn read_metrics(bytes: &[u8]) -> Option<FontMetrics> {
     ))
 }
 
-#[doc = include_str!("registry.doc/BOLD_THRESHOLD.md")]
+/// The weight at and above which a request is treated as "bold-ish": a request
+/// this heavy matched to a clearly lighter face is faux-bolded (spec §5.18).
 const BOLD_THRESHOLD: u16 = 600;
 
-#[doc = include_str!("registry.doc/synthesis.md")]
+#[doc = include_str!("../docs/api/registry.doc/synthesis.md")]
 fn synthesis(requested: &FontAttributes, matched: &FontAttributes) -> (bool, bool) {
     let oblique = requested.slant != FontSlant::Normal && matched.slant == FontSlant::Normal;
     let bold =
@@ -348,7 +323,8 @@ fn synthesis(requested: &FontAttributes, matched: &FontAttributes) -> (bool, boo
     (oblique, bold)
 }
 
-#[doc = include_str!("registry.doc/is_ignorable.md")]
+/// Returns whether `ch` is ignored for coverage: ASCII whitespace or an ASCII
+/// control character, which need no glyph.
 const fn is_ignorable(ch: char) -> bool {
     ch.is_ascii_whitespace() || ch.is_ascii_control()
 }

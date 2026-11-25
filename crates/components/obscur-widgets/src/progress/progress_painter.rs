@@ -1,5 +1,8 @@
-#![doc = include_str!("progress_painter.doc/_module.md")]
+#![doc = include_str!("../../docs/api/progress/progress_painter.doc/_module.md")]
 
+use obscur_diagnostics::{
+    Diagnostic, DiagnosticCode, DiagnosticSeverity, DiagnosticSubsystem, RecoveryAction,
+};
 use obscur_geometry::{Point, Size};
 use obscur_scene::command::CanvasRegion;
 use obscur_scene::paint::{Brush, LineCap, Stroke};
@@ -8,16 +11,16 @@ use obscur_view::view::{CanvasPaint, ViewProperty, ViewValue};
 
 use super::{Progress, ProgressShape};
 
-#[doc = include_str!("progress_painter.doc/THICKNESS.md")]
+/// How thick the bar is, in logical pixels.
 const THICKNESS: f32 = 6.0;
 
-#[doc = include_str!("progress_painter.doc/SWEEP_SECONDS.md")]
+/// How long one sweep of an untracked bar takes.
 const SWEEP_SECONDS: f32 = 1.4;
 
-#[doc = include_str!("progress_painter.doc/SWEEP_FRACTION.md")]
+/// How much of the track an untracked bar's moving window covers.
 const SWEEP_FRACTION: f32 = 0.25;
 
-#[doc = include_str!("progress_painter.doc/paint_progress.md")]
+/// Draws the track and the filled span over it, along the same path.
 pub fn paint_progress(
     region: &mut CanvasRegion<'_>,
     paint: &CanvasPaint<'_>,
@@ -27,7 +30,7 @@ pub fn paint_progress(
     let size = region.size();
     let tracked = read_tracked(props);
     let shape = ProgressShape::from_int(read_shape(props));
-    let track_path = read_path(props).unwrap_or_else(|| track_path(shape, size));
+    let track_path = read_path(paint).unwrap_or_else(|| track_path(shape, size));
     if track_path.is_empty() {
         return false;
     }
@@ -64,7 +67,7 @@ pub fn paint_progress(
     !tracked
 }
 
-#[doc = include_str!("progress_painter.doc/sweep.md")]
+#[doc = include_str!("../../docs/api/progress/progress_painter.doc/sweep.md")]
 fn sweep(elapsed: f32) -> (f32, f32) {
     // The window's LEADING edge runs the whole track and wraps; the trailing
     // edge follows a fixed distance behind. Clamping rather than wrapping the
@@ -76,23 +79,36 @@ fn sweep(elapsed: f32) -> (f32, f32) {
     (tail.clamp(0.0, 1.0), head.clamp(0.0, 1.0))
 }
 
-#[doc = include_str!("progress_painter.doc/read_path.md")]
-fn read_path(props: &[ViewProperty]) -> Option<Path> {
-    let data = props
+/// Parses the optional SVG track path and reports malformed data before falling back to the built-in track.
+fn read_path(paint: &CanvasPaint<'_>) -> Option<Path> {
+    let data = paint
+        .props()
         .iter()
         .find(|p| p.name() == Progress::PROP_PATH)
         .and_then(|p| match p.value() {
             ViewValue::Text(text) if !text.is_empty() => Some(&**text),
             _ => None,
         })?;
-    // Unparseable data falls back to the built-in shape rather than to nothing:
-    // a bar that vanished because of a typo in its outline would be a worse
-    // answer than a plain bar. The parse itself refuses loudly — see
-    // `PathDataError` — so a host that wants to report it can.
-    parse_path_data(data).ok().filter(|path| !path.is_empty())
+    match parse_path_data(data) {
+        Ok(path) => Some(path).filter(|path| !path.is_empty()),
+        Err(error) => {
+            let mut diagnostic = Diagnostic::new(
+                DiagnosticCode::new("progress.invalid_path"),
+                DiagnosticSeverity::Warning,
+                DiagnosticSubsystem::View,
+                format!(
+                    "invalid Progress path at byte {} ({:?})",
+                    error.at, error.what
+                ),
+            );
+            diagnostic.recovery = RecoveryAction::Fallback;
+            paint.report(diagnostic);
+            None
+        }
+    }
 }
 
-#[doc = include_str!("progress_painter.doc/read_tracked.md")]
+/// Whether the node says it knows its value; a node that says nothing is tracked.
 fn read_tracked(props: &[ViewProperty]) -> bool {
     props
         .iter()
@@ -106,7 +122,7 @@ fn read_tracked(props: &[ViewProperty]) -> bool {
         .unwrap_or(true)
 }
 
-#[doc = include_str!("progress_painter.doc/track_path.md")]
+/// The path the bar runs along, for a given shape and box.
 fn track_path(shape: ProgressShape, size: Size) -> Path {
     match shape {
         ProgressShape::Line => {
@@ -123,7 +139,7 @@ fn track_path(shape: ProgressShape, size: Size) -> Path {
     }
 }
 
-#[doc = include_str!("progress_painter.doc/ring.md")]
+#[doc = include_str!("../../docs/api/progress/progress_painter.doc/ring.md")]
 fn ring(size: Size) -> Path {
     // Four cubics, the standard circle approximation, starting at twelve
     // o'clock and running clockwise — so a ring fills the way a clock does,
@@ -160,7 +176,7 @@ fn ring(size: Size) -> Path {
     path
 }
 
-#[doc = include_str!("progress_painter.doc/track_brush.md")]
+#[doc = include_str!("../../docs/api/progress/progress_painter.doc/track_brush.md")]
 fn track_brush() -> Brush {
     // The unfilled remainder, faint. It is drawn by the painter rather than
     // left to the sheet because it must follow the SAME path as the fill: a
@@ -168,7 +184,7 @@ fn track_brush() -> Brush {
     Brush::solid(obscur_scene::color::Color::rgba(0.17, 0.16, 0.15, 0.25))
 }
 
-#[doc = include_str!("progress_painter.doc/read_value.md")]
+/// The fraction a node carries, clamped, defaulting to zero.
 fn read_value(props: &[ViewProperty]) -> f32 {
     props
         .iter()
@@ -192,7 +208,7 @@ fn read_value(props: &[ViewProperty]) -> f32 {
         })
 }
 
-#[doc = include_str!("progress_painter.doc/read_shape.md")]
+/// The shape a node carries, defaulting to the line.
 fn read_shape(props: &[ViewProperty]) -> i64 {
     props
         .iter()

@@ -1,31 +1,32 @@
-#![doc = include_str!("resource_entry.doc/_module.md")]
+//! The Resource Hub's per-resource bookkeeping record (spec §5.15).
 
 use crate::handle::{ResourceHandle, ResourceKind};
 use crate::hub::ResourceNamespace;
 use crate::source::ResourceSource;
 use crate::state::{ResourceState, ResourceVersion};
 
-#[doc = include_str!("resource_entry.doc/ResourceEntry.md")]
+#[doc = include_str!("../../docs/api/hub/resource_entry.doc/ResourceEntry.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResourceEntry {
-    #[doc = include_str!("resource_entry.doc/handle.md")]
+    /// The identity handle for this resource.
     handle: ResourceHandle,
-    #[doc = include_str!("resource_entry.doc/source.md")]
+    /// Where the resource's bytes come from.
     source: ResourceSource,
-    #[doc = include_str!("resource_entry.doc/kind.md")]
+    /// The category of resource.
     kind: ResourceKind,
-    #[doc = include_str!("resource_entry.doc/namespace.md")]
+    /// The disposal / hot-reload scope that owns this resource.
     namespace: ResourceNamespace,
-    #[doc = include_str!("resource_entry.doc/state.md")]
+    /// The current load lifecycle state.
     state: ResourceState,
-    #[doc = include_str!("resource_entry.doc/version.md")]
+    /// The authoritative content version; a load job is rejected on completion
+    /// if it no longer matches (spec §5.15 stale-job rejection).
     version: ResourceVersion,
-    #[doc = include_str!("resource_entry.doc/ref_count.md")]
+    /// How many outstanding requests reference this deduplicated resource.
     ref_count: usize,
 }
 
 impl ResourceEntry {
-    #[doc = include_str!("resource_entry.doc/new.md")]
+    #[doc = include_str!("../../docs/api/hub/resource_entry.doc/new.md")]
     #[must_use]
     pub fn new(
         handle: ResourceHandle,
@@ -44,71 +45,73 @@ impl ResourceEntry {
         }
     }
 
-    #[doc = include_str!("resource_entry.doc/retain.md")]
+    /// Records one more request referencing this deduplicated resource (spec
+    /// §5.15 deduplication).
     pub fn retain(&mut self) {
         self.ref_count = self.ref_count.saturating_add(1);
     }
 
-    #[doc = include_str!("resource_entry.doc/release.md")]
+    #[doc = include_str!("../../docs/api/hub/resource_entry.doc/release.md")]
     pub fn release(&mut self) -> usize {
         self.ref_count = self.ref_count.saturating_sub(1);
         self.ref_count
     }
 
-    #[doc = include_str!("resource_entry.doc/is_unreferenced.md")]
+    /// Returns whether no requests reference this resource any longer.
     #[must_use]
     pub const fn is_unreferenced(&self) -> bool {
         self.ref_count == 0
     }
 
-    #[doc = include_str!("resource_entry.doc/handle_2.md")]
+    /// Returns the identity handle for this resource.
     #[must_use]
     pub const fn handle(&self) -> ResourceHandle {
         self.handle
     }
 
-    #[doc = include_str!("resource_entry.doc/source_2.md")]
+    /// Returns where the resource's bytes come from.
     #[must_use]
     pub const fn source(&self) -> &ResourceSource {
         &self.source
     }
 
-    #[doc = include_str!("resource_entry.doc/kind_2.md")]
+    /// Returns the category of resource.
     #[must_use]
     pub const fn kind(&self) -> ResourceKind {
         self.kind
     }
 
-    #[doc = include_str!("resource_entry.doc/namespace_2.md")]
+    /// Returns the disposal / hot-reload scope that owns this resource.
     #[must_use]
     pub const fn namespace(&self) -> &ResourceNamespace {
         &self.namespace
     }
 
-    #[doc = include_str!("resource_entry.doc/state_2.md")]
+    /// Returns the current load lifecycle state.
     #[must_use]
     pub const fn state(&self) -> &ResourceState {
         &self.state
     }
 
-    #[doc = include_str!("resource_entry.doc/version_2.md")]
+    /// Returns the authoritative content version (spec §5.15 versioning).
     #[must_use]
     pub const fn version(&self) -> ResourceVersion {
         self.version
     }
 
-    #[doc = include_str!("resource_entry.doc/ref_count_2.md")]
+    /// Returns how many outstanding requests reference this resource.
     #[must_use]
     pub const fn ref_count(&self) -> usize {
         self.ref_count
     }
 
-    #[doc = include_str!("resource_entry.doc/set_state.md")]
+    /// Replaces the load lifecycle state (used by the hub's state machine).
     pub(crate) fn set_state(&mut self, state: ResourceState) {
         self.state = state;
     }
 
-    #[doc = include_str!("resource_entry.doc/bump_version.md")]
+    /// Advances the authoritative version by one and returns it (spec §5.15 hot
+    /// reload). Any in-flight job stamped with the prior version becomes stale.
     pub(crate) fn bump_version(&mut self) -> ResourceVersion {
         self.version = self.version.next();
         self.version

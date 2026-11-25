@@ -1,4 +1,4 @@
-#![doc = include_str!("glyph_raster.doc/_module.md")]
+#![doc = include_str!("../../docs/api/renderer/glyph_raster.doc/_module.md")]
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -11,10 +11,10 @@ use skrifa::outline::DrawSettings;
 use skrifa::{FontRef, GlyphId, MetadataProvider};
 
 use crate::renderer::brush_fill::brush_color;
-use crate::renderer::glyph_pen::GlyphPathPen;
+use crate::renderer::glyph_pen::{GlyphPathPen, append_bold_outline};
 use crate::renderer::skia_lowering::solid_paint;
 
-#[doc = include_str!("glyph_raster.doc/draw_text_run.md")]
+#[doc = include_str!("../../docs/api/renderer/glyph_raster.doc/draw_text_run.md")]
 pub(crate) fn draw_text_run(
     pixmap: &mut tiny_skia::Pixmap,
     origin: Point,
@@ -47,28 +47,19 @@ pub(crate) fn draw_text_run(
         && let Ok(font_ref) = FontRef::new(bytes)
     {
         draw_glyph_outlines(
-            pixmap,
-            origin,
-            run,
-            &font_ref,
-            &sk_paint,
-            clip,
-            transform,
-            skew,
-            run.synth_bold(),
+            pixmap, origin, run, &font_ref, &sk_paint, clip, transform, skew,
         );
         return;
     }
     draw_glyph_boxes(pixmap, origin, run, &sk_paint, clip, transform, skew);
 }
 
-#[doc = include_str!("glyph_raster.doc/FAUX_ITALIC_SKEW.md")]
+/// The synthetic-oblique shear factor: the standard faux-italic skew of `0.25`
+/// (`tan ≈ 14°`), applied as a rightward x-shift proportional to a point's height
+/// above the baseline (spec §5.18).
 const FAUX_ITALIC_SKEW: f32 = 0.25;
 
-#[doc = include_str!("glyph_raster.doc/FAUX_BOLD_STROKE_FRACTION.md")]
-const FAUX_BOLD_STROKE_FRACTION: f32 = 0.03;
-
-#[doc = include_str!("glyph_raster.doc/draw_glyph_outlines.md")]
+#[doc = include_str!("../../docs/api/renderer/glyph_raster.doc/draw_glyph_outlines.md")]
 #[allow(clippy::too_many_arguments)]
 fn draw_glyph_outlines(
     pixmap: &mut tiny_skia::Pixmap,
@@ -79,16 +70,10 @@ fn draw_glyph_outlines(
     clip: Option<&tiny_skia::Mask>,
     transform: tiny_skia::Transform,
     skew: f32,
-    bold: bool,
 ) {
     let outlines = font.outline_glyphs();
     let size = SkrifaSize::new(run.font_size());
-    // Faux-bold: stroke the filled outline with a hairline proportional to the
-    // font size so the shape gains weight without re-shaping.
-    let bold_stroke = bold.then(|| tiny_skia::Stroke {
-        width: run.font_size() * FAUX_BOLD_STROKE_FRACTION,
-        ..Default::default()
-    });
+    let mut run_path = tiny_skia::PathBuilder::new();
     for glyph in run.glyphs() {
         let Some(outline) = outlines.get(GlyphId::new(glyph.glyph_id())) else {
             continue;
@@ -103,20 +88,24 @@ fn draw_glyph_outlines(
         let Some(sk_path) = pen.into_path() else {
             continue;
         };
+        if run.synth_bold() {
+            append_bold_outline(&mut run_path, &sk_path, run.font_size());
+        } else {
+            run_path.push_path(&sk_path);
+        }
+    }
+    if let Some(path) = run_path.finish() {
         pixmap.fill_path(
-            &sk_path,
+            &path,
             sk_paint,
             tiny_skia::FillRule::Winding,
             transform,
             clip,
         );
-        if let Some(stroke) = &bold_stroke {
-            pixmap.stroke_path(&sk_path, sk_paint, stroke, transform, clip);
-        }
     }
 }
 
-#[doc = include_str!("glyph_raster.doc/draw_glyph_boxes.md")]
+#[doc = include_str!("../../docs/api/renderer/glyph_raster.doc/draw_glyph_boxes.md")]
 fn draw_glyph_boxes(
     pixmap: &mut tiny_skia::Pixmap,
     origin: Point,
@@ -127,40 +116,33 @@ fn draw_glyph_boxes(
     skew: f32,
 ) {
     let font_size = run.font_size();
+    let mut path = tiny_skia::PathBuilder::new();
     for glyph in run.glyphs() {
         // Skip whitespace: the mock shaper's glyph id is the Unicode scalar.
         if char::from_u32(glyph.glyph_id()).is_none_or(char::is_whitespace) {
             continue;
         }
-        let width = glyph.advance();
-        if width <= 0.0 {
-            continue;
-        }
         let x = origin.x + glyph.x();
         let baseline = origin.y + glyph.y();
         let top = baseline - font_size;
-        let sk_path = if skew == 0.0 {
-            let Some(rect) = tiny_skia::Rect::from_xywh(x, top, width, font_size) else {
-                continue;
-            };
-            tiny_skia::PathBuilder::from_rect(rect)
-        } else {
-            // Parallelogram: baseline edge unshifted, top edge slid right by
-            // `skew * font_size`.
-            let shift = skew * font_size;
-            let mut builder = tiny_skia::PathBuilder::new();
-            builder.move_to(x, baseline);
-            builder.line_to(x + width, baseline);
-            builder.line_to(x + width + shift, top);
-            builder.line_to(x + shift, top);
-            builder.close();
-            let Some(path) = builder.finish() else {
-                continue;
-            };
-            path
+        let width = glyph.advance();
+        let Some(rect) = tiny_skia::Rect::from_xywh(x, top, width, font_size) else {
+            continue;
         };
+        if skew == 0.0 {
+            path.push_rect(rect);
+        } else {
+            let shift = skew * font_size;
+            path.move_to(x, baseline);
+            path.line_to(x + width, baseline);
+            path.line_to(x + width + shift, top);
+            path.line_to(x + shift, top);
+            path.close();
+        }
+    }
+    if let Some(path) = path.finish() {
         pixmap.fill_path(
-            &sk_path,
+            &path,
             sk_paint,
             tiny_skia::FillRule::Winding,
             transform,
@@ -214,6 +196,26 @@ mod tests {
             target.pixel(50, 30).expect("pixel").alpha(),
             0,
             "nothing is painted past the advance"
+        );
+    }
+
+    #[test]
+    fn overlapping_fallback_cells_composite_once() {
+        let mut target = pixmap();
+        let glyph = PositionedGlyph::new(u32::from('A'), 0, 0.0, 40.0, 20.0);
+        let run = GlyphRun::new(vec![glyph, glyph], 32.0, "AA");
+        draw_text_run(
+            &mut target,
+            Point::ORIGIN,
+            &run,
+            &Brush::solid(Color::rgba(1.0, 1.0, 1.0, 0.5)),
+            None,
+            tiny_skia::Transform::identity(),
+            &HashMap::new(),
+        );
+        assert_eq!(
+            target.pixel(10, 30).expect("inside both cells").alpha(),
+            128
         );
     }
 

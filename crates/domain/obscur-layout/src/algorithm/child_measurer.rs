@@ -1,12 +1,30 @@
-#![doc = include_str!("child_measurer.doc/_module.md")]
+//! `ChildMeasurer`: the callback a layout algorithm uses to size a child.
 
 use obscur_geometry::BoxConstraints;
 use obscur_geometry::Size;
 
-#[doc = include_str!("child_measurer.doc/ChildMeasurer.md")]
+#[doc = include_str!("../../docs/api/algorithm/child_measurer.doc/ChildMeasurer.md")]
 pub trait ChildMeasurer {
-    #[doc = include_str!("child_measurer.doc/measure_child.md")]
+    #[doc = include_str!("../../docs/api/algorithm/child_measurer.doc/measure_child.md")]
     fn measure_child(&mut self, index: usize, constraints: BoxConstraints) -> Size;
+
+    /// Measures the child and returns its first baseline, when available, relative to its border-box top.
+    fn measure_child_with_baseline(
+        &mut self,
+        index: usize,
+        constraints: BoxConstraints,
+    ) -> (Size, Option<f32>) {
+        (self.measure_child(index, constraints), None)
+    }
+
+    /// Measures the child and returns its last baseline relative to the top of its border box.
+    fn measure_child_with_last_baseline(
+        &mut self,
+        index: usize,
+        constraints: BoxConstraints,
+    ) -> (Size, Option<f32>) {
+        (self.measure_child(index, constraints), None)
+    }
 }
 
 #[cfg(test)]

@@ -1,4 +1,6 @@
-#![doc = include_str!("pointer_converter.doc/_module.md")]
+//! The [`PointerConverter`] pure winit→domain pointer-event converter
+//! (spec §4.7 pointer input; §6.1 windowing; §2.7 "преобразует native events в
+//! доменные события").
 
 use obscur_geometry::Point;
 use obscur_interaction::pointer::{
@@ -6,18 +8,18 @@ use obscur_interaction::pointer::{
     WheelEvent,
 };
 
-#[doc = include_str!("pointer_converter.doc/PointerConverter.md")]
+#[doc = include_str!("../../docs/api/conversion/pointer_converter.doc/PointerConverter.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PointerConverter;
 
 impl PointerConverter {
-    #[doc = include_str!("pointer_converter.doc/new.md")]
+    /// Creates a converter.
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    #[doc = include_str!("pointer_converter.doc/button.md")]
+    #[doc = include_str!("../../docs/api/conversion/pointer_converter.doc/button.md")]
     #[must_use]
     pub fn button(button: winit::event::MouseButton) -> Option<PointerButton> {
         use winit::event::MouseButton as Winit;
@@ -31,7 +33,10 @@ impl PointerConverter {
         }
     }
 
-    #[doc = include_str!("pointer_converter.doc/kind.md")]
+    /// Maps a winit [`ElementState`](winit::event::ElementState) to the pointer
+    /// [`PointerEventKind`] for a button transition
+    /// (`Pressed` → [`Down`](PointerEventKind::Down),
+    /// `Released` → [`Up`](PointerEventKind::Up)).
     #[must_use]
     pub fn kind(state: winit::event::ElementState) -> PointerEventKind {
         match state {
@@ -40,7 +45,7 @@ impl PointerConverter {
         }
     }
 
-    #[doc = include_str!("pointer_converter.doc/wheel.md")]
+    #[doc = include_str!("../../docs/api/conversion/pointer_converter.doc/wheel.md")]
     #[must_use]
     pub fn wheel(delta: winit::event::MouseScrollDelta, at: Point) -> WheelEvent {
         use winit::event::MouseScrollDelta as Winit;
@@ -59,7 +64,7 @@ impl PointerConverter {
         .as_trusted()
     }
 
-    #[doc = include_str!("pointer_converter.doc/moved.md")]
+    #[doc = include_str!("../../docs/api/conversion/pointer_converter.doc/moved.md")]
     #[must_use]
     pub fn moved(
         &self,
@@ -71,7 +76,7 @@ impl PointerConverter {
             .with_buttons(held)
     }
 
-    #[doc = include_str!("pointer_converter.doc/entered.md")]
+    #[doc = include_str!("../../docs/api/conversion/pointer_converter.doc/entered.md")]
     #[must_use]
     pub fn entered(
         &self,
@@ -83,7 +88,7 @@ impl PointerConverter {
             .with_buttons(held)
     }
 
-    #[doc = include_str!("pointer_converter.doc/left.md")]
+    #[doc = include_str!("../../docs/api/conversion/pointer_converter.doc/left.md")]
     #[must_use]
     pub fn left(
         &self,
@@ -95,7 +100,7 @@ impl PointerConverter {
             .with_buttons(held)
     }
 
-    #[doc = include_str!("pointer_converter.doc/pressed.md")]
+    #[doc = include_str!("../../docs/api/conversion/pointer_converter.doc/pressed.md")]
     #[must_use]
     pub fn pressed(
         &self,
@@ -109,7 +114,10 @@ impl PointerConverter {
             .with_button(button)
     }
 
-    #[doc = include_str!("pointer_converter.doc/released.md")]
+    /// Builds a [`PointerEventKind::Up`] event at `position` for pointer `id`, naming
+    /// the `button` that came up and the `held` set still down **after** the release
+    /// (spec §4.7). See [`pressed`](Self::pressed) for why the two are separate facts,
+    /// and for why the trusted flag needs this builder at all.
     #[must_use]
     pub fn released(
         &self,
@@ -123,7 +131,7 @@ impl PointerConverter {
             .with_button(button)
     }
 
-    #[doc = include_str!("pointer_converter.doc/touch.md")]
+    #[doc = include_str!("../../docs/api/conversion/pointer_converter.doc/touch.md")]
     #[must_use]
     #[allow(clippy::cast_possible_truncation)]
     pub fn touch(&self, contact: winit::event::Touch) -> PointerEvent {
@@ -151,7 +159,7 @@ impl PointerConverter {
         .with_pressure(pressure)
     }
 
-    #[doc = include_str!("pointer_converter.doc/event.md")]
+    #[doc = include_str!("../../docs/api/conversion/pointer_converter.doc/event.md")]
     #[allow(clippy::trivially_copy_pass_by_ref)]
     fn event(
         &self,
@@ -162,7 +170,7 @@ impl PointerConverter {
         self.event_of(PointerDevice::Mouse, id, kind, position)
     }
 
-    #[doc = include_str!("pointer_converter.doc/clippy.md")]
+    #[doc = include_str!("../../docs/api/conversion/pointer_converter.doc/clippy.md")]
     #[allow(
         clippy::cast_possible_truncation,
         clippy::unused_self,

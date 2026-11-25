@@ -1,1 +1,0 @@
-Maximum allotted duration.

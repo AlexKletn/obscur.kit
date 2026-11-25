@@ -1,8 +1,9 @@
-#![doc = include_str!("transfer_payload.doc/_module.md")]
+//! The transferable content: a MIME offer plus an optional typed internal
+//! payload (spec §6.20 typed internal payload, §6.21).
 
 use crate::offer::DataOffer;
 
-#[doc = include_str!("transfer_payload.doc/TransferPayload.md")]
+#[doc = include_str!("../../docs/api/transfer/transfer_payload.doc/TransferPayload.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransferPayload {
     offer: DataOffer,
@@ -11,7 +12,7 @@ pub struct TransferPayload {
 }
 
 impl TransferPayload {
-    #[doc = include_str!("transfer_payload.doc/new.md")]
+    /// Creates a payload carrying only the system MIME `offer` (spec §6.20).
     #[must_use]
     pub fn new(offer: DataOffer) -> Self {
         Self {
@@ -21,7 +22,7 @@ impl TransferPayload {
         }
     }
 
-    #[doc = include_str!("transfer_payload.doc/with_internal.md")]
+    #[doc = include_str!("../../docs/api/transfer/transfer_payload.doc/with_internal.md")]
     #[must_use]
     pub fn with_internal(
         mut self,
@@ -33,31 +34,34 @@ impl TransferPayload {
         self
     }
 
-    #[doc = include_str!("transfer_payload.doc/offer.md")]
+    /// Returns the system MIME offer (spec §6.20).
     #[must_use]
     pub fn offer(&self) -> &DataOffer {
         &self.offer
     }
 
-    #[doc = include_str!("transfer_payload.doc/internal_type.md")]
+    /// Returns the internal type tag, if a typed internal path is present (spec
+    /// §6.21).
     #[must_use]
     pub fn internal_type(&self) -> Option<&str> {
         self.internal_type.as_deref()
     }
 
-    #[doc = include_str!("transfer_payload.doc/internal_data.md")]
+    /// Returns the serialized internal data, if a typed internal path is present
+    /// (spec §6.21).
     #[must_use]
     pub fn internal_data(&self) -> Option<&str> {
         self.internal_data.as_deref()
     }
 
-    #[doc = include_str!("transfer_payload.doc/has_internal.md")]
+    /// Returns whether a typed internal path is present (spec §6.21).
     #[must_use]
     pub fn has_internal(&self) -> bool {
         self.internal_type.is_some()
     }
 
-    #[doc = include_str!("transfer_payload.doc/is_empty.md")]
+    /// Returns whether the payload carries nothing — an empty offer and no
+    /// internal path (spec §6.20).
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.offer.is_empty() && !self.has_internal()

@@ -1,4 +1,4 @@
-#![doc = include_str!("pipeline_snapshot.doc/_module.md")]
+//! An immutable capture of the frame pipeline stages: [`PipelineSnapshot`].
 
 use obscur_accessibility::tree::SemanticSnapshot;
 use obscur_geometry::Size;
@@ -14,29 +14,30 @@ use obscur_tree::tree::{RetainedTree, TreeSnapshot};
 
 use super::{ImageSnapshot, RenderGraphSummary};
 
-#[doc = include_str!("pipeline_snapshot.doc/PipelineSnapshot.md")]
+#[doc = include_str!("../../docs/api/snapshot/pipeline_snapshot.doc/PipelineSnapshot.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct PipelineSnapshot {
-    #[doc = include_str!("pipeline_snapshot.doc/tree.md")]
+    /// The reconciled retained tree at capture (spec §5.13).
     tree: TreeSnapshot,
-    #[doc = include_str!("pipeline_snapshot.doc/computed.md")]
+    /// The per-node computed styles resolved from the tree (spec §4.14).
     computed: ComputedStyles,
-    #[doc = include_str!("pipeline_snapshot.doc/layout.md")]
+    /// The per-node absolute layout boxes (spec §4.2).
     layout: LayoutBoxes,
-    #[doc = include_str!("pipeline_snapshot.doc/scene.md")]
+    /// The composed, paint-ordered scene (spec §5.1).
     scene: SceneSnapshot,
-    #[doc = include_str!("pipeline_snapshot.doc/paint.md")]
+    /// The flat paint-command stream a rasterizer consumes (spec §5.1, §7.4).
     paint: DisplayList,
-    #[doc = include_str!("pipeline_snapshot.doc/accessibility.md")]
+    /// The semantic accessibility tree linked to the retained tree (spec §7.1).
     accessibility: SemanticSnapshot,
-    #[doc = include_str!("pipeline_snapshot.doc/render_graph.md")]
+    /// The backend-neutral render-graph description (spec §7.4).
     render_graph: RenderGraphSummary,
-    #[doc = include_str!("pipeline_snapshot.doc/image.md")]
+    /// The rendered raster image, present only once a backend has produced it
+    /// (spec §7.4). Backend-dependent, hence optional.
     image: Option<ImageSnapshot>,
 }
 
 impl PipelineSnapshot {
-    #[doc = include_str!("pipeline_snapshot.doc/new.md")]
+    #[doc = include_str!("../../docs/api/snapshot/pipeline_snapshot.doc/new.md")]
     #[must_use]
     pub fn new(
         tree: TreeSnapshot,
@@ -59,14 +60,14 @@ impl PipelineSnapshot {
         }
     }
 
-    #[doc = include_str!("pipeline_snapshot.doc/with_image.md")]
+    #[doc = include_str!("../../docs/api/snapshot/pipeline_snapshot.doc/with_image.md")]
     #[must_use]
     pub fn with_image(mut self, image: ImageSnapshot) -> Self {
         self.image = Some(image);
         self
     }
 
-    #[doc = include_str!("pipeline_snapshot.doc/capture.md")]
+    #[doc = include_str!("../../docs/api/snapshot/pipeline_snapshot.doc/capture.md")]
     #[must_use]
     pub fn capture(tree: &RetainedTree, inputs: &StyleInputs, viewport: Size) -> Self {
         let tree_snapshot = tree.snapshot();
@@ -158,67 +159,70 @@ impl PipelineSnapshot {
         )
     }
 
-    #[doc = include_str!("pipeline_snapshot.doc/tree_2.md")]
+    /// Returns the captured retained-tree snapshot.
     #[must_use]
     pub fn tree(&self) -> &TreeSnapshot {
         &self.tree
     }
 
-    #[doc = include_str!("pipeline_snapshot.doc/computed_2.md")]
+    /// Returns the captured per-node computed styles.
     #[must_use]
     pub fn computed(&self) -> &ComputedStyles {
         &self.computed
     }
 
-    #[doc = include_str!("pipeline_snapshot.doc/layout_2.md")]
+    /// Returns the captured per-node absolute layout boxes.
     #[must_use]
     pub fn layout(&self) -> &LayoutBoxes {
         &self.layout
     }
 
-    #[doc = include_str!("pipeline_snapshot.doc/scene_2.md")]
+    /// Returns the captured scene snapshot.
     #[must_use]
     pub fn scene(&self) -> &SceneSnapshot {
         &self.scene
     }
 
-    #[doc = include_str!("pipeline_snapshot.doc/paint_2.md")]
+    /// Returns the captured paint-command stream (spec §7.4).
     #[must_use]
     pub fn paint(&self) -> &DisplayList {
         &self.paint
     }
 
-    #[doc = include_str!("pipeline_snapshot.doc/accessibility_2.md")]
+    /// Returns the captured accessibility (semantic) snapshot (spec §7.1, §7.4).
     #[must_use]
     pub fn accessibility(&self) -> &SemanticSnapshot {
         &self.accessibility
     }
 
-    #[doc = include_str!("pipeline_snapshot.doc/render_graph_2.md")]
+    /// Returns the captured backend-neutral render-graph description (spec §7.4).
     #[must_use]
     pub fn render_graph(&self) -> &RenderGraphSummary {
         &self.render_graph
     }
 
-    #[doc = include_str!("pipeline_snapshot.doc/image_2.md")]
+    /// Returns the captured rendered image, if a backend has attached one
+    /// (spec §7.4).
     #[must_use]
     pub fn image(&self) -> Option<&ImageSnapshot> {
         self.image.as_ref()
     }
 
-    #[doc = include_str!("pipeline_snapshot.doc/node_count.md")]
+    /// Returns the number of nodes captured in the retained-tree snapshot.
     #[must_use]
     pub fn node_count(&self) -> usize {
         self.tree.len()
     }
 
-    #[doc = include_str!("pipeline_snapshot.doc/fill_count.md")]
+    /// Returns the number of paint commands (fills) in the composed scene's
+    /// display list.
     #[must_use]
     pub fn fill_count(&self) -> usize {
         self.scene.display_list().len()
     }
 
-    #[doc = include_str!("pipeline_snapshot.doc/is_balanced.md")]
+    /// Returns whether the composed scene's display list is balanced, i.e. a
+    /// well-formed stream a renderer can consume.
     #[must_use]
     pub fn is_balanced(&self) -> bool {
         self.scene.is_balanced()

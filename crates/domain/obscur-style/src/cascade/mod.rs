@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Cascade module.
 mod cascade;
 pub use cascade::Cascade;
 mod cascade_origin;

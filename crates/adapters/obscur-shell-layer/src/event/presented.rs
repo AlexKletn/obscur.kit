@@ -34,4 +34,28 @@ pub struct Presented {
     /// a dropped or discarded one visible as a gap rather than as a silent
     /// shift of every later reading by one.
     pub seq: u64,
+    /// The output's own frame counter at the moment this frame was shown.
+    ///
+    /// This is the protocol's `seq_hi`/`seq_lo` — MSC, the media stream counter
+    /// — and it is the compositor counting **the screen's** refreshes, not this
+    /// process counting its own requests. The two answer different questions and
+    /// were indistinguishable while this field did not exist:
+    ///
+    /// * step of one between consecutive presentations — the screen turned over
+    ///   as often as we handed it something. Whatever is slow is below us.
+    /// * step of N — the screen offered N chances and we took one. That is our
+    ///   side, and no amount of blaming the panel will move it.
+    ///
+    /// Zero when the compositor does not count, which some do not; a run whose
+    /// MSC never moves is telling you the field is unsupported, not that the
+    /// screen is frozen.
+    pub msc: u64,
+    /// What the compositor says about *how* it was shown.
+    ///
+    /// The `wp_presentation_feedback` kind bits: vsync, hardware clock, hardware
+    /// completion, zero-copy. Carried rather than dropped because "shown, but
+    /// through a copy, off the vsync clock" and "shown by page flip" are
+    /// different machines, and a frame budget derived from the wrong one is a
+    /// budget for a machine nobody is using.
+    pub flags: u32,
 }

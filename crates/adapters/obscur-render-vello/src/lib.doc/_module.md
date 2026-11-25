@@ -1,1 +1,0 @@
-Vello/wgpu Renderer adapter.

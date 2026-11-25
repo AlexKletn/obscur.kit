@@ -1,8 +1,9 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Graph-based dependency architecture checks (spec §3.16, §5.9).
 
 pub(crate) mod check;
 pub(crate) mod crate_node;
 pub(crate) mod graph;
 pub(crate) mod layer;
+mod visit_mark;
 
 pub(crate) use check::check;

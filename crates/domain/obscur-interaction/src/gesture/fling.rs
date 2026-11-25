@@ -1,6 +1,7 @@
-#![doc = include_str!("fling.doc/_module.md")]
+//! The [`Fling`] — the coast a flicked surface keeps after the finger has gone
+//! (spec §6.16 `Swipe`/`Pan` continuation).
 
-#[doc = include_str!("fling.doc/Fling.md")]
+#[doc = include_str!("../../docs/api/gesture/fling.doc/Fling.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Fling {
     velocity: f32,
@@ -9,7 +10,9 @@ pub struct Fling {
 }
 
 impl Fling {
-    #[doc = include_str!("fling.doc/new.md")]
+    /// Launches a fling at `velocity` (units per second, signed), decaying with
+    /// time constant `tau` seconds, ending once the speed falls below
+    /// `rest_speed`.
     #[must_use]
     pub fn new(velocity: f32, tau: f32, rest_speed: f32) -> Self {
         Self {
@@ -19,9 +22,9 @@ impl Fling {
         }
     }
 
-    #[doc = include_str!("fling.doc/advance.md")]
+    #[doc = include_str!("../../docs/api/gesture/fling.doc/advance.md")]
     pub fn advance(&mut self, seconds: f32) -> f32 {
-        if self.is_done() || seconds <= 0.0 {
+        if self.is_done() || !seconds.is_finite() || seconds <= 0.0 {
             return 0.0;
         }
         let decayed = self.velocity * (-seconds / self.tau).exp();
@@ -33,19 +36,20 @@ impl Fling {
         travelled
     }
 
-    #[doc = include_str!("fling.doc/is_done.md")]
+    /// Whether the coast has come to rest and should be dropped.
     #[must_use]
     pub fn is_done(&self) -> bool {
         self.velocity.abs() <= self.rest_speed
     }
 
-    #[doc = include_str!("fling.doc/velocity.md")]
+    /// The current velocity (units per second, signed).
     #[must_use]
     pub fn velocity(&self) -> f32 {
         self.velocity
     }
 
-    #[doc = include_str!("fling.doc/stop.md")]
+    /// Stops the coast immediately — a new contact on the surface, or the surface
+    /// reaching the end of its content.
     pub fn stop(&mut self) {
         self.velocity = 0.0;
     }

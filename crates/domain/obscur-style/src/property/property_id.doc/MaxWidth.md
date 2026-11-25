@@ -1,1 +1,0 @@
-The `max-width` property.

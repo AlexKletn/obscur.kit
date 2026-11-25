@@ -1,34 +1,40 @@
-#![doc = include_str!("grid_layout.doc/_module.md")]
+//! `GridLayout`: a real CSS-grid track-sizing formatting context.
+
+use std::ops::RangeInclusive;
 
 use obscur_geometry::{BoxConstraints, Insets, Point, Rect, Size};
 
-use crate::model::{JustifyContent, LayoutBox, LayoutStyle};
+use crate::model::{BoxSizing, Dimension, JustifyContent, LayoutBox, LayoutStyle};
 
 use super::grid::{GridTemplate, TrackSize};
 use super::grid_item_alignment::{CellAlign, align_offset, item_axis_align};
 use super::grid_item_margins::{absorbs_free_space, auto_lead};
 use super::grid_item_placement::PlacedItems;
-use super::grid_track_positions::{collapsed_tracks, distributed_track_offsets, span_extent};
-use super::grid_track_sizing::{
-    Contributions, KINDS, Kind, implicit_track, resolve_tracks, track_takes,
+use super::grid_track_positions::{
+    active_track_extent, collapsed_tracks, distributed_track_offsets, span_extent,
 };
+use super::grid_track_sizing::{
+    Contributions, KINDS, Kind, implicit_track, is_flexible, resolve_tracks, track_takes,
+    uses_percentage,
+};
+use super::size_containment::{combined_insets, contained_style};
 use super::{
     ChildMeasurer, ChildPercentBasis, LayoutAlgorithm, LayoutChild, LayoutOutput, clamp_content,
 };
 
-#[doc = include_str!("grid_layout.doc/GridLayout.md")]
+#[doc = include_str!("../../docs/api/algorithm/grid_layout.doc/GridLayout.md")]
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct GridLayout {
-    #[doc = include_str!("grid_layout.doc/template.md")]
+    /// The explicit column/row track template.
     template: GridTemplate,
-    #[doc = include_str!("grid_layout.doc/column_gap.md")]
+    /// Horizontal gap between adjacent columns, in logical pixels.
     column_gap: f32,
-    #[doc = include_str!("grid_layout.doc/row_gap.md")]
+    /// Vertical gap between adjacent rows, in logical pixels.
     row_gap: f32,
 }
 
 impl GridLayout {
-    #[doc = include_str!("grid_layout.doc/new.md")]
+    #[doc = include_str!("../../docs/api/algorithm/grid_layout.doc/new.md")]
     #[must_use]
     pub fn new(columns: usize) -> Self {
         let n = columns.max(1);
@@ -39,7 +45,7 @@ impl GridLayout {
         }
     }
 
-    #[doc = include_str!("grid_layout.doc/with_template.md")]
+    /// Creates a grid from an explicit [`GridTemplate`] and the two gaps.
     #[must_use]
     pub fn with_template(template: GridTemplate, column_gap: f32, row_gap: f32) -> Self {
         Self {
@@ -49,43 +55,145 @@ impl GridLayout {
         }
     }
 
-    #[doc = include_str!("grid_layout.doc/with_column_gap.md")]
+    /// Returns a copy with the horizontal `column_gap` replaced.
     #[must_use]
     pub fn with_column_gap(mut self, column_gap: f32) -> Self {
         self.column_gap = column_gap;
         self
     }
 
-    #[doc = include_str!("grid_layout.doc/with_row_gap.md")]
+    /// Returns a copy with the vertical `row_gap` replaced.
     #[must_use]
     pub fn with_row_gap(mut self, row_gap: f32) -> Self {
         self.row_gap = row_gap;
         self
     }
 
-    #[doc = include_str!("grid_layout.doc/template_2.md")]
+    /// The grid's track template.
     #[must_use]
     pub const fn template(&self) -> &GridTemplate {
         &self.template
     }
 
-    #[doc = include_str!("grid_layout.doc/columns.md")]
+    #[doc = include_str!("../../docs/api/algorithm/grid_layout.doc/columns.md")]
     #[must_use]
     pub fn columns(&self) -> usize {
-        self.template.columns().explicit_len().max(1)
+        self.template
+            .columns()
+            .explicit_len()
+            .max(self.template.area_dimensions().0)
+            .max(1)
     }
 
-    #[doc = include_str!("grid_layout.doc/column_gap_2.md")]
+    /// The horizontal gap between columns, in logical pixels.
     #[must_use]
     pub const fn column_gap(&self) -> f32 {
         self.column_gap
     }
 
-    #[doc = include_str!("grid_layout.doc/row_gap_2.md")]
+    /// The vertical gap between rows, in logical pixels.
     #[must_use]
     pub const fn row_gap(&self) -> f32 {
         self.row_gap
     }
+}
+
+/// Maps a placed track to its explicit size or the cyclic implicit pattern.
+fn effective_track(
+    explicit: &[TrackSize],
+    auto: &[TrackSize],
+    prefix: usize,
+    index: usize,
+) -> TrackSize {
+    match index.checked_sub(prefix) {
+        Some(index) => explicit
+            .get(index)
+            .cloned()
+            .unwrap_or_else(|| implicit_track(auto, index - explicit.len())),
+        None if auto.is_empty() => TrackSize::Auto,
+        None => {
+            let distance = (prefix - index) % auto.len();
+            implicit_track(auto, auto.len() - distance)
+        }
+    }
+}
+
+/// Resolves the authored bounds in the same content coordinates as track sizing.
+fn content_bounds(
+    min: Dimension,
+    max: Dimension,
+    available: f32,
+    padding: f32,
+    box_sizing: BoxSizing,
+) -> RangeInclusive<f32> {
+    let clamp = |extent| {
+        clamp_content(
+            extent,
+            min.clone(),
+            max.clone(),
+            available,
+            padding,
+            box_sizing,
+        )
+    };
+    clamp(0.0)..=clamp(f32::INFINITY)
+}
+
+/// Resolves cyclic percentages after measuring the intrinsic axis once.
+#[allow(clippy::too_many_arguments)]
+fn size_grid_axis(
+    tracks: &[TrackSize],
+    available: f32,
+    gap: f32,
+    definite: bool,
+    stretch: bool,
+    bounds: RangeInclusive<f32>,
+    collapsed: &[bool],
+    items: &[(usize, usize, Contributions)],
+) -> (Vec<f32>, Option<f32>) {
+    let sizes = resolve_tracks(
+        tracks,
+        available,
+        gap,
+        definite,
+        stretch,
+        bounds.clone(),
+        collapsed,
+        items,
+    );
+    if definite || available.is_finite() || !tracks.iter().any(uses_percentage) {
+        return (sizes, None);
+    }
+    let (_, intrinsic) = active_track_extent(&sizes, gap, collapsed);
+    let basis = intrinsic.clamp(*bounds.start(), *bounds.end());
+    let sizes = resolve_tracks(tracks, basis, gap, true, stretch, bounds, collapsed, items);
+    (sizes, Some(basis))
+}
+
+/// Resolves a cyclic Grid gap for placement while preserving the intrinsic content extent.
+fn finalize_cyclic_gap(
+    dimension: Option<&Dimension>,
+    intrinsic_gap: f32,
+    definite: bool,
+    sizes: &[f32],
+    collapsed: &[bool],
+    resolved_extent: Option<f32>,
+    bounds: &RangeInclusive<f32>,
+) -> (f32, Option<f32>) {
+    let Some(dimension) = dimension.filter(|dimension| !definite && dimension.uses_percentage())
+    else {
+        return (intrinsic_gap, resolved_extent);
+    };
+    let extent = resolved_extent.unwrap_or_else(|| {
+        let (_, intrinsic) = active_track_extent(sizes, intrinsic_gap, collapsed);
+        intrinsic.clamp(*bounds.start(), *bounds.end())
+    });
+    // The gap may overflow the intrinsic box. Feeding its used value back
+    // into the box size would make the percentage depend on itself.
+    (
+        dimension.resolve(extent).unwrap_or(intrinsic_gap).max(0.0),
+        Some(extent),
+    )
 }
 
 impl LayoutAlgorithm for GridLayout {
@@ -96,7 +204,13 @@ impl LayoutAlgorithm for GridLayout {
         constraints: BoxConstraints,
         measurer: &mut dyn ChildMeasurer,
     ) -> LayoutOutput {
-        let padding = style.padding;
+        let contained = contained_style(style.clone(), constraints);
+        let style = contained.as_ref().unwrap_or(style);
+        let padding = if contained.is_some() {
+            combined_insets(style)
+        } else {
+            style.padding
+        };
         let pad_x = padding.left + padding.right;
         let pad_y = padding.top + padding.bottom;
 
@@ -128,43 +242,85 @@ impl LayoutAlgorithm for GridLayout {
         // placed off the bottom of it. The inline axis is offered a finite width in
         // that same pass, which is why `grid-template-columns` divided and
         // `grid-template-rows` did not (`docs/layer-consumer-audit.md`, 2-B).
-        let content_width = style
-            .width
-            .resolve(constraints.percent_width())
+        let authored_width = style.width.resolve(constraints.percent_width());
+        let authored_height = style.height.resolve(constraints.percent_height());
+        let col_definite = authored_width.is_some()
+            || (constraints.max.width > 0.0 && constraints.min.width >= constraints.max.width);
+        let row_definite = authored_height.is_some()
+            || (constraints.max.height > 0.0 && constraints.min.height >= constraints.max.height);
+        let content_width = authored_width
             .map_or(constraints.max.width - pad_x, |w| {
                 style.box_sizing.content_extent(w, pad_x)
             })
             .max(0.0);
-        let content_height = style
-            .height
-            .resolve(constraints.percent_height())
+        let content_height = authored_height
             .map_or(constraints.max.height - pad_y, |h| {
                 style.box_sizing.content_extent(h, pad_y)
             })
             .max(0.0);
 
-        // Expand each axis's track list into a concrete track vector against the
-        // content extent: a `repeat(auto-fill | auto-fit, …)`'s repetition count
-        // depends on how many copies fit that extent (spec §4.1). For a template
-        // WITHOUT an auto-repeat this is byte-identical to its explicit track
-        // vector, so every non-auto-repeat template lays out exactly as before.
-        // `col_autofit` / `row_autofit` carry the generated `auto-fit` track range
-        // (if any) so empty ones collapse after placement.
-        let (columns_expanded, col_autofit) = self
-            .template
-            .columns()
-            .expand(content_width, self.column_gap);
-        let (rows_expanded, row_autofit) =
-            self.template.rows().expand(content_height, self.row_gap);
-
-        // An empty column template still lays out one flexible column so items
-        // always have somewhere to go.
-        let fallback_cols = [TrackSize::Fr(1.0)];
-        let columns: &[TrackSize] = if columns_expanded.is_empty() {
-            &fallback_cols
-        } else {
-            &columns_expanded
+        let column_dimension = style.column_gap.as_ref().or(style.gap_dimension.as_ref());
+        let row_dimension = style.row_gap.as_ref().or(style.gap_dimension.as_ref());
+        let resolve_gap = |dimension: Option<&Dimension>, fallback, extent, definite| {
+            dimension.map_or(fallback, |gap| {
+                gap.resolve(if definite { extent } else { 0.0 })
+                    .unwrap_or(0.0)
+                    .max(0.0)
+            })
         };
+        let column_gap = resolve_gap(
+            column_dimension,
+            self.column_gap,
+            content_width,
+            col_definite,
+        );
+        let row_gap = resolve_gap(row_dimension, self.row_gap, content_height, row_definite);
+
+        let col_bounds = content_bounds(
+            style.min_width.clone(),
+            style.max_width.clone(),
+            constraints.percent_width(),
+            pad_x,
+            style.box_sizing,
+        );
+        let row_bounds = content_bounds(
+            style.min_height.clone(),
+            style.max_height.clone(),
+            constraints.percent_height(),
+            pad_y,
+            style.box_sizing,
+        );
+        // Auto-repeat uses a definite preferred or maximum size as its ceiling.
+        // With only a minimum, it repeats enough tracks to reach that floor.
+        let repeat_ceiling = |definite: bool, extent: f32, bounds: &RangeInclusive<f32>| {
+            if definite {
+                extent.clamp(*bounds.start(), *bounds.end())
+            } else {
+                *bounds.end()
+            }
+        };
+        let (columns_expanded, col_autofit) = self.template.columns().expand_for_bounds(
+            *col_bounds.start(),
+            repeat_ceiling(col_definite, content_width, &col_bounds),
+            column_gap,
+        );
+        let (rows_expanded, row_autofit) = self.template.rows().expand_for_bounds(
+            *row_bounds.start(),
+            repeat_ceiling(row_definite, content_height, &row_bounds),
+            row_gap,
+        );
+
+        // Preserve the default flexible column when neither an explicit
+        // template nor an implicit sizing pattern supplies its size.
+        let (area_columns, area_rows) = self.template.area_dimensions();
+        let auto_cols = self.template.auto_columns();
+        let fallback_cols = [TrackSize::Fr(1.0)];
+        let columns: &[TrackSize] =
+            if columns_expanded.is_empty() && auto_cols.is_empty() && area_columns == 0 {
+                &fallback_cols
+            } else {
+                &columns_expanded
+            };
         let count = children.len();
 
         // Two-phase placement into an occupancy grid: every item's cell and
@@ -172,6 +328,11 @@ impl LayoutAlgorithm for GridLayout {
         // tracks are added. `grid-auto-flow` decides the iteration axis and
         // whether the placement cursor backfills earlier holes; the whole of
         // that machinery is [`PlacedItems`].
+        let resolved_lines = self.template.resolve_repeated_lines(
+            children,
+            columns_expanded.len(),
+            rows_expanded.len(),
+        );
         let PlacedItems {
             col: place_col,
             row: place_row,
@@ -179,24 +340,20 @@ impl LayoutAlgorithm for GridLayout {
             row_span,
             n_cols,
             n_rows,
+            preceding_cols,
+            preceding_rows,
+            limited_item,
         } = PlacedItems::resolve(
-            children,
+            resolved_lines.as_deref().unwrap_or(children),
             style.grid_auto_flow,
-            columns.len(),
-            rows_expanded.len(),
+            columns.len().max(area_columns),
+            rows_expanded.len().max(area_rows),
         );
 
         // Effective column tracks: the explicit template, padded with implicit
         // tracks sized by `grid-auto-columns` (cycled; empty → `Auto`).
-        let auto_cols = self.template.auto_columns();
-        let explicit_cols = columns.len();
         let cols_effective: Vec<TrackSize> = (0..n_cols)
-            .map(|c| {
-                columns
-                    .get(c)
-                    .cloned()
-                    .unwrap_or_else(|| implicit_track(auto_cols, c - explicit_cols))
-            })
+            .map(|index| effective_track(columns, auto_cols, preceding_cols, index))
             .collect();
 
         // Step 2: column track sizing via the canonical §11 pipeline. Each item
@@ -224,10 +381,14 @@ impl LayoutAlgorithm for GridLayout {
             .iter()
             .map(|c| c.style().margin.resolve(0.0))
             .collect();
-        let col_definite = !style.width.is_auto();
+        let col_probe = if !col_definite && cols_effective.iter().any(uses_percentage) {
+            f32::INFINITY
+        } else {
+            content_width
+        };
         let col_stretch = matches!(
             style.justify_content,
-            JustifyContent::FlexStart | JustifyContent::Stretch
+            JustifyContent::Normal | JustifyContent::Stretch
         );
         let mut col_items: Vec<(usize, usize, Contributions)> = Vec::with_capacity(count);
         for i in 0..count {
@@ -240,7 +401,9 @@ impl LayoutAlgorithm for GridLayout {
             // the width it was given (`BoxConstraints::constrain_allowing_overflow`).
             let mut contributions = Contributions::default();
             for kind in KINDS {
-                if !spanned.iter().any(|t| track_takes(t, kind)) {
+                let flex_max =
+                    kind == Kind::Max && !col_probe.is_finite() && spanned.iter().any(is_flexible);
+                if !flex_max && !spanned.iter().any(|t| track_takes(t, kind, col_probe)) {
                     continue;
                 }
                 // The track has to hold the item's MARGIN box, so the margins come
@@ -258,22 +421,29 @@ impl LayoutAlgorithm for GridLayout {
             }
             col_items.push((start, span, contributions));
         }
-        let mut col_sizes = resolve_tracks(
+        let col_fit =
+            col_autofit.map(|(start, end)| (start + preceding_cols, end + preceding_cols));
+        let col_collapsed = collapsed_tracks(n_cols, col_fit, &place_col, &col_span);
+        let (col_sizes, resolved_width) = size_grid_axis(
             &cols_effective,
-            content_width,
-            self.column_gap,
+            col_probe,
+            column_gap,
             col_definite,
             col_stretch,
+            col_bounds.clone(),
+            &col_collapsed,
             &col_items,
         );
-        // `auto-fit`: a generated column no item landed in collapses to zero width
-        // (its surrounding gaps collapse in `track_offsets`).
-        let col_collapsed = collapsed_tracks(n_cols, col_autofit, &place_col, &col_span);
-        for (size, &collapsed) in col_sizes.iter_mut().zip(col_collapsed.iter()) {
-            if collapsed {
-                *size = 0.0;
-            }
-        }
+
+        let (column_gap, resolved_width) = finalize_cyclic_gap(
+            column_dimension,
+            column_gap,
+            col_definite,
+            &col_sizes,
+            &col_collapsed,
+            resolved_width,
+            &col_bounds,
+        );
 
         // How each item is aligned inside its own grid area, on both axes: a
         // per-item `justify-self` / `align-self` (when not `auto`) overrides the
@@ -297,15 +467,15 @@ impl LayoutAlgorithm for GridLayout {
             .map(|c| {
                 let cs = c.style();
                 let inline =
-                    item_axis_align(cs.justify_self.resolve(style.justify_items), cs.width);
-                let block = item_axis_align(cs.align_self.resolve(style.align_items), cs.height);
+                    item_axis_align(cs.justify_self.resolve(style.justify_items), &cs.width);
+                let block = item_axis_align(cs.align_self.resolve(style.align_items), &cs.height);
                 (
-                    if absorbs_free_space(cs.margin.left, cs.margin.right) {
+                    if absorbs_free_space(&cs.margin.left, &cs.margin.right) {
                         CellAlign::Start
                     } else {
                         inline
                     },
-                    if absorbs_free_space(cs.margin.top, cs.margin.bottom) {
+                    if absorbs_free_space(&cs.margin.top, &cs.margin.bottom) {
                         CellAlign::Start
                     } else {
                         block
@@ -319,7 +489,7 @@ impl LayoutAlgorithm for GridLayout {
         // INLINE size on both axes (CSS 2.1 §8.3), and a grid item's containing
         // block is its grid area (`specs/w3c/css-grid-2.txt:712`).
         let cell_width: Vec<f32> = (0..count)
-            .map(|i| span_extent(&col_sizes, place_col[i], col_span[i], self.column_gap))
+            .map(|i| span_extent(&col_sizes, place_col[i], col_span[i], column_gap))
             .collect();
         let margin: Vec<Insets> = children
             .iter()
@@ -351,6 +521,9 @@ impl LayoutAlgorithm for GridLayout {
         //   states the resolved area (`child_bases`) — which is the two-pass shape
         //   css-grid-2 §12 describes, with no cycle in it.
         let mut item_size = vec![Size::ZERO; count];
+        let mut baselines = vec![None; count];
+        let mut first_row_baselines = vec![f32::NEG_INFINITY; n_rows];
+        let mut last_row_baselines = vec![f32::NEG_INFINITY; n_rows];
         for i in 0..count {
             // The space inside the area's margins is what the item may occupy; the
             // area itself is still what its percentages resolve against, because the
@@ -361,15 +534,52 @@ impl LayoutAlgorithm for GridLayout {
             } else {
                 0.0
             };
-            item_size[i] = measurer.measure_child(
-                i,
-                BoxConstraints {
-                    min: Size::new(min_w, 0.0),
-                    max: Size::new(inner_w, content_height),
-                    percent_basis: Some(Size::new(cell_width[i], f32::INFINITY)),
-                },
-            );
+            let offer = BoxConstraints {
+                min: Size::new(min_w, 0.0),
+                max: Size::new(inner_w, content_height),
+                percent_basis: Some(Size::new(cell_width[i], f32::INFINITY)),
+            };
+            let cs = children[i].style();
+            let alignment = item_align[i].1;
+            if absorbs_free_space(&cs.margin.top, &cs.margin.bottom) {
+                item_size[i] = measurer.measure_child(i, offer);
+                continue;
+            }
+            let (size, baseline) = match alignment {
+                CellAlign::Baseline => measurer.measure_child_with_baseline(i, offer),
+                CellAlign::LastBaseline => measurer.measure_child_with_last_baseline(i, offer),
+                _ => {
+                    item_size[i] = measurer.measure_child(i, offer);
+                    continue;
+                }
+            };
+            item_size[i] = size;
+            let from_top = baseline.unwrap_or(size.height);
+            let (edge_distance, group) = if alignment == CellAlign::LastBaseline {
+                (
+                    size.height - from_top + margin[i].bottom,
+                    &mut last_row_baselines[place_row[i] + row_span[i] - 1],
+                )
+            } else {
+                (
+                    from_top + margin[i].top,
+                    &mut first_row_baselines[place_row[i]],
+                )
+            };
+            baselines[i] = Some(edge_distance);
+            *group = group.max(edge_distance);
         }
+
+        let baseline_shim = |i: usize| {
+            baselines[i].map_or(0.0, |baseline| {
+                let group = if item_align[i].1 == CellAlign::LastBaseline {
+                    last_row_baselines[place_row[i] + row_span[i] - 1]
+                } else {
+                    first_row_baselines[place_row[i]]
+                };
+                group - baseline
+            })
+        };
 
         // Step 3: row track sizing via the same §11 pipeline. Explicit rows come
         // from the template; rows past it are implicit, sized by `grid-auto-rows`
@@ -378,19 +588,17 @@ impl LayoutAlgorithm for GridLayout {
         // the algorithm distributes a row-spanning item's height across its
         // spanned rows. `align-content: stretch`/`normal` routes to §11.8.
         let auto_rows = self.template.auto_rows();
-        let explicit_rows = rows_expanded.len();
         let rows_effective: Vec<TrackSize> = (0..n_rows)
-            .map(|r| {
-                rows_expanded
-                    .get(r)
-                    .cloned()
-                    .unwrap_or_else(|| implicit_track(auto_rows, r - explicit_rows))
-            })
+            .map(|index| effective_track(&rows_expanded, auto_rows, preceding_rows, index))
             .collect();
-        let row_definite = !style.height.is_auto();
+        let row_probe = if !row_definite && rows_effective.iter().any(uses_percentage) {
+            f32::INFINITY
+        } else {
+            content_height
+        };
         let row_stretch = matches!(
             style.align_content,
-            JustifyContent::FlexStart | JustifyContent::Stretch
+            JustifyContent::Normal | JustifyContent::Stretch
         );
         let mut row_items: Vec<(usize, usize, Contributions)> = Vec::with_capacity(count);
         for i in 0..count {
@@ -405,29 +613,40 @@ impl LayoutAlgorithm for GridLayout {
             let mut contributions = Contributions::default();
             let block_margin = margin[i].top + margin[i].bottom;
             for kind in KINDS {
-                if spanned.iter().any(|t| track_takes(t, kind)) {
+                let flex_max =
+                    kind == Kind::Max && !row_probe.is_finite() && spanned.iter().any(is_flexible);
+                if flex_max || spanned.iter().any(|t| track_takes(t, kind, row_probe)) {
                     // The row holds the item's MARGIN box, the same way the column
                     // did above.
-                    *contributions.slot(kind) = item_size[i].height + block_margin;
+                    *contributions.slot(kind) =
+                        item_size[i].height + block_margin + baseline_shim(i);
                 }
             }
             row_items.push((start, span, contributions));
         }
-        let mut row_sizes = resolve_tracks(
+        let row_fit =
+            row_autofit.map(|(start, end)| (start + preceding_rows, end + preceding_rows));
+        let row_collapsed = collapsed_tracks(n_rows, row_fit, &place_row, &row_span);
+        let (row_sizes, resolved_height) = size_grid_axis(
             &rows_effective,
-            content_height,
-            self.row_gap,
+            row_probe,
+            row_gap,
             row_definite,
             row_stretch,
+            row_bounds.clone(),
+            &row_collapsed,
             &row_items,
         );
-        // `auto-fit` on the row axis: collapse the generated rows with no item.
-        let row_collapsed = collapsed_tracks(n_rows, row_autofit, &place_row, &row_span);
-        for (size, &collapsed) in row_sizes.iter_mut().zip(row_collapsed.iter()) {
-            if collapsed {
-                *size = 0.0;
-            }
-        }
+
+        let (row_gap, resolved_height) = finalize_cyclic_gap(
+            row_dimension,
+            row_gap,
+            row_definite,
+            &row_sizes,
+            &row_collapsed,
+            resolved_height,
+            &row_bounds,
+        );
 
         // Step 4 & 5: place each item into its (spanned) track cell. Leftover free
         // space on each axis (when the tracks do not fill the content extent) is
@@ -436,18 +655,18 @@ impl LayoutAlgorithm for GridLayout {
         // packs the tracks at the start — byte-identical to before.
         let col_offsets = distributed_track_offsets(
             &col_sizes,
-            self.column_gap,
+            column_gap,
             padding.left,
             &col_collapsed,
-            content_width,
+            resolved_width.unwrap_or(content_width),
             style.justify_content,
         );
         let row_offsets = distributed_track_offsets(
             &row_sizes,
-            self.row_gap,
+            row_gap,
             padding.top,
             &row_collapsed,
-            content_height,
+            resolved_height.unwrap_or(content_height),
             style.align_content,
         );
 
@@ -460,16 +679,17 @@ impl LayoutAlgorithm for GridLayout {
         // where the area is known; see the note there for why only the inline axis
         // is stated.
         let mut child_bases = Vec::with_capacity(count);
-        // Bounding box of placed children; starts at the padding origin so an
-        // empty grid sizes to its padding only.
-        let mut max_right = padding.left;
-        let mut max_bottom = padding.top;
+        // Empty explicit tracks contribute to the grid's automatic size.
+        let (_, col_extent) = active_track_extent(&col_sizes, column_gap, &col_collapsed);
+        let (_, row_extent) = active_track_extent(&row_sizes, row_gap, &row_collapsed);
+        let mut max_right = padding.left + col_extent;
+        let mut max_bottom = padding.top + row_extent;
         for i in 0..count {
             let (c0, cspan) = (place_col[i], col_span[i]);
             let (r0, rspan) = (place_row[i], row_span[i]);
             let cell_x = col_offsets[c0];
             let cell_y = row_offsets[r0];
-            let cell_w = span_extent(&col_sizes, c0, cspan, self.column_gap);
+            let cell_w = span_extent(&col_sizes, c0, cspan, column_gap);
             // The cell is its spanned row tracks (+ interior gaps) — the RESOLVED
             // ones, on every kind of track alike.
             //
@@ -483,7 +703,7 @@ impl LayoutAlgorithm for GridLayout {
             // shell — the row is the whole container while the item measured one
             // line of text; the special case handed the item the line and left the
             // rest of the surface empty (`docs/layer-consumer-audit.md`, 2-I).
-            let cell_h = span_extent(&row_sizes, r0, rspan, self.row_gap);
+            let cell_h = span_extent(&row_sizes, r0, rspan, row_gap);
 
             // This item's effective alignment on each axis, resolved above: the
             // inline axis is the column (x) axis, the block axis is the row (y)
@@ -556,10 +776,17 @@ impl LayoutAlgorithm for GridLayout {
                     align_offset(align, inner, used)
                 }
             };
-            let x =
-                cell_x + reserved.left + lead(cs.margin.left, cs.margin.right, inner_w, w, inline);
-            let y =
-                cell_y + reserved.top + lead(cs.margin.top, cs.margin.bottom, inner_h, h, block);
+            let x = cell_x
+                + reserved.left
+                + lead(&cs.margin.left, &cs.margin.right, inner_w, w, inline);
+            let y = cell_y
+                + reserved.top
+                + lead(&cs.margin.top, &cs.margin.bottom, inner_h, h, block)
+                + if block == CellAlign::LastBaseline {
+                    -baseline_shim(i)
+                } else {
+                    baseline_shim(i)
+                };
             child_boxes.push(LayoutBox::new(Rect::new(Point::new(x, y), Size::new(w, h))));
             // This item's containing block, for its own percentages and therefore
             // for everything its subtree inherits. `cell_w` is the item's grid area
@@ -607,18 +834,22 @@ impl LayoutAlgorithm for GridLayout {
 
         // Step 6: border box, clamped. When the container sets an explicit size the
         // border box is that content extent plus padding (so the container *is* the
-        // authored size, even if its tracks do not fill it); an `Auto` axis sizes to
-        // the children's bounding box plus padding, exactly as before.
+        // authored size, even if its tracks do not fill it). An auto size
+        // includes the full track extent.
         //
         // `max_right`/`max_bottom` are accumulated from the content origin (they
         // start at `padding.left`/`padding.top`), so subtracting that origin back
         // off yields the CONTENT extent — the axis `clamp_content` operates on.
-        let own_content_width = if style.width.is_auto() {
+        let own_content_width = if let Some(width) = resolved_width {
+            width
+        } else if style.width.is_auto() {
             max_right - padding.left
         } else {
             content_width
         };
-        let own_content_height = if style.height.is_auto() {
+        let own_content_height = if let Some(height) = resolved_height {
+            height
+        } else if style.height.is_auto() {
             max_bottom - padding.top
         } else {
             content_height
@@ -630,17 +861,17 @@ impl LayoutAlgorithm for GridLayout {
         // defect flow and flex carried before `clamp_content` was factored out.
         let own_w = clamp_content(
             own_content_width,
-            style.min_width,
-            style.max_width,
-            constraints.max.width,
+            style.min_width.clone(),
+            style.max_width.clone(),
+            constraints.percent_width(),
             pad_x,
             style.box_sizing,
         );
         let own_h = clamp_content(
             own_content_height,
-            style.min_height,
-            style.max_height,
-            constraints.max.height,
+            style.min_height.clone(),
+            style.max_height.clone(),
+            constraints.percent_height(),
             pad_y,
             style.box_sizing,
         );
@@ -660,7 +891,9 @@ impl LayoutAlgorithm for GridLayout {
         // (`docs/layer-consumer-audit.md`, 2-I (1)).
         let size = constraints.constrain_allowing_overflow(border_box);
 
-        LayoutOutput::new(size, child_boxes).with_child_percent_bases(child_bases)
+        LayoutOutput::new(size, child_boxes)
+            .with_child_percent_bases(child_bases)
+            .with_grid_limited_item(limited_item)
     }
 }
 
@@ -1474,10 +1707,10 @@ mod tests {
         assert_eq!(b[0].size().width, 200.0);
     }
 
-    // (c) an explicit item at column line 2 + an auto item: the auto item flows
-    // around the occupied cell, landing in column 0.
+    // (c) an explicit item at column line 2 + an auto item: the auto item continues
+    // forward from the fixed column, landing in column 2.
     #[test]
-    fn auto_item_flows_around_explicit_cell() {
+    fn auto_item_continues_from_a_fixed_column() {
         let style = LayoutStyle::default();
         let children = [
             placed(1, GridPlacement::column(GridLine::Line(2), GridLine::Auto)),
@@ -1492,9 +1725,9 @@ mod tests {
             &mut measurer,
         );
         let b = out.child_boxes();
-        // Explicit item on column 1 (x=100), auto item flows to column 0 (x=0).
+        // Explicit item on column 1 (x=100), auto item flows to column 2 (x=200).
         assert_eq!(b[0].origin(), Point::new(100.0, 0.0));
-        assert_eq!(b[1].origin(), Point::new(0.0, 0.0));
+        assert_eq!(b[1].origin(), Point::new(200.0, 0.0));
     }
 
     // (d) `grid-row: 2` puts an item on row index 1. Row 0 is a fixed 50px track
@@ -1629,9 +1862,9 @@ mod tests {
         assert_eq!(b[0].size().width, 300.0);
     }
 
-    // (neg-b) `grid-column: -1` lands on the last column: x=200, width 100.
+    // (neg-b) `grid-column: -1` starts at the last explicit line.
     #[test]
-    fn negative_start_line_places_in_last_column() {
+    fn negative_start_line_places_after_the_explicit_columns() {
         let style = LayoutStyle::default();
         let children = [placed(
             1,
@@ -1645,20 +1878,20 @@ mod tests {
             &mut measurer,
         );
         let b = out.child_boxes();
-        assert_eq!(b[0].origin().x, 200.0);
-        assert_eq!(b[0].size().width, 100.0);
+        assert_eq!(b[0].origin().x, 300.0);
+        assert_eq!(b[0].size().width, 0.0);
     }
 
-    // (neg-c) a negative row line: `grid-row: -1` places on the last explicit row.
+    // (neg-c) `grid-row: -1` starts after the explicit rows.
     #[test]
-    fn negative_row_line_places_on_last_row() {
+    fn negative_row_line_places_after_the_explicit_rows() {
         let style = LayoutStyle::default();
         let children = [placed(
             1,
             GridPlacement::row(GridLine::Line(-1), GridLine::Auto),
         )];
         let mut measurer = FixedChildMeasurer::new(vec![Size::new(0.0, 30.0)]);
-        // Two explicit 50px rows; -1 is the last row (index 1) → y = 50.
+        // Two explicit 50px rows end at y = 100.
         let g = grid(
             vec![TrackSize::Fixed(100.0)],
             vec![TrackSize::Fixed(50.0), TrackSize::Fixed(50.0)],
@@ -1672,7 +1905,7 @@ mod tests {
             &mut measurer,
         );
         let b = out.child_boxes();
-        assert_eq!(b[0].origin().y, 50.0);
+        assert_eq!(b[0].origin().y, 100.0);
     }
 
     // ---- `repeat(auto-fill | auto-fit, …)` computed from the container size. ----
@@ -2557,6 +2790,166 @@ mod tests {
         }
     }
 
+    #[test]
+    fn unbounded_percentage_columns_resolve_against_the_intrinsic_width() {
+        let out = grid(
+            vec![TrackSize::Percent(0.5), TrackSize::Fixed(100.0)],
+            vec![],
+            0.0,
+            0.0,
+        )
+        .layout(
+            &LayoutStyle::default(),
+            &[child(1), child(2)],
+            BoxConstraints::loose(Size::new(f32::INFINITY, 100.0)),
+            &mut Paragraph {
+                min: 30.0,
+                max: 200.0,
+            },
+        );
+        let boxes = out.child_boxes();
+        assert_eq!(out.size().width, 300.0);
+        assert_eq!(boxes[0].size().width, 150.0);
+        assert_eq!(boxes[1].origin().x, 150.0);
+    }
+
+    #[test]
+    fn tight_axis_supplies_the_basis_for_percentage_tracks() {
+        let out = grid(
+            vec![TrackSize::Percent(0.5), TrackSize::Fixed(60.0)],
+            vec![],
+            0.0,
+            0.0,
+        )
+        .layout(
+            &LayoutStyle::default(),
+            &[child(1), child(2)],
+            BoxConstraints::tight(Size::new(400.0, 100.0)),
+            &mut FixedChildMeasurer::default(),
+        );
+        assert_eq!(out.size().width, 400.0);
+        assert_eq!(out.child_boxes()[1].origin().x, 200.0);
+    }
+
+    #[test]
+    fn unbounded_percentage_rows_can_overflow_the_intrinsic_height() {
+        let out = grid(
+            vec![TrackSize::Fixed(100.0)],
+            vec![TrackSize::Percent(1.0), TrackSize::Fixed(30.0)],
+            0.0,
+            0.0,
+        )
+        .layout(
+            &LayoutStyle::default(),
+            &[child(1), child(2)],
+            BoxConstraints::loose(Size::new(100.0, f32::INFINITY)),
+            &mut FixedChildMeasurer::new(vec![Size::new(10.0, 20.0); 2]),
+        );
+        let boxes = out.child_boxes();
+        assert_eq!(out.size().height, 50.0);
+        assert_eq!(boxes[0].size().height, 50.0);
+        assert_eq!(boxes[1].origin().y, 50.0);
+    }
+
+    #[test]
+    fn unbounded_flexible_columns_use_max_content_contributions() {
+        let out = grid(
+            vec![TrackSize::Fr(1.0), TrackSize::Fr(2.0)],
+            vec![],
+            0.0,
+            0.0,
+        )
+        .layout(
+            &LayoutStyle::default(),
+            &[child(1)],
+            BoxConstraints::loose(Size::new(f32::INFINITY, 100.0)),
+            &mut Paragraph {
+                min: 30.0,
+                max: 200.0,
+            },
+        );
+        assert_eq!(out.child_boxes()[0].size().width, 200.0);
+        assert_eq!(out.size().width, 600.0);
+    }
+
+    #[test]
+    fn unbounded_flexible_rows_keep_their_ratio_and_finite_offsets() {
+        let style = LayoutStyle {
+            align_content: JustifyContent::Center,
+            ..LayoutStyle::default()
+        };
+        let out = grid(
+            vec![TrackSize::Fixed(100.0)],
+            vec![TrackSize::Fr(1.0), TrackSize::Fr(2.0)],
+            0.0,
+            5.0,
+        )
+        .layout(
+            &style,
+            &[child(1), child(2)],
+            BoxConstraints::loose(Size::new(100.0, f32::INFINITY)),
+            &mut FixedChildMeasurer::new(vec![Size::new(10.0, 20.0), Size::new(10.0, 70.0)]),
+        );
+        let boxes = out.child_boxes();
+        assert_eq!((boxes[0].origin().y, boxes[0].size().height), (0.0, 35.0));
+        assert_eq!((boxes[1].origin().y, boxes[1].size().height), (40.0, 70.0));
+        assert_eq!(out.size().height, 110.0);
+    }
+
+    #[test]
+    fn unbounded_flexible_columns_refit_to_a_border_box_max_width() {
+        let style = LayoutStyle {
+            max_width: Dimension::Px(300.0),
+            padding: Insets::uniform(10.0),
+            box_sizing: crate::model::BoxSizing::BorderBox,
+            ..LayoutStyle::default()
+        };
+        let flexible = |factor| {
+            TrackSize::MinMax(
+                Box::new(TrackSize::Fixed(0.0)),
+                Box::new(TrackSize::Fr(factor)),
+            )
+        };
+        let out = grid(vec![flexible(1.0), flexible(2.0)], vec![], 10.0, 0.0).layout(
+            &style,
+            &[child(1), child(2)],
+            BoxConstraints::loose(Size::new(f32::INFINITY, 100.0)),
+            &mut Paragraph {
+                min: 30.0,
+                max: 200.0,
+            },
+        );
+        let boxes = out.child_boxes();
+        assert_eq!(out.size().width, 300.0);
+        assert_eq!((boxes[0].origin().x, boxes[0].size().width), (10.0, 90.0));
+        assert_eq!((boxes[1].origin().x, boxes[1].size().width), (110.0, 180.0));
+    }
+
+    #[test]
+    fn unbounded_flexible_rows_refit_to_min_height() {
+        let style = LayoutStyle {
+            min_height: Dimension::Percent(50.0),
+            ..LayoutStyle::default()
+        };
+        let out = grid(
+            vec![TrackSize::Fixed(100.0)],
+            vec![TrackSize::Fr(1.0), TrackSize::Fr(2.0)],
+            0.0,
+            10.0,
+        )
+        .layout(
+            &style,
+            &[child(1), child(2)],
+            BoxConstraints::loose(Size::new(100.0, f32::INFINITY))
+                .with_percent_basis(Size::new(100.0, 320.0)),
+            &mut FixedChildMeasurer::new(vec![Size::new(10.0, 20.0); 2]),
+        );
+        let boxes = out.child_boxes();
+        assert_eq!(out.size().height, 160.0);
+        assert_eq!((boxes[0].origin().y, boxes[0].size().height), (0.0, 50.0));
+        assert_eq!((boxes[1].origin().y, boxes[1].size().height), (60.0, 100.0));
+    }
+
     /// The single column's width under `track`, in a `line`-wide grid holding one
     /// paragraph item (min-content 30, max-content 200).
     fn one_track_width(track: TrackSize, line: f32) -> f32 {
@@ -2585,6 +2978,83 @@ mod tests {
         // OVERFLOWS the 100px container: `max-content` is a question about the
         // content, and the container's answer is not it.
         assert_eq!(one_track_width(TrackSize::MaxContent, 100.0), 200.0);
+    }
+
+    #[test]
+    fn cyclic_row_gap_uses_intrinsic_height_for_placement_without_growing_the_box() {
+        let layout = grid(
+            vec![TrackSize::Fixed(80.0)],
+            vec![TrackSize::Fixed(20.0); 2],
+            0.0,
+            0.0,
+        );
+        let style = LayoutStyle {
+            gap_dimension: Some(Dimension::Affine {
+                pixels: 5.0,
+                fraction: 0.1,
+            }),
+            ..LayoutStyle::default()
+        };
+        let out = layout.layout(
+            &style,
+            &[child(1), child(2)],
+            BoxConstraints::loose(Size::new(80.0, f32::INFINITY)),
+            &mut FixedChildMeasurer::new(vec![Size::new(80.0, 20.0); 2]),
+        );
+        assert_eq!(out.size().height, 45.0);
+        assert_eq!(out.child_boxes()[1].origin().y, 29.5);
+    }
+
+    #[test]
+    fn first_baseline_alignment_expands_an_intrinsic_row_for_the_shift() {
+        struct BaselineItems;
+        impl ChildMeasurer for BaselineItems {
+            fn measure_child(&mut self, index: usize, _: BoxConstraints) -> Size {
+                Size::new(40.0, [30.0, 25.0][index])
+            }
+
+            fn measure_child_with_baseline(
+                &mut self,
+                index: usize,
+                constraints: BoxConstraints,
+            ) -> (Size, Option<f32>) {
+                (
+                    self.measure_child(index, constraints),
+                    Some([10.0, 20.0][index]),
+                )
+            }
+        }
+
+        let out = grid(
+            vec![TrackSize::Fixed(40.0); 2],
+            vec![TrackSize::Auto],
+            0.0,
+            0.0,
+        )
+        .layout(
+            &LayoutStyle {
+                align_items: crate::model::AlignItems::Baseline,
+                ..LayoutStyle::default()
+            },
+            &[child(1), child(2)],
+            BoxConstraints::loose(Size::new(80.0, 100.0)),
+            &mut BaselineItems,
+        );
+        assert_eq!(out.child_boxes()[0].origin().y, 10.0);
+        assert_eq!(out.child_boxes()[1].origin().y, 0.0);
+        assert_eq!(out.size().height, 40.0);
+    }
+
+    #[test]
+    fn fit_content_columns_cap_growth_but_respect_the_intrinsic_minimum() {
+        use crate::model::Dimension;
+        let width = |limit| one_track_width(TrackSize::FitContent(limit), 300.0);
+        assert_eq!(width(Dimension::Px(80.0)), 80.0);
+        // The loose grid first measures its 200px intrinsic width. The second
+        // pass resolves the percentage against that width.
+        assert_eq!(width(Dimension::Percent(25.0)), 50.0);
+        assert_eq!(width(Dimension::Px(5.0)), 30.0);
+        assert_eq!(width(Dimension::Px(250.0)), 200.0);
     }
 
     #[test]
@@ -2764,9 +3234,9 @@ mod tests {
             // measurer carries the same style because it is the same box: the
             // algorithm reads the declared width from the descriptor, and the
             // measure re-lays it out.
-            &[LayoutChild::new(NodeId::from_raw(1), item_style)],
+            &[LayoutChild::new(NodeId::from_raw(1), item_style.clone())],
             BoxConstraints::tight(Size::new(480.0, 240.0)),
-            &mut GridItem(item_style),
+            &mut GridItem(item_style.clone()),
         );
         let item_box = out.child_boxes()[0].size();
         // The caller's fallback basis is the grid container's own content box —
@@ -2978,7 +3448,7 @@ mod tests {
             ..LayoutStyle::default()
         };
         let children: Vec<LayoutChild> = (1..=4)
-            .map(|i| LayoutChild::new(NodeId::from_raw(i), row))
+            .map(|i| LayoutChild::new(NodeId::from_raw(i), row.clone()))
             .collect();
         let mut measurer = FixedChildMeasurer::new(vec![Size::new(0.0, 20.0); 4]);
         let out = FlexLayout.layout(

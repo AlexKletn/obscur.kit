@@ -41,6 +41,9 @@ fn grid_view(n: usize) -> View {
 #[doc = include_str!("grid_placement_css.doc/drive.md")]
 fn drive(css: &str, n: usize, width: f32, height: f32) -> (UiRuntime, Vec<NodeId>) {
     let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(width, height));
+    rt.set_custom_value_parser(std::rc::Rc::new(
+        obscur_kit::css::compiler::CustomValueCache::new(),
+    ));
     let sheet = compile(css);
     let view = grid_view(n);
     let result = rt.render_now(&view, std::slice::from_ref(&sheet));
@@ -112,9 +115,9 @@ fn column_span_keyword_occupies_two_columns() {
 }
 
 // 3. explicit single line: `.a{grid-column: 2}` locks `.a` to col 1 (x=100); the
-//    auto `.b` flows around it into col 0 (x=0).
+//    auto `.b` continues forward from there into col 2 (x=200).
 #[test]
-fn explicit_column_line_and_auto_flows_around() {
+fn explicit_column_line_advances_the_sparse_cursor() {
     let (rt, k) = drive(
         &format!("{THREE_COL} .a{{grid-column:2;height:10px}} .b{{height:10px}}"),
         2,
@@ -125,7 +128,7 @@ fn explicit_column_line_and_auto_flows_around() {
     let (bx, by, _, _) = geom(&rt, k[1]);
     approx(ax, 100.0, "a.x (line 2 → col 1)");
     approx(ay, 0.0, "a.y (row 0)");
-    approx(bx, 0.0, "b.x (auto flows into the free col 0)");
+    approx(bx, 200.0, "b.x (auto continues to col 2)");
     approx(by, 0.0, "b.y (row 0)");
 }
 
@@ -169,9 +172,9 @@ fn column_span_includes_interior_gap() {
 }
 
 // 6. mixed explicit + auto: `.b{grid-column: 3}` locks col 2; the auto `.a`, `.c`,
-//    `.d` first-fit around it row-major (a→col0, c→col1, d→row1 col0).
+//    `.d` follow the cursor row-major (a→col0, c→row1 col0, d→row1 col1).
 #[test]
-fn mixed_explicit_and_auto_fill_remaining_cells() {
+fn mixed_explicit_and_auto_items_follow_the_sparse_cursor() {
     let (rt, k) = drive(
         &format!(
             "{THREE_COL} .a{{height:10px}} .b{{grid-column:3;height:10px}} \
@@ -189,9 +192,9 @@ fn mixed_explicit_and_auto_fill_remaining_cells() {
     approx(by, 0.0, "b.y (row 0)");
     approx(ax, 0.0, "a.x (auto → col 0)");
     approx(ay, 0.0, "a.y (row 0)");
-    approx(cx, 100.0, "c.x (auto → col 1, skipping the occupied col 2)");
-    approx(cy, 0.0, "c.y (row 0)");
-    approx(dx, 0.0, "d.x (auto wraps → col 0)");
+    approx(cx, 0.0, "c.x (auto wraps → col 0)");
+    approx(cy, 10.0, "c.y (row 1)");
+    approx(dx, 100.0, "d.x (auto → col 1)");
     approx(dy, 10.0, "d.y (row 1, below the 10px row 0)");
 }
 
@@ -215,18 +218,18 @@ fn negative_end_line_spans_all_columns() {
     );
 }
 
-// 8. negative single line: `.a{grid-column: -1}` lands on the LAST column (x=200).
+// 8. A negative single line starts an implicit column after the explicit grid.
 #[test]
-fn negative_single_line_places_in_last_column() {
+fn negative_single_line_places_after_the_last_explicit_column() {
     let (rt, k) = drive(
-        &format!("{THREE_COL} .a{{grid-column:-1;height:10px}}"),
+        &format!("{THREE_COL} .grid{{grid-auto-columns:40px}} .a{{grid-column:-1;height:10px}}"),
         1,
         400.0,
         200.0,
     );
     let (ax, _, aw, _) = geom(&rt, k[0]);
-    approx(ax, 200.0, "a.x (-1 → last column, index 2)");
-    approx(aw, 100.0, "a.width (single column)");
+    approx(ax, 300.0, "a.x starts at the final explicit line");
+    approx(aw, 40.0, "a.width follows its implicit column");
 }
 
 // 10. `grid-auto-flow: dense` backfill: two `span 2` items in a 3-column grid land
@@ -465,4 +468,269 @@ fn an_authored_stretch_does_not_beat_a_declared_size() {
     approx(ay, 0.0, "a.y");
     approx(aw, 40.0, "a.width (authored `stretch` still falls back)");
     approx(ah, 30.0, "a.height (authored `stretch` still falls back)");
+}
+
+#[test]
+fn template_areas_generate_named_lines_on_both_axes() {
+    let css = ".grid{display:grid;width:300px;               grid-template-columns:100px 100px [panel-start] 100px;               grid-template-rows:20px 30px;               grid-template-areas:\". . .\" \". panel panel\"}                .a{grid-column:panel-start / panel-end;grid-row:panel-start / panel-end}";
+    let (rt, children) = drive(css, 1, 400.0, 200.0);
+    let (x, y, width, height) = geom(&rt, children[0]);
+    approx(x, 100.0, "first panel-start line wins");
+    approx(y, 20.0, "panel block start");
+    approx(width, 200.0, "panel inline span");
+    approx(height, 30.0, "panel block span");
+}
+
+#[test]
+fn template_areas_none_clears_an_earlier_template() {
+    let css = ".grid{display:grid;width:200px;grid-template-columns:100px 100px;
+               grid-template-areas:\". panel\";grid-template-areas:none}
+               .a{grid-area:panel}";
+    let (rt, children) = drive(css, 1, 400.0, 200.0);
+    let (x, _, _, _) = geom(&rt, children[0]);
+    approx(
+        x,
+        200.0,
+        "the name resolves beyond the explicit grid after the area is cleared",
+    );
+}
+
+#[test]
+fn numbered_named_lines_count_distinct_lines_from_either_end() {
+    let css = ".grid{display:grid;width:400px;
+               grid-template-columns:[panel-start] 100px [panel-start panel-start] 100px 100px [panel-start] 100px;
+               grid-template-areas:\". . panel panel\"}
+               .a{grid-column:panel-start 2 / span 1}
+               .b{grid-column:-2 panel-start / span 1}
+               .c{grid-column-start:3 panel-start;grid-column-end:span 1}";
+    let (rt, children) = drive(css, 3, 500.0, 200.0);
+    approx(geom(&rt, children[0]).0, 100.0, "one occurrence per line");
+    approx(
+        geom(&rt, children[1]).0,
+        200.0,
+        "second from end includes generated line",
+    );
+    approx(
+        geom(&rt, children[2]).0,
+        200.0,
+        "third from start includes generated line",
+    );
+}
+
+#[test]
+fn column_auto_flow_respects_definite_cells_and_moves_along_a_fixed_row() {
+    let css = ".grid{display:grid;width:150px;grid-template-columns:50px;
+               grid-template-rows:20px 20px;grid-auto-columns:50px;grid-auto-flow:column}
+               .a{grid-row:1}
+               .b{grid-column:1}
+               .c{grid-column:1;grid-row:1}
+               .d{grid-row:1}";
+    let (rt, children) = drive(css, 4, 400.0, 200.0);
+    let positions: Vec<_> = children
+        .iter()
+        .map(|&node| {
+            let (x, y, _, _) = geom(&rt, node);
+            (x, y)
+        })
+        .collect();
+    assert_eq!(
+        positions,
+        [(50.0, 0.0), (0.0, 20.0), (0.0, 0.0), (100.0, 0.0)]
+    );
+}
+
+#[test]
+fn column_dense_can_backfill_a_hole_for_items_locked_to_a_column() {
+    fn last_y(flow: &str) -> f32 {
+        let css = format!(
+            ".grid{{display:grid;width:50px;grid-template-columns:50px;
+                   grid-template-rows:repeat(5, 20px);grid-auto-flow:{flow}}}
+             .a{{grid-column:1;grid-row:span 2}} .b{{grid-column:1;grid-row:2}}
+             .c{{grid-column:1}}"
+        );
+        let (rt, children) = drive(&css, 3, 400.0, 200.0);
+        geom(&rt, children[2]).1
+    }
+    assert_eq!(last_y("column"), 80.0);
+    assert_eq!(last_y("column dense"), 0.0);
+}
+
+#[test]
+fn row_auto_flow_reserves_definite_cells_and_expands_for_items_locked_to_a_row() {
+    let css = ".grid{display:grid;width:150px;grid-template-columns:50px;
+               grid-template-rows:20px;grid-auto-columns:50px;grid-auto-rows:20px}
+               .a{grid-row:1} .b{grid-column:1}
+               .c{grid-column:1;grid-row:1} .d{grid-row:1}";
+    let (rt, children) = drive(css, 4, 400.0, 200.0);
+    let positions: Vec<_> = children
+        .iter()
+        .map(|&node| {
+            let (x, y, _, _) = geom(&rt, node);
+            (x, y)
+        })
+        .collect();
+    assert_eq!(
+        positions,
+        [(50.0, 0.0), (0.0, 20.0), (0.0, 0.0), (100.0, 0.0)]
+    );
+}
+
+#[test]
+fn fixed_columns_wrap_the_sparse_row_flow_cursor() {
+    fn last_y(flow: &str) -> f32 {
+        let css = format!(
+            ".grid{{display:grid;width:150px;grid-template-columns:repeat(3, 50px);
+                   grid-auto-rows:20px;grid-auto-flow:{flow}}}
+             .a{{grid-column:3}} .b{{grid-column:1}}"
+        );
+        let (rt, children) = drive(&css, 2, 400.0, 200.0);
+        geom(&rt, children[1]).1
+    }
+    assert_eq!(last_y("row"), 20.0);
+    assert_eq!(last_y("row dense"), 0.0);
+}
+
+#[test]
+fn numbered_grid_lines_resolve_names_from_numeric_repeats() {
+    let css = ".grid{display:grid;grid-template-columns:repeat(3,[start] 40px [end]);gap:5px}
+               .a{grid-column:start 3 / end 3;height:10px}";
+    let (rt, children) = drive(css, 1, 400.0, 200.0);
+    assert_eq!(geom(&rt, children[0]), (90.0, 0.0, 40.0, 10.0));
+}
+
+#[test]
+fn automatic_repeat_names_and_trailing_lines_follow_the_expanded_track_count() {
+    let css = ".grid{display:grid;width:100%;
+               grid-template-columns:repeat(auto-fill,[slot] 40px [slot]) [tail] 20px}
+               .a{grid-column:slot 3;grid-row:1;height:10px}
+               .b{grid-column:tail;grid-row:1;height:10px}";
+    let (mut rt, children) = drive(css, 2, 170.0, 200.0);
+    assert_eq!(geom(&rt, children[0]), (80.0, 0.0, 40.0, 10.0));
+    assert_eq!(geom(&rt, children[1]), (120.0, 0.0, 20.0, 10.0));
+
+    rt.set_viewport(Size::new(210.0, 200.0));
+    rt.render_now(&grid_view(2), &[compile(css)]);
+    assert_eq!(geom(&rt, children[0]), (80.0, 0.0, 40.0, 10.0));
+    assert_eq!(geom(&rt, children[1]), (160.0, 0.0, 20.0, 10.0));
+}
+
+#[test]
+fn auto_fit_resolves_named_lines_before_collapsing_empty_tracks() {
+    let css = ".grid{display:grid;width:200px;
+               grid-template-columns:repeat(auto-fit,[slot] 40px)}
+               .a{grid-column:-2 slot;grid-row:1;height:10px}
+               .b{grid-column:slot;grid-row:1;height:10px}";
+    let (rt, children) = drive(css, 2, 400.0, 200.0);
+    assert_eq!(geom(&rt, children[0]), (40.0, 0.0, 40.0, 10.0));
+    assert_eq!(geom(&rt, children[1]), (0.0, 0.0, 40.0, 10.0));
+}
+
+#[test]
+fn numbered_missing_matches_extend_the_grid_on_both_sides() {
+    let css = ".grid{display:grid;
+               grid-template-columns:[mark] 100px;grid-auto-columns:20px 30px}
+               .a{grid-column:-3 mark;grid-row:1;height:10px}
+               .b{grid-column:1;grid-row:1;height:10px}
+               .c{grid-column:mark 3;grid-row:1;height:10px}";
+    let (rt, children) = drive(css, 3, 400.0, 200.0);
+    assert_eq!(geom(&rt, children[0]), (0.0, 0.0, 20.0, 10.0));
+    assert_eq!(geom(&rt, children[1]), (50.0, 0.0, 100.0, 10.0));
+    assert_eq!(geom(&rt, children[2]), (200.0, 0.0, 20.0, 10.0));
+}
+
+#[test]
+fn numbered_names_count_implicit_rows_after_expanding_auto_repeat() {
+    let css = ".grid{display:grid;width:50px;height:80px;grid-template-columns:50px;
+               grid-template-rows:repeat(auto-fill,[mark] 40px);grid-auto-rows:20px}
+               .a{grid-row:mark 3;grid-column:1}
+               .b{grid-row:-3 mark;grid-column:1}";
+    let (rt, children) = drive(css, 2, 400.0, 200.0);
+    assert_eq!(geom(&rt, children[0]), (0.0, 120.0, 50.0, 20.0));
+    assert_eq!(geom(&rt, children[1]), (0.0, 0.0, 50.0, 20.0));
+}
+
+#[test]
+fn a_bare_column_name_prefers_the_area_boundaries_over_a_matching_line() {
+    let css = ".grid{display:grid;grid-template-columns:[panel] 20px 30px 40px;
+               grid-template-areas:\". panel panel\"}
+               .a{grid-column:panel;grid-row:1;height:10px}";
+    let (rt, children) = drive(css, 1, 400.0, 200.0);
+    assert_eq!(geom(&rt, children[0]), (20.0, 0.0, 70.0, 10.0));
+}
+
+#[test]
+fn bare_names_resolve_preferred_repeat_edges_and_unknown_implicit_lines() {
+    let css = ".grid{display:grid;width:180px;
+               grid-template-columns:20px repeat(auto-fill,[panel-start] 40px [panel-end]);
+               grid-auto-columns:15px}
+               .a{grid-column:panel;grid-row:1;height:10px}
+               .b{grid-column:missing;grid-row:1;height:10px}";
+    let (rt, children) = drive(css, 2, 400.0, 200.0);
+    assert_eq!(geom(&rt, children[0]), (20.0, 0.0, 40.0, 10.0));
+    assert_eq!(geom(&rt, children[1]), (195.0, 0.0, 15.0, 10.0));
+}
+
+#[test]
+fn named_grid_area_edges_obey_later_longhands() {
+    let css = ".grid{display:grid;grid-template-columns:30px 40px 50px;
+               grid-template-rows:20px;grid-template-areas:\"panel panel .\"}
+               .a{grid-area:panel;grid-column-start:3;grid-column-end:4}";
+    let (rt, children) = drive(css, 1, 400.0, 200.0);
+    assert_eq!(geom(&rt, children[0]), (70.0, 0.0, 50.0, 20.0));
+}
+
+#[test]
+fn reversed_grid_lines_span_the_same_tracks_as_forward_lines() {
+    let css = ".grid{display:grid;grid-template-columns:30px 40px 50px;
+               grid-template-rows:20px 30px 40px;gap:5px}
+               .a{grid-column:4 / 2;grid-row:-1 / 2}
+               .b{grid-column:2 / 4;grid-row:2 / -1}";
+    let (rt, children) = drive(css, 2, 400.0, 200.0);
+    assert_eq!(geom(&rt, children[0]), (35.0, 25.0, 95.0, 75.0));
+    assert_eq!(geom(&rt, children[1]), geom(&rt, children[0]));
+}
+
+#[test]
+fn numeric_placement_can_add_columns_before_the_first_explicit_line() {
+    let css = ".grid{display:grid;grid-template-columns:50px 60px;grid-auto-columns:20px 30px}
+               .a{grid-column:-5;grid-row:1;height:10px}
+               .b{grid-column:1;grid-row:1;height:10px}
+               .c{grid-column:span 2 / 1;grid-row:2;height:10px}";
+    let (rt, children) = drive(css, 3, 400.0, 200.0);
+    assert_eq!(geom(&rt, children[0]), (0.0, 0.0, 20.0, 10.0));
+    assert_eq!(geom(&rt, children[1]), (50.0, 0.0, 50.0, 10.0));
+    assert_eq!(geom(&rt, children[2]), (0.0, 10.0, 50.0, 10.0));
+}
+
+#[test]
+fn grid_auto_placement_uses_order_groups_and_source_order_for_ties() {
+    let css = ".grid{display:grid;grid-template-columns:repeat(3,40px);grid-auto-rows:20px}
+               .a{order:2} .b{order:-1} .d{--priority:-1;order:var(--priority)} .e{order:2}";
+    let (rt, children) = drive(css, 5, 400.0, 200.0);
+    let positions: Vec<_> = children
+        .iter()
+        .map(|&node| {
+            let (x, y, _, _) = geom(&rt, node);
+            (x, y)
+        })
+        .collect();
+    assert_eq!(
+        positions,
+        [
+            (0.0, 20.0),
+            (0.0, 0.0),
+            (80.0, 0.0),
+            (40.0, 0.0),
+            (40.0, 20.0)
+        ]
+    );
+}
+
+#[test]
+fn grid_order_also_applies_to_items_locked_to_a_row() {
+    let css = ".grid{display:grid;grid-template-columns:repeat(2,40px);grid-auto-rows:20px}
+               .a,.b{grid-row:1} .b{order:-1}";
+    let (rt, children) = drive(css, 2, 400.0, 200.0);
+    assert_eq!(geom(&rt, children[0]).0, 40.0);
+    assert_eq!(geom(&rt, children[1]).0, 0.0);
 }

@@ -1,11 +1,12 @@
-#![doc = include_str!("stable_selector.doc/_module.md")]
+//! Stable, non-CSS identifiers a test or DevTools client targets a node by
+//! (spec §7.5).
 
 use obscur_identity::InternedSymbol;
 
-#[doc = include_str!("stable_selector.doc/TEST_ID.md")]
+#[doc = include_str!("../../docs/api/view/stable_selector.doc/TEST_ID.md")]
 pub const TEST_ID: InternedSymbol = InternedSymbol::from_raw(0x0000_0201);
 
-#[doc = include_str!("stable_selector.doc/AUTOMATION_ID.md")]
+#[doc = include_str!("../../docs/api/view/stable_selector.doc/AUTOMATION_ID.md")]
 pub const AUTOMATION_ID: InternedSymbol = InternedSymbol::from_raw(0x0000_0202);
 
 #[cfg(test)]

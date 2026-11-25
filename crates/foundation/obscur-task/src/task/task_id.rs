@@ -1,17 +1,18 @@
-#![doc = include_str!("task_id.doc/_module.md")]
+//! Identifier for a scheduled task.
 
-#[doc = include_str!("task_id.doc/TaskId.md")]
+/// An opaque identifier for a spawned task, used to correlate completions and
+/// discard stale work (spec §3.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TaskId(u64);
 
 impl TaskId {
-    #[doc = include_str!("task_id.doc/from_raw.md")]
+    /// Wraps a raw task handle value.
     #[must_use]
     pub const fn from_raw(raw: u64) -> Self {
         Self(raw)
     }
 
-    #[doc = include_str!("task_id.doc/raw.md")]
+    /// Returns the raw task handle value.
     #[must_use]
     pub const fn raw(self) -> u64 {
         self.0

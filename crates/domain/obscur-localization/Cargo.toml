@@ -11,6 +11,11 @@ publish = false
 workspace = true
 
 [dependencies]
+icu_decimal = { workspace = true }
+icu_datetime = { workspace = true }
+icu_experimental = { workspace = true }
+icu_locale_core = { workspace = true }
+writeable = { workspace = true }
 # `LanguageTag::direction` answers in the text layer's own `TextDirection` rather
 # than inventing a second direction enum: spec §7.2 requires localization to
 # integrate with RTL and with text shaping, so the edge to the text domain is the

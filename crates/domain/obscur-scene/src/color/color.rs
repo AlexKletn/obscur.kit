@@ -1,20 +1,20 @@
-#![doc = include_str!("color.doc/_module.md")]
+//! A typed color: the lightweight `{r, g, b, a}` component tuple.
 
-#[doc = include_str!("color.doc/Color.md")]
+#[doc = include_str!("../../docs/api/color/color.doc/Color.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Color {
-    #[doc = include_str!("color.doc/r.md")]
+    /// Red channel, conventionally `0.0..=1.0`.
     pub r: f32,
-    #[doc = include_str!("color.doc/g.md")]
+    /// Green channel, conventionally `0.0..=1.0`.
     pub g: f32,
-    #[doc = include_str!("color.doc/b.md")]
+    /// Blue channel, conventionally `0.0..=1.0`.
     pub b: f32,
-    #[doc = include_str!("color.doc/a.md")]
+    /// Alpha channel, conventionally `0.0..=1.0`.
     pub a: f32,
 }
 
 impl Color {
-    #[doc = include_str!("color.doc/TRANSPARENT.md")]
+    /// Fully transparent (all channels zero).
     pub const TRANSPARENT: Self = Self {
         r: 0.0,
         g: 0.0,
@@ -22,7 +22,7 @@ impl Color {
         a: 0.0,
     };
 
-    #[doc = include_str!("color.doc/BLACK.md")]
+    /// Opaque black.
     pub const BLACK: Self = Self {
         r: 0.0,
         g: 0.0,
@@ -30,7 +30,7 @@ impl Color {
         a: 1.0,
     };
 
-    #[doc = include_str!("color.doc/WHITE.md")]
+    /// Opaque white.
     pub const WHITE: Self = Self {
         r: 1.0,
         g: 1.0,
@@ -38,37 +38,37 @@ impl Color {
         a: 1.0,
     };
 
-    #[doc = include_str!("color.doc/rgba.md")]
+    /// Creates a color from straight-alpha sRGB components.
     #[must_use]
     pub const fn rgba(r: f32, g: f32, b: f32, a: f32) -> Self {
         Self { r, g, b, a }
     }
 
-    #[doc = include_str!("color.doc/rgb.md")]
+    /// Creates an opaque color (alpha `1.0`) from sRGB components.
     #[must_use]
     pub const fn rgb(r: f32, g: f32, b: f32) -> Self {
         Self { r, g, b, a: 1.0 }
     }
 
-    #[doc = include_str!("color.doc/with_alpha.md")]
+    /// Returns a copy of this color with its alpha replaced by `a`.
     #[must_use]
     pub const fn with_alpha(self, a: f32) -> Self {
         Self { a, ..self }
     }
 
-    #[doc = include_str!("color.doc/is_opaque.md")]
+    /// Returns whether the color is fully opaque (`a >= 1.0`).
     #[must_use]
     pub fn is_opaque(self) -> bool {
         self.a >= 1.0
     }
 
-    #[doc = include_str!("color.doc/is_transparent.md")]
+    /// Returns whether the color is fully transparent (`a <= 0.0`).
     #[must_use]
     pub fn is_transparent(self) -> bool {
         self.a <= 0.0
     }
 
-    #[doc = include_str!("color.doc/premultiply.md")]
+    #[doc = include_str!("../../docs/api/color/color.doc/premultiply.md")]
     #[must_use]
     pub fn premultiply(self) -> Color {
         Self {

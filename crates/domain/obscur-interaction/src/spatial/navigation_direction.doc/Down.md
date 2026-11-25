@@ -1,1 +1,0 @@
-Toward larger `y` (downward).

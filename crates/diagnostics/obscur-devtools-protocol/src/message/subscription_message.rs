@@ -1,104 +1,19 @@
-#![doc = include_str!("subscription_message.doc/_module.md")]
+//! Subscribe/unsubscribe envelope, subscription record, and limits (§7.7).
 
-use super::{CommandId, Topic};
-
-#[doc = include_str!("subscription_message.doc/SUBSCRIPTION_LIMIT.md")]
+/// Maximum number of concurrent subscriptions a single endpoint may hold
+/// (spec §7.7 subscription limits).
 pub const SUBSCRIPTION_LIMIT: usize = 64;
 
-#[doc = include_str!("subscription_message.doc/MESSAGE_LIMIT.md")]
+/// Maximum number of in-flight/queued messages permitted for an endpoint
+/// before the server applies backpressure or disconnects (spec §7.7).
 pub const MESSAGE_LIMIT: usize = 1024;
-
-#[doc = include_str!("subscription_message.doc/SubscriptionId.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct SubscriptionId(pub u64);
-
-impl SubscriptionId {
-    #[doc = include_str!("subscription_message.doc/new.md")]
-    #[must_use]
-    pub const fn new(raw: u64) -> Self {
-        Self(raw)
-    }
-
-    #[doc = include_str!("subscription_message.doc/raw.md")]
-    #[must_use]
-    pub const fn raw(self) -> u64 {
-        self.0
-    }
-}
-
-#[doc = include_str!("subscription_message.doc/SubscribeRequest.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SubscribeRequest {
-    #[doc = include_str!("subscription_message.doc/command.md")]
-    pub command: CommandId,
-    #[doc = include_str!("subscription_message.doc/topic.md")]
-    pub topic: Topic,
-}
-
-impl SubscribeRequest {
-    #[doc = include_str!("subscription_message.doc/new_2.md")]
-    #[must_use]
-    pub const fn new(command: CommandId, topic: Topic) -> Self {
-        Self { command, topic }
-    }
-}
-
-#[doc = include_str!("subscription_message.doc/Subscription.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Subscription {
-    #[doc = include_str!("subscription_message.doc/id.md")]
-    pub id: SubscriptionId,
-    #[doc = include_str!("subscription_message.doc/topic_2.md")]
-    pub topic: Topic,
-    #[doc = include_str!("subscription_message.doc/granted.md")]
-    pub granted: bool,
-}
-
-impl Subscription {
-    #[doc = include_str!("subscription_message.doc/granted_2.md")]
-    #[must_use]
-    pub const fn granted(id: SubscriptionId, topic: Topic) -> Self {
-        Self {
-            id,
-            topic,
-            granted: true,
-        }
-    }
-
-    #[doc = include_str!("subscription_message.doc/denied.md")]
-    #[must_use]
-    pub const fn denied(id: SubscriptionId, topic: Topic) -> Self {
-        Self {
-            id,
-            topic,
-            granted: false,
-        }
-    }
-}
-
-#[doc = include_str!("subscription_message.doc/SubscribeResponse.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SubscribeResponse {
-    #[doc = include_str!("subscription_message.doc/command_2.md")]
-    pub command: CommandId,
-    #[doc = include_str!("subscription_message.doc/subscription.md")]
-    pub subscription: Subscription,
-}
-
-impl SubscribeResponse {
-    #[doc = include_str!("subscription_message.doc/new_3.md")]
-    #[must_use]
-    pub const fn new(command: CommandId, subscription: Subscription) -> Self {
-        Self {
-            command,
-            subscription,
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::super::{
+        CommandId, SubscribeRequest, SubscribeResponse, Subscription, SubscriptionId, Topic,
+    };
+    use super::{MESSAGE_LIMIT, SUBSCRIPTION_LIMIT};
 
     #[test]
     fn limits_are_sane() {

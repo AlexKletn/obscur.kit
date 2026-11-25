@@ -1,22 +1,23 @@
-#![doc = include_str!("shaped_glyph.doc/_module.md")]
+//! A single positioned output glyph produced by shaping (spec §5.10).
 
-#[doc = include_str!("shaped_glyph.doc/ShapedGlyph.md")]
+#[doc = include_str!("../../docs/api/shaping/shaped_glyph.doc/ShapedGlyph.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ShapedGlyph {
-    #[doc = include_str!("shaped_glyph.doc/glyph_id.md")]
+    /// The font-specific glyph index (not a Unicode code point).
     glyph_id: u32,
-    #[doc = include_str!("shaped_glyph.doc/cluster.md")]
+    /// The byte offset into the source text this glyph maps back to.
     cluster: usize,
-    #[doc = include_str!("shaped_glyph.doc/x_advance.md")]
+    /// The horizontal pen advance, in logical pixels.
     x_advance: f32,
-    #[doc = include_str!("shaped_glyph.doc/x_offset.md")]
+    /// The horizontal placement offset from the pen, in logical pixels.
     x_offset: f32,
-    #[doc = include_str!("shaped_glyph.doc/y_offset.md")]
+    /// The vertical placement offset from the pen, in logical pixels.
     y_offset: f32,
 }
 
 impl ShapedGlyph {
-    #[doc = include_str!("shaped_glyph.doc/new.md")]
+    /// Creates a glyph with the given `glyph_id`, source `cluster`, and
+    /// `x_advance`, leaving both placement offsets at `0.0`.
     #[must_use]
     pub const fn new(glyph_id: u32, cluster: usize, x_advance: f32) -> Self {
         Self {
@@ -28,7 +29,7 @@ impl ShapedGlyph {
         }
     }
 
-    #[doc = include_str!("shaped_glyph.doc/with_offset.md")]
+    /// Returns this glyph with its placement offsets set to `(x, y)`.
     #[must_use]
     pub const fn with_offset(mut self, x: f32, y: f32) -> Self {
         self.x_offset = x;
@@ -36,38 +37,38 @@ impl ShapedGlyph {
         self
     }
 
-    #[doc = include_str!("shaped_glyph.doc/with_x_advance.md")]
+    #[doc = include_str!("../../docs/api/shaping/shaped_glyph.doc/with_x_advance.md")]
     #[must_use]
     pub const fn with_x_advance(mut self, x_advance: f32) -> Self {
         self.x_advance = x_advance;
         self
     }
 
-    #[doc = include_str!("shaped_glyph.doc/glyph_id_2.md")]
+    /// Returns the font-specific glyph index.
     #[must_use]
     pub const fn glyph_id(&self) -> u32 {
         self.glyph_id
     }
 
-    #[doc = include_str!("shaped_glyph.doc/cluster_2.md")]
+    /// Returns the byte offset into the source text this glyph maps back to.
     #[must_use]
     pub const fn cluster(&self) -> usize {
         self.cluster
     }
 
-    #[doc = include_str!("shaped_glyph.doc/x_advance_2.md")]
+    /// Returns the horizontal pen advance, in logical pixels.
     #[must_use]
     pub const fn x_advance(&self) -> f32 {
         self.x_advance
     }
 
-    #[doc = include_str!("shaped_glyph.doc/x_offset_2.md")]
+    /// Returns the horizontal placement offset from the pen, in logical pixels.
     #[must_use]
     pub const fn x_offset(&self) -> f32 {
         self.x_offset
     }
 
-    #[doc = include_str!("shaped_glyph.doc/y_offset_2.md")]
+    /// Returns the vertical placement offset from the pen, in logical pixels.
     #[must_use]
     pub const fn y_offset(&self) -> f32 {
         self.y_offset

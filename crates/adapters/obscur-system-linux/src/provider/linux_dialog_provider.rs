@@ -1,4 +1,4 @@
-#![doc = include_str!("linux_dialog_provider.doc/_module.md")]
+#![doc = include_str!("../../docs/api/provider/linux_dialog_provider.doc/_module.md")]
 
 use std::process::{Command, Output};
 
@@ -8,15 +8,15 @@ use obscur_system::document::{
     DirectoryHandle, DocumentHandle, DocumentMetadata, DocumentPermission,
 };
 
-#[doc = include_str!("linux_dialog_provider.doc/LinuxDialogProvider.md")]
+#[doc = include_str!("../../docs/api/provider/linux_dialog_provider.doc/LinuxDialogProvider.md")]
 #[derive(Debug, Clone)]
 pub struct LinuxDialogProvider {
-    #[doc = include_str!("linux_dialog_provider.doc/tool.md")]
+    /// The dialog tool to invoke, e.g. `"zenity"`.
     tool: Box<str>,
 }
 
 impl LinuxDialogProvider {
-    #[doc = include_str!("linux_dialog_provider.doc/new.md")]
+    /// Creates a provider that presents dialogs with `zenity` (spec §6.9).
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -24,26 +24,27 @@ impl LinuxDialogProvider {
         }
     }
 
-    #[doc = include_str!("linux_dialog_provider.doc/with_tool.md")]
+    /// Creates a provider that presents dialogs with a custom `tool` command
+    /// (spec §6.9).
     #[must_use]
     pub fn with_tool(tool: impl Into<Box<str>>) -> Self {
         Self { tool: tool.into() }
     }
 
-    #[doc = include_str!("linux_dialog_provider.doc/tool_2.md")]
+    /// Returns the dialog tool this provider invokes (spec §6.9).
     #[must_use]
     pub fn tool(&self) -> &str {
         &self.tool
     }
 
-    #[doc = include_str!("linux_dialog_provider.doc/run_zenity.md")]
+    /// Runs the configured tool with `args`, capturing its output (spec §6.9).
     fn run_zenity(&self, args: &[&str]) -> std::io::Result<Output> {
         Command::new(&*self.tool).args(args).output()
     }
 }
 
 impl Default for LinuxDialogProvider {
-    #[doc = include_str!("linux_dialog_provider.doc/default.md")]
+    /// The default provider presents dialogs with `zenity`.
     fn default() -> Self {
         Self::new()
     }
@@ -118,7 +119,7 @@ impl DialogProvider for LinuxDialogProvider {
     }
 }
 
-#[doc = include_str!("linux_dialog_provider.doc/build_args.md")]
+#[doc = include_str!("../../docs/api/provider/linux_dialog_provider.doc/build_args.md")]
 #[must_use]
 fn build_args(request: &DialogRequest) -> Vec<String> {
     match request {
@@ -156,7 +157,7 @@ fn build_args(request: &DialogRequest) -> Vec<String> {
     }
 }
 
-#[doc = include_str!("linux_dialog_provider.doc/message_flag.md")]
+/// Maps a [`MessageLevel`] to the corresponding `zenity` flag (spec §6.9).
 fn message_flag(level: MessageLevel) -> &'static str {
     match level {
         MessageLevel::Info => "--info",
@@ -165,7 +166,7 @@ fn message_flag(level: MessageLevel) -> &'static str {
     }
 }
 
-#[doc = include_str!("linux_dialog_provider.doc/parse_paths.md")]
+#[doc = include_str!("../../docs/api/provider/linux_dialog_provider.doc/parse_paths.md")]
 fn parse_paths(stdout: &str) -> Vec<String> {
     stdout
         .split(['\n', '|'])
@@ -175,13 +176,14 @@ fn parse_paths(stdout: &str) -> Vec<String> {
         .collect()
 }
 
-#[doc = include_str!("linux_dialog_provider.doc/handle_from_path.md")]
+#[doc = include_str!("../../docs/api/provider/linux_dialog_provider.doc/handle_from_path.md")]
 fn handle_from_path(path: &str, permission: DocumentPermission) -> DocumentHandle {
     DocumentHandle::new(path, DocumentMetadata::new(basename(path)), permission)
         .with_path_hint(path)
 }
 
-#[doc = include_str!("linux_dialog_provider.doc/directory_from_path.md")]
+/// Builds a read-only [`DirectoryHandle`] from a picked directory `path`
+/// (spec §6.10).
 fn directory_from_path(path: &str) -> DirectoryHandle {
     DirectoryHandle::new(
         path,
@@ -191,12 +193,13 @@ fn directory_from_path(path: &str) -> DirectoryHandle {
     .with_path_hint(path)
 }
 
-#[doc = include_str!("linux_dialog_provider.doc/basename.md")]
+/// Returns the last path component of `path` for display, or the whole string
+/// when there is no separator.
 fn basename(path: &str) -> &str {
     path.rsplit('/').find(|s| !s.is_empty()).unwrap_or(path)
 }
 
-#[doc = include_str!("linux_dialog_provider.doc/tool_available.md")]
+#[doc = include_str!("../../docs/api/provider/linux_dialog_provider.doc/tool_available.md")]
 fn tool_available(cmd: &str) -> bool {
     let Some(path) = std::env::var_os("PATH") else {
         return false;

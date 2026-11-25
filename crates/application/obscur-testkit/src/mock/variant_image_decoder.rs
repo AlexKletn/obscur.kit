@@ -1,4 +1,4 @@
-#![doc = include_str!("variant_image_decoder.doc/_module.md")]
+//! The decoder that reads a variant's pixel size back.
 
 use std::sync::Arc;
 
@@ -7,7 +7,9 @@ use obscur_resources::handle::ResourceKind;
 use obscur_resources::port::{DecodedResource, ResourceDecoder};
 use obscur_resources::state::{ResourceError, ResourceMetadata};
 
-#[doc = include_str!("variant_image_decoder.doc/VariantImageDecoder.md")]
+/// [`VariantImageLoader`](crate::mock::VariantImageLoader)'s counterpart: decodes
+/// the one-byte "asset" into an `N×N` opaque RGBA image, so the decoded pixel size
+/// names the file it came from.
 #[derive(Debug, Clone)]
 pub struct VariantImageDecoder;
 

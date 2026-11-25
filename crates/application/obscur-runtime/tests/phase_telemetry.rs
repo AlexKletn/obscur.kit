@@ -5,14 +5,23 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use obscur_diagnostics::{
-    BudgetViolation, CollectingTelemetrySink, DiagnosticSeverity, DiagnosticSubsystem,
-    PerformanceCounter, PerformanceSpan, TelemetrySink,
+    BudgetViolation, CollectingTelemetrySink, Diagnostic, DiagnosticSeverity, DiagnosticSink,
+    DiagnosticSubsystem, PerformanceCounter, PerformanceSpan, TelemetrySink,
 };
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_runtime::FrameBudget;
 use obscur_runtime::frame::FrameReason;
 use obscur_testkit::fixture::{CounterPanel, TestFixture};
 use obscur_view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
+
+#[derive(Clone, Default)]
+struct SharedDiagnostics(Rc<RefCell<Vec<Diagnostic>>>);
+
+impl DiagnosticSink for SharedDiagnostics {
+    fn emit(&self, diagnostic: &Diagnostic) {
+        self.0.borrow_mut().push(diagnostic.clone());
+    }
+}
 
 /// A telemetry sink that shares a [`CollectingTelemetrySink`] behind an
 /// `Rc<RefCell<_>>`, so a test can install it into the runtime (which takes
@@ -168,6 +177,8 @@ fn an_exceeded_budget_records_a_violation_that_becomes_a_warning_diagnostic() {
     let mut runtime = TestFixture::runtime();
     let shared = SharedSink::default();
     runtime.set_telemetry_sink(Box::new(shared.clone()));
+    let diagnostics = SharedDiagnostics::default();
+    runtime.set_diagnostic_sink(Box::new(diagnostics.clone()));
     // Bound the reconcile phase to zero nodes: any populated tree exceeds it.
     runtime.set_frame_budget(FrameBudget::unbounded().with_reconcile_nodes(0));
     assert_eq!(
@@ -185,7 +196,9 @@ fn an_exceeded_budget_records_a_violation_that_becomes_a_warning_diagnostic() {
     assert_eq!(violation.subsystem(), DiagnosticSubsystem::Tree);
     // The violation flows into the diagnostics channel as a warning, not a
     // crash (spec §7.9).
-    let diagnostic = violation.to_diagnostic();
+    let diagnostics = diagnostics.0.borrow();
+    assert_eq!(diagnostics.len(), 1);
+    let diagnostic = &diagnostics[0];
     assert_eq!(diagnostic.severity, DiagnosticSeverity::Warning);
     assert_eq!(diagnostic.subsystem, DiagnosticSubsystem::Tree);
 }
@@ -195,6 +208,8 @@ fn a_generous_budget_records_no_violation() {
     let mut runtime = TestFixture::runtime();
     let shared = SharedSink::default();
     runtime.set_telemetry_sink(Box::new(shared.clone()));
+    let diagnostics = SharedDiagnostics::default();
+    runtime.set_diagnostic_sink(Box::new(diagnostics.clone()));
     runtime.set_frame_budget(
         FrameBudget::unbounded()
             .with_reconcile_nodes(1_000)
@@ -208,6 +223,7 @@ fn a_generous_budget_records_no_violation() {
     let _ = runtime.render_now(&view, std::slice::from_ref(&sheet));
 
     assert!(shared.0.borrow().violations.is_empty());
+    assert!(diagnostics.0.borrow().is_empty());
 }
 
 #[test]

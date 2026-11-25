@@ -1,18 +1,19 @@
-#![doc = include_str!("line_cap.doc/_module.md")]
+//! Stroke end-cap style.
 
-#[doc = include_str!("line_cap.doc/LineCap.md")]
+/// The shape drawn at the open ends of a stroked, unclosed path (spec §5.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LineCap {
-    #[doc = include_str!("line_cap.doc/Butt.md")]
+    /// The stroke ends flush with the endpoint, with no cap extending past it.
     Butt,
-    #[doc = include_str!("line_cap.doc/Round.md")]
+    /// A semicircular cap of radius half the stroke width extends past the
+    /// endpoint.
     Round,
-    #[doc = include_str!("line_cap.doc/Square.md")]
+    /// A square cap of half the stroke width extends past the endpoint.
     Square,
 }
 
 impl Default for LineCap {
-    #[doc = include_str!("line_cap.doc/default.md")]
+    /// The default line cap is [`LineCap::Butt`].
     fn default() -> Self {
         Self::Butt
     }

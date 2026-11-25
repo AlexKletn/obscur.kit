@@ -1,4 +1,4 @@
-#![doc = include_str!("view_codegen.doc/_module.md")]
+#![doc = include_str!("../../docs/api/codegen/view_codegen.doc/_module.md")]
 
 use std::fmt::Write as _;
 
@@ -7,12 +7,13 @@ use obscur_ui_ir::name_binding::{self, TagPosition};
 
 use crate::codegen::CodegenRoot;
 
-#[doc = include_str!("view_codegen.doc/ViewCodegen.md")]
+/// Emits ordinary Rust source building a [`View`](obscur_view::view::View) from
+/// a compiled [`UiIrDocument`].
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ViewCodegen;
 
 impl ViewCodegen {
-    #[doc = include_str!("view_codegen.doc/document_to_view_fn.md")]
+    #[doc = include_str!("../../docs/api/codegen/view_codegen.doc/document_to_view_fn.md")]
     #[must_use]
     pub fn document_to_view_fn(
         document: &UiIrDocument,
@@ -36,7 +37,8 @@ impl ViewCodegen {
         )
     }
 
-    #[doc = include_str!("view_codegen.doc/document_to_view_expr.md")]
+    /// Emits just the [`View`](obscur_view::view::View) expression (no enclosing
+    /// function), indented for embedding.
     #[must_use]
     pub fn document_to_view_expr(document: &UiIrDocument, root: &CodegenRoot) -> String {
         let nodes = emit_nodes_block(std::slice::from_ref(&document.root()), 1, root);
@@ -49,7 +51,7 @@ impl ViewCodegen {
     }
 }
 
-#[doc = include_str!("view_codegen.doc/emit_nodes_block.md")]
+#[doc = include_str!("../../docs/api/codegen/view_codegen.doc/emit_nodes_block.md")]
 fn emit_nodes_block(nodes: &[&UiIrNode], indent: usize, root: &CodegenRoot) -> String {
     let pad = indentation(indent);
     let inner = indentation(indent + 1);
@@ -66,7 +68,7 @@ fn emit_nodes_block(nodes: &[&UiIrNode], indent: usize, root: &CodegenRoot) -> S
     out
 }
 
-#[doc = include_str!("view_codegen.doc/emit_into.md")]
+#[doc = include_str!("../../docs/api/codegen/view_codegen.doc/emit_into.md")]
 fn emit_into(
     nodes: &[&UiIrNode],
     out: &mut String,
@@ -88,17 +90,33 @@ fn emit_into(
     }
 }
 
-#[doc = include_str!("view_codegen.doc/loop_slot.md")]
+#[doc = include_str!("../../docs/api/codegen/view_codegen.doc/loop_slot.md")]
 fn loop_slot(tag: &str) -> bool {
-    matches!(tag, "Empty" | "Separator")
+    matches!(tag, "Empty" | "Loading" | "Separator")
 }
 
-#[doc = include_str!("view_codegen.doc/emit_loop.md")]
+#[doc = include_str!("../../docs/api/codegen/view_codegen.doc/emit_loop.md")]
 fn emit_loop(node: &UiIrNode, out: &mut String, indent: usize, root: &CodegenRoot) {
-    // A `<VirtualFor>` is not a `<For>`: it does not walk the collection at all.
-    // It emits a virtual-collection marker the runtime realizes into a
-    // viewport-bounded window (spec §4.9), so it is handled apart from the
-    // per-item `for` below.
+    if let Some(loading) = node.property("loading").map(emit_condition)
+        && let Some(slot) = node
+            .children()
+            .iter()
+            .find(|child| child.tag() == "Loading")
+    {
+        let pad = indentation(indent);
+        let _ = writeln!(out, "{pad}if {loading} {{");
+        let children: Vec<_> = slot.children().iter().collect();
+        emit_into(&children, out, indent + 1, None, root);
+        let _ = writeln!(out, "{pad}}} else {{");
+        emit_ready_loop(node, out, indent + 1, root);
+        let _ = writeln!(out, "{pad}}}");
+    } else {
+        emit_ready_loop(node, out, indent, root);
+    }
+}
+
+/// Emits the collection and its ready-state slots after the loading branch.
+fn emit_ready_loop(node: &UiIrNode, out: &mut String, indent: usize, root: &CodegenRoot) {
     if node.tag() == "VirtualFor" {
         emit_virtual_collection(node, out, indent, root);
         return;
@@ -111,7 +129,7 @@ fn emit_loop(node: &UiIrNode, out: &mut String, indent: usize, root: &CodegenRoo
         node.children().iter().partition(|c| !loop_slot(c.tag()));
     let separator = slots.iter().find(|c| c.tag() == "Separator");
     let empty = slots.iter().find(|c| c.tag() == "Empty");
-    let needs_flag = separator.is_some() || empty.is_some();
+    let needs_flag = empty.is_some();
 
     let Some(each) = node.property("each").map(emit_condition) else {
         // No collection to walk. Emitting `for _ in &()` would be a type error in
@@ -126,14 +144,20 @@ fn emit_loop(node: &UiIrNode, out: &mut String, indent: usize, root: &CodegenRoo
     };
     let binding = node
         .property("as")
-        .map_or_else(|| "_".to_owned(), emit_condition);
+        .map_or_else(|| "item".to_owned(), emit_condition);
 
     if needs_flag {
         let _ = writeln!(out, "{pad}let mut __first = true;");
     }
-    let _ = writeln!(out, "{pad}for {binding} in {each}.iter() {{");
+    let _ = writeln!(
+        out,
+        "{pad}for (__obscur_index, {binding}) in {each}.iter().enumerate() {{"
+    );
+    if binding != "index" {
+        let _ = writeln!(out, "{inner}let index = __obscur_index;");
+    }
     if let Some(separator) = separator {
-        let _ = writeln!(out, "{inner}if !__first {{");
+        let _ = writeln!(out, "{inner}if __obscur_index != 0 {{");
         let children: Vec<&UiIrNode> = separator.children().iter().collect();
         emit_into(&children, out, indent + 2, None, root);
         let _ = writeln!(out, "{inner}}}");
@@ -152,10 +176,9 @@ fn emit_loop(node: &UiIrNode, out: &mut String, indent: usize, root: &CodegenRoo
     }
 }
 
-#[doc = include_str!("view_codegen.doc/emit_virtual_collection.md")]
+#[doc = include_str!("../../docs/api/codegen/view_codegen.doc/emit_virtual_collection.md")]
 fn emit_virtual_collection(node: &UiIrNode, out: &mut String, indent: usize, root: &CodegenRoot) {
     let pad = indentation(indent);
-    let inner = indentation(indent + 1);
     let view = root.view();
 
     let body: Vec<&UiIrNode> = node
@@ -163,7 +186,85 @@ fn emit_virtual_collection(node: &UiIrNode, out: &mut String, indent: usize, roo
         .iter()
         .filter(|child| !loop_slot(child.tag()))
         .collect();
+    if let Some(each) = node.property("each").map(emit_condition) {
+        let identity = root.identity();
+        let id = node.id();
+        let binding = node
+            .property("as")
+            .map_or_else(|| "item".to_owned(), emit_condition);
+        let _ = writeln!(out, "{pad}{{");
+        let inner = indentation(indent + 1);
+        let _ = writeln!(
+            out,
+            "{inner}let __virtual_items = ::std::clone::Clone::clone(&({each}));"
+        );
+        let empty = node.children().iter().find(|child| child.tag() == "Empty");
+        let item_indent = indent + 1 + usize::from(empty.is_some());
+        if let Some(empty) = empty {
+            let _ = writeln!(out, "{inner}if __virtual_items.is_empty() {{");
+            let children: Vec<_> = empty.children().iter().collect();
+            emit_into(&children, out, item_indent, None, root);
+            let _ = writeln!(out, "{inner}}} else {{");
+        }
+        let item_pad = indentation(item_indent);
+        let _ = writeln!(
+            out,
+            "{item_pad}__nodes.push({view}::ViewNode::virtual_list_with_rows("
+        );
+        let _ = writeln!(
+            out,
+            "{item_pad}    {identity}::InternedSymbol::named(concat!(file!(), \":\", line!(), \":\", column!(), \":virtual:{id}\")),"
+        );
+        let _ = writeln!(
+            out,
+            "{item_pad}    __virtual_items.len(), {view}::DEFAULT_VIRTUAL_ROW_EXTENT,"
+        );
+        let _ = writeln!(out, "{item_pad}    move |index| {{");
+        let _ = writeln!(
+            out,
+            "{item_pad}        let {binding} = &__virtual_items[index];"
+        );
+        let _ = writeln!(
+            out,
+            "{item_pad}        let mut __nodes: ::std::vec::Vec<{view}::ViewNode> = ::std::vec::Vec::new();"
+        );
+        emit_into(&body, out, item_indent + 2, node.key(), root);
+        let _ = writeln!(
+            out,
+            "{item_pad}        {view}::ViewFragment::from_nodes(__nodes)"
+        );
+        let _ = writeln!(out, "{item_pad}    }},");
+        let _ = write!(out, "{item_pad})");
+        if let Some(slot) = node
+            .children()
+            .iter()
+            .find(|child| child.tag() == "Separator")
+        {
+            let extent = match slot.property("extent") {
+                Some(UiIrExpression::Literal(UiIrValue::Int(value))) => {
+                    format!("Some({value}i64 as f32)")
+                }
+                Some(UiIrExpression::Literal(UiIrValue::Float(value))) if value.is_finite() => {
+                    format!("Some({value:?}f64 as f32)")
+                }
+                _ => "None".into(),
+            };
+            let children: Vec<_> = slot.children().iter().collect();
+            let content = emit_nodes_block(&children, item_indent + 1, root);
+            let _ = write!(
+                out,
+                ".with_virtual_separator({extent}, {view}::ViewFragment::from_nodes({content}))"
+            );
+        }
+        let _ = writeln!(out, ");");
+        if empty.is_some() {
+            let _ = writeln!(out, "{inner}}}");
+        }
+        let _ = writeln!(out, "{pad}}}");
+        return;
+    }
     let template = emit_nodes_block(&body, indent + 1, root);
+    let inner = indentation(indent + 1);
 
     let _ = writeln!(
         out,
@@ -174,12 +275,13 @@ fn emit_virtual_collection(node: &UiIrNode, out: &mut String, indent: usize, roo
     let _ = writeln!(out, "{pad}));");
 }
 
-#[doc = include_str!("view_codegen.doc/is_chain_head.md")]
+/// Whether `node` opens a conditional chain (an `<If>`).
 fn is_chain_head(node: &UiIrNode) -> bool {
     node.kind() == UiIrNodeKind::Conditional && node.tag() == "If"
 }
 
-#[doc = include_str!("view_codegen.doc/chain_end.md")]
+/// The exclusive end of the conditional chain starting at `start`: every
+/// following `<ElseIf>`, up to and including the first `<Else>`.
 fn chain_end(nodes: &[&UiIrNode], start: usize) -> usize {
     let mut end = start + 1;
     while end < nodes.len() && nodes[end].kind() == UiIrNodeKind::Conditional {
@@ -195,7 +297,7 @@ fn chain_end(nodes: &[&UiIrNode], start: usize) -> usize {
     end
 }
 
-#[doc = include_str!("view_codegen.doc/emit_conditional_chain.md")]
+/// Emits one `if / else if / else` chain, each branch pushing its own body.
 fn emit_conditional_chain(
     chain: &[&UiIrNode],
     out: &mut String,
@@ -222,14 +324,14 @@ fn emit_conditional_chain(
     out.push('\n');
 }
 
-#[doc = include_str!("view_codegen.doc/branch_condition.md")]
+#[doc = include_str!("../../docs/api/codegen/view_codegen.doc/branch_condition.md")]
 fn branch_condition(branch: &UiIrNode) -> String {
     branch
         .property("cond")
         .map_or_else(|| "false".to_owned(), emit_condition)
 }
 
-#[doc = include_str!("view_codegen.doc/emit_condition.md")]
+#[doc = include_str!("../../docs/api/codegen/view_codegen.doc/emit_condition.md")]
 fn emit_condition(expression: &UiIrExpression) -> String {
     match expression {
         UiIrExpression::Binding(path) => path.to_string(),
@@ -238,7 +340,7 @@ fn emit_condition(expression: &UiIrExpression) -> String {
     }
 }
 
-#[doc = include_str!("view_codegen.doc/emit_node.md")]
+#[doc = include_str!("../../docs/api/codegen/view_codegen.doc/emit_node.md")]
 fn emit_node(
     node: &UiIrNode,
     out: &mut String,
@@ -269,7 +371,8 @@ fn emit_node(
     }
 }
 
-#[doc = include_str!("view_codegen.doc/emit_text.md")]
+/// Appends the statement pushing a `ViewNode::text` whose content is the
+/// already-emitted Rust expression `content`.
 fn emit_text(
     node: &UiIrNode,
     out: &mut String,
@@ -285,7 +388,7 @@ fn emit_text(
     out.push_str(");\n");
 }
 
-#[doc = include_str!("view_codegen.doc/emit_text_content.md")]
+#[doc = include_str!("../../docs/api/codegen/view_codegen.doc/emit_text_content.md")]
 fn emit_text_content(expression: &UiIrExpression) -> String {
     match expression {
         UiIrExpression::Binding(path) => format!("::std::string::ToString::to_string(&({path}))"),
@@ -299,7 +402,7 @@ fn emit_text_content(expression: &UiIrExpression) -> String {
     }
 }
 
-#[doc = include_str!("view_codegen.doc/emit_element.md")]
+#[doc = include_str!("../../docs/api/codegen/view_codegen.doc/emit_element.md")]
 fn emit_element(
     node: &UiIrNode,
     out: &mut String,
@@ -379,7 +482,8 @@ fn emit_element(
     out.push_str(");\n");
 }
 
-#[doc = include_str!("view_codegen.doc/emit_key.md")]
+/// Appends a `.with_key(…)` modifier for `node`'s key, if it has one; a no-op
+/// otherwise. Mirrors the runtime bridge's key lowering.
 fn emit_key(
     node: &UiIrNode,
     out: &mut String,
@@ -425,7 +529,7 @@ fn emit_key(
     let _ = write!(out, ".with_key({key_expr})");
 }
 
-#[doc = include_str!("view_codegen.doc/emit_value.md")]
+#[doc = include_str!("../../docs/api/codegen/view_codegen.doc/emit_value.md")]
 fn emit_value(expression: &UiIrExpression, root: &CodegenRoot) -> String {
     let view = root.view();
     match expression {
@@ -437,7 +541,7 @@ fn emit_value(expression: &UiIrExpression, root: &CodegenRoot) -> String {
     }
 }
 
-#[doc = include_str!("view_codegen.doc/emit_literal.md")]
+/// Emits the `ViewValue` expression for a literal.
 fn emit_literal(value: &UiIrValue, root: &CodegenRoot) -> String {
     let view = root.view();
     match value {
@@ -451,12 +555,13 @@ fn emit_literal(value: &UiIrValue, root: &CodegenRoot) -> String {
     }
 }
 
-#[doc = include_str!("view_codegen.doc/string_literal.md")]
+/// Renders `text` as a valid Rust string literal (Debug formatting escapes
+/// quotes, backslashes and control characters correctly).
 fn string_literal(text: &str) -> String {
     format!("{text:?}")
 }
 
-#[doc = include_str!("view_codegen.doc/indentation.md")]
+/// Returns `indent` levels of four-space indentation.
 fn indentation(indent: usize) -> String {
     "    ".repeat(indent)
 }

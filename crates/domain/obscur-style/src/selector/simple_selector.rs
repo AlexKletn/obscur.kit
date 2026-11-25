@@ -1,31 +1,33 @@
-#![doc = include_str!("simple_selector.doc/_module.md")]
+//! A single simple selector: [`SimpleSelector`] and its attribute forms.
 
 use super::pseudo_class_selector::PseudoClassSelector;
 use super::selector_specificity::SelectorSpecificity;
 
-#[doc = include_str!("simple_selector.doc/SimpleSelector.md")]
+use super::AttributeSelector;
+
+#[doc = include_str!("../../docs/api/selector/simple_selector.doc/SimpleSelector.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SimpleSelector {
-    #[doc = include_str!("simple_selector.doc/Type.md")]
+    /// A type/element selector such as `div`; stores the local name.
     Type(Box<str>),
-    #[doc = include_str!("simple_selector.doc/Universal.md")]
+    /// The universal selector `*`, matching every element.
     Universal,
-    #[doc = include_str!("simple_selector.doc/Class.md")]
+    /// A class selector such as `.button`; stores the class name (no `.`).
     Class(Box<str>),
-    #[doc = include_str!("simple_selector.doc/Id.md")]
+    /// An id selector such as `#main`; stores the id (no `#`).
     Id(Box<str>),
-    #[doc = include_str!("simple_selector.doc/Attribute.md")]
+    /// An attribute selector such as `[data-x]` or `[type="text"]`.
     Attribute(AttributeSelector),
-    #[doc = include_str!("simple_selector.doc/PseudoClass.md")]
+    /// A pseudo-class such as `:hover` or `:nth-child(2n+1)`.
     PseudoClass(PseudoClassSelector),
-    #[doc = include_str!("simple_selector.doc/PseudoElement.md")]
+    #[doc = include_str!("../../docs/api/selector/simple_selector.doc/PseudoElement.md")]
     PseudoElement(Box<str>),
-    #[doc = include_str!("simple_selector.doc/Part.md")]
+    #[doc = include_str!("../../docs/api/selector/simple_selector.doc/Part.md")]
     Part(Box<str>),
 }
 
 impl SimpleSelector {
-    #[doc = include_str!("simple_selector.doc/part_name.md")]
+    /// Returns the part name if this is a [`Part`](Self::Part) selector.
     #[must_use]
     pub fn part_name(&self) -> Option<&str> {
         match self {
@@ -34,7 +36,8 @@ impl SimpleSelector {
         }
     }
 
-    #[doc = include_str!("simple_selector.doc/pseudo_element_name.md")]
+    /// Returns the pseudo-element name if this is a
+    /// [`PseudoElement`](Self::PseudoElement) selector.
     #[must_use]
     pub fn pseudo_element_name(&self) -> Option<&str> {
         match self {
@@ -45,7 +48,7 @@ impl SimpleSelector {
 }
 
 impl SimpleSelector {
-    #[doc = include_str!("simple_selector.doc/specificity_contribution.md")]
+    #[doc = include_str!("../../docs/api/selector/simple_selector.doc/specificity_contribution.md")]
     #[must_use]
     pub fn specificity_contribution(&self) -> SelectorSpecificity {
         match self {
@@ -60,32 +63,6 @@ impl SimpleSelector {
             Self::Universal => SelectorSpecificity::ZERO,
         }
     }
-}
-
-#[doc = include_str!("simple_selector.doc/AttributeSelector.md")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AttributeSelector {
-    #[doc = include_str!("simple_selector.doc/name.md")]
-    pub name: Box<str>,
-    #[doc = include_str!("simple_selector.doc/matcher.md")]
-    pub matcher: Option<AttrMatch>,
-}
-
-#[doc = include_str!("simple_selector.doc/AttrMatch.md")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AttrMatch {
-    #[doc = include_str!("simple_selector.doc/Exact.md")]
-    Exact(Box<str>),
-    #[doc = include_str!("simple_selector.doc/Includes.md")]
-    Includes(Box<str>),
-    #[doc = include_str!("simple_selector.doc/DashMatch.md")]
-    DashMatch(Box<str>),
-    #[doc = include_str!("simple_selector.doc/Prefix.md")]
-    Prefix(Box<str>),
-    #[doc = include_str!("simple_selector.doc/Suffix.md")]
-    Suffix(Box<str>),
-    #[doc = include_str!("simple_selector.doc/Substring.md")]
-    Substring(Box<str>),
 }
 
 #[cfg(test)]

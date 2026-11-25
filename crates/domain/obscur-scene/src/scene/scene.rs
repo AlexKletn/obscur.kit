@@ -1,11 +1,11 @@
-#![doc = include_str!("scene.doc/_module.md")]
+//! The mutable scene the runtime builds up each frame.
 
 use std::sync::Arc;
 
 use crate::command::DisplayList;
 use crate::scene::{SceneGeneration, SceneSnapshot, SceneStatistics};
 
-#[doc = include_str!("scene.doc/Scene.md")]
+#[doc = include_str!("../../docs/api/scene/scene.doc/Scene.md")]
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Scene {
     // Shared rather than owned outright so that `snapshot` — called at least once
@@ -16,7 +16,8 @@ pub struct Scene {
 }
 
 impl Scene {
-    #[doc = include_str!("scene.doc/new.md")]
+    /// Creates an empty scene: an empty root display list at
+    /// [`SceneGeneration::FIRST`].
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -25,43 +26,43 @@ impl Scene {
         }
     }
 
-    #[doc = include_str!("scene.doc/root.md")]
+    /// The root display list the scene is currently composed of.
     #[must_use]
     pub fn root(&self) -> &DisplayList {
         &self.root
     }
 
-    #[doc = include_str!("scene.doc/shared_root.md")]
+    #[doc = include_str!("../../docs/api/scene/scene.doc/shared_root.md")]
     #[must_use]
     pub fn shared_root(&self) -> &Arc<DisplayList> {
         &self.root
     }
 
-    #[doc = include_str!("scene.doc/set_root.md")]
+    #[doc = include_str!("../../docs/api/scene/scene.doc/set_root.md")]
     pub fn set_root(&mut self, list: DisplayList) {
         self.root = Arc::new(list);
         self.generation = self.generation.next();
     }
 
-    #[doc = include_str!("scene.doc/generation.md")]
+    /// The current generation stamping the scene's content.
     #[must_use]
     pub fn generation(&self) -> SceneGeneration {
         self.generation
     }
 
-    #[doc = include_str!("scene.doc/is_empty.md")]
+    /// Whether the scene has no content, i.e. its root display list is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.root.is_empty()
     }
 
-    #[doc = include_str!("scene.doc/statistics.md")]
+    /// Computes the diagnostic [`SceneStatistics`] for the current root.
     #[must_use]
     pub fn statistics(&self) -> SceneStatistics {
         SceneStatistics::from_display_list(&self.root)
     }
 
-    #[doc = include_str!("scene.doc/snapshot.md")]
+    #[doc = include_str!("../../docs/api/scene/scene.doc/snapshot.md")]
     #[must_use]
     pub fn snapshot(&self) -> SceneSnapshot {
         SceneSnapshot::from_scene(self)

@@ -1,19 +1,19 @@
-#![doc = include_str!("acquired_image.doc/_module.md")]
+//! A swapchain image, with the extent it was acquired at.
 
-#[doc = include_str!("acquired_image.doc/AcquiredImage.md")]
+#[doc = include_str!("../../docs/api/renderer/acquired_image.doc/AcquiredImage.md")]
 pub struct AcquiredImage {
-    #[doc = include_str!("acquired_image.doc/texture.md")]
+    /// The image itself. Presenting it consumes it.
     pub texture: wgpu::SurfaceTexture,
-    #[doc = include_str!("acquired_image.doc/width.md")]
+    /// The surface's width when this image was acquired.
     pub width: u32,
-    #[doc = include_str!("acquired_image.doc/height.md")]
+    /// The surface's height when this image was acquired.
     pub height: u32,
-    #[doc = include_str!("acquired_image.doc/format.md")]
+    #[doc = include_str!("../../docs/api/renderer/acquired_image.doc/format.md")]
     pub format: wgpu::TextureFormat,
 }
 
 impl AcquiredImage {
-    #[doc = include_str!("acquired_image.doc/matches.md")]
+    /// Whether this image still belongs to the extent a caller expects.
     #[must_use]
     pub const fn matches(&self, width: u32, height: u32) -> bool {
         self.width == width && self.height == height

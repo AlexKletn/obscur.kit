@@ -1,4 +1,4 @@
-#![doc = include_str!("paragraph_layout.doc/_module.md")]
+//! The full laid-out multi-font paragraph: lines stacked vertically (spec §5.10).
 
 use obscur_geometry::Size;
 
@@ -7,7 +7,7 @@ use crate::shaping::{ShapedGlyph, ShapedRun, TextDirection};
 use crate::span::TextRange;
 
 use super::break_offsets::BreakOffsets;
-use super::line_break::is_cjk_ideograph;
+use super::is_cjk_ideograph::is_cjk_ideograph;
 use super::line_justification::justify_lines;
 use super::line_segments::line_segments;
 use super::line_truncation::truncate_lines;
@@ -18,21 +18,21 @@ use super::{
     OverflowWrap, ParagraphLine, TextAlignment, TextOverflow, WhiteSpace, WordBreak,
 };
 
-#[doc = include_str!("paragraph_layout.doc/ParagraphLayout.md")]
+#[doc = include_str!("../../docs/api/layout/paragraph_layout.doc/ParagraphLayout.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParagraphLayout {
-    #[doc = include_str!("paragraph_layout.doc/lines.md")]
+    /// The laid-out lines, top to bottom.
     lines: Vec<ParagraphLine>,
-    #[doc = include_str!("paragraph_layout.doc/size.md")]
+    /// The total bounding size: max line width by summed line height.
     size: Size,
-    #[doc = include_str!("paragraph_layout.doc/alignment.md")]
+    /// The horizontal alignment applied to the lines.
     alignment: TextAlignment,
-    #[doc = include_str!("paragraph_layout.doc/overflow.md")]
+    /// The overflow policy for text exceeding the available width.
     overflow: TextOverflow,
 }
 
 impl ParagraphLayout {
-    #[doc = include_str!("paragraph_layout.doc/new.md")]
+    #[doc = include_str!("../../docs/api/layout/paragraph_layout.doc/new.md")]
     #[must_use]
     pub fn new(
         lines: Vec<ParagraphLine>,
@@ -52,7 +52,7 @@ impl ParagraphLayout {
         }
     }
 
-    #[doc = include_str!("paragraph_layout.doc/wrap.md")]
+    #[doc = include_str!("../../docs/api/layout/paragraph_layout.doc/wrap.md")]
     // The wrap inputs plus the white-space mode are cohesive positional arguments
     // of one leaf entry point, not a public API surface.
     #[allow(clippy::too_many_arguments)]
@@ -85,7 +85,7 @@ impl ParagraphLayout {
         )
     }
 
-    #[doc = include_str!("paragraph_layout.doc/wrap_hyphenated.md")]
+    #[doc = include_str!("../../docs/api/layout/paragraph_layout.doc/wrap_hyphenated.md")]
     // The wrap inputs plus the hyphenation port, hyphen glyph, and ellipsis glyph
     // are cohesive positional arguments of one leaf entry point, not a public API
     // surface.
@@ -131,7 +131,11 @@ impl ParagraphLayout {
         )
     }
 
-    #[doc = include_str!("paragraph_layout.doc/wrap_strut.md")]
+    /// Wraps like [`wrap`](Self::wrap) but sizes each line box from the mixed-font
+    /// line-box **strut** (CSS 2.1 §10.8.1): the `strut` (the element's own
+    /// primary-font metrics + used `line-height`) plus each segment font's metrics
+    /// from `seg_metrics`. See
+    /// [`wrap_strut_hyphenated`](Self::wrap_strut_hyphenated) for the formula.
     #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub fn wrap_strut(
@@ -166,7 +170,7 @@ impl ParagraphLayout {
         )
     }
 
-    #[doc = include_str!("paragraph_layout.doc/wrap_strut_hyphenated.md")]
+    #[doc = include_str!("../../docs/api/layout/paragraph_layout.doc/wrap_strut_hyphenated.md")]
     #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub fn wrap_strut_hyphenated(
@@ -207,7 +211,7 @@ impl ParagraphLayout {
         )
     }
 
-    #[doc = include_str!("paragraph_layout.doc/wrap_core.md")]
+    #[doc = include_str!("../../docs/api/layout/paragraph_layout.doc/wrap_core.md")]
     #[allow(clippy::too_many_arguments)]
     #[must_use]
     fn wrap_core(
@@ -378,7 +382,7 @@ impl ParagraphLayout {
         Self::new(lines, alignment, overflow)
     }
 
-    #[doc = include_str!("paragraph_layout.doc/is_keep_all_suppressed.md")]
+    #[doc = include_str!("../../docs/api/layout/paragraph_layout.doc/is_keep_all_suppressed.md")]
     fn is_keep_all_suppressed(break_point: LineBreak, text: &str) -> bool {
         if break_point.is_mandatory() {
             return false;
@@ -396,7 +400,7 @@ impl ParagraphLayout {
             .map_or(text_end, |tagged| tagged.glyph.cluster())
     }
 
-    #[doc = include_str!("paragraph_layout.doc/aligned_to.md")]
+    #[doc = include_str!("../../docs/api/layout/paragraph_layout.doc/aligned_to.md")]
     #[must_use]
     pub fn aligned_to(self, width: f32) -> Self {
         let alignment = self.alignment;
@@ -412,31 +416,31 @@ impl ParagraphLayout {
         Self::new(lines, alignment, overflow)
     }
 
-    #[doc = include_str!("paragraph_layout.doc/lines_2.md")]
+    /// Returns the laid-out lines, top to bottom.
     #[must_use]
     pub fn lines(&self) -> &[ParagraphLine] {
         &self.lines
     }
 
-    #[doc = include_str!("paragraph_layout.doc/size_2.md")]
+    /// Returns the total bounding size of the paragraph.
     #[must_use]
     pub const fn size(&self) -> Size {
         self.size
     }
 
-    #[doc = include_str!("paragraph_layout.doc/alignment_2.md")]
+    /// Returns the horizontal alignment applied to the lines.
     #[must_use]
     pub const fn alignment(&self) -> TextAlignment {
         self.alignment
     }
 
-    #[doc = include_str!("paragraph_layout.doc/overflow_2.md")]
+    /// Returns the overflow policy for text exceeding the available width.
     #[must_use]
     pub const fn overflow(&self) -> TextOverflow {
         self.overflow
     }
 
-    #[doc = include_str!("paragraph_layout.doc/line_count.md")]
+    /// Returns the number of lines.
     #[must_use]
     pub fn line_count(&self) -> usize {
         self.lines.len()
@@ -532,6 +536,42 @@ mod tests {
         assert_eq!(segs[1].font(), FontId::new(1));
         assert_eq!(segs[2].font(), FontId::new(2));
         assert_eq!(layout.lines()[0].width(), 36.0);
+    }
+
+    #[test]
+    fn rtl_run_wraps_in_logical_order_and_paints_each_line_in_visual_order() {
+        let text = "אב\nגד";
+        let glyphs = text
+            .char_indices()
+            .rev()
+            .map(|(byte, _)| ShapedGlyph::new(1, byte, 6.0))
+            .collect();
+        let run = ShapedRun::new(
+            FontId::new(0),
+            GlyphRun::new(
+                glyphs,
+                TextDirection::RightToLeft,
+                10.0,
+                TextRange::new(0, text.len()),
+            ),
+        )
+        .with_level(1);
+        let layout = ParagraphLayout::wrap(
+            &[run],
+            text,
+            100.0,
+            12.0,
+            9.0,
+            TextAlignment::Start,
+            TextOverflow::Visible,
+            WhiteSpace::PreWrap,
+        );
+        assert_eq!(layout.line_count(), 2);
+        assert_eq!(layout.lines()[0].range(), TextRange::new(0, 5));
+        assert_eq!(layout.lines()[1].range(), TextRange::new(5, 9));
+        let second = layout.lines()[1].segments()[0].run().glyphs();
+        assert_eq!(second[0].cluster(), 7);
+        assert_eq!(second[1].cluster(), 5);
     }
 
     #[test]

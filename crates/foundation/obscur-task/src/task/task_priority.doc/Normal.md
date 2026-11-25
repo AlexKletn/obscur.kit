@@ -1,1 +1,0 @@
-Normal application work.

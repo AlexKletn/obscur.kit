@@ -1,50 +1,51 @@
-#![doc = include_str!("paint.doc/_module.md")]
+//! How a shape is painted: filled or stroked.
 
 use crate::color::Color;
 
 use super::{Brush, Stroke};
 
-#[doc = include_str!("paint.doc/Paint.md")]
+#[doc = include_str!("../../docs/api/paint/paint.doc/Paint.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Paint {
-    #[doc = include_str!("paint.doc/Fill.md")]
+    /// Fill the shape's interior with a brush.
     Fill(Brush),
-    #[doc = include_str!("paint.doc/Stroke.md")]
+    /// Draw the shape's outline with a stroke.
     Stroke(Stroke),
 }
 
 impl Paint {
-    #[doc = include_str!("paint.doc/fill.md")]
+    /// Creates a fill paint using `brush`.
     #[must_use]
     pub const fn fill(brush: Brush) -> Self {
         Self::Fill(brush)
     }
 
-    #[doc = include_str!("paint.doc/solid_fill.md")]
+    /// Creates a fill paint using a solid brush of `color`.
     #[must_use]
     pub const fn solid_fill(color: Color) -> Self {
         Self::Fill(Brush::solid(color))
     }
 
-    #[doc = include_str!("paint.doc/stroke.md")]
+    /// Creates a stroke paint using `stroke`.
     #[must_use]
     pub const fn stroke(stroke: Stroke) -> Self {
         Self::Stroke(stroke)
     }
 
-    #[doc = include_str!("paint.doc/is_fill.md")]
+    /// Returns whether this is a [`Paint::Fill`].
     #[must_use]
     pub const fn is_fill(&self) -> bool {
         matches!(self, Self::Fill(_))
     }
 
-    #[doc = include_str!("paint.doc/is_stroke.md")]
+    /// Returns whether this is a [`Paint::Stroke`].
     #[must_use]
     pub const fn is_stroke(&self) -> bool {
         matches!(self, Self::Stroke(_))
     }
 
-    #[doc = include_str!("paint.doc/brush.md")]
+    /// Returns the brush that colors this paint: the fill's brush, or the
+    /// stroke's brush.
     #[must_use]
     pub const fn brush(&self) -> &Brush {
         match self {

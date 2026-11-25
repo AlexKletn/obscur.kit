@@ -1,4 +1,4 @@
-#![doc = include_str!("layout_algorithm.doc/_module.md")]
+//! `LayoutAlgorithm`: the trait every formatting context implements.
 
 use obscur_geometry::BoxConstraints;
 
@@ -6,9 +6,11 @@ use crate::model::LayoutStyle;
 
 use super::{ChildMeasurer, LayoutChild, LayoutOutput};
 
-#[doc = include_str!("layout_algorithm.doc/LayoutAlgorithm.md")]
+#[doc = include_str!("../../docs/api/algorithm/layout_algorithm.doc/LayoutAlgorithm.md")]
 pub trait LayoutAlgorithm {
-    #[doc = include_str!("layout_algorithm.doc/layout.md")]
+    /// Lays out `style`'s node with the given `children` under `constraints`,
+    /// measuring children through `measurer`, and returns the node's border-box
+    /// size together with each child's arranged box.
     fn layout(
         &self,
         style: &LayoutStyle,

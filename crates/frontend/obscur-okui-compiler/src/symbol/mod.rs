@@ -1,7 +1,9 @@
-#![doc = include_str!("mod.doc/_module.md")]
+#![doc = include_str!("../../docs/api/symbol/mod.doc/_module.md")]
 
 mod symbol;
-pub use symbol::{Symbol, SymbolKind};
+pub use symbol::Symbol;
+mod symbol_kind;
+pub use symbol_kind::SymbolKind;
 
 mod scope;
 pub use scope::Scope;

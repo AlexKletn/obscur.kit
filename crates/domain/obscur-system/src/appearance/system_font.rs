@@ -1,16 +1,16 @@
-#![doc = include_str!("system_font.doc/_module.md")]
+//! A font the desktop nominates, with its size where one was given.
 
-#[doc = include_str!("system_font.doc/SystemFont.md")]
+#[doc = include_str!("../../docs/api/appearance/system_font.doc/SystemFont.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct SystemFont {
-    #[doc = include_str!("system_font.doc/family.md")]
+    #[doc = include_str!("../../docs/api/appearance/system_font.doc/family.md")]
     pub family: Box<str>,
-    #[doc = include_str!("system_font.doc/size_pt.md")]
+    /// The size in points, if the desktop stated one.
     pub size_pt: Option<f32>,
 }
 
 impl SystemFont {
-    #[doc = include_str!("system_font.doc/new.md")]
+    /// A font from a family and an optional size.
     #[must_use]
     pub fn new(family: impl Into<Box<str>>, size_pt: Option<f32>) -> Self {
         Self {
@@ -19,7 +19,7 @@ impl SystemFont {
         }
     }
 
-    #[doc = include_str!("system_font.doc/size_px.md")]
+    #[doc = include_str!("../../docs/api/appearance/system_font.doc/size_px.md")]
     #[must_use]
     pub fn size_px(&self) -> Option<f32> {
         // The CSS reference pixel is 1/96 in and a point is 1/72 in, so the

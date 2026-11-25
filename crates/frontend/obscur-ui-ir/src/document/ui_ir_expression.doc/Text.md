@@ -1,1 +1,0 @@
-An owned text value.

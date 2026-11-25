@@ -1,6 +1,6 @@
-#![doc = include_str!("document_source.doc/_module.md")]
+//! A resource backed by a host document handle (spec §5.16, §6.10).
 
-#[doc = include_str!("document_source.doc/DocumentSource.md")]
+#[doc = include_str!("../../docs/api/source/document_source.doc/DocumentSource.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DocumentSource {
     token: Box<str>,
@@ -8,7 +8,7 @@ pub struct DocumentSource {
 }
 
 impl DocumentSource {
-    #[doc = include_str!("document_source.doc/new.md")]
+    /// Creates a document source from an opaque host handle token.
     #[must_use]
     pub fn new(token: impl Into<Box<str>>) -> Self {
         Self {
@@ -17,20 +17,20 @@ impl DocumentSource {
         }
     }
 
-    #[doc = include_str!("document_source.doc/with_path_hint.md")]
+    #[doc = include_str!("../../docs/api/source/document_source.doc/with_path_hint.md")]
     #[must_use]
     pub fn with_path_hint(mut self, path_hint: impl Into<Box<str>>) -> Self {
         self.path_hint = Some(path_hint.into());
         self
     }
 
-    #[doc = include_str!("document_source.doc/token.md")]
+    /// Returns the opaque handle token the host resolves (spec §5.16).
     #[must_use]
     pub fn token(&self) -> &str {
         &self.token
     }
 
-    #[doc = include_str!("document_source.doc/path_hint.md")]
+    /// Returns the advisory path hint, if any (spec §6.10).
     #[must_use]
     pub fn path_hint(&self) -> Option<&str> {
         self.path_hint.as_deref()

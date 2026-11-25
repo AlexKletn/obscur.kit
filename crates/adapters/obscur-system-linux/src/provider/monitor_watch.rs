@@ -1,4 +1,4 @@
-#![doc = include_str!("monitor_watch.doc/_module.md")]
+//! Watching a settings store through a monitoring tool's output.
 
 use std::io::{BufRead, BufReader};
 use std::process::{Child, Command, Stdio};
@@ -7,12 +7,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use obscur_system::appearance::{AppearanceCallback, AppearanceWatch};
 
-#[doc = include_str!("monitor_watch.doc/MonitorWatch.md")]
+#[doc = include_str!("../../docs/api/provider/monitor_watch.doc/MonitorWatch.md")]
 #[derive(Debug)]
 pub(super) struct MonitorWatch;
 
 impl MonitorWatch {
-    #[doc = include_str!("monitor_watch.doc/spawn.md")]
+    #[doc = include_str!("../../docs/api/provider/monitor_watch.doc/spawn.md")]
     pub(super) fn spawn(
         tool: &str,
         args: &[&str],
@@ -57,7 +57,7 @@ impl MonitorWatch {
     }
 }
 
-#[doc = include_str!("monitor_watch.doc/stop_child.md")]
+#[doc = include_str!("../../docs/api/provider/monitor_watch.doc/stop_child.md")]
 fn stop_child(child: &mut Child) {
     // Killing closes the pipe, which is what ends the reader thread's `lines()`
     // loop; the thread is left to finish on its own rather than joined, because

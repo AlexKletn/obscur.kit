@@ -1,11 +1,12 @@
-#![doc = include_str!("invalidation_router.doc/_module.md")]
+//! Routes classified invalidations to the domain accumulators and tracks which
+//! pipeline phases are dirty (Obscur Kit 2 specs §4.3).
 
 use obscur_layout::invalidation::{LayoutInvalidation, LayoutInvalidationReason};
 use obscur_style::invalidation::{StyleInvalidation, StyleInvalidationReason};
 
 use crate::invalidation::{Invalidation, InvalidationReason};
 
-#[doc = include_str!("invalidation_router.doc/style_reason.md")]
+#[doc = include_str!("../../docs/api/invalidation/invalidation_router.doc/style_reason.md")]
 fn style_reason(reason: InvalidationReason) -> Option<StyleInvalidationReason> {
     match reason {
         InvalidationReason::StyleChanged => Some(StyleInvalidationReason::DeclarationsChanged),
@@ -23,7 +24,7 @@ fn style_reason(reason: InvalidationReason) -> Option<StyleInvalidationReason> {
     }
 }
 
-#[doc = include_str!("invalidation_router.doc/layout_reason.md")]
+#[doc = include_str!("../../docs/api/invalidation/invalidation_router.doc/layout_reason.md")]
 fn layout_reason(reason: InvalidationReason) -> LayoutInvalidationReason {
     match reason {
         InvalidationReason::StyleChanged
@@ -39,27 +40,27 @@ fn layout_reason(reason: InvalidationReason) -> LayoutInvalidationReason {
     }
 }
 
-#[doc = include_str!("invalidation_router.doc/InvalidationRouter.md")]
+#[doc = include_str!("../../docs/api/invalidation/invalidation_router.doc/InvalidationRouter.md")]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InvalidationRouter {
-    #[doc = include_str!("invalidation_router.doc/style_dirty.md")]
+    /// The style pass must run.
     style_dirty: bool,
-    #[doc = include_str!("invalidation_router.doc/layout_dirty.md")]
+    /// The layout pass must run.
     layout_dirty: bool,
-    #[doc = include_str!("invalidation_router.doc/scene_dirty.md")]
+    /// The scene must be re-composed.
     scene_dirty: bool,
-    #[doc = include_str!("invalidation_router.doc/paint_dirty.md")]
+    /// The scene must be re-painted.
     paint_dirty: bool,
 }
 
 impl InvalidationRouter {
-    #[doc = include_str!("invalidation_router.doc/new.md")]
+    /// Creates a router with no dirty phases.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    #[doc = include_str!("invalidation_router.doc/route.md")]
+    #[doc = include_str!("../../docs/api/invalidation/invalidation_router.doc/route.md")]
     pub fn route(
         &mut self,
         inv: Invalidation,
@@ -92,31 +93,31 @@ impl InvalidationRouter {
         }
     }
 
-    #[doc = include_str!("invalidation_router.doc/needs_style.md")]
+    /// Returns whether the style pass is flagged dirty.
     #[must_use]
     pub fn needs_style(&self) -> bool {
         self.style_dirty
     }
 
-    #[doc = include_str!("invalidation_router.doc/needs_layout.md")]
+    /// Returns whether the layout pass is flagged dirty.
     #[must_use]
     pub fn needs_layout(&self) -> bool {
         self.layout_dirty
     }
 
-    #[doc = include_str!("invalidation_router.doc/needs_scene.md")]
+    /// Returns whether the scene pass (recompose and/or paint) is flagged dirty.
     #[must_use]
     pub fn needs_scene(&self) -> bool {
         self.scene_dirty || self.paint_dirty
     }
 
-    #[doc = include_str!("invalidation_router.doc/is_clean.md")]
+    /// Returns whether no pipeline phase is flagged dirty.
     #[must_use]
     pub fn is_clean(&self) -> bool {
         !(self.style_dirty || self.layout_dirty || self.scene_dirty || self.paint_dirty)
     }
 
-    #[doc = include_str!("invalidation_router.doc/reset.md")]
+    #[doc = include_str!("../../docs/api/invalidation/invalidation_router.doc/reset.md")]
     pub fn reset(&mut self) {
         self.style_dirty = false;
         self.layout_dirty = false;

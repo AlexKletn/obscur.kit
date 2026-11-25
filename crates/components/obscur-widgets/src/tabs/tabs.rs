@@ -1,32 +1,35 @@
-#![doc = include_str!("tabs.doc/_module.md")]
+//! `Tabs`: a headless tab strip selecting one panel (spec §2.6).
 
+use super::{TabSelectionState, tab_entry::TabEntry};
 use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_primitives::Text;
 use obscur_view::view::{View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-#[doc = include_str!("tabs.doc/Tabs.md")]
+#[doc = include_str!("../../docs/api/tabs/tabs.doc/Tabs.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tabs {
-    tabs: Vec<Box<str>>,
+    tabs: Vec<TabEntry>,
     active: usize,
 }
 
 impl Tabs {
-    #[doc = include_str!("tabs.doc/COMPONENT_ID.md")]
+    #[doc = include_str!("../../docs/api/tabs/tabs.doc/COMPONENT_ID.md")]
     pub const COMPONENT_ID: ComponentId = ComponentId::from_raw(0x00D0_0007);
 
-    #[doc = include_str!("tabs.doc/TAB_ID.md")]
+    /// Stable component id for the per-tab child element.
     const TAB_ID: ComponentId = ComponentId::from_raw(0x00D0_0017);
 
-    #[doc = include_str!("tabs.doc/PROP_ROLE.md")]
+    /// Interned name of the semantic-role property (`role`); shares the
+    /// `0x00D1_NNXX` scheme with `NN = 07` (tabs): role=`00`, active=`01`,
+    /// selected=`02` (on tab children).
     const PROP_ROLE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0700);
-    #[doc = include_str!("tabs.doc/PROP_ACTIVE.md")]
+    /// Interned name of the `active` index property.
     const PROP_ACTIVE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0701);
-    #[doc = include_str!("tabs.doc/PROP_SELECTED.md")]
+    /// Interned name of the per-tab `selected` state property.
     const PROP_SELECTED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0702);
 
-    #[doc = include_str!("tabs.doc/new.md")]
+    /// Creates an empty tab strip with the active index at `0`.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -35,25 +38,75 @@ impl Tabs {
         }
     }
 
-    #[doc = include_str!("tabs.doc/tab.md")]
+    /// Appends a single tab label, returning the updated strip (fluent
+    /// builder).
     #[must_use]
     pub fn tab(mut self, label: impl Into<Box<str>>) -> Self {
-        self.tabs.push(label.into());
+        self.tabs.push(TabEntry {
+            id: None,
+            label: label.into(),
+        });
         self
     }
 
-    #[doc = include_str!("tabs.doc/with_tabs.md")]
+    /// Adds a tab with an application-defined ID for selection persistence. Use a nonempty ID that is unique within the strip.
+    #[must_use]
+    pub fn tab_with_id(mut self, id: impl Into<Box<str>>, label: impl Into<Box<str>>) -> Self {
+        self.tabs.push(TabEntry {
+            id: Some(id.into()),
+            label: label.into(),
+        });
+        self
+    }
+
+    /// Captures the selected tab when it has a unique, nonempty ID.
+    #[must_use]
+    pub fn capture_selection_state(&self) -> Option<TabSelectionState> {
+        let id = self.tabs.get(self.active_index())?.id.as_deref()?;
+        self.unique_tab_index(id)
+            .map(|_| TabSelectionState::capture(id))
+    }
+
+    /// Restores the selection by ID. Unknown versions and missing or ambiguous IDs leave the current selection intact.
+    pub fn restore_selection_state(&mut self, state: &TabSelectionState) -> bool {
+        let Some(index) = state
+            .validated_id()
+            .and_then(|id| self.unique_tab_index(id))
+        else {
+            return false;
+        };
+        self.activate(index)
+    }
+
+    fn unique_tab_index(&self, id: &str) -> Option<usize> {
+        if id.trim().is_empty() {
+            return None;
+        }
+        let mut matches = self
+            .tabs
+            .iter()
+            .enumerate()
+            .filter(|(_, tab)| tab.id.as_deref() == Some(id));
+        let (index, _) = matches.next()?;
+        matches.next().is_none().then_some(index)
+    }
+
+    /// Appends every label from `labels`, returning the updated strip.
     #[must_use]
     pub fn with_tabs<I, S>(mut self, labels: I) -> Self
     where
         I: IntoIterator<Item = S>,
         S: Into<Box<str>>,
     {
-        self.tabs.extend(labels.into_iter().map(Into::into));
+        self.tabs.extend(labels.into_iter().map(|label| TabEntry {
+            id: None,
+            label: label.into(),
+        }));
         self
     }
 
-    #[doc = include_str!("tabs.doc/activate.md")]
+    /// Activates the tab at `index`, returning `true` when `index` is in range;
+    /// otherwise leaves the active tab untouched and returns `false`.
     pub fn activate(&mut self, index: usize) -> bool {
         if index < self.tabs.len() {
             self.active = index;
@@ -63,7 +116,8 @@ impl Tabs {
         }
     }
 
-    #[doc = include_str!("tabs.doc/active_index.md")]
+    /// Returns the active tab index. Clamped to a valid index, or `0` when the
+    /// strip is empty.
     #[must_use]
     pub fn active_index(&self) -> usize {
         if self.tabs.is_empty() {
@@ -73,20 +127,23 @@ impl Tabs {
         }
     }
 
-    #[doc = include_str!("tabs.doc/active_label.md")]
+    /// Returns the active tab label, or `None` when the strip is empty.
     #[must_use]
     pub fn active_label(&self) -> Option<&str> {
-        self.tabs.get(self.active_index()).map(|s| &**s)
+        self.tabs
+            .get(self.active_index())
+            .map(|tab| tab.label.as_ref())
     }
 
-    #[doc = include_str!("tabs.doc/next.md")]
+    /// Moves selection to the next tab, wrapping around. A no-op when empty.
     pub fn next(&mut self) {
         if !self.tabs.is_empty() {
             self.active = (self.active_index() + 1) % self.tabs.len();
         }
     }
 
-    #[doc = include_str!("tabs.doc/previous.md")]
+    /// Moves selection to the previous tab, wrapping around. A no-op when
+    /// empty.
     pub fn previous(&mut self) {
         let len = self.tabs.len();
         if len != 0 {
@@ -94,25 +151,26 @@ impl Tabs {
         }
     }
 
-    #[doc = include_str!("tabs.doc/len.md")]
+    /// Returns the number of tabs.
     #[must_use]
     pub fn len(&self) -> usize {
         self.tabs.len()
     }
 
-    #[doc = include_str!("tabs.doc/is_empty.md")]
+    /// Returns whether the strip has no tabs.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.tabs.is_empty()
     }
 
-    #[doc = include_str!("tabs.doc/semantic_role.md")]
+    /// Returns the accessible role of this control ([`SemanticRole::Tab`]; see
+    /// the type docs on the strip vs. individual tab/panel distinction).
     #[must_use]
     pub const fn semantic_role(&self) -> SemanticRole {
         SemanticRole::Tab
     }
 
-    #[doc = include_str!("tabs.doc/view.md")]
+    #[doc = include_str!("../../docs/api/tabs/tabs.doc/view.md")]
     #[must_use]
     pub fn view(&self) -> View {
         let active = self.active_index();
@@ -121,7 +179,7 @@ impl Tabs {
             .tabs
             .iter()
             .enumerate()
-            .map(|(index, label)| {
+            .map(|(index, tab)| {
                 ViewNode::element(Self::TAB_ID)
                     .with_prop(ViewProperty::new(Self::PROP_ROLE, ViewValue::from("tab")))
                     .with_prop(ViewProperty::new(
@@ -129,7 +187,7 @@ impl Tabs {
                         ViewValue::Bool(index == active),
                     ))
                     .with_children(ViewFragment::from_nodes(vec![
-                        Text::new(label.clone()).into_view_node(),
+                        Text::new(tab.label.clone()).into_view_node(),
                     ]))
             })
             .collect();

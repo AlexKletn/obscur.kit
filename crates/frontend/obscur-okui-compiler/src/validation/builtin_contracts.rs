@@ -1,8 +1,8 @@
-#![doc = include_str!("builtin_contracts.doc/_module.md")]
+#![doc = include_str!("../../docs/api/validation/builtin_contracts.doc/_module.md")]
 
 use crate::validation::ComponentContract;
 
-#[doc = include_str!("builtin_contracts.doc/builtin_contracts.md")]
+#[doc = include_str!("../../docs/api/validation/builtin_contracts.doc/builtin_contracts.md")]
 #[must_use]
 pub fn builtin_contracts() -> Vec<ComponentContract> {
     vec![
@@ -27,7 +27,7 @@ pub fn builtin_contracts() -> Vec<ComponentContract> {
     ]
 }
 
-#[doc = include_str!("builtin_contracts.doc/widget_contracts.md")]
+#[doc = include_str!("../../docs/api/validation/builtin_contracts.doc/widget_contracts.md")]
 #[must_use]
 pub fn widget_contracts() -> Vec<ComponentContract> {
     vec![
@@ -136,7 +136,7 @@ pub fn widget_contracts() -> Vec<ComponentContract> {
     ]
 }
 
-#[doc = include_str!("builtin_contracts.doc/mounted_element_contracts.md")]
+#[doc = include_str!("../../docs/api/validation/builtin_contracts.doc/mounted_element_contracts.md")]
 #[must_use]
 pub fn mounted_element_contracts() -> Vec<ComponentContract> {
     ["input", "textarea", "checkbox", "radio", "select"]
@@ -145,7 +145,7 @@ pub fn mounted_element_contracts() -> Vec<ComponentContract> {
         .collect()
 }
 
-#[doc = include_str!("builtin_contracts.doc/default_contracts.md")]
+#[doc = include_str!("../../docs/api/validation/builtin_contracts.doc/default_contracts.md")]
 #[must_use]
 pub fn default_contracts() -> Vec<ComponentContract> {
     builtin_contracts()

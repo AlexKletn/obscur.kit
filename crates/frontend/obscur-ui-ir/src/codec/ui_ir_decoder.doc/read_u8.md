@@ -1,1 +1,0 @@
-Reads a single byte.

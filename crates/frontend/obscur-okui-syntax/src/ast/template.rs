@@ -1,14 +1,15 @@
-#![doc = include_str!("template.doc/_module.md")]
+//! `Template`: the typed AST view of a reusable template subtree (spec §2.12).
 
 use crate::ast::Element;
 use crate::syntax::{SyntaxKind, SyntaxNode};
 
-#[doc = include_str!("template.doc/Template.md")]
+#[doc = include_str!("../../docs/api/ast/template.doc/Template.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Template(SyntaxNode);
 
 impl Template {
-    #[doc = include_str!("template.doc/cast.md")]
+    /// Casts a syntax node to a `Template`, returning `Some` iff its kind is
+    /// [`Template`](SyntaxKind::Template) or [`Document`](SyntaxKind::Document).
     #[must_use]
     pub fn cast(node: SyntaxNode) -> Option<Self> {
         if matches!(node.kind(), SyntaxKind::Template | SyntaxKind::Document) {
@@ -18,18 +19,18 @@ impl Template {
         }
     }
 
-    #[doc = include_str!("template.doc/syntax.md")]
+    /// Returns the wrapped syntax node.
     #[must_use]
     pub const fn syntax(&self) -> &SyntaxNode {
         &self.0
     }
 
-    #[doc = include_str!("template.doc/roots.md")]
+    /// Iterates the template's top-level elements (its roots).
     pub fn roots(&self) -> impl Iterator<Item = Element> + '_ {
         self.0.child_nodes().cloned().filter_map(Element::cast)
     }
 
-    #[doc = include_str!("template.doc/slot_names.md")]
+    #[doc = include_str!("../../docs/api/ast/template.doc/slot_names.md")]
     #[must_use]
     pub fn slot_names(&self) -> Vec<String> {
         let mut names = Vec::new();
@@ -38,7 +39,8 @@ impl Template {
     }
 }
 
-#[doc = include_str!("template.doc/collect_slot_names.md")]
+/// Recursively collects `slot="name"` attribute values from `node` and its
+/// descendants into `out`.
 fn collect_slot_names(node: &SyntaxNode, out: &mut Vec<String>) {
     if let Some(element) = Element::cast(node.clone())
         && let Some(name) = element.attribute("slot").and_then(|a| a.string_value())

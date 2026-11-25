@@ -1,20 +1,21 @@
-#![doc = include_str!("dispatch_result.doc/_module.md")]
+//! The outcome of dispatching an event through a propagation path (spec §4.7).
 
 use obscur_identity::NodeId;
 
-#[doc = include_str!("dispatch_result.doc/DispatchResult.md")]
+#[doc = include_str!("../../docs/api/event/dispatch_result.doc/DispatchResult.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DispatchResult {
-    #[doc = include_str!("dispatch_result.doc/handled.md")]
+    /// Whether any node along the path consumed the event.
     pub handled: bool,
-    #[doc = include_str!("dispatch_result.doc/default_prevented.md")]
+    /// Whether the host's default action was suppressed.
     pub default_prevented: bool,
-    #[doc = include_str!("dispatch_result.doc/stopped_at.md")]
+    /// The node at which propagation was stopped, if it was stopped at all.
     pub stopped_at: Option<NodeId>,
 }
 
 impl DispatchResult {
-    #[doc = include_str!("dispatch_result.doc/new.md")]
+    /// Creates a result recording that nothing handled the event, no default was
+    /// prevented, and propagation ran to completion.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -24,31 +25,32 @@ impl DispatchResult {
         }
     }
 
-    #[doc = include_str!("dispatch_result.doc/handled_2.md")]
+    /// Returns this result with [`handled`](Self::handled) set to `true`
+    /// (fluent form of [`mark_handled`](Self::mark_handled)).
     #[must_use]
     pub const fn handled(mut self) -> Self {
         self.handled = true;
         self
     }
 
-    #[doc = include_str!("dispatch_result.doc/mark_handled.md")]
+    /// Marks this result as handled in place.
     pub const fn mark_handled(&mut self) {
         self.handled = true;
     }
 
-    #[doc = include_str!("dispatch_result.doc/is_handled.md")]
+    /// Returns whether any node consumed the event.
     #[must_use]
     pub const fn is_handled(&self) -> bool {
         self.handled
     }
 
-    #[doc = include_str!("dispatch_result.doc/is_default_prevented.md")]
+    /// Returns whether the host's default action was suppressed.
     #[must_use]
     pub const fn is_default_prevented(&self) -> bool {
         self.default_prevented
     }
 
-    #[doc = include_str!("dispatch_result.doc/stopped_at_2.md")]
+    /// Returns the node at which propagation was stopped, if any.
     #[must_use]
     pub const fn stopped_at(&self) -> Option<NodeId> {
         self.stopped_at

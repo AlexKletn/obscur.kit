@@ -1,49 +1,41 @@
-#![doc = include_str!("shell_target.doc/_module.md")]
+//! What to open via the platform shell (spec §6.11 — shell integration).
 
 use crate::document::DocumentHandle;
 
-#[doc = include_str!("shell_target.doc/ActivationKind.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ActivationKind {
-    #[doc = include_str!("shell_target.doc/File.md")]
-    File,
-    #[doc = include_str!("shell_target.doc/Uri.md")]
-    Uri,
-    #[doc = include_str!("shell_target.doc/DeepLink.md")]
-    DeepLink,
-}
+use super::ActivationKind;
 
-#[doc = include_str!("shell_target.doc/ShellTarget.md")]
+#[doc = include_str!("../../docs/api/shell/shell_target.doc/ShellTarget.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum ShellTarget {
-    #[doc = include_str!("shell_target.doc/File_2.md")]
+    /// An opaque document handle to reveal or open (spec §6.10).
     File(DocumentHandle),
-    #[doc = include_str!("shell_target.doc/Uri_2.md")]
+    /// An arbitrary URI to hand to the shell.
     Uri(Box<str>),
-    #[doc = include_str!("shell_target.doc/Document.md")]
+    /// An opaque document token to open through the shell.
     Document(Box<str>),
 }
 
 impl ShellTarget {
-    #[doc = include_str!("shell_target.doc/file.md")]
+    /// Creates a target that opens the document behind `handle` (spec §6.11).
     #[must_use]
     pub const fn file(handle: DocumentHandle) -> Self {
         Self::File(handle)
     }
 
-    #[doc = include_str!("shell_target.doc/uri.md")]
+    /// Creates a target that opens the given `uri` (spec §6.11).
     #[must_use]
     pub fn uri(uri: impl Into<Box<str>>) -> Self {
         Self::Uri(uri.into())
     }
 
-    #[doc = include_str!("shell_target.doc/document.md")]
+    /// Creates a target that opens the given opaque document `token`
+    /// (spec §6.11).
     #[must_use]
     pub fn document(token: impl Into<Box<str>>) -> Self {
         Self::Document(token.into())
     }
 
-    #[doc = include_str!("shell_target.doc/activation_kind.md")]
+    #[doc = include_str!("../../docs/api/shell/shell_target.doc/activation_kind.md")]
     #[must_use]
     pub fn activation_kind(&self) -> ActivationKind {
         match self {
@@ -58,7 +50,8 @@ impl ShellTarget {
         }
     }
 
-    #[doc = include_str!("shell_target.doc/as_uri.md")]
+    /// Returns the URI string when this target is a [`Uri`](Self::Uri), else
+    /// `None` (spec §6.11).
     #[must_use]
     pub fn as_uri(&self) -> Option<&str> {
         match self {

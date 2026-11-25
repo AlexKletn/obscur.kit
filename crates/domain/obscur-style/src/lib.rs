@@ -1,4 +1,4 @@
-#![doc = include_str!("lib.doc/_module.md")]
+//! Computed style, cascade and inheritance (skeleton). Does not parse CSS syntax.
 #![forbid(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 

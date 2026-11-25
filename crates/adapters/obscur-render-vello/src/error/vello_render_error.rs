@@ -1,30 +1,40 @@
-#![doc = include_str!("vello_render_error.doc/_module.md")]
+//! The Vello backend's typed failure, mapped into the domain's `RendererError`
+//! (spec §5.2 explicit diagnostics; §2.7 the vello adapter owns its own errors).
 
 use obscur_render::frame::{DeviceLoss, DeviceLossReason};
 use obscur_render::renderer::RendererError;
 
-#[doc = include_str!("vello_render_error.doc/VelloRenderError.md")]
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[doc = include_str!("../../docs/api/error/vello_render_error.doc/VelloRenderError.md")]
+#[derive(Debug)]
 pub enum VelloRenderError {
-    #[doc = include_str!("vello_render_error.doc/DeviceCreation.md")]
+    /// Creating the wgpu device (or queue) failed, with a human-readable reason.
     DeviceCreation(Box<str>),
-    #[doc = include_str!("vello_render_error.doc/SurfaceLost.md")]
+    /// Vello failed to initialize its renderer for an existing device.
+    RendererInitialization(vello::Error),
+    /// The render surface was lost and must be reconfigured before the next
+    /// frame, with a human-readable reason.
     SurfaceLost(Box<str>),
-    #[doc = include_str!("vello_render_error.doc/SurfaceConfiguration.md")]
+    /// Configuring the render surface (format, size, present mode) failed, with
+    /// a human-readable reason.
     SurfaceConfiguration(Box<str>),
-    #[doc = include_str!("vello_render_error.doc/RenderFailed.md")]
+    /// Submitting or presenting a rendered frame failed, with a human-readable
+    /// reason.
     RenderFailed(Box<str>),
-    #[doc = include_str!("vello_render_error.doc/NoGpuAdapter.md")]
+    /// No GPU adapter compatible with the backend's requirements was found.
     NoGpuAdapter,
 }
 
 impl VelloRenderError {
-    #[doc = include_str!("vello_render_error.doc/into_renderer_error.md")]
+    #[doc = include_str!("../../docs/api/error/vello_render_error.doc/into_renderer_error.md")]
     #[must_use]
     pub fn into_renderer_error(self) -> RendererError {
         match self {
             Self::DeviceCreation(reason) => RendererError::DeviceLost(
                 DeviceLoss::fatal(DeviceLossReason::Unknown).with_detail(reason),
+            ),
+            Self::RendererInitialization(error) => RendererError::DeviceLost(
+                DeviceLoss::fatal(DeviceLossReason::Unknown)
+                    .with_detail(error.to_string().into_boxed_str()),
             ),
             Self::NoGpuAdapter => RendererError::DeviceLost(
                 DeviceLoss::fatal(DeviceLossReason::Unknown)
@@ -43,6 +53,9 @@ impl std::fmt::Display for VelloRenderError {
             Self::DeviceCreation(reason) => {
                 write!(f, "vello device creation failed: {reason}")
             }
+            Self::RendererInitialization(error) => {
+                write!(f, "vello renderer initialization failed: {error}")
+            }
             Self::SurfaceLost(reason) => write!(f, "vello surface lost: {reason}"),
             Self::SurfaceConfiguration(reason) => {
                 write!(f, "vello surface configuration failed: {reason}")
@@ -53,11 +66,30 @@ impl std::fmt::Display for VelloRenderError {
     }
 }
 
-impl std::error::Error for VelloRenderError {}
+impl std::error::Error for VelloRenderError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::RendererInitialization(error) => Some(error),
+            _ => None,
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
+    use std::error::Error;
+
     use super::*;
+
+    #[test]
+    fn renderer_initialization_exposes_the_vello_error() {
+        let error = VelloRenderError::RendererInitialization(vello::Error::NoCompatibleDevice);
+        let source = error
+            .source()
+            .and_then(|source| source.downcast_ref::<vello::Error>());
+
+        assert!(matches!(source, Some(vello::Error::NoCompatibleDevice)));
+    }
 
     #[test]
     fn device_creation_maps_to_device_lost() {

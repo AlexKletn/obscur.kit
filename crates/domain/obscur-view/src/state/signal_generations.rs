@@ -1,4 +1,4 @@
-#![doc = include_str!("signal_generations.doc/_module.md")]
+//! `SignalGenerations`: the current version of every observable source.
 
 use std::collections::HashMap;
 
@@ -6,21 +6,21 @@ use obscur_identity::SignalId;
 
 use crate::state::StateGeneration;
 
-#[doc = include_str!("signal_generations.doc/SignalGenerations.md")]
+#[doc = include_str!("../../docs/api/state/signal_generations.doc/SignalGenerations.md")]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SignalGenerations {
-    #[doc = include_str!("signal_generations.doc/versions.md")]
+    /// Sources that have been bumped at least once. Absent == `INITIAL`.
     versions: HashMap<SignalId, StateGeneration>,
 }
 
 impl SignalGenerations {
-    #[doc = include_str!("signal_generations.doc/new.md")]
+    /// Creates a book in which every source is at [`StateGeneration::INITIAL`].
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    #[doc = include_str!("signal_generations.doc/generation.md")]
+    /// The current generation of `source`.
     #[must_use]
     pub fn generation(&self, source: SignalId) -> StateGeneration {
         self.versions
@@ -29,20 +29,20 @@ impl SignalGenerations {
             .unwrap_or(StateGeneration::INITIAL)
     }
 
-    #[doc = include_str!("signal_generations.doc/bump.md")]
+    #[doc = include_str!("../../docs/api/state/signal_generations.doc/bump.md")]
     pub fn bump(&mut self, source: SignalId) -> StateGeneration {
         let next = self.generation(source).next();
         self.versions.insert(source, next);
         next
     }
 
-    #[doc = include_str!("signal_generations.doc/len.md")]
+    /// How many sources have ever been bumped.
     #[must_use]
     pub fn len(&self) -> usize {
         self.versions.len()
     }
 
-    #[doc = include_str!("signal_generations.doc/is_empty.md")]
+    /// Whether no source has ever been bumped.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.versions.is_empty()

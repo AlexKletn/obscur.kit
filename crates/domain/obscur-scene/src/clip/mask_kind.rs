@@ -1,16 +1,16 @@
-#![doc = include_str!("mask_kind.doc/_module.md")]
+//! How a mask's coverage is derived from its source content.
 
-#[doc = include_str!("mask_kind.doc/MaskKind.md")]
+#[doc = include_str!("../../docs/api/clip/mask_kind.doc/MaskKind.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MaskKind {
-    #[doc = include_str!("mask_kind.doc/Alpha.md")]
+    /// Coverage comes from the source's alpha channel.
     Alpha,
-    #[doc = include_str!("mask_kind.doc/Luminance.md")]
+    /// Coverage comes from the source's luminance (perceived brightness).
     Luminance,
 }
 
 impl MaskKind {
-    #[doc = include_str!("mask_kind.doc/is_luminance.md")]
+    /// Returns whether coverage is derived from luminance rather than alpha.
     #[must_use]
     pub const fn is_luminance(self) -> bool {
         matches!(self, Self::Luminance)

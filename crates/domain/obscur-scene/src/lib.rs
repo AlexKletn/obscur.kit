@@ -1,4 +1,4 @@
-#![doc = include_str!("lib.doc/_module.md")]
+//! Backend-independent Scene/Paint model (skeleton).
 #![forbid(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 

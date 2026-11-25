@@ -1,4 +1,4 @@
-#![doc = include_str!("text_editing.doc/_module.md")]
+#![doc = include_str!("../../../docs/api/runtime/ui_runtime/text_editing.doc/_module.md")]
 
 use obscur_identity::NodeId;
 use obscur_text::selection::TextSelection;
@@ -12,7 +12,7 @@ use crate::runtime::{
 use super::UiRuntime;
 
 impl UiRuntime {
-    #[doc = include_str!("text_editing.doc/begin_text_editing.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/text_editing.doc/begin_text_editing.md")]
     pub fn begin_text_editing(&mut self, node: NodeId, initial_text: impl Into<String>) {
         // A disabled control accepts no editing session — a defensive guard mirroring
         // the pointer path, so even an explicit app call can't make a disabled field
@@ -23,14 +23,15 @@ impl UiRuntime {
         self.editing = Some(TextEditSession::seeded(node, initial_text));
     }
 
-    #[doc = include_str!("text_editing.doc/set_editing_text.md")]
+    /// Re-seeds the active editing session's text (caret at the end, history
+    /// cleared). A no-op when no session is active.
     pub fn set_editing_text(&mut self, text: impl Into<String>) {
         if let Some(session) = self.editing.as_mut() {
             session.reseed(text);
         }
     }
 
-    #[doc = include_str!("text_editing.doc/sync_editing_to_focus.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/text_editing.doc/sync_editing_to_focus.md")]
     pub(super) fn sync_editing_to_focus(&mut self) {
         let new_editable = self
             .focused
@@ -55,7 +56,7 @@ impl UiRuntime {
         }
     }
 
-    #[doc = include_str!("text_editing.doc/reseed_editing_from_retained.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/text_editing.doc/reseed_editing_from_retained.md")]
     pub(super) fn reseed_editing_from_retained(&mut self) {
         let Some(session) = self.editing.as_ref() else {
             return;
@@ -85,7 +86,7 @@ impl UiRuntime {
         }
     }
 
-    #[doc = include_str!("text_editing.doc/commit_editable_change.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/text_editing.doc/commit_editable_change.md")]
     pub(super) fn commit_editable_change(&mut self, rebaseline: bool) -> bool {
         let Some(session) = self.editing.as_ref() else {
             return false;
@@ -116,7 +117,7 @@ impl UiRuntime {
         }
     }
 
-    #[doc = include_str!("text_editing.doc/focus_accepts_text.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/text_editing.doc/focus_accepts_text.md")]
     #[must_use]
     pub fn focus_accepts_text(&self) -> bool {
         self.focused
@@ -124,19 +125,20 @@ impl UiRuntime {
             .is_some()
     }
 
-    #[doc = include_str!("text_editing.doc/editing_text.md")]
+    /// Returns the focused field's current editing text, if a session is active.
     #[must_use]
     pub fn editing_text(&self) -> Option<&str> {
         self.editing.as_ref().map(TextEditSession::text)
     }
 
-    #[doc = include_str!("text_editing.doc/editing_selection.md")]
+    /// Returns the focused field's current caret/selection, if a session is
+    /// active — the input to step-2 caret + selection rendering.
     #[must_use]
     pub fn editing_selection(&self) -> Option<TextSelection> {
         self.editing.as_ref().map(TextEditSession::selection)
     }
 
-    #[doc = include_str!("text_editing.doc/editing_view.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/text_editing.doc/editing_view.md")]
     pub(super) fn editing_view(&self) -> Option<EditingView<'_>> {
         self.editing.as_ref().map(TextEditSession::view)
     }

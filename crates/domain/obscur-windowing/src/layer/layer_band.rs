@@ -1,27 +1,28 @@
-#![doc = include_str!("layer_band.doc/_module.md")]
+//! The depth band a layer surface occupies.
 
-#[doc = include_str!("layer_band.doc/LayerBand.md")]
+#[doc = include_str!("../../docs/api/layer/layer_band.doc/LayerBand.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum LayerBand {
-    #[doc = include_str!("layer_band.doc/Background.md")]
+    /// Below every application window — the wallpaper band.
     Background,
-    #[doc = include_str!("layer_band.doc/Bottom.md")]
+    /// Above the wallpaper, still below every application window.
     Bottom,
-    #[doc = include_str!("layer_band.doc/Top.md")]
+    #[doc = include_str!("../../docs/api/layer/layer_band.doc/Top.md")]
     #[default]
     Top,
-    #[doc = include_str!("layer_band.doc/Overlay.md")]
+    /// Above everything, including other layer surfaces — notifications, lock
+    /// screens, on-screen keyboards.
     Overlay,
 }
 
 impl LayerBand {
-    #[doc = include_str!("layer_band.doc/is_above_windows.md")]
+    #[doc = include_str!("../../docs/api/layer/layer_band.doc/is_above_windows.md")]
     #[must_use]
     pub const fn is_above_windows(self) -> bool {
         matches!(self, Self::Top | Self::Overlay)
     }
 
-    #[doc = include_str!("layer_band.doc/depth_order.md")]
+    #[doc = include_str!("../../docs/api/layer/layer_band.doc/depth_order.md")]
     #[must_use]
     pub const fn depth_order(self) -> u8 {
         match self {

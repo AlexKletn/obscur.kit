@@ -1,24 +1,26 @@
-#![doc = include_str!("chrome_mode.doc/_module.md")]
+//! How a window's frame is provided: system, client-side, or custom chrome
+//! (spec §6.4).
 
-#[doc = include_str!("chrome_mode.doc/ChromeMode.md")]
+#[doc = include_str!("../../docs/api/chrome/chrome_mode.doc/ChromeMode.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ChromeMode {
-    #[doc = include_str!("chrome_mode.doc/SystemFrame.md")]
+    /// Native window decorations drawn by the platform (the system-frame
+    /// fallback).
     SystemFrame,
-    #[doc = include_str!("chrome_mode.doc/ClientSide.md")]
+    /// Client-side decorations where the kit draws the standard controls.
     ClientSide,
-    #[doc = include_str!("chrome_mode.doc/Custom.md")]
+    /// A fully custom title bar drawn entirely by the application.
     Custom,
 }
 
 impl ChromeMode {
-    #[doc = include_str!("chrome_mode.doc/is_custom.md")]
+    /// Returns whether this is a fully custom title bar.
     #[must_use]
     pub const fn is_custom(self) -> bool {
         matches!(self, Self::Custom)
     }
 
-    #[doc = include_str!("chrome_mode.doc/uses_client_side.md")]
+    #[doc = include_str!("../../docs/api/chrome/chrome_mode.doc/uses_client_side.md")]
     #[must_use]
     pub const fn uses_client_side(self) -> bool {
         matches!(self, Self::ClientSide | Self::Custom)
@@ -26,7 +28,8 @@ impl ChromeMode {
 }
 
 impl Default for ChromeMode {
-    #[doc = include_str!("chrome_mode.doc/default.md")]
+    /// The default chrome mode is [`ChromeMode::SystemFrame`], the safe
+    /// system-frame fallback.
     fn default() -> Self {
         Self::SystemFrame
     }

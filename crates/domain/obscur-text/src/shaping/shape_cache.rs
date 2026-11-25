@@ -1,4 +1,6 @@
-#![doc = include_str!("shape_cache.doc/_module.md")]
+//! The bounded memo table of shaped paragraphs: [`ShapeCache`].
+
+use super::style_group::StyleGroup;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -8,30 +10,31 @@ use crate::shaping::ShapedRun;
 use crate::shaping::TextDirection;
 use crate::shaping::paragraph_style_key::ParagraphStyleKey;
 
-#[doc = include_str!("shape_cache.doc/StyleGroup.md")]
-struct StyleGroup {
-    #[doc = include_str!("shape_cache.doc/style.md")]
-    style: ParagraphStyleKey,
-    #[doc = include_str!("shape_cache.doc/texts.md")]
-    texts: HashMap<Box<str>, Arc<[ShapedRun]>>,
-}
-
-#[doc = include_str!("shape_cache.doc/ShapeCache.md")]
+#[doc = include_str!("../../docs/api/shaping/shape_cache.doc/ShapeCache.md")]
 pub(crate) struct ShapeCache {
-    #[doc = include_str!("shape_cache.doc/young.md")]
+    /// The generation being filled: everything inserted, or promoted, since the
+    /// last rotation. Looked at first.
     young: Vec<StyleGroup>,
-    #[doc = include_str!("shape_cache.doc/old.md")]
+    /// The previous generation. Still served — a hit here is promoted back into
+    /// [`young`](Self::young) — and dropped whole at the next rotation. This is
+    /// the only thing that is ever evicted, so an entry has to go two full
+    /// generations untouched to be lost.
     old: Vec<StyleGroup>,
-    #[doc = include_str!("shape_cache.doc/young_entries.md")]
+    /// How many distinct paragraphs [`young`](Self::young) holds. Tracked rather
+    /// than summed over the groups so the bound is checked in constant time.
     young_entries: usize,
-    #[doc = include_str!("shape_cache.doc/old_entries.md")]
+    /// How many distinct paragraphs [`old`](Self::old) holds.
     old_entries: usize,
-    #[doc = include_str!("shape_cache.doc/rotate_at.md")]
+    /// The young-generation size that triggers a rotation: half the capacity the
+    /// caller asked for, rounded down, so the two live generations together never
+    /// exceed it.
     rotate_at: usize,
 }
 
 impl ShapeCache {
-    #[doc = include_str!("shape_cache.doc/new.md")]
+    /// An empty cache holding at most `capacity` shaped paragraphs across its two
+    /// generations. A capacity below 2 is raised to 2: a generation that rotated
+    /// on every insertion would keep nothing.
     pub(crate) fn new(capacity: usize) -> Self {
         Self {
             young: Vec::new(),
@@ -45,7 +48,7 @@ impl ShapeCache {
         }
     }
 
-    #[doc = include_str!("shape_cache.doc/get.md")]
+    #[doc = include_str!("../../docs/api/shaping/shape_cache.doc/get.md")]
     pub(crate) fn get(
         &mut self,
         text: &str,
@@ -95,7 +98,7 @@ impl ShapeCache {
         Some(promoted)
     }
 
-    #[doc = include_str!("shape_cache.doc/insert.md")]
+    #[doc = include_str!("../../docs/api/shaping/shape_cache.doc/insert.md")]
     // The shaping inputs are the cohesive identity of one paragraph, the same
     // list [`get`](Self::get) takes; bundling them would only move the names.
     #[allow(clippy::too_many_arguments)]
@@ -145,7 +148,7 @@ impl ShapeCache {
         }
     }
 
-    #[doc = include_str!("shape_cache.doc/clear.md")]
+    /// Drops everything. Used when a port is swapped and no memo can be trusted.
     pub(crate) fn clear(&mut self) {
         self.young.clear();
         self.old.clear();
@@ -153,7 +156,7 @@ impl ShapeCache {
         self.old_entries = 0;
     }
 
-    #[doc = include_str!("shape_cache.doc/len.md")]
+    /// How many distinct paragraphs are memoized across both generations.
     pub(crate) fn len(&self) -> usize {
         self.young_entries + self.old_entries
     }

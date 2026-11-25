@@ -1,46 +1,79 @@
-#![doc = include_str!("subtree_brackets.doc/_module.md")]
+//! The paired `Push*` / `Pop*` wrappers a node's whole subtree paints inside, and
+//! the order they nest in: [`SubtreeBrackets`].
 
-use obscur_geometry::{AffineTransform, Rect};
-use obscur_identity::{FastMap, NodeId};
+use std::collections::HashMap;
+
+use obscur_geometry::{AffineTransform, Point, Rect};
+use obscur_identity::{FastBuildHasher, FastMap, NodeId};
 use obscur_scene::clip::Clip;
 use obscur_scene::command::PaintCommand;
 use obscur_scene::layer::{LayerEffect, SceneLayer};
-use obscur_scene::paint::BlendMode;
 
+use super::paint_unit::PaintUnit;
 use super::scroll_container_paint::scrollbar_commands;
-use super::stacking::{PaintLayer, PaintUnit};
 
-#[doc = include_str!("subtree_brackets.doc/SubtreeBrackets.md")]
+#[doc = include_str!("../../docs/api/orchestration/subtree_brackets.doc/SubtreeBrackets.md")]
 #[derive(Debug, Default)]
 pub(super) struct SubtreeBrackets {
-    #[doc = include_str!("subtree_brackets.doc/enter_index.md")]
+    /// Each node's pre-order enter index — its own paint unit's `tree_index`, and
+    /// the index every `Push*` of that node sorts at.
     enter_index: FastMap<NodeId, usize>,
-    #[doc = include_str!("subtree_brackets.doc/parent_of.md")]
+    /// Each node's parent, walked in reverse pre-order to propagate subtree exit
+    /// indices up the tree.
     parent_of: FastMap<NodeId, Option<NodeId>>,
-    #[doc = include_str!("subtree_brackets.doc/depth_of.md")]
+    /// Each node's tree depth, which breaks the pop tie between nested brackets
+    /// that end at the same exit index (the deeper one closes first).
     depth_of: FastMap<NodeId, u32>,
-    #[doc = include_str!("subtree_brackets.doc/preorder.md")]
+    /// The pre-order sequence, walked in reverse so a descendant's exit index
+    /// reaches its ancestors.
     preorder: Vec<NodeId>,
-    #[doc = include_str!("subtree_brackets.doc/clips.md")]
-    clips: Vec<(NodeId, Clip)>,
-    #[doc = include_str!("subtree_brackets.doc/transforms.md")]
+    /// A rounded / overflow-clipping element's subtree clip: the ROUNDED border box
+    /// when the node has a radius (which also clips overflow), else a plain rect
+    /// clip to the border box. Exactly ONE clip per node.
+    clips: Vec<(NodeId, Clip, i64)>,
+    /// A non-identity CSS 2D `transform`, resolved about the node's transform
+    /// origin. It brackets the node's WHOLE subtree paint, outside any rounded clip.
     transforms: Vec<(NodeId, AffineTransform)>,
-    #[doc = include_str!("subtree_brackets.doc/opacities.md")]
-    opacities: Vec<(NodeId, f32)>,
-    #[doc = include_str!("subtree_brackets.doc/blends.md")]
-    blends: Vec<(NodeId, BlendMode)>,
-    #[doc = include_str!("subtree_brackets.doc/filters.md")]
+    groups: Vec<(NodeId, SceneLayer)>,
+    /// A CSS `filter` blurring and/or colour-transforming the node's whole
+    /// composited subtree: `(node, border_box, blur_radius (0 = none),
+    /// color_matrix)`. The clip carries the element's border box so the renderer
+    /// knows the region; this filter layer is the OUTERMOST subtree wrapper, so the
+    /// Vello renderer's owned wgpu passes operate on the fully-composited element.
     filters: Vec<(NodeId, Rect, f32, Option<[f32; 20]>)>,
-    #[doc = include_str!("subtree_brackets.doc/outlines.md")]
+    /// A CSS `outline` (a focus ring): ONE stroked path OUTSIDE the node's border
+    /// box. It reserves no layout space and — unlike the background/border — must
+    /// NOT be clipped by the node's own rounded clip, so it is emitted at the
+    /// subtree's EXIT index rather than inside the node's paint unit.
     outlines: Vec<(NodeId, PaintCommand)>,
-    #[doc = include_str!("subtree_brackets.doc/scrolls.md")]
-    scrolls: Vec<(NodeId, f32)>,
-    #[doc = include_str!("subtree_brackets.doc/scrollbars.md")]
-    scrollbars: Vec<(NodeId, Rect, f32, f32)>,
+    #[doc = include_str!("../../docs/api/orchestration/subtree_brackets.doc/scrolls.md")]
+    scrolls: Vec<(NodeId, Point)>,
+    /// A scroll container's vertical scrollbar: `(node, scrollport, scroll_top,
+    /// content_height)`. Painted as its own unit at the subtree exit index, on top
+    /// of and outside the scrolled content (CSS Overflow 3 §scrollbars).
+    scrollbars: Vec<(NodeId, Rect, f32, f32, bool)>,
 }
 
 impl SubtreeBrackets {
-    #[doc = include_str!("subtree_brackets.doc/enter.md")]
+    #[doc = include_str!("../../docs/api/orchestration/subtree_brackets.doc/with_capacity.md")]
+    pub(super) fn with_capacity(nodes: usize) -> Self {
+        // `enter` writes one entry into each of the three tables for EVERY node
+        // the walk pops, whether or not that node ever records a bracket, so
+        // their final size is the node count and is known here. Reserving it
+        // replaces the ~7 rehashes each table pays growing from empty with one
+        // sized allocation apiece. The bracket vectors stay unreserved: how many
+        // clips or transforms a document has is not knowable from the node count,
+        // and a document with none must not pay for a guess.
+        Self {
+            enter_index: HashMap::with_capacity_and_hasher(nodes, FastBuildHasher::default()),
+            parent_of: HashMap::with_capacity_and_hasher(nodes, FastBuildHasher::default()),
+            depth_of: HashMap::with_capacity_and_hasher(nodes, FastBuildHasher::default()),
+            preorder: Vec::with_capacity(nodes),
+            ..Self::default()
+        }
+    }
+
+    #[doc = include_str!("../../docs/api/orchestration/subtree_brackets.doc/enter.md")]
     pub(super) fn enter(
         &mut self,
         node: NodeId,
@@ -54,27 +87,35 @@ impl SubtreeBrackets {
         self.preorder.push(node);
     }
 
-    #[doc = include_str!("subtree_brackets.doc/clip.md")]
+    /// Brackets `node`'s subtree with `clip` (see [`clips`](Self::clips)).
     pub(super) fn clip(&mut self, node: NodeId, clip: Clip) {
-        self.clips.push((node, clip));
+        self.clips.push((node, clip, PaintUnit::CLIP_PUSH_ORDER));
     }
 
-    #[doc = include_str!("subtree_brackets.doc/transform.md")]
+    pub(super) fn css_clip(&mut self, node: NodeId, clip: Clip) {
+        self.clips
+            .push((node, clip, PaintUnit::CSS_CLIP_PUSH_ORDER));
+    }
+
+    /// Brackets descendants with the scrollport padding clip.
+    pub(super) fn overflow_clip(&mut self, node: NodeId, clip: Clip) {
+        self.clips
+            .push((node, clip, PaintUnit::OVERFLOW_CLIP_PUSH_ORDER));
+    }
+
+    /// Brackets `node`'s subtree with the resolved CSS `transform` `affine`.
     pub(super) fn transform(&mut self, node: NodeId, affine: AffineTransform) {
         self.transforms.push((node, affine));
     }
 
-    #[doc = include_str!("subtree_brackets.doc/opacity.md")]
-    pub(super) fn opacity(&mut self, node: NodeId, alpha: f32) {
-        self.opacities.push((node, alpha));
+    /// Records one compositing group for opacity, blend mode and isolation.
+    pub(super) fn group(&mut self, node: NodeId, layer: SceneLayer) {
+        self.groups.push((node, layer));
     }
 
-    #[doc = include_str!("subtree_brackets.doc/blend.md")]
-    pub(super) fn blend(&mut self, node: NodeId, mode: BlendMode) {
-        self.blends.push((node, mode));
-    }
-
-    #[doc = include_str!("subtree_brackets.doc/filter.md")]
+    /// Brackets `node`'s subtree with a filter group layer over `bounds` (its border
+    /// box), carrying a gaussian `radius` (`0.0` = none) and/or a folded
+    /// `color_matrix`.
     pub(super) fn filter(
         &mut self,
         node: NodeId,
@@ -85,45 +126,48 @@ impl SubtreeBrackets {
         self.filters.push((node, bounds, radius, color_matrix));
     }
 
-    #[doc = include_str!("subtree_brackets.doc/outline.md")]
+    /// Records the stroked `outline` ring `command` painting on top of — and
+    /// outside — `node`'s whole subtree.
     pub(super) fn outline(&mut self, node: NodeId, command: PaintCommand) {
         self.outlines.push((node, command));
     }
 
-    #[doc = include_str!("subtree_brackets.doc/scroll.md")]
-    pub(super) fn scroll(&mut self, node: NodeId, scroll_top: f32) {
-        self.scrolls.push((node, scroll_top));
+    /// Translates `node`'s descendants up by `scroll_top` within its scrollport.
+    pub(super) fn scroll(&mut self, node: NodeId, offset: Point) {
+        self.scrolls.push((node, offset));
     }
 
-    #[doc = include_str!("subtree_brackets.doc/scrollbar.md")]
+    /// Records `node`'s vertical scrollbar over `scrollport`, sized from
+    /// `scroll_top` and `content_height`.
     pub(super) fn scrollbar(
         &mut self,
         node: NodeId,
         scrollport: Rect,
         scroll_top: f32,
         content_height: f32,
+        horizontal: bool,
     ) {
         self.scrollbars
-            .push((node, scrollport, scroll_top, content_height));
+            .push((node, scrollport, scroll_top, content_height, horizontal));
     }
 
-    #[doc = include_str!("subtree_brackets.doc/is_empty.md")]
+    /// Whether nothing at all was bracketed, so [`emit`](Self::emit) has no work and
+    /// the walk's units are exactly what a pre-bracket compose produced.
     fn is_empty(&self) -> bool {
         self.clips.is_empty()
             && self.transforms.is_empty()
-            && self.opacities.is_empty()
-            && self.blends.is_empty()
+            && self.groups.is_empty()
             && self.filters.is_empty()
             && self.outlines.is_empty()
             && self.scrolls.is_empty()
             && self.scrollbars.is_empty()
     }
 
-    #[doc = include_str!("subtree_brackets.doc/emit.md")]
+    #[doc = include_str!("../../docs/api/orchestration/subtree_brackets.doc/emit.md")]
     pub(super) fn emit(
         self,
         zmap: &FastMap<NodeId, i32>,
-        layermap: &FastMap<NodeId, PaintLayer>,
+        context_end: &FastMap<NodeId, i32>,
         units: &mut Vec<PaintUnit>,
     ) {
         if self.is_empty() {
@@ -136,8 +180,7 @@ impl SubtreeBrackets {
             preorder,
             clips,
             transforms,
-            opacities,
-            blends,
+            groups,
             filters,
             outlines,
             scrolls,
@@ -154,146 +197,80 @@ impl SubtreeBrackets {
                 }
             }
         }
-        // The `(z, layer, enter, exit, depth)` key every bracket of one node shares.
+        // The `(z, enter, exit, depth)` key every bracket of one node shares.
         let key = |node: NodeId| {
             let z = zmap.get(&node).copied().unwrap_or(0);
-            let layer = layermap
-                .get(&node)
-                .copied()
-                .unwrap_or(PaintLayer::NonPositioned);
             let enter = enter_index.get(&node).copied().unwrap_or(0);
             let exit = exit_index.get(&node).copied().unwrap_or(enter);
             let depth = depth_of.get(&node).copied().unwrap_or(0);
-            (z, layer, enter, exit, depth)
+            (z, enter, exit, depth)
         };
 
-        // Scroll transform brackets are emitted BEFORE the clip brackets so that
-        // when a scroll container carries both (it always does — `overflow:
-        // scroll/auto` clips too), the tie at the shared `(z, exit, MAX − depth)`
-        // pop key resolves — via the stable sort — with the scroll transform's
-        // `PopTransform` BEFORE the clip's `PopClip` (the scroll transform closes
-        // *inside* the clip). The `PushTransform` sorts AFTER the node's own
-        // paint (`SCROLL_TRANSFORM_PUSH_ORDER > PAINT_ORDER`) and after the clip
-        // push, so only the descendants (a strictly greater `tree_index`) are
-        // scrolled — the container's own background/border stay fixed in the
-        // scrollport (CSS Overflow 3 §scrollport).
-        for (node, scroll_top) in scrolls {
-            let (z, layer, enter, exit, depth) = key(node);
-            let affine = AffineTransform::translate(0.0, -scroll_top);
+        // Scrolling moves descendants inside the stationary scrollport.
+        for (node, offset) in scrolls {
+            let (z, enter, exit, depth) = key(node);
+            let affine = AffineTransform::translate(-offset.x, -offset.y);
             units.push(PaintUnit {
                 z,
-                layer,
                 tree_index: enter,
                 order: PaintUnit::SCROLL_TRANSFORM_PUSH_ORDER,
                 commands: vec![PaintCommand::PushTransform(affine)],
             });
             units.push(PaintUnit {
-                z,
-                layer,
+                z: context_end.get(&node).copied().unwrap_or(z),
                 tree_index: exit,
-                order: PaintUnit::transform_pop_order(depth),
+                order: PaintUnit::pop_order(depth, PaintUnit::SCROLL_TRANSFORM_PUSH_ORDER),
                 commands: vec![PaintCommand::PopTransform],
             });
         }
-        for (node, clip) in clips {
-            let (z, layer, enter, exit, depth) = key(node);
+        for (node, clip, order) in clips {
+            let (z, enter, exit, depth) = key(node);
             units.push(PaintUnit {
                 z,
-                layer,
                 tree_index: enter,
-                order: PaintUnit::CLIP_PUSH_ORDER,
+                order,
                 commands: vec![PaintCommand::PushClip(clip)],
             });
             units.push(PaintUnit {
-                z,
-                layer,
+                z: context_end.get(&node).copied().unwrap_or(z),
                 tree_index: exit,
-                order: PaintUnit::clip_pop_order(depth),
+                order: PaintUnit::pop_order(depth, order),
                 commands: vec![PaintCommand::PopClip],
             });
         }
-        // Opacity group layers are emitted AFTER the clip brackets and BEFORE
-        // the transform brackets. On enter the `PushLayer` sorts between the
-        // `PushTransform` (LAYER_PUSH_ORDER > TRANSFORM_PUSH_ORDER) and the
-        // `PushClip` (LAYER_PUSH_ORDER < CLIP_PUSH_ORDER), so the layer wraps
-        // the subtree inside the transform and outside the rounded clip. On
-        // exit the `PopLayer` ties with the clip's/transform's pop at the same
-        // `(z, exit, MAX - depth)` key; emitting it after the clip bracket but
-        // before the transform bracket makes the stable sort close the clip
-        // first (innermost), then the layer, then the transform (outermost).
-        for (node, alpha) in opacities {
-            let (z, layer, enter, exit, depth) = key(node);
+        for (node, layer) in groups {
+            let (z, enter, exit, depth) = key(node);
             units.push(PaintUnit {
                 z,
-                layer,
                 tree_index: enter,
                 order: PaintUnit::LAYER_PUSH_ORDER,
-                commands: vec![PaintCommand::PushLayer(
-                    SceneLayer::new().with_opacity(alpha),
-                )],
+                commands: vec![PaintCommand::PushLayer(layer)],
             });
             units.push(PaintUnit {
-                z,
-                layer,
+                z: context_end.get(&node).copied().unwrap_or(z),
                 tree_index: exit,
-                order: PaintUnit::layer_pop_order(depth),
+                order: PaintUnit::pop_order(depth, PaintUnit::LAYER_PUSH_ORDER),
                 commands: vec![PaintCommand::PopLayer],
             });
         }
-        // Blend-mode group layers are emitted like opacity layers (same push /
-        // pop ordering), so a node carrying both gets two nested group layers and
-        // the subtree composites as one group blended onto its backdrop.
-        for (node, mode) in blends {
-            let (z, layer, enter, exit, depth) = key(node);
-            units.push(PaintUnit {
-                z,
-                layer,
-                tree_index: enter,
-                order: PaintUnit::LAYER_PUSH_ORDER,
-                commands: vec![PaintCommand::PushLayer(
-                    SceneLayer::new().with_blend_mode(mode),
-                )],
-            });
-            units.push(PaintUnit {
-                z,
-                layer,
-                tree_index: exit,
-                order: PaintUnit::layer_pop_order(depth),
-                commands: vec![PaintCommand::PopLayer],
-            });
-        }
-        // Transform brackets are emitted AFTER the clip brackets so that when
-        // a node carries both, the tie at the shared `(z, exit, MAX - depth)`
-        // key resolves — via the stable sort — with the clip's `PopClip`
-        // before the transform's `PopTransform` (the clip closes inside the
-        // transform). The `PushTransform` sorts before the `PushClip`
-        // (TRANSFORM_PUSH_ORDER < CLIP_PUSH_ORDER), so the transform is the
-        // outermost wrapper of the subtree.
         for (node, affine) in transforms {
-            let (z, layer, enter, exit, depth) = key(node);
+            let (z, enter, exit, depth) = key(node);
             units.push(PaintUnit {
                 z,
-                layer,
                 tree_index: enter,
                 order: PaintUnit::TRANSFORM_PUSH_ORDER,
                 commands: vec![PaintCommand::PushTransform(affine)],
             });
             units.push(PaintUnit {
-                z,
-                layer,
+                z: context_end.get(&node).copied().unwrap_or(z),
                 tree_index: exit,
-                order: PaintUnit::transform_pop_order(depth),
+                order: PaintUnit::pop_order(depth, PaintUnit::TRANSFORM_PUSH_ORDER),
                 commands: vec![PaintCommand::PopTransform],
             });
         }
-        // Blur group layers are the OUTERMOST subtree wrapper: their push sorts
-        // before every other bracket (BLUR_PUSH_ORDER < TRANSFORM_PUSH_ORDER) and
-        // — emitted LAST here — their pop ties are broken to close after the
-        // transform/opacity/clip pops, so the blur wraps the fully-composited
-        // element. The clip is the node's border box, the blur region the
-        // renderer's owned gaussian pass operates over.
+        // The CSS clip surrounds the filtered result.
         for (node, bounds, radius, color_matrix) in filters {
-            let (z, paint_layer, enter, exit, depth) = key(node);
+            let (z, enter, exit, depth) = key(node);
             let mut layer = SceneLayer::new().with_clip(Clip::rect(bounds));
             // Blur and color-matrix can coexist on ONE filter layer; a zero
             // radius carries no blur effect (the color-only path). The renderer
@@ -306,53 +283,38 @@ impl SubtreeBrackets {
             }
             units.push(PaintUnit {
                 z,
-                layer: paint_layer,
                 tree_index: enter,
                 order: PaintUnit::BLUR_PUSH_ORDER,
                 commands: vec![PaintCommand::PushLayer(layer)],
             });
             units.push(PaintUnit {
-                z,
-                layer: paint_layer,
+                z: context_end.get(&node).copied().unwrap_or(z),
                 tree_index: exit,
-                order: PaintUnit::blur_pop_order(depth),
+                order: PaintUnit::pop_order(depth, PaintUnit::BLUR_PUSH_ORDER),
                 commands: vec![PaintCommand::PopLayer],
             });
         }
-        // The outline (focus ring) paints as its OWN unit at the subtree's exit
-        // index with `OUTLINE_ORDER` — sorting after every `Pop*` bracket at the
-        // same index — so it lands OUTSIDE the node's rounded clip and ON TOP of
-        // the node's whole subtree. Emitted LAST so a tie with a depth-0
-        // `PopClip` (both at `i64::MAX`) breaks in the outline's favour (the ring
-        // paints after the clip closes, unclipped).
+        // Outlines and scrollbars escape the overflow clip and remain inside
+        // the CSS clip, transform and compositing group.
         for (node, command) in outlines {
-            let (z, layer, _enter, exit, _depth) = key(node);
+            let (z, _enter, exit, depth) = key(node);
             units.push(PaintUnit {
-                z,
-                layer,
+                z: context_end.get(&node).copied().unwrap_or(z),
                 tree_index: exit,
-                order: PaintUnit::OUTLINE_ORDER,
+                order: PaintUnit::overlay_order(depth),
                 commands: vec![command],
             });
         }
-        // A scroll container's vertical scrollbar (track + thumb), painted as its
-        // OWN unit at the subtree exit index with `SCROLLBAR_ORDER` (the ceiling)
-        // and emitted LAST, so it sorts after the scroll transform's
-        // `PopTransform` — it does NOT scroll — and after the overflow clip's
-        // `PopClip`, landing on top of the container's whole scrolled subtree
-        // (CSS Overflow 3 §scrollbars). Its rects lie within the scrollport, so
-        // being outside the clip is visually identical to being inside it.
-        for (node, scrollport, scroll_top, content_height) in scrollbars {
-            let commands = scrollbar_commands(scrollport, scroll_top, content_height);
+        for (node, scrollport, scroll_top, content_height, horizontal) in scrollbars {
+            let commands = scrollbar_commands(scrollport, scroll_top, content_height, horizontal);
             if commands.is_empty() {
                 continue;
             }
-            let (z, layer, _enter, exit, _depth) = key(node);
+            let (z, _enter, exit, depth) = key(node);
             units.push(PaintUnit {
-                z,
-                layer,
+                z: context_end.get(&node).copied().unwrap_or(z),
                 tree_index: exit,
-                order: PaintUnit::SCROLLBAR_ORDER,
+                order: PaintUnit::overlay_order(depth),
                 commands,
             });
         }

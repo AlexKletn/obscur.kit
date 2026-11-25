@@ -1,4 +1,4 @@
-#![doc = include_str!("button.doc/_module.md")]
+//! `Button`: a headless push-button control (spec §2.6).
 
 use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
@@ -8,7 +8,7 @@ use obscur_view::view::{
     ViewNode, ViewProperty, ViewValue,
 };
 
-#[doc = include_str!("button.doc/Button.md")]
+#[doc = include_str!("../../docs/api/button/button.doc/Button.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Button {
     label: Box<str>,
@@ -18,17 +18,18 @@ pub struct Button {
 }
 
 impl Button {
-    #[doc = include_str!("button.doc/COMPONENT_ID.md")]
+    #[doc = include_str!("../../docs/api/button/button.doc/COMPONENT_ID.md")]
     pub const COMPONENT_ID: ComponentId = ComponentId::from_raw(0x00D0_0001);
 
-    #[doc = include_str!("button.doc/PROP_ROLE.md")]
+    #[doc = include_str!("../../docs/api/button/button.doc/PROP_ROLE.md")]
     const PROP_ROLE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0100);
-    #[doc = include_str!("button.doc/PROP_DISABLED.md")]
+    /// Interned name of the `disabled` state property.
     const PROP_DISABLED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0101);
-    #[doc = include_str!("button.doc/PROP_PRESSED.md")]
+    /// Interned name of the `pressed` state property.
     const PROP_PRESSED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0102);
 
-    #[doc = include_str!("button.doc/new.md")]
+    /// Creates an enabled, un-pressed button showing `label` that fires
+    /// `command` on activation.
     #[must_use]
     pub fn new(label: impl Into<Box<str>>, command: InternedSymbol) -> Self {
         Self {
@@ -39,63 +40,64 @@ impl Button {
         }
     }
 
-    #[doc = include_str!("button.doc/disabled.md")]
+    /// Sets the disabled state, returning the updated button (fluent builder).
     #[must_use]
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
 
-    #[doc = include_str!("button.doc/press.md")]
+    /// Arms the button. A no-op while [`disabled`](Self::is_disabled).
     pub fn press(&mut self) {
         if !self.disabled {
             self.pressed = true;
         }
     }
 
-    #[doc = include_str!("button.doc/release.md")]
+    /// Ends a press cycle, clearing the pressed state and returning whether the
+    /// button was *activated* — i.e. it had been pressed and is enabled.
     pub fn release(&mut self) -> bool {
         let activated = self.pressed && !self.disabled;
         self.pressed = false;
         activated
     }
 
-    #[doc = include_str!("button.doc/command.md")]
+    /// Returns the command fired when the button is activated.
     #[must_use]
     pub const fn command(&self) -> InternedSymbol {
         self.command
     }
 
-    #[doc = include_str!("button.doc/label.md")]
+    /// Returns the button label.
     #[must_use]
     pub fn label(&self) -> &str {
         &self.label
     }
 
-    #[doc = include_str!("button.doc/is_pressed.md")]
+    /// Returns whether the button is currently armed.
     #[must_use]
     pub const fn is_pressed(&self) -> bool {
         self.pressed
     }
 
-    #[doc = include_str!("button.doc/is_disabled.md")]
+    /// Returns whether the button is disabled.
     #[must_use]
     pub const fn is_disabled(&self) -> bool {
         self.disabled
     }
 
-    #[doc = include_str!("button.doc/set_disabled.md")]
+    /// Sets the disabled state in place.
     pub fn set_disabled(&mut self, disabled: bool) {
         self.disabled = disabled;
     }
 
-    #[doc = include_str!("button.doc/semantic_role.md")]
+    /// Returns the accessible role of this control.
     #[must_use]
     pub const fn semantic_role(&self) -> SemanticRole {
         SemanticRole::Button
     }
 
-    #[doc = include_str!("button.doc/view.md")]
+    #[doc = include_str!("../../docs/api/button/button.doc/view.md")]
     #[must_use]
     pub fn view(&self) -> View {
         let mut node = ViewNode::element(Self::COMPONENT_ID)
@@ -127,7 +129,7 @@ impl Button {
         View::single(node)
     }
 
-    #[doc = include_str!("button.doc/contents.md")]
+    #[doc = include_str!("../../docs/api/button/button.doc/contents.md")]
     #[must_use]
     pub(crate) fn contents(label: &str) -> ViewFragment {
         if label.is_empty() {
@@ -136,7 +138,7 @@ impl Button {
         ViewFragment::from_nodes(vec![Text::new(label).into_view_node()])
     }
 
-    #[doc = include_str!("button.doc/into_view_node.md")]
+    #[doc = include_str!("../../docs/api/button/button.doc/into_view_node.md")]
     #[must_use]
     pub fn into_view_node(&self) -> ViewNode {
         self.view()

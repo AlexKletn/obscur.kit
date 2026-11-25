@@ -1,32 +1,39 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Algorithm module.
 mod child_measurer;
 pub use child_measurer::ChildMeasurer;
 mod child_percent_basis;
 pub use child_percent_basis::ChildPercentBasis;
 mod constraint_layout;
+mod content_distribution;
 pub use constraint_layout::ConstraintLayout;
 mod custom_layout;
 pub use custom_layout::CustomLayout;
 mod docking_layout;
-pub use docking_layout::{DockSide, DockingLayout};
+pub use docking_layout::DockingLayout;
+mod dock_side;
+pub use dock_side::DockSide;
 mod fixed_child_measurer;
 pub use fixed_child_measurer::FixedChildMeasurer;
 mod flex_axis_bounds;
 mod flex_cross_size;
 mod flex_layout;
 pub use flex_layout::FlexLayout;
+mod collapsing_margins;
+mod flex_line_args;
 mod flex_line_placement;
 mod flex_main_margins;
 mod flex_main_probe;
 mod flow_layout;
+mod placed_line;
 mod resolve_flexible_lengths;
+mod vertical_placement;
 pub use flow_layout::FlowLayout;
 mod intrinsic_inline;
 pub(crate) use intrinsic_inline::intrinsic_inline_size;
 mod grid;
 pub use grid::{
-    AutoRepeat, AutoRepeatMode, GridAutoFlow, GridLine, GridPlacement, GridTemplate, TrackList,
-    TrackSize,
+    AutoRepeat, AutoRepeatMode, GridAutoFlow, GridLine, GridPlacement, GridTemplate,
+    RepeatedGridLine, TrackLimit, TrackList, TrackSize,
 };
 mod grid_item_alignment;
 mod grid_item_margins;
@@ -35,13 +42,19 @@ mod grid_layout;
 pub use grid_layout::GridLayout;
 mod grid_track_positions;
 mod grid_track_sizing;
+mod intrinsic_track_kind;
 mod layout_algorithm;
+mod max_track_fn;
+mod min_track_fn;
+mod track_contributions;
+mod track_sizing_state;
 pub use layout_algorithm::LayoutAlgorithm;
 mod layout_child;
 pub use layout_child::LayoutChild;
 mod layout_output;
 pub use layout_output::LayoutOutput;
 mod size_clamp;
+mod size_containment;
 pub(crate) use size_clamp::{clamp_content, clamp_content_measured};
 mod positioned_layout;
 pub use positioned_layout::PositionedLayout;

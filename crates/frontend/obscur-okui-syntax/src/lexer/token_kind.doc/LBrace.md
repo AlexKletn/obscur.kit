@@ -1,1 +1,0 @@
-`{` — opens an expression interpolation.

@@ -1,17 +1,17 @@
-#![doc = include_str!("runtime_id.doc/_module.md")]
+//! Typed identifier: `RuntimeId`.
 
-#[doc = include_str!("runtime_id.doc/RuntimeId.md")]
+#[doc = include_str!("../../docs/api/id/runtime_id.doc/RuntimeId.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RuntimeId(u64);
 
 impl RuntimeId {
-    #[doc = include_str!("runtime_id.doc/from_raw.md")]
+    /// Wraps a raw handle value into a `RuntimeId`.
     #[must_use]
     pub const fn from_raw(raw: u64) -> Self {
         Self(raw)
     }
 
-    #[doc = include_str!("runtime_id.doc/raw.md")]
+    /// Returns the raw handle value backing this identifier.
     #[must_use]
     pub const fn raw(self) -> u64 {
         self.0

@@ -1,33 +1,25 @@
-#![doc = include_str!("composition.doc/_module.md")]
+//! The active IME composition session anchored in the target buffer
+//! (spec §5.12 IME).
 
 use crate::span::TextRange;
 
 use super::Preedit;
 
-#[doc = include_str!("composition.doc/CompositionState.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum CompositionState {
-    #[doc = include_str!("composition.doc/Composing.md")]
-    Composing,
-    #[doc = include_str!("composition.doc/Committed.md")]
-    Committed,
-    #[doc = include_str!("composition.doc/Cancelled.md")]
-    Cancelled,
-}
+use super::CompositionState;
 
-#[doc = include_str!("composition.doc/Composition.md")]
+#[doc = include_str!("../../docs/api/ime/composition.doc/Composition.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Composition {
-    #[doc = include_str!("composition.doc/anchor.md")]
+    /// The byte range in the target buffer the composition occupies / replaces.
     anchor: TextRange,
-    #[doc = include_str!("composition.doc/preedit.md")]
+    /// The uncommitted preedit shown at the anchor.
     preedit: Preedit,
-    #[doc = include_str!("composition.doc/state.md")]
+    /// The lifecycle state.
     state: CompositionState,
 }
 
 impl Composition {
-    #[doc = include_str!("composition.doc/start.md")]
+    #[doc = include_str!("../../docs/api/ime/composition.doc/start.md")]
     #[must_use]
     pub fn start(anchor: TextRange) -> Self {
         Self {
@@ -37,14 +29,14 @@ impl Composition {
         }
     }
 
-    #[doc = include_str!("composition.doc/update.md")]
+    #[doc = include_str!("../../docs/api/ime/composition.doc/update.md")]
     pub fn update(&mut self, preedit: Preedit) {
         if self.state == CompositionState::Composing {
             self.preedit = preedit;
         }
     }
 
-    #[doc = include_str!("composition.doc/commit.md")]
+    #[doc = include_str!("../../docs/api/ime/composition.doc/commit.md")]
     #[must_use]
     pub fn commit(&mut self) -> Box<str> {
         if self.state != CompositionState::Composing {
@@ -56,7 +48,7 @@ impl Composition {
         text
     }
 
-    #[doc = include_str!("composition.doc/cancel.md")]
+    #[doc = include_str!("../../docs/api/ime/composition.doc/cancel.md")]
     pub fn cancel(&mut self) {
         if self.state == CompositionState::Composing {
             self.preedit = Preedit::empty();
@@ -64,31 +56,32 @@ impl Composition {
         }
     }
 
-    #[doc = include_str!("composition.doc/is_active.md")]
+    /// Returns whether the composition is live
+    /// ([`Composing`](CompositionState::Composing)).
     #[must_use]
     pub const fn is_active(&self) -> bool {
         matches!(self.state, CompositionState::Composing)
     }
 
-    #[doc = include_str!("composition.doc/anchor_2.md")]
+    /// Returns the byte range the composition occupies in the target buffer.
     #[must_use]
     pub const fn anchor(&self) -> TextRange {
         self.anchor
     }
 
-    #[doc = include_str!("composition.doc/preedit_2.md")]
+    /// Returns the current preedit.
     #[must_use]
     pub const fn preedit(&self) -> &Preedit {
         &self.preedit
     }
 
-    #[doc = include_str!("composition.doc/state_2.md")]
+    /// Returns the lifecycle state.
     #[must_use]
     pub const fn state(&self) -> CompositionState {
         self.state
     }
 
-    #[doc = include_str!("composition.doc/validate_external_edit.md")]
+    #[doc = include_str!("../../docs/api/ime/composition.doc/validate_external_edit.md")]
     #[must_use]
     pub fn validate_external_edit(&self, edit: TextRange) -> bool {
         if self.state == CompositionState::Composing {

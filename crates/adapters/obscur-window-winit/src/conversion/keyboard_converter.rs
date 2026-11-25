@@ -1,19 +1,21 @@
-#![doc = include_str!("keyboard_converter.doc/_module.md")]
+//! The [`KeyboardConverter`] pure winit→domain key converter (spec §6.7
+//! keyboard; §6.1 windowing; §2.7 "преобразует native events в доменные
+//! события").
 
 use obscur_interaction::command::{LogicalKey, Modifier, Modifiers, NamedKey, PhysicalKey};
 
-#[doc = include_str!("keyboard_converter.doc/KeyboardConverter.md")]
+#[doc = include_str!("../../docs/api/conversion/keyboard_converter.doc/KeyboardConverter.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct KeyboardConverter;
 
 impl KeyboardConverter {
-    #[doc = include_str!("keyboard_converter.doc/new.md")]
+    /// Creates a converter.
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    #[doc = include_str!("keyboard_converter.doc/physical_key.md")]
+    #[doc = include_str!("../../docs/api/conversion/keyboard_converter.doc/physical_key.md")]
     #[must_use]
     pub fn physical_key(code: winit::keyboard::KeyCode) -> Option<PhysicalKey> {
         use winit::keyboard::KeyCode as Kc;
@@ -93,7 +95,7 @@ impl KeyboardConverter {
         Some(mapped)
     }
 
-    #[doc = include_str!("keyboard_converter.doc/modifiers.md")]
+    #[doc = include_str!("../../docs/api/conversion/keyboard_converter.doc/modifiers.md")]
     #[must_use]
     pub fn modifiers(state: winit::keyboard::ModifiersState) -> Modifiers {
         let mut modifiers = Modifiers::new();
@@ -110,7 +112,7 @@ impl KeyboardConverter {
         modifiers
     }
 
-    #[doc = include_str!("keyboard_converter.doc/logical_key.md")]
+    #[doc = include_str!("../../docs/api/conversion/keyboard_converter.doc/logical_key.md")]
     #[must_use]
     pub fn logical_key(key: &winit::keyboard::Key) -> Option<LogicalKey> {
         use winit::keyboard::{Key, NamedKey as Winit};

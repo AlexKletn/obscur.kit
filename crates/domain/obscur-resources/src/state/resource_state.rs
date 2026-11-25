@@ -1,83 +1,87 @@
-#![doc = include_str!("resource_state.doc/_module.md")]
+//! Load lifecycle state of a resource (spec §5.15 loading/ready/failed).
 
 use crate::state::{ResourceError, ResourceMetadata, ResourceVersion};
 
-#[doc = include_str!("resource_state.doc/ResourceState.md")]
+#[doc = include_str!("../../docs/api/state/resource_state.doc/ResourceState.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum ResourceState {
-    #[doc = include_str!("resource_state.doc/Pending.md")]
+    /// The resource has been requested but loading has not started.
     Pending,
-    #[doc = include_str!("resource_state.doc/Loading.md")]
+    /// The resource is in flight. `progress` is `0.0..=1.0` when known (spec
+    /// §5.16 progressive decode), or `None` when indeterminate.
     Loading {
-        #[doc = include_str!("resource_state.doc/progress.md")]
+        /// Fractional load progress in `0.0..=1.0`, or `None` if indeterminate.
         progress: Option<f32>,
     },
-    #[doc = include_str!("resource_state.doc/Ready.md")]
+    /// The resource is usable, carrying the version it was loaded at and its
+    /// descriptive metadata (spec §5.15 ready state).
     Ready {
-        #[doc = include_str!("resource_state.doc/version.md")]
+        /// The version this ready result was produced at.
         version: ResourceVersion,
-        #[doc = include_str!("resource_state.doc/metadata.md")]
+        /// Descriptive metadata about the loaded resource.
         metadata: ResourceMetadata,
     },
-    #[doc = include_str!("resource_state.doc/Failed.md")]
+    /// The resource failed at a given version, so a newer reload can supersede
+    /// it (spec §5.15 failed state).
     Failed {
-        #[doc = include_str!("resource_state.doc/error.md")]
+        /// Why the resource failed.
         error: ResourceError,
-        #[doc = include_str!("resource_state.doc/version_2.md")]
+        /// The version this failure was produced at.
         version: ResourceVersion,
     },
 }
 
 impl ResourceState {
-    #[doc = include_str!("resource_state.doc/pending.md")]
+    /// A [`ResourceState::Pending`] state.
     #[must_use]
     pub const fn pending() -> Self {
         Self::Pending
     }
 
-    #[doc = include_str!("resource_state.doc/loading.md")]
+    /// A [`ResourceState::Loading`] state with the given optional progress.
     #[must_use]
     pub const fn loading(progress: Option<f32>) -> Self {
         Self::Loading { progress }
     }
 
-    #[doc = include_str!("resource_state.doc/ready.md")]
+    /// A [`ResourceState::Ready`] state at the given version, carrying metadata.
     #[must_use]
     pub const fn ready(version: ResourceVersion, metadata: ResourceMetadata) -> Self {
         Self::Ready { version, metadata }
     }
 
-    #[doc = include_str!("resource_state.doc/failed.md")]
+    /// A [`ResourceState::Failed`] state with the given error and version.
     #[must_use]
     pub const fn failed(error: ResourceError, version: ResourceVersion) -> Self {
         Self::Failed { error, version }
     }
 
-    #[doc = include_str!("resource_state.doc/is_ready.md")]
+    /// Returns whether the resource is ready to use.
     #[must_use]
     pub const fn is_ready(&self) -> bool {
         matches!(self, Self::Ready { .. })
     }
 
-    #[doc = include_str!("resource_state.doc/is_failed.md")]
+    /// Returns whether the resource failed to load.
     #[must_use]
     pub const fn is_failed(&self) -> bool {
         matches!(self, Self::Failed { .. })
     }
 
-    #[doc = include_str!("resource_state.doc/is_loading.md")]
+    /// Returns whether the resource is currently loading.
     #[must_use]
     pub const fn is_loading(&self) -> bool {
         matches!(self, Self::Loading { .. })
     }
 
-    #[doc = include_str!("resource_state.doc/is_terminal.md")]
+    /// Returns whether the resource has reached a terminal state
+    /// ([`ResourceState::Ready`] or [`ResourceState::Failed`]).
     #[must_use]
     pub const fn is_terminal(&self) -> bool {
         matches!(self, Self::Ready { .. } | Self::Failed { .. })
     }
 
-    #[doc = include_str!("resource_state.doc/version_3.md")]
+    #[doc = include_str!("../../docs/api/state/resource_state.doc/version_3.md")]
     #[must_use]
     pub const fn version(&self) -> Option<ResourceVersion> {
         match self {
@@ -86,7 +90,7 @@ impl ResourceState {
         }
     }
 
-    #[doc = include_str!("resource_state.doc/metadata_2.md")]
+    /// Returns the metadata for a [`ResourceState::Ready`] state, else `None`.
     #[must_use]
     pub const fn metadata(&self) -> Option<&ResourceMetadata> {
         match self {
@@ -95,7 +99,7 @@ impl ResourceState {
         }
     }
 
-    #[doc = include_str!("resource_state.doc/error_2.md")]
+    /// Returns the error for a [`ResourceState::Failed`] state, else `None`.
     #[must_use]
     pub const fn error(&self) -> Option<&ResourceError> {
         match self {

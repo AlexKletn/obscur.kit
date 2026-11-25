@@ -1,20 +1,20 @@
-#![doc = include_str!("capability_contract.doc/_module.md")]
+//! `CapabilityContract`: a capability a component depends on (spec §2.13).
 
 use obscur_capability::CapabilityId;
 
 use crate::contract::CapabilityRequirement;
 
-#[doc = include_str!("capability_contract.doc/CapabilityContract.md")]
+#[doc = include_str!("../../docs/api/contract/capability_contract.doc/CapabilityContract.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CapabilityContract {
-    #[doc = include_str!("capability_contract.doc/capability.md")]
+    /// Stable identifier of the capability being depended on.
     pub capability: CapabilityId,
-    #[doc = include_str!("capability_contract.doc/requirement.md")]
+    /// How strongly the component needs the capability.
     pub requirement: CapabilityRequirement,
 }
 
 impl CapabilityContract {
-    #[doc = include_str!("capability_contract.doc/new.md")]
+    /// Creates a contract declaring `capability` with the given `requirement`.
     #[must_use]
     pub const fn new(capability: CapabilityId, requirement: CapabilityRequirement) -> Self {
         Self {
@@ -23,19 +23,19 @@ impl CapabilityContract {
         }
     }
 
-    #[doc = include_str!("capability_contract.doc/required.md")]
+    /// Creates a contract for a strictly required capability.
     #[must_use]
     pub const fn required(capability: CapabilityId) -> Self {
         Self::new(capability, CapabilityRequirement::Required)
     }
 
-    #[doc = include_str!("capability_contract.doc/optional.md")]
+    /// Creates a contract for an optional capability.
     #[must_use]
     pub const fn optional(capability: CapabilityId) -> Self {
         Self::new(capability, CapabilityRequirement::Optional)
     }
 
-    #[doc = include_str!("capability_contract.doc/is_required.md")]
+    /// Returns whether the capability is strictly required.
     #[must_use]
     pub const fn is_required(&self) -> bool {
         self.requirement.is_required()

@@ -1,4 +1,4 @@
-#![doc = include_str!("component_store.doc/_module.md")]
+//! `ComponentStore`: the runtime's per-node component instances.
 
 use obscur_identity::{ComponentId, NodeId, SignalId};
 use obscur_tree::node::{NodeFlags, NodeKind};
@@ -11,72 +11,77 @@ use obscur_view::state::SignalGenerations;
 
 use crate::component::MountedComponent;
 
-#[doc = include_str!("component_store.doc/ComponentStore.md")]
+#[doc = include_str!("../../docs/api/component/component_store.doc/ComponentStore.md")]
 #[derive(Debug, Default)]
 pub struct ComponentStore {
-    #[doc = include_str!("component_store.doc/registry.md")]
+    /// The kinds a host has registered; nothing mounts without one.
     registry: ComponentRegistry,
-    #[doc = include_str!("component_store.doc/mounted.md")]
+    /// One live instance per component-backed node.
     mounted: SecondaryMap<MountedComponent>,
-    #[doc = include_str!("component_store.doc/next_instance.md")]
+    /// Monotonic source of [`InstanceId`]s. Never reused, so an id in a
+    /// diagnostic always names one historical instance.
     next_instance: u64,
-    #[doc = include_str!("component_store.doc/signals.md")]
+    /// The current version of every observable source (spec §3.1). A component
+    /// records which of these its render read; comparing the two is what
+    /// invalidates only the consumers of a value that actually changed.
     signals: SignalGenerations,
 }
 
 impl ComponentStore {
-    #[doc = include_str!("component_store.doc/new.md")]
+    /// Creates an empty store with no registered kinds.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    #[doc = include_str!("component_store.doc/register.md")]
+    #[doc = include_str!("../../docs/api/component/component_store.doc/register.md")]
     pub fn register(&mut self, registration: ComponentRegistration) -> Result<(), RegistryError> {
         self.registry.register(registration)
     }
 
-    #[doc = include_str!("component_store.doc/has_registrations.md")]
+    /// Whether any component kind is registered — the cheap guard that lets a
+    /// host which uses no components skip every code path here.
     #[must_use]
     pub fn has_registrations(&self) -> bool {
         !self.registry.is_empty()
     }
 
-    #[doc = include_str!("component_store.doc/len.md")]
+    /// The number of currently mounted instances.
     #[must_use]
     pub fn len(&self) -> usize {
         self.mounted.len()
     }
 
-    #[doc = include_str!("component_store.doc/is_empty.md")]
+    /// Whether nothing is mounted.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.mounted.is_empty()
     }
 
-    #[doc = include_str!("component_store.doc/contract.md")]
+    #[doc = include_str!("../../docs/api/component/component_store.doc/contract.md")]
     #[must_use]
     pub fn contract(&self, component: ComponentId) -> Option<&ComponentContract> {
         self.registry.contract(component)
     }
 
-    #[doc = include_str!("component_store.doc/get.md")]
+    /// The instance mounted at `node`, if any.
     #[must_use]
     pub fn get(&self, node: NodeId) -> Option<&MountedComponent> {
         self.mounted.get(node)
     }
 
-    #[doc = include_str!("component_store.doc/get_mut.md")]
+    /// Mutable access to the instance mounted at `node`, if any.
     pub fn get_mut(&mut self, node: NodeId) -> Option<&mut MountedComponent> {
         self.mounted.get_mut(node)
     }
 
-    #[doc = include_str!("component_store.doc/nodes.md")]
+    /// Every mounted node, in unspecified order.
     pub fn nodes(&self) -> impl Iterator<Item = NodeId> + '_ {
         self.mounted.iter().map(|(node, _)| node)
     }
 
-    #[doc = include_str!("component_store.doc/stale_nodes.md")]
+    /// Every mounted node whose component's output is stale and must be
+    /// re-rendered — the only ones a frame needs to touch.
     #[must_use]
     pub fn stale_nodes(&self) -> Vec<NodeId> {
         self.mounted
@@ -86,13 +91,14 @@ impl ComponentStore {
             .collect()
     }
 
-    #[doc = include_str!("component_store.doc/signals_2.md")]
+    /// The current version of every observable source, for a caller that renders
+    /// a component itself.
     #[must_use]
     pub const fn signals(&self) -> &SignalGenerations {
         &self.signals
     }
 
-    #[doc = include_str!("component_store.doc/notify.md")]
+    #[doc = include_str!("../../docs/api/component/component_store.doc/notify.md")]
     pub fn notify(&mut self, source: SignalId) -> usize {
         let current = self.signals.bump(source);
         let stale: Vec<NodeId> = self
@@ -109,13 +115,28 @@ impl ComponentStore {
         stale.len()
     }
 
-    #[doc = include_str!("component_store.doc/has_stale.md")]
+    /// How many mounted components still need a render.
+    ///
+    /// [`Self::has_stale`] answers whether the frame must ask for another one;
+    /// this answers how hard. The distinction matters when a loop turns forever
+    /// with nothing changing on screen: one component re-rendering itself and
+    /// two hundred of them are the same `true` and different faults. Walks the
+    /// mounted components, so it is asked only when an instrument is on.
+    #[must_use]
+    pub fn stale_count(&self) -> usize {
+        self.mounted
+            .iter()
+            .filter(|(_, mounted)| mounted.needs_render())
+            .count()
+    }
+
+    #[doc = include_str!("../../docs/api/component/component_store.doc/has_stale.md")]
     #[must_use]
     pub fn has_stale(&self) -> bool {
         self.mounted.iter().any(|(_, m)| m.needs_render())
     }
 
-    #[doc = include_str!("component_store.doc/sync.md")]
+    #[doc = include_str!("../../docs/api/component/component_store.doc/sync.md")]
     pub fn sync(&mut self, tree: &mut RetainedTree, plan: &ReconciliationPlan) {
         for op in plan {
             if op.is_insert() {
@@ -130,7 +151,7 @@ impl ComponentStore {
         }
     }
 
-    #[doc = include_str!("component_store.doc/mount.md")]
+    #[doc = include_str!("../../docs/api/component/component_store.doc/mount.md")]
     fn mount(&mut self, tree: &mut RetainedTree, node: NodeId) {
         let Some(component) = tree.get(node).and_then(|n| component_id_of(n.kind())) else {
             return;
@@ -162,7 +183,7 @@ impl ComponentStore {
         }
     }
 
-    #[doc = include_str!("component_store.doc/unmount.md")]
+    #[doc = include_str!("../../docs/api/component/component_store.doc/unmount.md")]
     fn unmount(&mut self, tree: &mut RetainedTree, node: NodeId) {
         if let Some(mut mounted) = self.mounted.remove(node) {
             mounted.unmount(&self.signals);
@@ -178,7 +199,8 @@ impl ComponentStore {
     }
 }
 
-#[doc = include_str!("component_store.doc/component_id_of.md")]
+/// The [`ComponentId`] a node instantiates, or [`None`] for a kind that names no
+/// component (root, text, synthetic).
 fn component_id_of(kind: &NodeKind) -> Option<ComponentId> {
     kind.component_id()
 }

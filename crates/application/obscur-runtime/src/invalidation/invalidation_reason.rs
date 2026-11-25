@@ -1,30 +1,36 @@
-#![doc = include_str!("invalidation_reason.doc/_module.md")]
+//! The runtime-level cause of a change (Obscur Kit 2 specs §4.3).
 
 use crate::invalidation::InvalidationKind;
 
-#[doc = include_str!("invalidation_reason.doc/InvalidationReason.md")]
+#[doc = include_str!("../../docs/api/invalidation/invalidation_reason.doc/InvalidationReason.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum InvalidationReason {
-    #[doc = include_str!("invalidation_reason.doc/StyleChanged.md")]
+    /// A node's style / declarations changed (e.g. a stylesheet rule now matches
+    /// differently). Maps to [`InvalidationKind::Style`].
     StyleChanged,
-    #[doc = include_str!("invalidation_reason.doc/InlineStyleChanged.md")]
+    /// A node's inline style attribute changed. Maps to [`InvalidationKind::Style`].
     InlineStyleChanged,
-    #[doc = include_str!("invalidation_reason.doc/PseudoStateChanged.md")]
+    /// A node's pseudo-state changed (hover/focus/etc.). Maps to
+    /// [`InvalidationKind::Style`].
     PseudoStateChanged,
-    #[doc = include_str!("invalidation_reason.doc/CustomPropertyChanged.md")]
+    /// A custom property (CSS variable) affecting a node changed. Maps to
+    /// [`InvalidationKind::Style`].
     CustomPropertyChanged,
-    #[doc = include_str!("invalidation_reason.doc/LayoutChanged.md")]
+    #[doc = include_str!("../../docs/api/invalidation/invalidation_reason.doc/LayoutChanged.md")]
     LayoutChanged,
-    #[doc = include_str!("invalidation_reason.doc/TreeChanged.md")]
+    /// The node tree changed (children added/removed). Maps to
+    /// [`InvalidationKind::Tree`].
     TreeChanged,
-    #[doc = include_str!("invalidation_reason.doc/ContentChanged.md")]
+    /// A node's text / intrinsic content changed. Maps to
+    /// [`InvalidationKind::Text`].
     ContentChanged,
-    #[doc = include_str!("invalidation_reason.doc/EnvironmentChanged.md")]
+    /// The window/environment changed (viewport, DPI). Maps to
+    /// [`InvalidationKind::Environment`].
     EnvironmentChanged,
 }
 
 impl InvalidationReason {
-    #[doc = include_str!("invalidation_reason.doc/kind.md")]
+    #[doc = include_str!("../../docs/api/invalidation/invalidation_reason.doc/kind.md")]
     #[must_use]
     pub fn kind(self) -> InvalidationKind {
         match self {

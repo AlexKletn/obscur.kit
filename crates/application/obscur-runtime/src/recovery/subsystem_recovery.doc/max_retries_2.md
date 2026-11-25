@@ -1,1 +1,0 @@
-The configured retry budget.

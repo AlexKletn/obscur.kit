@@ -1,21 +1,23 @@
-#![doc = include_str!("semantic_tree.doc/_module.md")]
+//! The semantic accessibility tree linked to the retained UI tree (spec §7.1).
 
 use std::collections::BTreeMap;
 
+use obscur_geometry::Rect;
 use obscur_identity::NodeId;
 
-use crate::semantic::SemanticNode;
+use crate::semantic::{SemanticNode, SemanticRole};
 
-#[doc = include_str!("semantic_tree.doc/SemanticTree.md")]
+#[doc = include_str!("../../docs/api/tree/semantic_tree.doc/SemanticTree.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct SemanticTree {
-    #[doc = include_str!("semantic_tree.doc/nodes.md")]
+    /// The semantic nodes, keyed by the retained [`NodeId`] each describes.
     nodes: BTreeMap<NodeId, SemanticNode>,
-    #[doc = include_str!("semantic_tree.doc/children.md")]
+    /// Ordered child id lists, keyed by parent [`NodeId`].
     children: BTreeMap<NodeId, Vec<NodeId>>,
-    #[doc = include_str!("semantic_tree.doc/root.md")]
+    /// The tree root, if one has been designated.
     root: Option<NodeId>,
-    #[doc = include_str!("semantic_tree.doc/version.md")]
+    /// The monotonic mutation counter, bumped on every structural or content
+    /// change; used for snapshot staleness rather than any wall-clock value.
     version: u64,
 }
 
@@ -26,7 +28,7 @@ impl Default for SemanticTree {
 }
 
 impl SemanticTree {
-    #[doc = include_str!("semantic_tree.doc/new.md")]
+    /// Creates an empty tree with no nodes, no root, and version `0`.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -37,19 +39,19 @@ impl SemanticTree {
         }
     }
 
-    #[doc = include_str!("semantic_tree.doc/set_root.md")]
+    /// Designates `id` as the tree [`root`](Self::root) and bumps the version.
     pub fn set_root(&mut self, id: NodeId) {
         self.root = Some(id);
         self.version += 1;
     }
 
-    #[doc = include_str!("semantic_tree.doc/root_2.md")]
+    /// Returns the tree root, if one has been designated.
     #[must_use]
     pub const fn root(&self) -> Option<NodeId> {
         self.root
     }
 
-    #[doc = include_str!("semantic_tree.doc/insert.md")]
+    #[doc = include_str!("../../docs/api/tree/semantic_tree.doc/insert.md")]
     pub fn insert(&mut self, node: SemanticNode, parent: Option<NodeId>) {
         let id = node.node();
         self.nodes.insert(id, node);
@@ -59,19 +61,52 @@ impl SemanticTree {
         self.version += 1;
     }
 
-    #[doc = include_str!("semantic_tree.doc/get.md")]
+    /// Returns the semantic node for `id`, if present.
     #[must_use]
     pub fn get(&self, id: NodeId) -> Option<&SemanticNode> {
         self.nodes.get(&id)
     }
 
-    #[doc = include_str!("semantic_tree.doc/children_2.md")]
+    /// Projects live editable text and its directional UTF-8 selection.
+    pub fn project_editing(&mut self, id: NodeId, text: &str, selection: [usize; 2]) {
+        use crate::semantic::{SemanticAction, SemanticRole, SemanticValue};
+
+        if let Some(node) = self.nodes.get_mut(&id)
+            && node.role == SemanticRole::TextInput
+            && !node.state.hidden
+            && selection
+                .iter()
+                .all(|&offset| text.is_char_boundary(offset))
+        {
+            node.value = SemanticValue::text(text);
+            node.text_selection = Some(selection);
+            if !node.supports_action(SemanticAction::SetTextSelection) {
+                node.add_action(SemanticAction::SetTextSelection);
+            }
+            self.version += 1;
+        }
+    }
+
+    /// Updates the geometry of existing semantic nodes without changing their hierarchy.
+    pub fn project_bounds(&mut self, mut bounds_for: impl FnMut(NodeId) -> Option<Rect>) {
+        let mut changed = false;
+        for (&id, node) in &mut self.nodes {
+            let bounds = bounds_for(id);
+            changed |= node.bounds != bounds;
+            node.bounds = bounds;
+        }
+        if changed {
+            self.version += 1;
+        }
+    }
+
+    /// Returns the ordered child ids of `id`, or an empty slice if it has none.
     #[must_use]
     pub fn children(&self, id: NodeId) -> &[NodeId] {
         self.children.get(&id).map_or(&[], Vec::as_slice)
     }
 
-    #[doc = include_str!("semantic_tree.doc/remove.md")]
+    #[doc = include_str!("../../docs/api/tree/semantic_tree.doc/remove.md")]
     pub fn remove(&mut self, id: NodeId) -> Option<SemanticNode> {
         let removed = self.nodes.remove(&id)?;
         self.children.remove(&id);
@@ -85,40 +120,54 @@ impl SemanticTree {
         Some(removed)
     }
 
-    #[doc = include_str!("semantic_tree.doc/contains.md")]
+    /// Returns whether a node for `id` is present.
     #[must_use]
     pub fn contains(&self, id: NodeId) -> bool {
         self.nodes.contains_key(&id)
     }
 
-    #[doc = include_str!("semantic_tree.doc/len.md")]
+    /// Returns the number of nodes in the tree.
     #[must_use]
     pub fn len(&self) -> usize {
         self.nodes.len()
     }
 
-    #[doc = include_str!("semantic_tree.doc/is_empty.md")]
+    /// Returns whether the tree holds no nodes.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
     }
 
-    #[doc = include_str!("semantic_tree.doc/version_2.md")]
+    /// Returns the current monotonic version counter.
     #[must_use]
     pub const fn version(&self) -> u64 {
         self.version
     }
 
-    #[doc = include_str!("semantic_tree.doc/iter.md")]
+    /// Iterates over every `(NodeId, &SemanticNode)` in deterministic ascending
+    /// id order.
     pub fn iter(&self) -> impl Iterator<Item = (NodeId, &SemanticNode)> {
         self.nodes.iter().map(|(id, node)| (*id, node))
+    }
+
+    /// Lists visible nodes with the given semantic role. An optional name is
+    /// matched exactly against the accessible name. With no name, any name matches.
+    pub fn by_role<'a>(
+        &'a self,
+        role: SemanticRole,
+        name: Option<&'a str>,
+    ) -> impl Iterator<Item = (NodeId, &'a SemanticNode)> + 'a {
+        self.iter().filter(move |(_, node)| {
+            !node.state().hidden
+                && node.role() == role
+                && name.is_none_or(|name| node.name() == Some(name))
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::semantic::SemanticRole;
 
     fn node(n: u64) -> SemanticNode {
         SemanticNode::new(NodeId::from_raw(n), SemanticRole::Button)

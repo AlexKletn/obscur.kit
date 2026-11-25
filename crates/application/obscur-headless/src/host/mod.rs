@@ -1,5 +1,6 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Host module.
 mod headless_host;
+mod runtime_timer;
 
 pub use headless_host::HeadlessHost;
 

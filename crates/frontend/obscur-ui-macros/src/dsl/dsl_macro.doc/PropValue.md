@@ -1,1 +1,0 @@
-A resolved attribute value.

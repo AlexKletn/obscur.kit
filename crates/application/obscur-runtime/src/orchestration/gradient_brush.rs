@@ -1,4 +1,6 @@
-#![doc = include_str!("gradient_brush.doc/_module.md")]
+//! CSS Images 3 gradients resolved into scene fill brushes: the linear
+//! gradient line, the radial ending shape, and the conic sweep, each over the
+//! box they paint.
 
 use obscur_geometry::{Point, Rect};
 use obscur_scene::paint::{
@@ -11,7 +13,7 @@ use obscur_style::property::{
 
 use super::paint_color::scene_color_from;
 
-#[doc = include_str!("gradient_brush.doc/linear_gradient_brush.md")]
+#[doc = include_str!("../../docs/api/orchestration/gradient_brush.doc/linear_gradient_brush.md")]
 pub(super) fn linear_gradient_brush(
     gradient: &LinearGradient,
     bounds: Rect,
@@ -34,6 +36,27 @@ pub(super) fn linear_gradient_brush(
     // valid for any unit `dir` (reduces to |w·sin θ| + |h·cos θ| for an angle).
     let half_len = (w * dir_x).abs().mul_add(0.5, (h * dir_y).abs() * 0.5);
     let start = Point::new(cx - dir_x * half_len, cy - dir_y * half_len);
+    if let Some(positions) = gradient.repeat_positions() {
+        let (first, period, stops) =
+            resolve_repeat_stops(gradient.stops(), positions, f64::from(2.0 * half_len));
+        if period <= 0.0 || !period.is_finite() {
+            return SceneLinearGradient::new(
+                start,
+                Point::new(cx + dir_x * half_len, cy + dir_y * half_len),
+                vec![SceneGradientStop::new(0.0, average_repeat_stops(&stops))],
+            );
+        }
+        let point_at = |distance: f64| {
+            Point::new(
+                obscur_geometry::saturating_f32(f64::from(start.x) + f64::from(dir_x) * distance),
+                obscur_geometry::saturating_f32(f64::from(start.y) + f64::from(dir_y) * distance),
+            )
+        };
+        let start = point_at(first);
+        let end = point_at(first + period);
+        return SceneLinearGradient::new(start, end, phase_repeat_stops(&stops, 0.0))
+            .with_extend(ExtendMode::Repeat);
+    }
     let stops = gradient_stops(gradient.stops());
     // A repeating gradient's axis spans exactly one period from the box's 0%
     // anchor, and the pattern tiles with `ExtendMode::Repeat`.
@@ -51,7 +74,7 @@ pub(super) fn linear_gradient_brush(
     SceneLinearGradient::new(start, end, stops)
 }
 
-#[doc = include_str!("gradient_brush.doc/corner_direction.md")]
+#[doc = include_str!("../../docs/api/orchestration/gradient_brush.doc/corner_direction.md")]
 fn corner_direction(corner: Corner, w: f32, h: f32) -> (f32, f32) {
     let (sx, sy) = match corner {
         Corner::TopRight => (h, -w),
@@ -67,7 +90,7 @@ fn corner_direction(corner: Corner, w: f32, h: f32) -> (f32, f32) {
     }
 }
 
-#[doc = include_str!("gradient_brush.doc/radial_gradient_brush.md")]
+#[doc = include_str!("../../docs/api/orchestration/gradient_brush.doc/radial_gradient_brush.md")]
 pub(super) fn radial_gradient_brush(
     gradient: &RadialGradient,
     bounds: Rect,
@@ -75,15 +98,165 @@ pub(super) fn radial_gradient_brush(
     let cx = resolve_center(gradient.center_x(), bounds.origin.x, bounds.size.width);
     let cy = resolve_center(gradient.center_y(), bounds.origin.y, bounds.size.height);
     let (rx, ry) = resolve_radii(gradient.shape(), gradient.size(), cx, cy, bounds);
-    SceneRadialGradient::new_elliptical(
-        Point::new(cx, cy),
-        rx,
-        ry,
-        gradient_stops(gradient.stops()),
-    )
+    let center = Point::new(cx, cy);
+    if let Some(positions) = gradient.repeat_positions() {
+        return repeating_radial_brush(gradient, positions, center, rx, ry);
+    }
+    SceneRadialGradient::new_elliptical(center, rx, ry, gradient_stops(gradient.stops()))
 }
 
-#[doc = include_str!("gradient_brush.doc/conic_gradient_brush.md")]
+/// Resolves authored stop lengths and maps one CSS radial period to the repeating scene ellipse.
+fn repeating_radial_brush(
+    gradient: &RadialGradient,
+    positions: &[Option<Length>],
+    center: Point,
+    rx: f32,
+    ry: f32,
+) -> SceneRadialGradient {
+    let radius = f64::from(rx);
+    let (first, period, stops) = resolve_repeat_stops(gradient.stops(), positions, radius);
+    let period_x = obscur_geometry::saturating_f32(period);
+    let period_y = obscur_geometry::saturating_f32(period * f64::from(ry) / radius);
+    if !period.is_finite()
+        || period_x <= 0.0
+        || period_y <= 0.0
+        || !period_y.is_finite()
+        || radius <= 0.0
+    {
+        return SceneRadialGradient::new(
+            center,
+            1.0,
+            vec![SceneGradientStop::new(0.0, average_repeat_stops(&stops))],
+        );
+    }
+    let phase = (-first / period).rem_euclid(1.0);
+    let phase = if phase == 1.0 { 0.0 } else { phase };
+    let stops = phase_repeat_stops(&stops, phase);
+    SceneRadialGradient::new_elliptical(center, period_x, period_y, stops)
+        .with_extend(ExtendMode::Repeat)
+}
+
+/// Resolves CSS stop distances and normalizes one repeat, retaining the first stop’s offset.
+fn resolve_repeat_stops(
+    stops: &[obscur_style::property::GradientStop],
+    positions: &[Option<Length>],
+    basis: f64,
+) -> (f64, f64, Vec<(f64, obscur_scene::color::Color)>) {
+    let mut offsets: Vec<_> = positions
+        .iter()
+        .map(|position| match position {
+            Some(Length::Px(px)) => Some(f64::from(px.0)),
+            Some(Length::Percent(percent)) => Some(basis * f64::from(*percent) / 100.0),
+            _ => None,
+        })
+        .collect();
+    let last = offsets.len() - 1;
+    offsets[0].get_or_insert(0.0);
+    offsets[last].get_or_insert(basis);
+    let mut previous = f64::NEG_INFINITY;
+    for offset in offsets.iter_mut().flatten() {
+        *offset = offset.max(previous);
+        previous = *offset;
+    }
+    let first = offsets[0].unwrap_or_default();
+    let period = previous - first;
+    let colors = stops.iter().map(|stop| scene_color_from(stop.color()));
+    let mut start = 0;
+    for end in 1..=last {
+        let Some(next) = offsets[end] else {
+            continue;
+        };
+        let from = offsets[start].unwrap_or_default();
+        for (index, offset) in offsets.iter_mut().enumerate().take(end).skip(start + 1) {
+            #[allow(clippy::cast_precision_loss)]
+            let t = (index - start) as f64 / (end - start) as f64;
+            *offset = Some(from + (next - from) * t);
+        }
+        start = end;
+    }
+    let real_period = period > 0.0 && period.is_finite();
+    let stops: Vec<_> = offsets
+        .into_iter()
+        .zip(colors)
+        .enumerate()
+        .map(|(index, (offset, color))| {
+            #[allow(clippy::cast_precision_loss)]
+            let normalized = if real_period {
+                (offset.unwrap_or_default() - first) / period
+            } else {
+                index as f64 / last as f64
+            };
+            (normalized, color)
+        })
+        .collect();
+    (first, period, stops)
+}
+
+/// Computes the CSS Images average of a collapsed repeat in premultiplied sRGBA.
+#[allow(clippy::cast_possible_truncation)]
+fn average_repeat_stops(stops: &[(f64, obscur_scene::color::Color)]) -> obscur_scene::color::Color {
+    use obscur_scene::color::Color;
+
+    let mut total = [0.0; 4];
+    for pair in stops.windows(2) {
+        let weight = (pair[1].0 - pair[0].0) / 2.0;
+        for (_, color) in pair {
+            let alpha = f64::from(color.a);
+            total[0] += f64::from(color.r) * alpha * weight;
+            total[1] += f64::from(color.g) * alpha * weight;
+            total[2] += f64::from(color.b) * alpha * weight;
+            total[3] += alpha * weight;
+        }
+    }
+    let [r, g, b, a] = total;
+    if a > 0.0 {
+        Color::rgba((r / a) as f32, (g / a) as f32, (b / a) as f32, a as f32)
+    } else {
+        Color::rgba(0.0, 0.0, 0.0, 0.0)
+    }
+}
+
+/// Converts a normalized repeat to scene stops and shifts its seam when a nonzero phase is needed.
+#[allow(clippy::cast_possible_truncation)]
+fn phase_repeat_stops(
+    stops: &[(f64, obscur_scene::color::Color)],
+    phase: f64,
+) -> Vec<SceneGradientStop> {
+    use obscur_scene::color::convert::{oklab_lerp, premul_oklab};
+
+    if phase == 0.0 {
+        return stops
+            .iter()
+            .map(|&(offset, color)| SceneGradientStop::new(offset as f32, color))
+            .collect();
+    }
+    let lower = stops.partition_point(|&(offset, _)| offset < phase);
+    let upper = stops.partition_point(|&(offset, _)| offset <= phase);
+    let (before, after) = if upper > lower {
+        (stops[lower].1, stops[upper - 1].1)
+    } else {
+        let (a, from) = stops[lower - 1];
+        let (b, to) = stops[upper];
+        let color = oklab_lerp(premul_oklab(from), premul_oklab(to), (phase - a) / (b - a));
+        (color, color)
+    };
+    let mut rotated = Vec::with_capacity(stops.len() + 2);
+    rotated.push(SceneGradientStop::new(0.0, after));
+    rotated.extend(
+        stops[upper..]
+            .iter()
+            .map(|&(offset, color)| SceneGradientStop::new((offset - phase) as f32, color)),
+    );
+    rotated.extend(
+        stops[..lower]
+            .iter()
+            .map(|&(offset, color)| SceneGradientStop::new((1.0 + offset - phase) as f32, color)),
+    );
+    rotated.push(SceneGradientStop::new(1.0, before));
+    rotated
+}
+
+#[doc = include_str!("../../docs/api/orchestration/gradient_brush.doc/conic_gradient_brush.md")]
 pub(super) fn conic_gradient_brush(gradient: &ConicGradient, bounds: Rect) -> SceneConicGradient {
     let cx = resolve_center(gradient.center_x(), bounds.origin.x, bounds.size.width);
     let cy = resolve_center(gradient.center_y(), bounds.origin.y, bounds.size.height);
@@ -95,7 +268,11 @@ pub(super) fn conic_gradient_brush(gradient: &ConicGradient, bounds: Rect) -> Sc
     )
 }
 
-#[doc = include_str!("gradient_brush.doc/gradient_stops.md")]
+/// Maps a style gradient's color stops to scene [`SceneGradientStop`]s: each stop's
+/// resolved `0.0..=1.0` position becomes the scene offset and its
+/// [`StyleColor`](obscur_style::property::StyleColor)
+/// the scene paint color. An unpositioned stop (never produced by the CSS lowering,
+/// which resolves every position) falls back to its index-proportional offset.
 fn gradient_stops(stops: &[obscur_style::property::GradientStop]) -> Vec<SceneGradientStop> {
     stops
         .iter()
@@ -113,7 +290,10 @@ fn gradient_stops(stops: &[obscur_style::property::GradientStop]) -> Vec<SceneGr
         .collect()
 }
 
-#[doc = include_str!("gradient_brush.doc/resolve_center.md")]
+/// Resolves a gradient's box-relative center [`Length`] on one axis to an absolute
+/// coordinate: an absolute `px` offset from `origin`, a `Percent` as a fraction of
+/// the axis `extent` from `origin`. Any other (context-dependent) length falls back
+/// to the axis center (a documented approximation).
 fn resolve_center(length: Length, origin: f32, extent: f32) -> f32 {
     match length {
         Length::Px(px) => origin + px.0,
@@ -122,7 +302,7 @@ fn resolve_center(length: Length, origin: f32, extent: f32) -> f32 {
     }
 }
 
-#[doc = include_str!("gradient_brush.doc/resolve_radii.md")]
+#[doc = include_str!("../../docs/api/orchestration/gradient_brush.doc/resolve_radii.md")]
 fn resolve_radii(
     shape: RadialShape,
     size: RadialSize,
@@ -151,7 +331,7 @@ fn resolve_radii(
                 RadialSize::FarthestCorner => dx_far.hypot(dy_far),
                 RadialSize::Length(Length::Px(px)) => px.0,
                 RadialSize::Length(Length::Percent(pct)) => pct / 100.0 * w,
-                RadialSize::Length(_) => dx_far.hypot(dy_far),
+                RadialSize::Length(_) | RadialSize::Ellipse(..) => dx_far.hypot(dy_far),
             };
             (r, r)
         }
@@ -161,11 +341,14 @@ fn resolve_radii(
             RadialSize::ClosestCorner => (dx_near * SQRT2, dy_near * SQRT2),
             RadialSize::FarthestCorner => (dx_far * SQRT2, dy_far * SQRT2),
             RadialSize::Length(len) => (resolve_axis_radius(len, w), resolve_axis_radius(len, h)),
+            RadialSize::Ellipse(x, y) => (resolve_axis_radius(x, w), resolve_axis_radius(y, h)),
         },
     }
 }
 
-#[doc = include_str!("gradient_brush.doc/resolve_axis_radius.md")]
+/// Resolves an explicit radius [`Length`] against a box axis of length `extent`:
+/// an absolute `px` directly, a percentage as that fraction of `extent`; any other
+/// (context-dependent) length falls back to the full `extent`.
 fn resolve_axis_radius(len: Length, extent: f32) -> f32 {
     match len {
         Length::Px(px) => px.0,

@@ -1,16 +1,16 @@
-#![doc = include_str!("alpha_mode.doc/_module.md")]
+//! Whether a color's or image's alpha is premultiplied into its channels.
 
-#[doc = include_str!("alpha_mode.doc/AlphaMode.md")]
+#[doc = include_str!("../../docs/api/color/alpha_mode.doc/AlphaMode.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AlphaMode {
-    #[doc = include_str!("alpha_mode.doc/Straight.md")]
+    /// Color channels are independent of alpha (as authored).
     Straight,
-    #[doc = include_str!("alpha_mode.doc/Premultiplied.md")]
+    /// Color channels have been multiplied by alpha (compositing form).
     Premultiplied,
 }
 
 impl AlphaMode {
-    #[doc = include_str!("alpha_mode.doc/is_premultiplied.md")]
+    /// Returns whether the color channels are premultiplied by alpha.
     #[must_use]
     pub const fn is_premultiplied(self) -> bool {
         matches!(self, Self::Premultiplied)
@@ -18,7 +18,8 @@ impl AlphaMode {
 }
 
 impl Default for AlphaMode {
-    #[doc = include_str!("alpha_mode.doc/default.md")]
+    /// The default alpha mode is [`AlphaMode::Straight`], matching authored
+    /// colors.
     fn default() -> Self {
         Self::Straight
     }

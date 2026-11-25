@@ -1,6 +1,7 @@
-#![doc = include_str!("image_cache.doc/_module.md")]
+//! The runtime's budgeted, evicting cache of decoded images (spec §5.19).
 
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
 use obscur_resources::cache::{
     CacheBudget, CacheEntry, CacheKey, CacheStatistics, EvictionPolicy, VisibilityPriority,
@@ -8,30 +9,36 @@ use obscur_resources::cache::{
 use obscur_resources::state::ResourceVersion;
 use obscur_scene::paint::SceneImage;
 
-#[doc = include_str!("image_cache.doc/DEFAULT_MAX_BYTES.md")]
+#[doc = include_str!("../../docs/api/runtime/image_cache.doc/DEFAULT_MAX_BYTES.md")]
 const DEFAULT_MAX_BYTES: u64 = 128 * 1024 * 1024;
 
-#[doc = include_str!("image_cache.doc/DEFAULT_MAX_ENTRIES.md")]
+#[doc = include_str!("../../docs/api/runtime/image_cache.doc/DEFAULT_MAX_ENTRIES.md")]
 const DEFAULT_MAX_ENTRIES: usize = 512;
 
-#[doc = include_str!("image_cache.doc/ImageCache.md")]
+const VISIBILITY_LEVELS: usize = VisibilityPriority::Visible as usize + 1;
+
+#[doc = include_str!("../../docs/api/runtime/image_cache.doc/ImageCache.md")]
 pub struct ImageCache {
-    #[doc = include_str!("image_cache.doc/images.md")]
+    /// The decoded pixels, keyed by the raw authored URL/path string — the map
+    /// compose looks images up in.
     images: HashMap<Box<str>, SceneImage>,
-    #[doc = include_str!("image_cache.doc/entries.md")]
+    /// Per-URL §5.19 bookkeeping (identity, byte size, version, visibility,
+    /// recency), parallel to [`images`](Self::images).
     entries: HashMap<Box<str>, CacheEntry>,
-    #[doc = include_str!("image_cache.doc/budget.md")]
+    /// The memory budget admission and eviction are ruled against.
     budget: CacheBudget,
-    #[doc = include_str!("image_cache.doc/policy.md")]
+    /// How a victim is chosen when the budget is exceeded.
     policy: EvictionPolicy,
-    #[doc = include_str!("image_cache.doc/stats.md")]
+    /// Live totals plus the `DevTools` hit/miss/eviction counters (spec §5.19).
     stats: CacheStatistics,
-    #[doc = include_str!("image_cache.doc/tick.md")]
+    /// The logical clock recency is stamped from: a monotonic counter, never a
+    /// wall-clock reading, so eviction order is reproducible.
     tick: u64,
+    protected_usage: OnceLock<[(u64, usize); VISIBILITY_LEVELS]>,
 }
 
 impl ImageCache {
-    #[doc = include_str!("image_cache.doc/new.md")]
+    #[doc = include_str!("../../docs/api/runtime/image_cache.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -42,45 +49,46 @@ impl ImageCache {
             policy: EvictionPolicy::default(),
             stats: CacheStatistics::new(),
             tick: 0,
+            protected_usage: OnceLock::new(),
         }
     }
 
-    #[doc = include_str!("image_cache.doc/images_2.md")]
+    /// The decoded images, for compose to paint from.
     #[must_use]
     pub fn images(&self) -> &HashMap<Box<str>, SceneImage> {
         &self.images
     }
 
-    #[doc = include_str!("image_cache.doc/len.md")]
+    /// The number of resident images.
     #[must_use]
     pub fn len(&self) -> usize {
         self.images.len()
     }
 
-    #[doc = include_str!("image_cache.doc/is_empty.md")]
+    /// Whether no image is resident.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.images.is_empty()
     }
 
-    #[doc = include_str!("image_cache.doc/statistics.md")]
+    /// The live metrics (spec §5.19 `DevTools` metrics).
     #[must_use]
     pub fn statistics(&self) -> CacheStatistics {
         self.stats
     }
 
-    #[doc = include_str!("image_cache.doc/budget_2.md")]
+    /// The memory budget in force (spec §5.19).
     #[must_use]
     pub fn budget(&self) -> CacheBudget {
         self.budget
     }
 
-    #[doc = include_str!("image_cache.doc/set_policy.md")]
+    /// Installs `policy` as the eviction strategy (spec §5.19 eviction).
     pub fn set_policy(&mut self, policy: EvictionPolicy) {
         self.policy = policy;
     }
 
-    #[doc = include_str!("image_cache.doc/set_budget.md")]
+    #[doc = include_str!("../../docs/api/runtime/image_cache.doc/set_budget.md")]
     pub fn set_budget(&mut self, budget: CacheBudget) -> Vec<Box<str>> {
         self.budget = budget;
         let mut evicted = Vec::new();
@@ -88,13 +96,15 @@ impl ImageCache {
             .budget
             .exceeds(self.stats.bytes(), self.stats.entries())
         {
-            let Some(url) = self.evict_one() else { break };
+            let Some(url) = self.evict_one(None) else {
+                break;
+            };
             evicted.push(url);
         }
         evicted
     }
 
-    #[doc = include_str!("image_cache.doc/record_lookup.md")]
+    #[doc = include_str!("../../docs/api/runtime/image_cache.doc/record_lookup.md")]
     pub fn record_lookup(&mut self, url: &str) -> bool {
         self.tick = self.tick.saturating_add(1);
         if let Some(entry) = self.entries.get_mut(url) {
@@ -106,8 +116,9 @@ impl ImageCache {
         false
     }
 
-    #[doc = include_str!("image_cache.doc/mark_visibility.md")]
+    #[doc = include_str!("../../docs/api/runtime/image_cache.doc/mark_visibility.md")]
     pub fn mark_visibility(&mut self, referenced: &HashMap<Box<str>, VisibilityPriority>) {
+        self.protected_usage.take();
         for (url, entry) in &mut self.entries {
             let priority = referenced
                 .get(url)
@@ -117,13 +128,75 @@ impl ImageCache {
         }
     }
 
-    #[doc = include_str!("image_cache.doc/insert.md")]
+    /// Allows a retry to use free capacity or displace only lower-priority images.
+    pub(super) fn can_retry(&self, bytes: u64, priority: VisibilityPriority) -> bool {
+        if self
+            .budget
+            .admits(self.stats.bytes(), self.stats.entries(), bytes)
+        {
+            return true;
+        }
+        if !self.budget.admits(0, 0, bytes) {
+            return false;
+        }
+        let usage = self.protected_usage.get_or_init(|| {
+            let mut usage = [(0u64, 0usize); VISIBILITY_LEVELS];
+            for entry in self.entries.values() {
+                let bucket = &mut usage[entry.visibility() as usize];
+                bucket.0 += entry.byte_size();
+                bucket.1 += 1;
+            }
+            for i in (0..VISIBILITY_LEVELS - 1).rev() {
+                usage[i].0 += usage[i + 1].0;
+                usage[i].1 += usage[i + 1].1;
+            }
+            usage
+        });
+        let (protected_bytes, protected_entries) = usage[priority as usize];
+        self.budget
+            .admits(protected_bytes, protected_entries, bytes)
+    }
+
+    /// Inserts runtime pixels with visibility known before their next frame.
+    pub(super) fn insert_for_frame(
+        &mut self,
+        url: Box<str>,
+        key: CacheKey,
+        version: ResourceVersion,
+        image: SceneImage,
+        priority: VisibilityPriority,
+        retry: bool,
+    ) -> Vec<Box<str>> {
+        if retry && !self.can_retry(image.pixels().len() as u64, priority) {
+            return Vec::new();
+        }
+        let evicted =
+            self.insert_inner(url.clone(), key, version, image, retry.then_some(priority));
+        if let Some(entry) = self.entries.get_mut(&url) {
+            *entry = entry.with_visibility(priority);
+        }
+        evicted
+    }
+
+    #[doc = include_str!("../../docs/api/runtime/image_cache.doc/insert.md")]
     pub fn insert(
         &mut self,
         url: Box<str>,
         key: CacheKey,
         version: ResourceVersion,
         image: SceneImage,
+    ) -> Vec<Box<str>> {
+        self.insert_inner(url, key, version, image, None)
+    }
+
+    /// Inserts a bitmap and optionally restricts eviction to lower-priority entries.
+    fn insert_inner(
+        &mut self,
+        url: Box<str>,
+        key: CacheKey,
+        version: ResourceVersion,
+        image: SceneImage,
+        below: Option<VisibilityPriority>,
     ) -> Vec<Box<str>> {
         let bytes = image.pixels().len() as u64;
         if let Some(freed) = self.remove(&url) {
@@ -137,7 +210,7 @@ impl ImageCache {
             .budget
             .admits(self.stats.bytes(), self.stats.entries(), bytes)
         {
-            let Some(victim) = self.evict_one() else {
+            let Some(victim) = self.evict_one(below) else {
                 break;
             };
             evicted.push(victim);
@@ -145,22 +218,29 @@ impl ImageCache {
         self.tick = self.tick.saturating_add(1);
         let mut entry = CacheEntry::new(key, bytes, version);
         entry.touch(self.tick);
+        self.protected_usage.take();
         self.entries.insert(url.clone(), entry);
         self.images.insert(url, image);
         self.stats.record_insertion(bytes);
         evicted
     }
 
-    #[doc = include_str!("image_cache.doc/clear.md")]
+    /// Drops every resident image and resets the metrics.
     pub fn clear(&mut self) {
+        self.protected_usage.take();
         self.images.clear();
         self.entries.clear();
         self.stats.reset();
     }
 
-    #[doc = include_str!("image_cache.doc/evict_one.md")]
-    fn evict_one(&mut self) -> Option<Box<str>> {
-        let candidates: Vec<CacheEntry> = self.entries.values().copied().collect();
+    /// Evicts one entry by the installed [`EvictionPolicy`], returning its URL.
+    fn evict_one(&mut self, below: Option<VisibilityPriority>) -> Option<Box<str>> {
+        let candidates: Vec<CacheEntry> = self
+            .entries
+            .values()
+            .copied()
+            .filter(|entry| below.is_none_or(|priority| entry.visibility() < priority))
+            .collect();
         let victim = self.policy.choose_victim(&candidates)?.key();
         // `choose_victim` borrows the candidate copies, so the URL comes back from
         // the bookkeeping by the identity it chose.
@@ -174,9 +254,11 @@ impl ImageCache {
         Some(url)
     }
 
-    #[doc = include_str!("image_cache.doc/remove.md")]
+    /// Removes `url`'s image and bookkeeping, returning the bytes it freed —
+    /// without touching the metrics, which the caller records.
     fn remove(&mut self, url: &str) -> Option<u64> {
         let entry = self.entries.remove(url)?;
+        self.protected_usage.take();
         self.images.remove(url);
         Some(entry.byte_size())
     }
@@ -189,7 +271,9 @@ impl Default for ImageCache {
 }
 
 impl std::fmt::Debug for ImageCache {
-    #[doc = include_str!("image_cache.doc/fmt.md")]
+    /// Elides the pixel buffers and the per-URL bookkeeping: a decoded image is
+    /// megabytes of RGBA8 that no debug line wants, and `stats` already carries the
+    /// entry count and byte total the bookkeeping sums to.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ImageCache")
             .field("len", &self.images.len())

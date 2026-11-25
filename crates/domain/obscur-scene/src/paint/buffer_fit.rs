@@ -1,23 +1,26 @@
-#![doc = include_str!("buffer_fit.doc/_module.md")]
+#![doc = include_str!("../../docs/api/paint/buffer_fit.doc/_module.md")]
 
 use obscur_geometry::{Point, Rect, Size};
 
-#[doc = include_str!("buffer_fit.doc/BufferFit.md")]
+/// How a buffer is fitted to a region.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BufferFit {
-    #[doc = include_str!("buffer_fit.doc/Stretch.md")]
+    /// Fill the region exactly, aspect ratio be damned. The default, and the right
+    /// answer when the producer already renders at the region's size.
     #[default]
     Stretch,
-    #[doc = include_str!("buffer_fit.doc/Contain.md")]
+    /// Scale to fit entirely inside, centred, letterboxed. Nothing is cropped.
     Contain,
-    #[doc = include_str!("buffer_fit.doc/Cover.md")]
+    /// Scale to cover the whole region, centred; whatever overflows is clipped by the
+    /// region itself. Nothing is letterboxed.
     Cover,
-    #[doc = include_str!("buffer_fit.doc/Natural.md")]
+    /// Draw at the buffer's own pixel size, centred. No resampling — what a
+    /// screenshot or a pixel-exact capture wants.
     Natural,
 }
 
 impl BufferFit {
-    #[doc = include_str!("buffer_fit.doc/place.md")]
+    #[doc = include_str!("../../docs/api/paint/buffer_fit.doc/place.md")]
     #[must_use]
     pub fn place(self, source: Size, into: Size) -> Rect {
         let origin = Point::new(0.0, 0.0);

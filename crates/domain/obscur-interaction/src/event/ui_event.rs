@@ -1,34 +1,45 @@
-#![doc = include_str!("ui_event.doc/_module.md")]
+//! The typed event handed to a handler as it propagates (spec §2.3, §4.7).
 
 use obscur_identity::NodeId;
 
 use super::{EventOrigin, EventPayload, EventPhase, EventPropagation, EventTrust};
 use crate::command::KeyEvent;
+use crate::gamepad::GamepadEvent;
+use crate::gesture::{SystemBackEvent, TouchpadGestureEvent};
 use crate::pointer::{PointerEvent, WheelEvent};
 
-#[doc = include_str!("ui_event.doc/UiEvent.md")]
+#[doc = include_str!("../../docs/api/event/ui_event.doc/UiEvent.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct UiEvent {
-    #[doc = include_str!("ui_event.doc/origin.md")]
+    /// The source that produced this event.
     pub origin: EventOrigin,
-    #[doc = include_str!("ui_event.doc/target.md")]
+    /// §2.3's `target`: the node the event is aimed at — the hit-test result, or
+    /// the focused node. Constant for the whole propagation; `None` when the
+    /// event has no tree position (a window- or application-level command
+    /// dispatched with nothing focused).
     pub target: Option<NodeId>,
-    #[doc = include_str!("ui_event.doc/current_target.md")]
+    /// §2.3's `current_target`: the node whose handler is running now. Advanced
+    /// at every step of the path, so it differs from [`target`](Self::target) for
+    /// every capture and bubble step. `None` for the window and application links
+    /// of §2.6's chain, which are not nodes.
     pub current_target: Option<NodeId>,
-    #[doc = include_str!("ui_event.doc/phase.md")]
+    /// The propagation phase the event currently occupies.
     pub phase: EventPhase,
-    #[doc = include_str!("ui_event.doc/propagation.md")]
+    /// The mutable propagation-control flags carried by the event.
     pub propagation: EventPropagation,
-    #[doc = include_str!("ui_event.doc/trust.md")]
+    /// §2.3's trusted/untrusted origin: whether a platform adapter vouched for
+    /// this as a real user gesture.
     pub trust: EventTrust,
-    #[doc = include_str!("ui_event.doc/payload.md")]
+    /// §2.4's device state (pointer) or §2.6's key pair (keyboard), typed per
+    /// kind.
     pub payload: EventPayload,
-    #[doc = include_str!("ui_event.doc/timestamp_micros.md")]
+    /// A logical timestamp in microseconds, supplied by the caller — never read
+    /// from a clock.
     pub timestamp_micros: u64,
 }
 
 impl UiEvent {
-    #[doc = include_str!("ui_event.doc/new.md")]
+    #[doc = include_str!("../../docs/api/event/ui_event.doc/new.md")]
     #[must_use]
     pub const fn new(origin: EventOrigin, target: NodeId) -> Self {
         Self {
@@ -43,7 +54,9 @@ impl UiEvent {
         }
     }
 
-    #[doc = include_str!("ui_event.doc/detached.md")]
+    /// Creates an event with **no** target node — the honest envelope for a
+    /// command that reaches only §2.6's window and application links because
+    /// nothing was focused and nothing was hit.
     #[must_use]
     pub const fn detached(origin: EventOrigin) -> Self {
         Self {
@@ -58,7 +71,7 @@ impl UiEvent {
         }
     }
 
-    #[doc = include_str!("ui_event.doc/from_pointer.md")]
+    #[doc = include_str!("../../docs/api/event/ui_event.doc/from_pointer.md")]
     #[must_use]
     pub const fn from_pointer(pointer: PointerEvent) -> Self {
         let origin = if pointer.device().is_touchscreen() {
@@ -73,7 +86,7 @@ impl UiEvent {
         event
     }
 
-    #[doc = include_str!("ui_event.doc/from_key.md")]
+    #[doc = include_str!("../../docs/api/event/ui_event.doc/from_key.md")]
     #[must_use]
     pub const fn from_key(key: KeyEvent) -> Self {
         let mut event = Self::detached(EventOrigin::Keyboard);
@@ -87,7 +100,44 @@ impl UiEvent {
         event
     }
 
-    #[doc = include_str!("ui_event.doc/from_wheel.md")]
+    /// Returns the gamepad report carried by this event.
+    #[must_use]
+    pub const fn gamepad(&self) -> Option<GamepadEvent> {
+        match self.payload {
+            EventPayload::Gamepad(event) => Some(event),
+            _ => None,
+        }
+    }
+
+    /// Returns predictive Back progress if the window host supplied it.
+    #[must_use]
+    pub const fn system_back(&self) -> Option<SystemBackEvent> {
+        match self.payload {
+            EventPayload::SystemBack(event) => Some(event),
+            _ => None,
+        }
+    }
+
+    /// Wraps a native touchpad gesture while preserving trust and time.
+    #[must_use]
+    pub const fn from_touchpad_gesture(gesture: TouchpadGestureEvent) -> Self {
+        let mut event = Self::detached(EventOrigin::Pointer);
+        event.trust = gesture.trust;
+        event.timestamp_micros = gesture.timestamp_micros;
+        event.payload = EventPayload::TouchpadGesture(gesture);
+        event
+    }
+
+    /// Returns the native touchpad gesture payload when present.
+    #[must_use]
+    pub const fn touchpad_gesture(&self) -> Option<TouchpadGestureEvent> {
+        match self.payload {
+            EventPayload::TouchpadGesture(gesture) => Some(gesture),
+            _ => None,
+        }
+    }
+
+    #[doc = include_str!("../../docs/api/event/ui_event.doc/from_wheel.md")]
     #[must_use]
     pub const fn from_wheel(wheel: WheelEvent) -> Self {
         // The pointing device's origin, because that is where a notch comes
@@ -109,7 +159,8 @@ impl UiEvent {
         event
     }
 
-    #[doc = include_str!("ui_event.doc/at_target.md")]
+    /// Returns this event aimed at `target`, with `current_target` seated there
+    /// too (fluent).
     #[must_use]
     pub const fn at_target(mut self, target: NodeId) -> Self {
         self.target = Some(target);
@@ -117,140 +168,150 @@ impl UiEvent {
         self
     }
 
-    #[doc = include_str!("ui_event.doc/at_current_target.md")]
+    /// Returns this event with `current_target` moved to `node`, leaving
+    /// [`target`](Self::target) untouched (fluent).
     #[must_use]
     pub const fn at_current_target(mut self, node: Option<NodeId>) -> Self {
         self.current_target = node;
         self
     }
 
-    #[doc = include_str!("ui_event.doc/as_trusted.md")]
+    #[doc = include_str!("../../docs/api/event/ui_event.doc/as_trusted.md")]
     #[must_use]
     pub const fn as_trusted(mut self) -> Self {
         self.trust = EventTrust::Trusted;
         self
     }
 
-    #[doc = include_str!("ui_event.doc/with_payload.md")]
+    /// Returns this event carrying `payload` (fluent).
     #[must_use]
     pub const fn with_payload(mut self, payload: EventPayload) -> Self {
         self.payload = payload;
         self
     }
 
-    #[doc = include_str!("ui_event.doc/with_timestamp.md")]
+    /// Returns this event with its logical timestamp set (fluent).
     #[must_use]
     pub const fn with_timestamp(mut self, timestamp_micros: u64) -> Self {
         self.timestamp_micros = timestamp_micros;
         self
     }
 
-    #[doc = include_str!("ui_event.doc/at_phase.md")]
+    /// Returns this event seated at `phase` (fluent).
     #[must_use]
     pub const fn at_phase(mut self, phase: EventPhase) -> Self {
         self.phase = phase;
         self
     }
 
-    #[doc = include_str!("ui_event.doc/origin_2.md")]
+    /// Returns the source that produced this event.
     #[must_use]
     pub const fn origin(&self) -> EventOrigin {
         self.origin
     }
 
-    #[doc = include_str!("ui_event.doc/target_2.md")]
+    /// Returns §2.3's `target`: the node the event is aimed at.
     #[must_use]
     pub const fn target(&self) -> Option<NodeId> {
         self.target
     }
 
-    #[doc = include_str!("ui_event.doc/current_target_2.md")]
+    /// Returns §2.3's `current_target`: the node whose handler is running now.
     #[must_use]
     pub const fn current_target(&self) -> Option<NodeId> {
         self.current_target
     }
 
-    #[doc = include_str!("ui_event.doc/phase_2.md")]
+    /// Returns the propagation phase this event currently occupies.
     #[must_use]
     pub const fn phase(&self) -> EventPhase {
         self.phase
     }
 
-    #[doc = include_str!("ui_event.doc/trust_2.md")]
+    /// Returns §2.3's trusted/untrusted origin.
     #[must_use]
     pub const fn trust(&self) -> EventTrust {
         self.trust
     }
 
-    #[doc = include_str!("ui_event.doc/is_trusted.md")]
+    /// Returns whether a platform adapter vouched for this as a real user
+    /// gesture (§2.3).
     #[must_use]
     pub const fn is_trusted(&self) -> bool {
         self.trust.is_trusted()
     }
 
-    #[doc = include_str!("ui_event.doc/payload_2.md")]
+    /// Returns the typed payload this event carries.
     #[must_use]
     pub const fn payload(&self) -> EventPayload {
         self.payload
     }
 
-    #[doc = include_str!("ui_event.doc/pointer.md")]
+    /// Returns §2.4's pointer payload, or `None` when this is not a pointer
+    /// event.
     #[must_use]
     pub const fn pointer(&self) -> Option<PointerEvent> {
         self.payload.pointer()
     }
 
-    #[doc = include_str!("ui_event.doc/key.md")]
+    /// Returns the keyboard payload, or `None` when this is not a key event.
     #[must_use]
     pub const fn key(&self) -> Option<KeyEvent> {
         self.payload.key()
     }
 
-    #[doc = include_str!("ui_event.doc/wheel.md")]
+    /// The wheel notch this event carries, or `None` when it carries something else.
     #[must_use]
     pub const fn wheel(&self) -> Option<WheelEvent> {
         self.payload.wheel()
     }
 
-    #[doc = include_str!("ui_event.doc/timestamp.md")]
+    /// Returns the logical timestamp, in microseconds, supplied by the caller.
     #[must_use]
     pub const fn timestamp(&self) -> u64 {
         self.timestamp_micros
     }
 
-    #[doc = include_str!("ui_event.doc/propagation_mut.md")]
+    /// Returns mutable access to the propagation control for advanced steering.
     pub const fn propagation_mut(&mut self) -> &mut EventPropagation {
         &mut self.propagation
     }
 
-    #[doc = include_str!("ui_event.doc/stop_propagation.md")]
+    /// Requests that propagation stop after the current node finishes, delegating
+    /// to [`EventPropagation::stop_propagation`].
     pub const fn stop_propagation(&mut self) {
         self.propagation.stop_propagation();
     }
 
-    #[doc = include_str!("ui_event.doc/stop_immediate_propagation.md")]
+    /// Requests that propagation stop at once, skipping any remaining handler on
+    /// the current node, delegating to
+    /// [`EventPropagation::stop_immediate_propagation`].
     pub const fn stop_immediate_propagation(&mut self) {
         self.propagation.stop_immediate_propagation();
     }
 
-    #[doc = include_str!("ui_event.doc/prevent_default.md")]
+    /// Suppresses the host's default action, delegating to
+    /// [`EventPropagation::prevent_default`].
     pub const fn prevent_default(&mut self) {
         self.propagation.prevent_default();
     }
 
-    #[doc = include_str!("ui_event.doc/is_stopped.md")]
+    /// Returns whether propagation has been stopped, delegating to
+    /// [`EventPropagation::is_stopped`].
     #[must_use]
     pub const fn is_stopped(&self) -> bool {
         self.propagation.is_stopped()
     }
 
-    #[doc = include_str!("ui_event.doc/is_immediate_stopped.md")]
+    /// Returns whether the remaining handlers on the *current* node are to be
+    /// skipped as well (`stopImmediatePropagation`).
     #[must_use]
     pub const fn is_immediate_stopped(&self) -> bool {
         self.propagation.stop_immediate
     }
 
-    #[doc = include_str!("ui_event.doc/is_default_prevented.md")]
+    /// Returns whether the host's default action has been suppressed, delegating
+    /// to [`EventPropagation::is_default_prevented`].
     #[must_use]
     pub const fn is_default_prevented(&self) -> bool {
         self.propagation.is_default_prevented()

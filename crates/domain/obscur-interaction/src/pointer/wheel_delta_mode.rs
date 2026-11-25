@@ -1,17 +1,17 @@
-#![doc = include_str!("wheel_delta_mode.doc/_module.md")]
+#![doc = include_str!("../../docs/api/pointer/wheel_delta_mode.doc/_module.md")]
 
-#[doc = include_str!("wheel_delta_mode.doc/WheelDeltaMode.md")]
+/// The unit a `WheelEvent`'s deltas are expressed in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum WheelDeltaMode {
-    #[doc = include_str!("wheel_delta_mode.doc/Pixels.md")]
+    #[doc = include_str!("../../docs/api/pointer/wheel_delta_mode.doc/Pixels.md")]
     #[default]
     Pixels,
-    #[doc = include_str!("wheel_delta_mode.doc/Lines.md")]
+    #[doc = include_str!("../../docs/api/pointer/wheel_delta_mode.doc/Lines.md")]
     Lines,
 }
 
 impl WheelDeltaMode {
-    #[doc = include_str!("wheel_delta_mode.doc/resolve.md")]
+    /// The delta in pixels, given what a line is worth.
     #[must_use]
     pub fn resolve(self, delta: f32, line_height: f32) -> f32 {
         match self {

@@ -1,4 +1,4 @@
-#![doc = include_str!("image_painter.doc/_module.md")]
+#![doc = include_str!("../../docs/api/conversion/image_painter.doc/_module.md")]
 
 use obscur_scene::color::AlphaMode;
 use obscur_scene::paint::SceneImage;
@@ -8,13 +8,17 @@ use vello::peniko::{self, ImageAlphaType};
 
 use super::image_blobs::ImageBlobs;
 
-#[doc = include_str!("image_painter.doc/MAX_TILES_PER_AXIS.md")]
+/// The largest number of image copies drawn per axis for a tiled
+/// (`background-repeat`) background — a bounded-loop guard matching the CPU
+/// backend, so both agree. The `region` clip trims any overdraw regardless.
 const MAX_TILES_PER_AXIS: i32 = 8192;
 
-#[doc = include_str!("image_painter.doc/MIN_TILE_EXTENT.md")]
+/// The smallest tile extent (logical px) that still tiles on an axis; at or below
+/// it the axis is treated as non-repeating so a degenerate size cannot spin the
+/// tile loop.
 const MIN_TILE_EXTENT: f32 = 0.5;
 
-#[doc = include_str!("image_painter.doc/draw_image.md")]
+#[doc = include_str!("../../docs/api/conversion/image_painter.doc/draw_image.md")]
 #[allow(clippy::cast_precision_loss, clippy::too_many_arguments)]
 pub(super) fn draw_image(
     scene: &mut Scene,
@@ -107,7 +111,11 @@ pub(super) fn draw_image(
     }
 }
 
-#[doc = include_str!("image_painter.doc/tile_index_range.md")]
+/// Computes the inclusive tile index range `[start, end]` covering the span
+/// `[r0, r1]` with copies at `t0 + k * ts` (`ts > 0`), matching the CPU backend. A
+/// non-repeating axis is the single index `0`; the range is padded by one on each
+/// side and clamped to [`MAX_TILES_PER_AXIS`] copies (the `region` clip trims any
+/// overdraw).
 #[allow(clippy::cast_possible_truncation)]
 fn tile_index_range(repeat: bool, r0: f32, r1: f32, t0: f32, ts: f32) -> (i32, i32) {
     if !repeat || ts <= 0.0 {

@@ -1,23 +1,26 @@
-#![doc = include_str!("font_attributes.doc/_module.md")]
+//! The selectable attributes used to pick a concrete font face (spec §5.18).
 
 use crate::span::{FontSlant, FontWeight};
 
-#[doc = include_str!("font_attributes.doc/FontAttributes.md")]
+use super::FontStretch;
+
+#[doc = include_str!("../../docs/api/font/font_attributes.doc/FontAttributes.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct FontAttributes {
-    #[doc = include_str!("font_attributes.doc/weight.md")]
+    /// The requested weight (default [`FontWeight::NORMAL`]).
     pub weight: FontWeight,
-    #[doc = include_str!("font_attributes.doc/slant.md")]
+    /// The requested slant (default [`FontSlant::Normal`]).
     pub slant: FontSlant,
-    #[doc = include_str!("font_attributes.doc/stretch.md")]
+    /// The requested width (default [`FontStretch::Normal`]).
     pub stretch: FontStretch,
 }
 
 impl FontAttributes {
-    #[doc = include_str!("font_attributes.doc/SLANT_PENALTY.md")]
+    #[doc = include_str!("../../docs/api/font/font_attributes.doc/SLANT_PENALTY.md")]
     const SLANT_PENALTY: u32 = 500;
 
-    #[doc = include_str!("font_attributes.doc/new.md")]
+    /// Creates attributes at their defaults: [`FontWeight::NORMAL`],
+    /// [`FontSlant::Normal`], and [`FontStretch::Normal`].
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -27,28 +30,28 @@ impl FontAttributes {
         }
     }
 
-    #[doc = include_str!("font_attributes.doc/with_weight.md")]
+    /// Returns these attributes with `weight` set.
     #[must_use]
     pub const fn with_weight(mut self, weight: FontWeight) -> Self {
         self.weight = weight;
         self
     }
 
-    #[doc = include_str!("font_attributes.doc/with_slant.md")]
+    /// Returns these attributes with `slant` set.
     #[must_use]
     pub const fn with_slant(mut self, slant: FontSlant) -> Self {
         self.slant = slant;
         self
     }
 
-    #[doc = include_str!("font_attributes.doc/with_stretch.md")]
+    /// Returns these attributes with `stretch` set.
     #[must_use]
     pub const fn with_stretch(mut self, stretch: FontStretch) -> Self {
         self.stretch = stretch;
         self
     }
 
-    #[doc = include_str!("font_attributes.doc/distance.md")]
+    #[doc = include_str!("../../docs/api/font/font_attributes.doc/distance.md")]
     #[must_use]
     pub fn distance(&self, other: &FontAttributes) -> u32 {
         let weight_diff = u32::from(self.weight.value().abs_diff(other.weight.value()));
@@ -64,54 +67,6 @@ impl FontAttributes {
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let stretch_penalty = stretch_diff.round() as u32;
         weight_diff + slant_penalty + stretch_penalty
-    }
-}
-
-#[doc = include_str!("font_attributes.doc/FontStretch.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum FontStretch {
-    #[doc = include_str!("font_attributes.doc/UltraCondensed.md")]
-    UltraCondensed,
-    #[doc = include_str!("font_attributes.doc/ExtraCondensed.md")]
-    ExtraCondensed,
-    #[doc = include_str!("font_attributes.doc/Condensed.md")]
-    Condensed,
-    #[doc = include_str!("font_attributes.doc/SemiCondensed.md")]
-    SemiCondensed,
-    #[doc = include_str!("font_attributes.doc/Normal.md")]
-    Normal,
-    #[doc = include_str!("font_attributes.doc/SemiExpanded.md")]
-    SemiExpanded,
-    #[doc = include_str!("font_attributes.doc/Expanded.md")]
-    Expanded,
-    #[doc = include_str!("font_attributes.doc/ExtraExpanded.md")]
-    ExtraExpanded,
-    #[doc = include_str!("font_attributes.doc/UltraExpanded.md")]
-    UltraExpanded,
-}
-
-impl FontStretch {
-    #[doc = include_str!("font_attributes.doc/percentage.md")]
-    #[must_use]
-    pub const fn percentage(&self) -> f32 {
-        match self {
-            Self::UltraCondensed => 50.0,
-            Self::ExtraCondensed => 62.5,
-            Self::Condensed => 75.0,
-            Self::SemiCondensed => 87.5,
-            Self::Normal => 100.0,
-            Self::SemiExpanded => 112.5,
-            Self::Expanded => 125.0,
-            Self::ExtraExpanded => 150.0,
-            Self::UltraExpanded => 200.0,
-        }
-    }
-}
-
-impl Default for FontStretch {
-    #[doc = include_str!("font_attributes.doc/default.md")]
-    fn default() -> Self {
-        Self::Normal
     }
 }
 
@@ -164,17 +119,6 @@ mod tests {
         // A same-weight italic is worse than a modestly heavier upright.
         let heavier = FontAttributes::new().with_weight(FontWeight::new(500));
         assert!(upright.distance(&italic) > upright.distance(&heavier));
-    }
-
-    #[test]
-    fn stretch_percentages() {
-        assert_eq!(FontStretch::UltraCondensed.percentage(), 50.0);
-        assert_eq!(FontStretch::Normal.percentage(), 100.0);
-        assert_eq!(FontStretch::UltraExpanded.percentage(), 200.0);
-        assert_eq!(FontStretch::default(), FontStretch::Normal);
-        // Declared order ranks by width for nearest-match.
-        assert!(FontStretch::Condensed < FontStretch::Normal);
-        assert!(FontStretch::Normal < FontStretch::Expanded);
     }
 
     #[test]

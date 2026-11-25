@@ -1,55 +1,58 @@
-#![doc = include_str!("node_kind.doc/_module.md")]
+//! Classification of a retained node.
 
 use obscur_identity::{ComponentId, InternedSymbol};
 
-#[doc = include_str!("node_kind.doc/NodeKind.md")]
+#[doc = include_str!("../../docs/api/node/node_kind.doc/NodeKind.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NodeKind {
-    #[doc = include_str!("node_kind.doc/Root.md")]
+    /// The tree root / a structural grouping node with no component or content
+    /// of its own.
     Root,
-    #[doc = include_str!("node_kind.doc/Element.md")]
+    /// An instantiated component element.
     Element {
-        #[doc = include_str!("node_kind.doc/component.md")]
+        /// Identity of the component instance backing this element.
         component: ComponentId,
     },
-    #[doc = include_str!("node_kind.doc/Text.md")]
+    /// A text node carrying literal content (spec §4.16).
     Text {
-        #[doc = include_str!("node_kind.doc/content.md")]
+        /// The text content of the node.
         content: Box<str>,
     },
-    #[doc = include_str!("node_kind.doc/Synthetic.md")]
+    /// A system-generated ("synthetic") part, hidden from the component tree but
+    /// visible in DevTools (spec §4.16). The tag names which part this is.
     Synthetic {
-        #[doc = include_str!("node_kind.doc/tag.md")]
+        /// Interned symbol naming the synthetic part.
         tag: InternedSymbol,
     },
 }
 
 impl NodeKind {
-    #[doc = include_str!("node_kind.doc/is_root.md")]
+    /// Returns `true` if this is the [`NodeKind::Root`] grouping node.
     #[must_use]
     pub const fn is_root(&self) -> bool {
         matches!(self, Self::Root)
     }
 
-    #[doc = include_str!("node_kind.doc/is_element.md")]
+    /// Returns `true` if this is a [`NodeKind::Element`].
     #[must_use]
     pub const fn is_element(&self) -> bool {
         matches!(self, Self::Element { .. })
     }
 
-    #[doc = include_str!("node_kind.doc/is_text.md")]
+    /// Returns `true` if this is a [`NodeKind::Text`] node.
     #[must_use]
     pub const fn is_text(&self) -> bool {
         matches!(self, Self::Text { .. })
     }
 
-    #[doc = include_str!("node_kind.doc/is_synthetic.md")]
+    /// Returns `true` if this is a system-generated [`NodeKind::Synthetic`]
+    /// node.
     #[must_use]
     pub const fn is_synthetic(&self) -> bool {
         matches!(self, Self::Synthetic { .. })
     }
 
-    #[doc = include_str!("node_kind.doc/component_id.md")]
+    /// Returns the backing [`ComponentId`] if this is an element node.
     #[must_use]
     pub const fn component_id(&self) -> Option<ComponentId> {
         match self {
@@ -58,7 +61,7 @@ impl NodeKind {
         }
     }
 
-    #[doc = include_str!("node_kind.doc/text.md")]
+    /// Returns the text content if this is a text node.
     #[must_use]
     pub fn text(&self) -> Option<&str> {
         match self {
@@ -67,7 +70,7 @@ impl NodeKind {
         }
     }
 
-    #[doc = include_str!("node_kind.doc/synthetic_tag.md")]
+    /// Returns the synthetic part tag if this is a synthetic node.
     #[must_use]
     pub const fn synthetic_tag(&self) -> Option<InternedSymbol> {
         match self {

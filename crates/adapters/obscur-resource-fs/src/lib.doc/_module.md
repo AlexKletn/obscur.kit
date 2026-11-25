@@ -1,1 +1,0 @@
-Filesystem resource loader adapter.

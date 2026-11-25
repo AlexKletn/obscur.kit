@@ -1,20 +1,23 @@
-#![doc = include_str!("scroll_anchor.doc/_module.md")]
+#![doc = include_str!("../../docs/api/virtualization/scroll_anchor.doc/_module.md")]
 
 use super::size_estimator::SizeEstimator;
 
-#[doc = include_str!("scroll_anchor.doc/ScrollAnchor.md")]
+#[doc = include_str!("../../docs/api/virtualization/scroll_anchor.doc/ScrollAnchor.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ScrollAnchor {
-    #[doc = include_str!("scroll_anchor.doc/index.md")]
+    /// The item the viewport top is anchored to.
     index: usize,
-    #[doc = include_str!("scroll_anchor.doc/offset_within_item.md")]
+    /// How far, in logical pixels, into the anchored item the viewport top sits
+    /// (`>= 0`).
     offset_within_item: f32,
-    #[doc = include_str!("scroll_anchor.doc/viewport_offset.md")]
+    /// The scroll offset the anchor was captured at, kept for reference.
     viewport_offset: f32,
 }
 
 impl ScrollAnchor {
-    #[doc = include_str!("scroll_anchor.doc/new.md")]
+    /// Creates an anchor pinned to `index`, with the viewport top
+    /// `offset_within_item` into that item, captured at `viewport_offset` (spec
+    /// §4.9).
     #[must_use]
     pub const fn new(index: usize, offset_within_item: f32, viewport_offset: f32) -> Self {
         Self {
@@ -24,31 +27,31 @@ impl ScrollAnchor {
         }
     }
 
-    #[doc = include_str!("scroll_anchor.doc/at_item.md")]
+    /// Creates an anchor pinned exactly to the top of `index` (both offsets `0`).
     #[must_use]
     pub const fn at_item(index: usize) -> Self {
         Self::new(index, 0.0, 0.0)
     }
 
-    #[doc = include_str!("scroll_anchor.doc/index_2.md")]
+    /// The anchored item index.
     #[must_use]
     pub const fn index(self) -> usize {
         self.index
     }
 
-    #[doc = include_str!("scroll_anchor.doc/offset_within_item_2.md")]
+    /// How far into the anchored item the viewport top sits, in logical pixels.
     #[must_use]
     pub const fn offset_within_item(self) -> f32 {
         self.offset_within_item
     }
 
-    #[doc = include_str!("scroll_anchor.doc/viewport_offset_2.md")]
+    /// The scroll offset this anchor was captured at.
     #[must_use]
     pub const fn viewport_offset(self) -> f32 {
         self.viewport_offset
     }
 
-    #[doc = include_str!("scroll_anchor.doc/resolve.md")]
+    #[doc = include_str!("../../docs/api/virtualization/scroll_anchor.doc/resolve.md")]
     #[must_use]
     pub fn resolve(&self, estimator: &SizeEstimator, item_count: usize) -> f32 {
         estimator.offset_of(self.index, item_count) + self.offset_within_item

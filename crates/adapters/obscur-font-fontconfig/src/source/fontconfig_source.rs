@@ -1,4 +1,5 @@
-#![doc = include_str!("fontconfig_source.doc/_module.md")]
+//! The [`FontconfigSource`]: system font lookup by shelling out to fontconfig's
+//! CLI (spec §5.18).
 
 use std::path::Path;
 use std::process::Command;
@@ -9,13 +10,14 @@ use obscur_text::span::{FontSlant, FontWeight};
 use super::attribute_scale::{css_slant, css_stretch, css_weight};
 use super::system_face::SystemFace;
 
-#[doc = include_str!("fontconfig_source.doc/FIELD.md")]
+/// The record separator asked of fontconfig's `-f` format. Font paths and family
+/// names may contain spaces and commas but not tabs in any real installation.
 const FIELD: char = '\t';
 
-#[doc = include_str!("fontconfig_source.doc/FORMAT.md")]
+/// The `-f` format both queries request: family, file, weight, slant, width.
 const FORMAT: &str = "%{family[0]}\t%{file}\t%{weight}\t%{slant}\t%{width}\n";
 
-#[doc = include_str!("fontconfig_source.doc/FontconfigSource.md")]
+#[doc = include_str!("../../docs/api/source/fontconfig_source.doc/FontconfigSource.md")]
 #[derive(Debug, Clone)]
 pub struct FontconfigSource {
     match_tool: Box<str>,
@@ -23,7 +25,7 @@ pub struct FontconfigSource {
 }
 
 impl FontconfigSource {
-    #[doc = include_str!("fontconfig_source.doc/new.md")]
+    /// Creates a source backed by the conventional `fc-match` / `fc-list`.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -32,7 +34,7 @@ impl FontconfigSource {
         }
     }
 
-    #[doc = include_str!("fontconfig_source.doc/with_tools.md")]
+    /// Creates a source backed by explicitly named tools.
     #[must_use]
     pub fn with_tools(match_tool: impl Into<Box<str>>, list_tool: impl Into<Box<str>>) -> Self {
         Self {
@@ -41,14 +43,14 @@ impl FontconfigSource {
         }
     }
 
-    #[doc = include_str!("fontconfig_source.doc/is_available.md")]
+    #[doc = include_str!("../../docs/api/source/fontconfig_source.doc/is_available.md")]
     #[must_use]
     pub fn is_available(&self) -> bool {
         Self::run(&self.match_tool, &["--version"]).is_some()
             && Self::run(&self.list_tool, &["--version"]).is_some()
     }
 
-    #[doc = include_str!("fontconfig_source.doc/match_generic.md")]
+    #[doc = include_str!("../../docs/api/source/fontconfig_source.doc/match_generic.md")]
     #[must_use]
     pub fn match_generic(&self, generic: GenericFamily) -> Option<SystemFace> {
         let pattern = generic_pattern(generic);
@@ -56,7 +58,7 @@ impl FontconfigSource {
         parse_faces(&out).into_iter().next()
     }
 
-    #[doc = include_str!("fontconfig_source.doc/match_char.md")]
+    #[doc = include_str!("../../docs/api/source/fontconfig_source.doc/match_char.md")]
     #[must_use]
     pub fn match_char(&self, character: char) -> Option<SystemFace> {
         let pattern = format!(":charset={:x}", character as u32);
@@ -64,17 +66,34 @@ impl FontconfigSource {
         parse_faces(&out).into_iter().next()
     }
 
-    #[doc = include_str!("fontconfig_source.doc/find_family.md")]
+    #[doc = include_str!("../../docs/api/source/fontconfig_source.doc/find_family.md")]
     #[must_use]
     pub fn find_family(&self, name: &str, attributes: &FontAttributes) -> Option<SystemFace> {
         let out = Self::run(&self.list_tool, &["-f", FORMAT, name])?;
-        parse_faces(&out)
-            .into_iter()
+        Self::closest_family(&parse_faces(&out), name, attributes).cloned()
+    }
+
+    /// Lists installed faces that can be loaded individually.
+    #[must_use]
+    pub fn list_faces(&self) -> Option<Vec<SystemFace>> {
+        let out = Self::run(&self.list_tool, &["-f", FORMAT])?;
+        Some(parse_faces(&out))
+    }
+
+    /// Selects the nearest cut of an exact family name in a face list.
+    #[must_use]
+    pub fn closest_family<'a>(
+        faces: &'a [SystemFace],
+        name: &str,
+        attributes: &FontAttributes,
+    ) -> Option<&'a SystemFace> {
+        faces
+            .iter()
             .filter(|face| face.family().eq_ignore_ascii_case(name))
             .min_by_key(|face| face.attributes().distance(attributes))
     }
 
-    #[doc = include_str!("fontconfig_source.doc/run.md")]
+    #[doc = include_str!("../../docs/api/source/fontconfig_source.doc/run.md")]
     fn run(tool: &str, args: &[&str]) -> Option<String> {
         let out = Command::new(tool).args(args).output().ok()?;
         if !out.status.success() {
@@ -85,13 +104,13 @@ impl FontconfigSource {
 }
 
 impl Default for FontconfigSource {
-    #[doc = include_str!("fontconfig_source.doc/default.md")]
+    /// The default source uses `fc-match` / `fc-list`.
     fn default() -> Self {
         Self::new()
     }
 }
 
-#[doc = include_str!("fontconfig_source.doc/generic_pattern.md")]
+#[doc = include_str!("../../docs/api/source/fontconfig_source.doc/generic_pattern.md")]
 const fn generic_pattern(generic: GenericFamily) -> &'static str {
     match generic {
         GenericFamily::Serif => "serif",
@@ -102,7 +121,7 @@ const fn generic_pattern(generic: GenericFamily) -> &'static str {
     }
 }
 
-#[doc = include_str!("fontconfig_source.doc/is_loadable.md")]
+#[doc = include_str!("../../docs/api/source/fontconfig_source.doc/is_loadable.md")]
 fn is_loadable(path: &Path) -> bool {
     let ext = path
         .extension()
@@ -111,12 +130,13 @@ fn is_loadable(path: &Path) -> bool {
     matches!(ext.as_deref(), Some("ttf" | "otf"))
 }
 
-#[doc = include_str!("fontconfig_source.doc/parse_faces.md")]
+/// Parses `FORMAT`-shaped fontconfig output into faces, dropping any line that is
+/// malformed or names a file this toolkit cannot load.
 fn parse_faces(out: &str) -> Vec<SystemFace> {
     out.lines().filter_map(parse_face).collect()
 }
 
-#[doc = include_str!("fontconfig_source.doc/parse_face.md")]
+/// Parses one `family\tfile\tweight\tslant\twidth` line.
 fn parse_face(line: &str) -> Option<SystemFace> {
     let mut fields = line.split(FIELD);
     let family = fields.next()?.trim();
@@ -176,6 +196,19 @@ mod tests {
         let faces = parse_faces("Fam\t/f/x.ttf\tnot-a-number\t\t\n");
         assert_eq!(faces.len(), 1);
         assert_eq!(faces[0].attributes(), &FontAttributes::new());
+    }
+
+    #[test]
+    fn catalog_selects_the_nearest_cut_of_the_exact_family() {
+        let faces = parse_faces(concat!(
+            "Other Mono\t/f/Other-Bold.ttf\t200\t0\t100\n",
+            "Test Mono\t/f/Test-Regular.ttf\t80\t0\t100\n",
+            "Test Mono\t/f/Test-Bold.ttf\t200\t0\t100\n",
+        ));
+        let bold = FontAttributes::new().with_weight(FontWeight::BOLD);
+        let face = FontconfigSource::closest_family(&faces, "test mono", &bold).unwrap();
+        assert_eq!(face.path(), Path::new("/f/Test-Bold.ttf"));
+        assert!(FontconfigSource::closest_family(&faces, "Mono", &bold).is_none());
     }
 
     #[test]

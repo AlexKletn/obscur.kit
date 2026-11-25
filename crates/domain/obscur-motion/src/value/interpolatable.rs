@@ -1,16 +1,16 @@
-#![doc = include_str!("interpolatable.doc/_module.md")]
+//! The `Interpolatable` trait: arbitrary typed interpolation (spec §4.17).
 
 use obscur_geometry::{Point, Rect, Size};
 
-#[doc = include_str!("interpolatable.doc/lerp_f32.md")]
+#[doc = include_str!("../../docs/api/value/interpolatable.doc/lerp_f32.md")]
 #[must_use]
 pub const fn lerp_f32(a: f32, b: f32, t: f32) -> f32 {
     a + (b - a) * t
 }
 
-#[doc = include_str!("interpolatable.doc/Interpolatable.md")]
+#[doc = include_str!("../../docs/api/value/interpolatable.doc/Interpolatable.md")]
 pub trait Interpolatable {
-    #[doc = include_str!("interpolatable.doc/interpolate.md")]
+    #[doc = include_str!("../../docs/api/value/interpolatable.doc/interpolate.md")]
     #[must_use]
     fn interpolate(&self, other: &Self, t: f32) -> Self;
 }

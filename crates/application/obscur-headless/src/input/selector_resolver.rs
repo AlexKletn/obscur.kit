@@ -1,72 +1,123 @@
-#![doc = include_str!("selector_resolver.doc/_module.md")]
+//! `SelectorResolver`: turning a [`SelectorTarget`] into a concrete node.
 
 use obscur_geometry::Point;
 use obscur_identity::{InternedSymbol, NodeId};
 use obscur_runtime::UiRuntime;
+use obscur_tree::node::RetainedNode;
 use obscur_view::view::{AUTOMATION_ID, TEST_ID, ViewValue};
 
 use crate::input::SelectorTarget;
+use crate::snapshot::PipelineSnapshot;
 
-#[doc = include_str!("selector_resolver.doc/SelectorResolver.md")]
+#[doc = include_str!("../../docs/api/input/selector_resolver.doc/SelectorResolver.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SelectorResolver;
 
 impl SelectorResolver {
-    #[doc = include_str!("selector_resolver.doc/new.md")]
+    /// Creates a resolver.
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    #[doc = include_str!("selector_resolver.doc/resolve.md")]
+    #[doc = include_str!("../../docs/api/input/selector_resolver.doc/resolve.md")]
     #[must_use]
     pub fn resolve(self, runtime: &UiRuntime, target: &SelectorTarget) -> Option<NodeId> {
         match target {
             SelectorTarget::Node(id) => runtime.tree().contains(*id).then_some(*id),
-            SelectorTarget::TestId(id) => Self::by_stable_id(runtime, TEST_ID, id),
-            SelectorTarget::AutomationId(id) => Self::by_stable_id(runtime, AUTOMATION_ID, id),
-            SelectorTarget::Coordinate(_) => None,
+            SelectorTarget::Semantic { role, name } => {
+                let tree = runtime.semantic_tree();
+                unique_node(tree.by_role(*role, name.as_deref()).map(|(id, _)| id))
+            }
+            _ => Self::resolve_retained(runtime.tree().iter(), target),
         }
     }
 
-    #[doc = include_str!("selector_resolver.doc/point_for.md")]
+    /// Finds a unique node using the retained tree and accessibility data
+    /// captured in the snapshot.
+    #[must_use]
+    pub fn resolve_in_snapshot(
+        self,
+        snapshot: &PipelineSnapshot,
+        target: &SelectorTarget,
+    ) -> Option<NodeId> {
+        match target {
+            SelectorTarget::Node(id) => snapshot.tree().contains(*id).then_some(*id),
+            SelectorTarget::Semantic { role, name } => {
+                unique_node(snapshot.accessibility().iter().filter_map(|(id, node)| {
+                    (!node.state().hidden
+                        && node.role() == *role
+                        && name.as_deref().is_none_or(|name| node.name() == Some(name)))
+                    .then_some(id)
+                }))
+            }
+            _ => Self::resolve_retained(snapshot.tree().iter(), target),
+        }
+    }
+
+    fn resolve_retained<'a>(
+        nodes: impl Iterator<Item = (NodeId, &'a RetainedNode)>,
+        target: &SelectorTarget,
+    ) -> Option<NodeId> {
+        match target {
+            SelectorTarget::Component(component) => unique_node(nodes.filter_map(|(id, node)| {
+                (node.kind().component_id() == Some(*component)).then_some(id)
+            })),
+            SelectorTarget::TestId(id) => Self::by_stable_id(nodes, TEST_ID, id),
+            SelectorTarget::AutomationId(id) => Self::by_stable_id(nodes, AUTOMATION_ID, id),
+            _ => None,
+        }
+    }
+
+    #[doc = include_str!("../../docs/api/input/selector_resolver.doc/point_for.md")]
     #[must_use]
     pub fn point_for(self, runtime: &UiRuntime, target: &SelectorTarget) -> Option<Point> {
         if let SelectorTarget::Coordinate(point) = target {
             return Some(*point);
         }
         let node = self.resolve(runtime, target)?;
-        let layout = runtime.layout_boxes().get(&node)?;
-        let origin = layout.origin();
-        let size = layout.size();
-        Some(Point::new(
-            origin.x + size.width / 2.0,
-            origin.y + size.height / 2.0,
-        ))
+        let bounds = runtime.presented_physical_bounds(node)?;
+        if bounds.size.width <= 0.0 || bounds.size.height <= 0.0 {
+            return None;
+        }
+        let point = Point::new(
+            bounds.origin.x + bounds.size.width / 2.0,
+            bounds.origin.y + bounds.size.height / 2.0,
+        );
+        runtime.hit_test(point).contains_node(node).then_some(point)
     }
 
-    #[doc = include_str!("selector_resolver.doc/by_stable_id.md")]
-    fn by_stable_id(runtime: &UiRuntime, attribute: InternedSymbol, id: &str) -> Option<NodeId> {
-        runtime
-            .tree()
-            .iter()
-            .find(|(_, node)| {
-                node.props().iter().any(|prop| {
+    #[doc = include_str!("../../docs/api/input/selector_resolver.doc/by_stable_id.md")]
+    fn by_stable_id<'a>(
+        nodes: impl Iterator<Item = (NodeId, &'a RetainedNode)>,
+        attribute: InternedSymbol,
+        id: &str,
+    ) -> Option<NodeId> {
+        unique_node(nodes.filter_map(|(node_id, node)| {
+            node.props()
+                .iter()
+                .any(|prop| {
                     prop.name() == attribute
                         && matches!(prop.value(), ViewValue::Text(text) if &**text == id)
                 })
-            })
-            .map(|(node_id, _)| node_id)
+                .then_some(node_id)
+        }))
     }
+}
+
+fn unique_node(mut matches: impl Iterator<Item = NodeId>) -> Option<NodeId> {
+    let id = matches.next()?;
+    matches.next().is_none().then_some(id)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::SelectorResolver;
+    use super::{PipelineSnapshot, SelectorResolver};
     use crate::input::SelectorTarget;
     use obscur_geometry::{Point, Size};
     use obscur_identity::{ComponentId, NodeId, RuntimeId};
     use obscur_runtime::UiRuntime;
+    use obscur_runtime::orchestration::StyleInputs;
     use obscur_style::cascade::CascadeOrigin;
     use obscur_style::matching::{BlockDeclaration, StyleRule, Stylesheet};
     use obscur_style::property::{Length, PropertyId, PropertyValue};
@@ -121,6 +172,32 @@ mod tests {
                 ViewValue::Text("submit".into()),
             )),
         ]))
+    }
+
+    #[test]
+    fn duplicate_stable_ids_do_not_resolve() {
+        let view = View::from_fragment(ViewFragment::from_nodes(
+            (1..=2)
+                .map(|id| {
+                    ViewNode::element(ComponentId::from_raw(id))
+                        .with_prop(ViewProperty::new(CLASS, ViewValue::Text("box".into())))
+                        .with_prop(ViewProperty::new(TEST_ID, ViewValue::Text("save".into())))
+                        .with_prop(ViewProperty::new(
+                            AUTOMATION_ID,
+                            ViewValue::Text("save".into()),
+                        ))
+                })
+                .collect(),
+        ));
+        let runtime = runtime_with(&view);
+        let resolver = SelectorResolver::new();
+        for target in [
+            SelectorTarget::test_id("save"),
+            SelectorTarget::automation_id("save"),
+        ] {
+            assert_eq!(resolver.resolve(&runtime, &target), None);
+            assert_eq!(resolver.point_for(&runtime, &target), None);
+        }
     }
 
     #[test]
@@ -210,6 +287,103 @@ mod tests {
             SelectorResolver::new().point_for(&runtime, &target),
             Some(point)
         );
+    }
+
+    #[test]
+    fn component_target_resolves_only_one_live_element() {
+        let component = ComponentId::from_raw(2);
+        let target = SelectorTarget::component(component);
+        let resolver = SelectorResolver::new();
+        let mut runtime = runtime_with(&tagged_view());
+        let id = resolver.resolve(&runtime, &target).unwrap();
+        assert_eq!(
+            runtime.tree().get(id).unwrap().kind().component_id(),
+            Some(component)
+        );
+        let repeated = View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(component),
+            ViewNode::element(component),
+        ]));
+        runtime.render_now(&repeated, &[]);
+        assert_eq!(resolver.resolve(&runtime, &target), None);
+    }
+
+    #[test]
+    fn snapshot_selectors_still_resolve_after_the_live_tree_changes() {
+        let mut runtime = runtime_with(&tagged_view());
+        let snapshot =
+            PipelineSnapshot::capture(runtime.tree(), &StyleInputs::new(), runtime.viewport());
+        let resolver = SelectorResolver::new();
+        let target = SelectorTarget::automation_id("submit");
+        let id = resolver.resolve(&runtime, &target).unwrap();
+        runtime.render_now(
+            &View::from_fragment(ViewFragment::from_nodes(Vec::new())),
+            &[],
+        );
+        assert_eq!(resolver.resolve(&runtime, &target), None);
+        assert_eq!(resolver.resolve_in_snapshot(&snapshot, &target), Some(id));
+    }
+
+    #[test]
+    fn semantic_targets_resolve_only_unique_visible_matches() {
+        use obscur_accessibility::semantic::SemanticRole;
+        use obscur_view::view::LOCAL_NAME;
+
+        let button = |id, label| {
+            ViewNode::element(ComponentId::from_raw(id))
+                .with_prop(ViewProperty::new(
+                    LOCAL_NAME,
+                    ViewValue::Text("button".into()),
+                ))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("box".into())))
+                .with_children(ViewFragment::from_nodes(vec![ViewNode::text(label)]))
+        };
+        let view = View::from_fragment(ViewFragment::from_nodes(vec![
+            button(1, "Save"),
+            button(2, "Cancel"),
+        ]));
+        let runtime = runtime_with(&view);
+        let resolver = SelectorResolver::new();
+        let save = SelectorTarget::semantic(SemanticRole::Button, Some("Save"));
+        let id = resolver.resolve(&runtime, &save).unwrap();
+        let snapshot =
+            PipelineSnapshot::capture(runtime.tree(), &StyleInputs::new(), runtime.viewport());
+        assert_eq!(resolver.resolve_in_snapshot(&snapshot, &save), Some(id));
+        assert_eq!(
+            runtime.semantic_tree().get(id).unwrap().name(),
+            Some("Save")
+        );
+        assert!(resolver.point_for(&runtime, &save).is_some());
+        assert_eq!(
+            resolver.resolve(
+                &runtime,
+                &SelectorTarget::semantic(SemanticRole::Button, None)
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn semantic_input_uses_physical_coordinates_at_device_scale() {
+        use crate::input::{SyntheticDispatcher, SyntheticInput};
+
+        let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(200.0, 200.0));
+        runtime.set_surface(Size::new(400.0, 400.0), 2.0);
+        runtime.render_now(&tagged_view(), &[sheet()]);
+        let resolver = SelectorResolver::new();
+        let target = SelectorTarget::test_id("submit");
+        let node = resolver.resolve(&runtime, &target).unwrap();
+        let bounds = runtime.layout_boxes().get(&node).unwrap().bounds;
+        assert_eq!(
+            resolver.point_for(&runtime, &target),
+            Some(Point::new(
+                bounds.origin.x * 2.0 + bounds.size.width,
+                bounds.origin.y * 2.0 + bounds.size.height,
+            ))
+        );
+        let outcome = SyntheticDispatcher::new()
+            .dispatch(&mut runtime, &SyntheticInput::pointer_move(target));
+        assert_eq!(outcome.target, Some(node));
     }
 
     #[test]

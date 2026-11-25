@@ -1,13 +1,27 @@
-#![doc = include_str!("logical_property.doc/_module.md")]
+#![doc = include_str!("../../docs/api/property/logical_property.doc/_module.md")]
 
 use crate::property::{PropertyId, WritingMode};
 
 impl PropertyId {
-    #[doc = include_str!("logical_property.doc/physical_under.md")]
+    #[doc = include_str!("../../docs/api/property/logical_property.doc/physical_under.md")]
     #[must_use]
     pub const fn physical_under(self, rtl: bool, wm: WritingMode) -> Option<Self> {
         let vertical = wm.is_vertical();
         Some(match self {
+            Self::ContainIntrinsicInlineSize => {
+                if vertical {
+                    Self::ContainIntrinsicHeight
+                } else {
+                    Self::ContainIntrinsicWidth
+                }
+            }
+            Self::ContainIntrinsicBlockSize => {
+                if vertical {
+                    Self::ContainIntrinsicWidth
+                } else {
+                    Self::ContainIntrinsicHeight
+                }
+            }
             // Inline axis: flipped by `direction`, and rotated to vertical by a
             // vertical `writing-mode` (line-left = physical top).
             Self::MarginInlineStart => match (vertical, rtl) {
@@ -128,7 +142,8 @@ impl PropertyId {
         })
     }
 
-    #[doc = include_str!("logical_property.doc/is_logical.md")]
+    /// Whether this is a logical property — one that resolves into a physical
+    /// counterpart rather than being computed itself.
     #[must_use]
     pub const fn is_logical(self) -> bool {
         // The direction / writing-mode are arbitrary here: a logical property maps
@@ -137,13 +152,15 @@ impl PropertyId {
             .is_some()
     }
 
-    #[doc = include_str!("logical_property.doc/LOGICAL.md")]
-    #[doc = include_str!("logical_property.doc/is_logical_target.md")]
+    #[doc = include_str!("../../docs/api/property/logical_property.doc/LOGICAL.md")]
+    #[doc = include_str!("../../docs/api/property/logical_property.doc/is_logical_target.md")]
     #[must_use]
     pub const fn is_logical_target(self) -> bool {
         matches!(
             self,
-            Self::MarginTop
+            Self::ContainIntrinsicWidth
+                | Self::ContainIntrinsicHeight
+                | Self::MarginTop
                 | Self::MarginRight
                 | Self::MarginBottom
                 | Self::MarginLeft
@@ -166,8 +183,10 @@ impl PropertyId {
         )
     }
 
-    #[doc = include_str!("logical_property.doc/LOGICAL.md")]
-    pub const LOGICAL: [Self; 20] = [
+    #[doc = include_str!("../../docs/api/property/logical_property.doc/LOGICAL.md")]
+    pub const LOGICAL: [Self; 22] = [
+        Self::ContainIntrinsicInlineSize,
+        Self::ContainIntrinsicBlockSize,
         Self::MarginInlineStart,
         Self::MarginInlineEnd,
         Self::MarginBlockStart,

@@ -1,44 +1,20 @@
-#![doc = include_str!("window_relation.doc/_module.md")]
+//! Owner/parent relations and modality between windows (spec §6.1).
 
 use obscur_identity::WindowId;
 
-#[doc = include_str!("window_relation.doc/Modality.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Modality {
-    #[doc = include_str!("window_relation.doc/Modeless.md")]
-    Modeless,
-    #[doc = include_str!("window_relation.doc/WindowModal.md")]
-    WindowModal,
-    #[doc = include_str!("window_relation.doc/ApplicationModal.md")]
-    ApplicationModal,
-}
+use super::Modality;
 
-impl Modality {
-    #[doc = include_str!("window_relation.doc/is_modal.md")]
-    #[must_use]
-    pub const fn is_modal(self) -> bool {
-        !matches!(self, Self::Modeless)
-    }
-}
-
-impl Default for Modality {
-    #[doc = include_str!("window_relation.doc/default.md")]
-    fn default() -> Self {
-        Self::Modeless
-    }
-}
-
-#[doc = include_str!("window_relation.doc/WindowRelation.md")]
+#[doc = include_str!("../../docs/api/window/window_relation.doc/WindowRelation.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WindowRelation {
-    #[doc = include_str!("window_relation.doc/owner.md")]
+    /// The owning/parent window, or `None` for a top-level window.
     pub owner: Option<WindowId>,
-    #[doc = include_str!("window_relation.doc/modality.md")]
+    /// How this window restricts interaction with other windows.
     pub modality: Modality,
 }
 
 impl WindowRelation {
-    #[doc = include_str!("window_relation.doc/top_level.md")]
+    /// A top-level, modeless window with no owner.
     #[must_use]
     pub const fn top_level() -> Self {
         Self {
@@ -47,7 +23,7 @@ impl WindowRelation {
         }
     }
 
-    #[doc = include_str!("window_relation.doc/owned_by.md")]
+    /// A modeless window owned by `owner`.
     #[must_use]
     pub const fn owned_by(owner: WindowId) -> Self {
         Self {
@@ -56,21 +32,21 @@ impl WindowRelation {
         }
     }
 
-    #[doc = include_str!("window_relation.doc/with_owner.md")]
+    /// Sets the owner window, returning the updated relation.
     #[must_use]
     pub const fn with_owner(mut self, owner: WindowId) -> Self {
         self.owner = Some(owner);
         self
     }
 
-    #[doc = include_str!("window_relation.doc/with_modality.md")]
+    /// Sets the modality, returning the updated relation.
     #[must_use]
     pub const fn with_modality(mut self, modality: Modality) -> Self {
         self.modality = modality;
         self
     }
 
-    #[doc = include_str!("window_relation.doc/is_top_level.md")]
+    /// Returns whether this window is top-level (has no owner).
     #[must_use]
     pub const fn is_top_level(&self) -> bool {
         self.owner.is_none()
@@ -78,7 +54,7 @@ impl WindowRelation {
 }
 
 impl Default for WindowRelation {
-    #[doc = include_str!("window_relation.doc/default_2.md")]
+    /// The default relation is a top-level, modeless window.
     fn default() -> Self {
         Self::top_level()
     }

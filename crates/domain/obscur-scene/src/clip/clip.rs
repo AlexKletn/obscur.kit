@@ -1,57 +1,80 @@
-#![doc = include_str!("clip.doc/_module.md")]
+//! A clip applied to subsequent drawing.
 
 use obscur_geometry::{CornerRadii, Rect};
 
+use crate::paint::SceneImage;
 use crate::path::Path;
 
 use super::{ClipShape, Mask};
 
-#[doc = include_str!("clip.doc/Clip.md")]
+#[doc = include_str!("../../docs/api/clip/clip.doc/Clip.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Clip {
-    #[doc = include_str!("clip.doc/Shape.md")]
+    /// A geometric clip confining drawing to a shape.
     Shape(ClipShape),
-    #[doc = include_str!("clip.doc/Mask.md")]
+    /// A mask clip modulating coverage from source content.
     Mask(Mask),
+    /// A raster coverage mask positioned in scene-local coordinates.
+    ImageMask {
+        /// Selects alpha or luminance coverage.
+        kind: Mask,
+        /// Image supplying the per-pixel coverage.
+        image: SceneImage,
+        /// Rectangle in clip-local coordinates onto which the image is mapped.
+        bounds: Rect,
+    },
 }
 
 impl Clip {
-    #[doc = include_str!("clip.doc/rect.md")]
+    /// Creates a rectangular shape clip.
     #[must_use]
     pub const fn rect(rect: Rect) -> Self {
         Self::Shape(ClipShape::rect(rect))
     }
 
-    #[doc = include_str!("clip.doc/rounded_rect.md")]
+    /// Creates a rounded-rectangular shape clip.
     #[must_use]
     pub const fn rounded_rect(rect: Rect, radii: CornerRadii) -> Self {
         Self::Shape(ClipShape::rounded_rect(rect, radii))
     }
 
-    #[doc = include_str!("clip.doc/path.md")]
+    /// Creates a path shape clip.
     #[must_use]
     pub fn path(path: Path) -> Self {
         Self::Shape(ClipShape::path(path))
     }
 
-    #[doc = include_str!("clip.doc/mask.md")]
+    /// Creates a mask clip.
     #[must_use]
     pub const fn mask(mask: Mask) -> Self {
         Self::Mask(mask)
     }
 
-    #[doc = include_str!("clip.doc/is_mask.md")]
+    /// Maps the supplied image to the bounds. Samples outside the image rectangle
+    /// have zero coverage. Alpha masks use the image alpha. Luminance masks use
+    /// linear-light luminance multiplied by image alpha.
     #[must_use]
-    pub const fn is_mask(&self) -> bool {
-        matches!(self, Self::Mask(_))
+    pub const fn image_mask(kind: Mask, image: SceneImage, bounds: Rect) -> Self {
+        Self::ImageMask {
+            kind,
+            image,
+            bounds,
+        }
     }
 
-    #[doc = include_str!("clip.doc/bounds.md")]
+    /// Returns whether this clip is a [`Clip::Mask`].
+    #[must_use]
+    pub const fn is_mask(&self) -> bool {
+        matches!(self, Self::Mask(_) | Self::ImageMask { .. })
+    }
+
+    #[doc = include_str!("../../docs/api/clip/clip.doc/bounds.md")]
     #[must_use]
     pub fn bounds(&self) -> Option<Rect> {
         match self {
             Self::Shape(shape) => shape.bounds(),
             Self::Mask(_) => None,
+            Self::ImageMask { bounds, .. } => Some(*bounds),
         }
     }
 }

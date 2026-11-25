@@ -1,4 +1,4 @@
-#![doc = include_str!("name_binding.doc/_module.md")]
+#![doc = include_str!("../docs/api/name_binding.doc/_module.md")]
 
 use obscur_identity::{ComponentId, InternedSymbol};
 
@@ -6,95 +6,113 @@ use crate::document::{UiIrExpression, UiIrValue};
 
 // --- Reserved attribute symbols (mirror `obscur_view::view::style_attribute`). ---
 
-#[doc = include_str!("name_binding.doc/CLASS.md")]
+/// Reserved `class` attribute symbol (`obscur_view::view::CLASS`).
 pub const CLASS: InternedSymbol = InternedSymbol::from_raw(0x0000_0001);
-#[doc = include_str!("name_binding.doc/ID.md")]
+/// Reserved `id` attribute symbol (`obscur_view::view::ID`).
 pub const ID: InternedSymbol = InternedSymbol::from_raw(0x0000_0002);
-#[doc = include_str!("name_binding.doc/TYPE.md")]
+#[doc = include_str!("../docs/api/name_binding.doc/TYPE.md")]
 pub const TYPE: InternedSymbol = InternedSymbol::from_raw(0x0000_0003);
-#[doc = include_str!("name_binding.doc/SRC.md")]
+/// Reserved `src` attribute symbol (`obscur_view::view::SRC`).
 pub const SRC: InternedSymbol = InternedSymbol::from_raw(0x0000_0004);
-#[doc = include_str!("name_binding.doc/DISABLED.md")]
+/// Reserved `disabled` attribute symbol (`obscur_view::view::DISABLED`).
 pub const DISABLED: InternedSymbol = InternedSymbol::from_raw(0x0000_0005);
-#[doc = include_str!("name_binding.doc/CHECKED.md")]
+/// Reserved `checked` attribute symbol (`obscur_view::view::CHECKED`).
 pub const CHECKED: InternedSymbol = InternedSymbol::from_raw(0x0000_0006);
-#[doc = include_str!("name_binding.doc/PLACEHOLDER.md")]
+#[doc = include_str!("../docs/api/name_binding.doc/PLACEHOLDER.md")]
 pub const PLACEHOLDER: InternedSymbol = InternedSymbol::from_raw(0x0000_0009);
-#[doc = include_str!("name_binding.doc/LOCAL_NAME.md")]
+#[doc = include_str!("../docs/api/name_binding.doc/LOCAL_NAME.md")]
 pub const LOCAL_NAME: InternedSymbol = InternedSymbol::from_raw(0x0000_000A);
-#[doc = include_str!("name_binding.doc/STYLE.md")]
+#[doc = include_str!("../docs/api/name_binding.doc/STYLE.md")]
 pub const STYLE: InternedSymbol = InternedSymbol::from_raw(0x0000_000B);
 
-#[doc = include_str!("name_binding.doc/TEST_ID.md")]
+#[doc = include_str!("../docs/api/name_binding.doc/TEST_ID.md")]
 pub const TEST_ID: InternedSymbol = InternedSymbol::from_raw(0x0000_0201);
 
-#[doc = include_str!("name_binding.doc/AUTOMATION_ID.md")]
+#[doc = include_str!("../docs/api/name_binding.doc/AUTOMATION_ID.md")]
 pub const AUTOMATION_ID: InternedSymbol = InternedSymbol::from_raw(0x0000_0202);
 
-#[doc = include_str!("name_binding.doc/SLOT.md")]
+#[doc = include_str!("../docs/api/name_binding.doc/SLOT.md")]
 pub const SLOT: InternedSymbol = InternedSymbol::from_raw(0x0000_0301);
 
 // --- Reserved control symbols (mirror `obscur_view::view::slider` and
 //     `obscur_widgets::progress`). ---
 
-#[doc = include_str!("name_binding.doc/SLIDER_MIN.md")]
+#[doc = include_str!("../docs/api/name_binding.doc/SLIDER_MIN.md")]
 pub const SLIDER_MIN: InternedSymbol = InternedSymbol::from_raw(0x0000_0501);
-#[doc = include_str!("name_binding.doc/SLIDER_MAX.md")]
+#[doc = include_str!("../docs/api/name_binding.doc/SLIDER_MAX.md")]
 pub const SLIDER_MAX: InternedSymbol = InternedSymbol::from_raw(0x0000_0502);
-#[doc = include_str!("name_binding.doc/SLIDER_STEP.md")]
+#[doc = include_str!("../docs/api/name_binding.doc/SLIDER_STEP.md")]
 pub const SLIDER_STEP: InternedSymbol = InternedSymbol::from_raw(0x0000_0503);
-#[doc = include_str!("name_binding.doc/SLIDER_LOW.md")]
+#[doc = include_str!("../docs/api/name_binding.doc/SLIDER_LOW.md")]
 pub const SLIDER_LOW: InternedSymbol = InternedSymbol::from_raw(0x0000_0504);
 
-#[doc = include_str!("name_binding.doc/PROGRESS_VALUE.md")]
+#[doc = include_str!("../docs/api/name_binding.doc/PROGRESS_VALUE.md")]
 pub const PROGRESS_VALUE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0702);
 
-#[doc = include_str!("name_binding.doc/SLOT_OUTLET.md")]
+#[doc = include_str!("../docs/api/name_binding.doc/SLOT_OUTLET.md")]
 pub const SLOT_OUTLET: ComponentId = ComponentId::from_raw(0x00B0_0001);
 
-#[doc = include_str!("name_binding.doc/OUTLET_TAG.md")]
+#[doc = include_str!("../docs/api/name_binding.doc/OUTLET_TAG.md")]
 pub const OUTLET_TAG: &str = "slot";
 
 // --- Reserved event symbols (mirror `obscur_view::view::event_name`). ---
 
-#[doc = include_str!("name_binding.doc/EVENT_CLICK.md")]
+/// Reserved `click` event symbol (`obscur_view::view::EVENT_CLICK`).
 pub const EVENT_CLICK: InternedSymbol = InternedSymbol::from_raw(0x0000_0101);
-#[doc = include_str!("name_binding.doc/EVENT_INPUT.md")]
+/// Reserved `input` event symbol (`obscur_view::view::EVENT_INPUT`).
 pub const EVENT_INPUT: InternedSymbol = InternedSymbol::from_raw(0x0000_0102);
-#[doc = include_str!("name_binding.doc/EVENT_CHANGE.md")]
+/// Reserved `change` event symbol (`obscur_view::view::EVENT_CHANGE`).
 pub const EVENT_CHANGE: InternedSymbol = InternedSymbol::from_raw(0x0000_0103);
-#[doc = include_str!("name_binding.doc/EVENT_LONG_PRESS.md")]
+/// Reserved `longpress` event symbol (`obscur_view::view::EVENT_LONG_PRESS`).
 pub const EVENT_LONG_PRESS: InternedSymbol = InternedSymbol::from_raw(0x0000_0104);
-#[doc = include_str!("name_binding.doc/EVENT_KEY_DOWN.md")]
+/// Mirrors `obscur_view::view::EVENT_KEY_DOWN`. `on:keydown="…"` lowers to it.
 pub const EVENT_KEY_DOWN: InternedSymbol = InternedSymbol::from_raw(0x0000_0105);
-#[doc = include_str!("name_binding.doc/EVENT_KEY_UP.md")]
+/// Mirrors `obscur_view::view::EVENT_KEY_UP`. `on:keyup="…"` lowers to it.
 pub const EVENT_KEY_UP: InternedSymbol = InternedSymbol::from_raw(0x0000_0106);
 
-#[doc = include_str!("name_binding.doc/EVENT_POINTER_DOWN.md")]
+/// Mirrors `obscur_view::view::EVENT_POINTER_DOWN`. `on:pointerdown="…"` lowers to it.
 pub const EVENT_POINTER_DOWN: InternedSymbol = InternedSymbol::from_raw(0x0000_0107);
-#[doc = include_str!("name_binding.doc/EVENT_POINTER_UP.md")]
+/// Mirrors `obscur_view::view::EVENT_POINTER_UP`. `on:pointerup="…"` lowers to it.
 pub const EVENT_POINTER_UP: InternedSymbol = InternedSymbol::from_raw(0x0000_0108);
-#[doc = include_str!("name_binding.doc/EVENT_POINTER_MOVE.md")]
+/// Mirrors `obscur_view::view::EVENT_POINTER_MOVE`. `on:pointermove="…"` lowers to it.
 pub const EVENT_POINTER_MOVE: InternedSymbol = InternedSymbol::from_raw(0x0000_0109);
-#[doc = include_str!("name_binding.doc/EVENT_POINTER_CANCEL.md")]
+/// Mirrors `obscur_view::view::EVENT_POINTER_CANCEL`. `on:pointercancel="…"` lowers to it.
 pub const EVENT_POINTER_CANCEL: InternedSymbol = InternedSymbol::from_raw(0x0000_010A);
-#[doc = include_str!("name_binding.doc/EVENT_POINTER_ENTER.md")]
+/// Mirrors `obscur_view::view::EVENT_POINTER_ENTER`, which states what the
+/// crossing pair means in this toolkit. `on:pointerenter="…"` lowers to it.
 pub const EVENT_POINTER_ENTER: InternedSymbol = InternedSymbol::from_raw(0x0000_010B);
-#[doc = include_str!("name_binding.doc/EVENT_POINTER_LEAVE.md")]
+/// Mirrors `obscur_view::view::EVENT_POINTER_LEAVE`. `on:pointerleave="…"` lowers
+/// to it.
 pub const EVENT_POINTER_LEAVE: InternedSymbol = InternedSymbol::from_raw(0x0000_010C);
 
-#[doc = include_str!("name_binding.doc/EVENT_WHEEL.md")]
+/// Mirrors `obscur_view::view::EVENT_WHEEL`. `on:wheel="…"` lowers to it.
 pub const EVENT_WHEEL: InternedSymbol = InternedSymbol::from_raw(0x0000_010D);
 
-#[doc = include_str!("name_binding.doc/EVENT_FOCUS.md")]
+/// Mirrors `obscur_view::view::EVENT_FOCUS`, which states why the pair is a
+/// notification rather than a gate. `on:focus="…"` lowers to it.
 pub const EVENT_FOCUS: InternedSymbol = InternedSymbol::from_raw(0x0000_010E);
-#[doc = include_str!("name_binding.doc/EVENT_BLUR.md")]
+/// Mirrors `obscur_view::view::EVENT_BLUR`. `on:blur="…"` lowers to it.
 pub const EVENT_BLUR: InternedSymbol = InternedSymbol::from_raw(0x0000_010F);
 
-#[doc = include_str!("name_binding.doc/EVENT_CONTEXT_MENU.md")]
+/// Native touchpad input event name.
+pub const EVENT_TOUCHPAD_GESTURE: InternedSymbol = InternedSymbol::from_raw(0x0000_0111);
+
+/// The application touch gesture candidate stream (`touchgesture`).
+pub const EVENT_TOUCH_GESTURE: InternedSymbol = InternedSymbol::from_raw(0x0000_0112);
+
+/// Predictive Back from the host of the current window (`systemback`).
+pub const EVENT_SYSTEM_BACK: InternedSymbol = InternedSymbol::from_raw(0x0000_0113);
+
+/// Application candidate for a phased pixel-scroll sequence (`scrollgesture`).
+pub const EVENT_SCROLL_GESTURE: InternedSymbol = InternedSymbol::from_raw(0x0000_0114);
+
+/// A host gamepad input report (`gamepad`).
+pub const EVENT_GAMEPAD: InternedSymbol = InternedSymbol::from_raw(0x0000_0115);
+
+/// Mirrors `obscur_view::view::EVENT_CONTEXT_MENU`. `on:contextmenu="…"` lowers to it.
 pub const EVENT_CONTEXT_MENU: InternedSymbol = InternedSymbol::from_raw(0x0000_0110);
 
-#[doc = include_str!("name_binding.doc/RESERVED_EVENTS.md")]
+#[doc = include_str!("../docs/api/name_binding.doc/RESERVED_EVENTS.md")]
 pub const RESERVED_EVENTS: &[InternedSymbol] = &[
     EVENT_CLICK,
     EVENT_INPUT,
@@ -111,51 +129,57 @@ pub const RESERVED_EVENTS: &[InternedSymbol] = &[
     EVENT_WHEEL,
     EVENT_FOCUS,
     EVENT_BLUR,
+    EVENT_TOUCHPAD_GESTURE,
+    EVENT_TOUCH_GESTURE,
+    EVENT_SYSTEM_BACK,
+    EVENT_SCROLL_GESTURE,
+    EVENT_GAMEPAD,
     EVENT_CONTEXT_MENU,
 ];
 
 // --- Primitive component ids (mirror `obscur_primitives::*::COMPONENT_ID`). ---
 
-#[doc = include_str!("name_binding.doc/CONTAINER.md")]
+/// The generic box primitive (`obscur_primitives::Container`) — the default
+/// binding for any tag without a more specific mapping.
 pub const CONTAINER: ComponentId = ComponentId::from_raw(0x00C0_0001);
-#[doc = include_str!("name_binding.doc/IMAGE.md")]
+/// The image primitive (`obscur_primitives::Image`).
 pub const IMAGE: ComponentId = ComponentId::from_raw(0x00C0_0003);
-#[doc = include_str!("name_binding.doc/SCROLL.md")]
+/// The scroll primitive (`obscur_primitives::Scroll`).
 pub const SCROLL: ComponentId = ComponentId::from_raw(0x00C0_0004);
-#[doc = include_str!("name_binding.doc/CANVAS.md")]
+/// The canvas primitive (`obscur_primitives::Canvas`).
 pub const CANVAS: ComponentId = ComponentId::from_raw(0x00C0_0005);
-#[doc = include_str!("name_binding.doc/PORTAL.md")]
+/// The portal primitive (`obscur_primitives::Portal`).
 pub const PORTAL: ComponentId = ComponentId::from_raw(0x00C0_0006);
-#[doc = include_str!("name_binding.doc/LAYER.md")]
+/// The layer primitive (`obscur_primitives::Layer`).
 pub const LAYER: ComponentId = ComponentId::from_raw(0x00C0_0007);
-#[doc = include_str!("name_binding.doc/FOREIGN_SURFACE.md")]
+/// The foreign-surface primitive (`obscur_primitives::ForeignSurface`).
 pub const FOREIGN_SURFACE: ComponentId = ComponentId::from_raw(0x00C0_0008);
 
 // --- Widget component ids (mirror `obscur_widgets::*::COMPONENT_ID`). ---
 
-#[doc = include_str!("name_binding.doc/BUTTON.md")]
+/// The button widget (`obscur_widgets::Button`).
 pub const BUTTON: ComponentId = ComponentId::from_raw(0x00D0_0001);
-#[doc = include_str!("name_binding.doc/INPUT.md")]
+/// The input widget (`obscur_widgets::Input`).
 pub const INPUT: ComponentId = ComponentId::from_raw(0x00D0_0002);
-#[doc = include_str!("name_binding.doc/CHECKBOX.md")]
+/// The checkbox widget (`obscur_widgets::Checkbox`).
 pub const CHECKBOX: ComponentId = ComponentId::from_raw(0x00D0_0003);
-#[doc = include_str!("name_binding.doc/SELECT.md")]
+/// The select widget (`obscur_widgets::Select`).
 pub const SELECT: ComponentId = ComponentId::from_raw(0x00D0_0004);
-#[doc = include_str!("name_binding.doc/MENU.md")]
+/// The menu widget (`obscur_widgets::Menu`).
 pub const MENU: ComponentId = ComponentId::from_raw(0x00D0_0005);
-#[doc = include_str!("name_binding.doc/DIALOG.md")]
+/// The dialog widget (`obscur_widgets::Dialog`).
 pub const DIALOG: ComponentId = ComponentId::from_raw(0x00D0_0006);
-#[doc = include_str!("name_binding.doc/TABS.md")]
+/// The tabs widget (`obscur_widgets::Tabs`).
 pub const TABS: ComponentId = ComponentId::from_raw(0x00D0_0007);
-#[doc = include_str!("name_binding.doc/LIST.md")]
+/// The list widget (`obscur_widgets::List`).
 pub const LIST: ComponentId = ComponentId::from_raw(0x00D0_0008);
-#[doc = include_str!("name_binding.doc/TREE.md")]
+/// The tree widget (`obscur_widgets::Tree`).
 pub const TREE: ComponentId = ComponentId::from_raw(0x00D0_0009);
-#[doc = include_str!("name_binding.doc/TABLE.md")]
+/// The table widget (`obscur_widgets::Table`).
 pub const TABLE: ComponentId = ComponentId::from_raw(0x00D0_000A);
-#[doc = include_str!("name_binding.doc/DOCKING.md")]
+/// The docking widget (`obscur_widgets::Docking`).
 pub const DOCKING: ComponentId = ComponentId::from_raw(0x00D0_000B);
-#[doc = include_str!("name_binding.doc/RADIO.md")]
+/// The radio widget (`obscur_widgets::Radio`).
 pub const RADIO: ComponentId = ComponentId::from_raw(0x00D0_000C);
 // 2026-08-07. These two are the ids the shipped widgets carry, and they are the
 // ids `Tabs` and `List` carry as well — `Progress` was numbered 0x00D0_0007 and
@@ -166,21 +190,22 @@ pub const RADIO: ComponentId = ComponentId::from_raw(0x00D0_000C);
 // number (a registry keyed by id would then mount a progress bar for `<Tabs/>`),
 // so the widgets' own constants are where it has to be fixed, and the facade's
 // drift test is what will fail here when they are.
-#[doc = include_str!("name_binding.doc/PROGRESS.md")]
+/// The progress widget (`obscur_widgets::Progress`).
 pub const PROGRESS: ComponentId = ComponentId::from_raw(0x00D0_0007);
-#[doc = include_str!("name_binding.doc/SLIDER.md")]
+/// The slider widget (`obscur_widgets::Slider`).
 pub const SLIDER: ComponentId = ComponentId::from_raw(0x00D0_0008);
 
-#[doc = include_str!("name_binding.doc/TagPosition.md")]
+#[doc = include_str!("../docs/api/name_binding.doc/TagPosition.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TagPosition {
-    #[doc = include_str!("name_binding.doc/Element.md")]
+    /// An element tag — `div`, `span`, `header`, `img`. Falls back to the
+    /// generic [`CONTAINER`] box.
     Element,
-    #[doc = include_str!("name_binding.doc/Component.md")]
+    /// A component tag — `Button`, `Card`. Falls back to [`user_component_id`].
     Component,
 }
 
-#[doc = include_str!("name_binding.doc/builtin_component_id.md")]
+#[doc = include_str!("../docs/api/name_binding.doc/builtin_component_id.md")]
 #[must_use]
 pub fn builtin_component_id(tag: &str) -> Option<ComponentId> {
     let id = match tag {
@@ -246,7 +271,7 @@ pub fn builtin_component_id(tag: &str) -> Option<ComponentId> {
     Some(id)
 }
 
-#[doc = include_str!("name_binding.doc/component_id_for.md")]
+#[doc = include_str!("../docs/api/name_binding.doc/component_id_for.md")]
 #[must_use]
 pub fn component_id_for(tag: &str, position: TagPosition) -> ComponentId {
     if let Some(builtin) = builtin_component_id(tag) {
@@ -258,7 +283,7 @@ pub fn component_id_for(tag: &str, position: TagPosition) -> ComponentId {
     }
 }
 
-#[doc = include_str!("name_binding.doc/local_name_for.md")]
+#[doc = include_str!("../docs/api/name_binding.doc/local_name_for.md")]
 #[must_use]
 pub fn local_name_for(tag: &str, position: TagPosition) -> Option<&str> {
     if position != TagPosition::Element || tag == OUTLET_TAG {
@@ -267,15 +292,19 @@ pub fn local_name_for(tag: &str, position: TagPosition) -> Option<&str> {
     Some(tag)
 }
 
-#[doc = include_str!("name_binding.doc/user_component_id.md")]
+#[doc = include_str!("../docs/api/name_binding.doc/user_component_id.md")]
 #[must_use]
 pub fn user_component_id(tag: &str) -> ComponentId {
     ComponentId::from_raw(hash_name_64(tag) | 0x8000_0000_0000_0000)
 }
 
-#[doc = include_str!("name_binding.doc/attr_symbol_on.md")]
+#[doc = include_str!("../docs/api/name_binding.doc/attr_symbol_on.md")]
 #[must_use]
 pub fn attr_symbol_on(tag: &str, name: &str) -> InternedSymbol {
+    if matches!(tag, "Portal" | "portal") && name == "target" {
+        return InternedSymbol::from_raw(0x00C1_0601);
+    }
+
     if tag == OUTLET_TAG && name == "name" {
         return SLOT;
     }
@@ -285,7 +314,7 @@ pub fn attr_symbol_on(tag: &str, name: &str) -> InternedSymbol {
     attr_symbol(name)
 }
 
-#[doc = include_str!("name_binding.doc/control_attr_symbol.md")]
+#[doc = include_str!("../docs/api/name_binding.doc/control_attr_symbol.md")]
 #[must_use]
 fn control_attr_symbol(tag: &str, name: &str) -> Option<InternedSymbol> {
     let symbol = match (tag, name) {
@@ -305,7 +334,7 @@ fn control_attr_symbol(tag: &str, name: &str) -> Option<InternedSymbol> {
     Some(symbol)
 }
 
-#[doc = include_str!("name_binding.doc/is_numeric_attribute_on.md")]
+#[doc = include_str!("../docs/api/name_binding.doc/is_numeric_attribute_on.md")]
 #[must_use]
 fn is_numeric_attribute_on(tag: &str, name: &str) -> bool {
     matches!(
@@ -315,7 +344,7 @@ fn is_numeric_attribute_on(tag: &str, name: &str) -> bool {
     )
 }
 
-#[doc = include_str!("name_binding.doc/attr_value_on.md")]
+#[doc = include_str!("../docs/api/name_binding.doc/attr_value_on.md")]
 #[must_use]
 pub fn attr_value_on(tag: &str, name: &str, value: &UiIrExpression) -> UiIrExpression {
     let UiIrExpression::Literal(literal) = value else {
@@ -330,7 +359,7 @@ pub fn attr_value_on(tag: &str, name: &str, value: &UiIrExpression) -> UiIrExpre
     }
 }
 
-#[doc = include_str!("name_binding.doc/literal_number.md")]
+#[doc = include_str!("../docs/api/name_binding.doc/literal_number.md")]
 #[must_use]
 fn literal_number(value: &UiIrValue) -> Option<f64> {
     let number = match value {
@@ -343,7 +372,7 @@ fn literal_number(value: &UiIrValue) -> Option<f64> {
     number.is_finite().then_some(number)
 }
 
-#[doc = include_str!("name_binding.doc/attr_symbol.md")]
+#[doc = include_str!("../docs/api/name_binding.doc/attr_symbol.md")]
 #[must_use]
 pub fn attr_symbol(name: &str) -> InternedSymbol {
     match name {
@@ -377,7 +406,7 @@ pub fn attr_symbol(name: &str) -> InternedSymbol {
     }
 }
 
-#[doc = include_str!("name_binding.doc/event_symbol.md")]
+#[doc = include_str!("../docs/api/name_binding.doc/event_symbol.md")]
 #[must_use]
 pub fn event_symbol(name: &str) -> InternedSymbol {
     match name {
@@ -419,24 +448,29 @@ pub fn event_symbol(name: &str) -> InternedSymbol {
         // is no `menu` alias: this names the *request* for a menu, which the
         // runtime does not itself open, so a name that promised an opened menu
         // would promise something nothing does.
+        "touchpadgesture" => EVENT_TOUCHPAD_GESTURE,
+        "touchgesture" => EVENT_TOUCH_GESTURE,
+        "systemback" => EVENT_SYSTEM_BACK,
+        "scrollgesture" => EVENT_SCROLL_GESTURE,
+        "gamepad" => EVENT_GAMEPAD,
         "contextmenu" => EVENT_CONTEXT_MENU,
         other => fallback_symbol(other),
     }
 }
 
-#[doc = include_str!("name_binding.doc/is_reserved_event.md")]
+#[doc = include_str!("../docs/api/name_binding.doc/is_reserved_event.md")]
 #[must_use]
 pub fn is_reserved_event(name: &str) -> bool {
     RESERVED_EVENTS.contains(&event_symbol(name))
 }
 
-#[doc = include_str!("name_binding.doc/fallback_symbol.md")]
+#[doc = include_str!("../docs/api/name_binding.doc/fallback_symbol.md")]
 #[must_use]
 pub fn fallback_symbol(name: &str) -> InternedSymbol {
     InternedSymbol::from_raw(hash_name_32(name) | 0x8000_0000)
 }
 
-#[doc = include_str!("name_binding.doc/hash_name_32.md")]
+/// Deterministic FNV-1a 32-bit hash of a name.
 #[must_use]
 fn hash_name_32(name: &str) -> u32 {
     let mut hash: u32 = 0x811c_9dc5;
@@ -447,7 +481,8 @@ fn hash_name_32(name: &str) -> u32 {
     hash
 }
 
-#[doc = include_str!("name_binding.doc/hash_name_64.md")]
+/// Deterministic FNV-1a 64-bit hash of a name — the [`ComponentId`]-width
+/// counterpart of [`hash_name_32`].
 #[must_use]
 fn hash_name_64(name: &str) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;

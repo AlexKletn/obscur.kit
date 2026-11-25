@@ -1,11 +1,13 @@
-#![doc = include_str!("skia_lowering.doc/_module.md")]
+#![doc = include_str!("../../docs/api/renderer/skia_lowering.doc/_module.md")]
 
 use obscur_geometry::{AffineTransform, Size};
 use obscur_scene::color::Color;
 use obscur_scene::paint::BlendMode;
 use obscur_scene::path::{FillRule, Path, PathSegment};
 
-#[doc = include_str!("skia_lowering.doc/to_sk_blend_mode.md")]
+/// Maps a scene [`BlendMode`] onto the `tiny-skia` compositing operator. The
+/// separable CSS `mix-blend-mode` values map one-to-one; [`BlendMode::Normal`] is
+/// `SourceOver`, the neutral operator.
 pub(crate) fn to_sk_blend_mode(mode: BlendMode) -> tiny_skia::BlendMode {
     match mode {
         BlendMode::Normal => tiny_skia::BlendMode::SourceOver,
@@ -20,18 +22,26 @@ pub(crate) fn to_sk_blend_mode(mode: BlendMode) -> tiny_skia::BlendMode {
         BlendMode::SoftLight => tiny_skia::BlendMode::SoftLight,
         BlendMode::Difference => tiny_skia::BlendMode::Difference,
         BlendMode::Exclusion => tiny_skia::BlendMode::Exclusion,
+        BlendMode::Hue => tiny_skia::BlendMode::Hue,
+        BlendMode::Saturation => tiny_skia::BlendMode::Saturation,
+        BlendMode::Color => tiny_skia::BlendMode::Color,
+        BlendMode::Luminosity => tiny_skia::BlendMode::Luminosity,
     }
 }
 
-#[doc = include_str!("skia_lowering.doc/sk_dimensions.md")]
+/// Computes the integer pixel dimensions of a target from its logical [`Size`],
+/// rounding to the nearest pixel and clamping finite negatives to zero.
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-pub(crate) fn sk_dimensions(size: Size) -> (u32, u32) {
-    let width = size.width.round().max(0.0) as u32;
-    let height = size.height.round().max(0.0) as u32;
-    (width, height)
+pub(crate) fn sk_dimensions(size: Size) -> Option<(u32, u32)> {
+    let dimension = |value: f32| {
+        let rounded = f64::from(value).round();
+        (rounded.is_finite() && rounded <= f64::from(u32::MAX)).then(|| rounded.max(0.0) as u32)
+    };
+    dimension(size.width).zip(dimension(size.height))
 }
 
-#[doc = include_str!("skia_lowering.doc/to_sk_path.md")]
+/// Converts a domain [`Path`] into a [`tiny_skia::Path`], or `None` when the
+/// outline is empty or degenerate (`tiny_skia::PathBuilder::finish` rejects it).
 pub(crate) fn to_sk_path(path: &Path) -> Option<tiny_skia::Path> {
     let mut builder = tiny_skia::PathBuilder::new();
     for segment in path.segments() {
@@ -52,13 +62,16 @@ pub(crate) fn to_sk_path(path: &Path) -> Option<tiny_skia::Path> {
     builder.finish()
 }
 
-#[doc = include_str!("skia_lowering.doc/to_sk_transform.md")]
+/// Converts an obscur-geometry [`AffineTransform`] into a
+/// [`tiny_skia::Transform`]. The obscur coefficients `[a, b, c, d, tx, ty]` map to
+/// tiny-skia's row order `(sx, ky, kx, sy, tx, ty)` one-to-one (both map a point
+/// `(x, y)` to `(a·x + c·y + tx, b·x + d·y + ty)`).
 pub(crate) fn to_sk_transform(t: &AffineTransform) -> tiny_skia::Transform {
     let m = t.coeffs;
     tiny_skia::Transform::from_row(m[0], m[1], m[2], m[3], m[4], m[5])
 }
 
-#[doc = include_str!("skia_lowering.doc/to_sk_fill_rule.md")]
+/// Maps a domain [`FillRule`] onto the `tiny-skia` equivalent.
 pub(crate) fn to_sk_fill_rule(rule: FillRule) -> tiny_skia::FillRule {
     match rule {
         FillRule::NonZero => tiny_skia::FillRule::Winding,
@@ -66,7 +79,8 @@ pub(crate) fn to_sk_fill_rule(rule: FillRule) -> tiny_skia::FillRule {
     }
 }
 
-#[doc = include_str!("skia_lowering.doc/to_sk_spread.md")]
+/// Maps a domain [`ExtendMode`](obscur_scene::paint::ExtendMode) onto tiny-skia's
+/// [`SpreadMode`](tiny_skia::SpreadMode) for gradient sampling outside `[0, 1]`.
 pub(crate) fn to_sk_spread(mode: obscur_scene::paint::ExtendMode) -> tiny_skia::SpreadMode {
     match mode {
         obscur_scene::paint::ExtendMode::Pad => tiny_skia::SpreadMode::Pad,
@@ -75,7 +89,9 @@ pub(crate) fn to_sk_spread(mode: obscur_scene::paint::ExtendMode) -> tiny_skia::
     }
 }
 
-#[doc = include_str!("skia_lowering.doc/aliased_solid_paint.md")]
+/// An **aliased** solid-color [`tiny_skia::Paint`] — used for conic-gradient wedges,
+/// whose shared internal edges must tile pixel-exactly without the AA seam an
+/// anti-aliased fill would leave between adjacent triangles.
 pub(crate) fn aliased_solid_paint(color: Color) -> Option<tiny_skia::Paint<'static>> {
     let sk_color = to_sk_color(color)?;
     Some(tiny_skia::Paint {
@@ -85,7 +101,9 @@ pub(crate) fn aliased_solid_paint(color: Color) -> Option<tiny_skia::Paint<'stat
     })
 }
 
-#[doc = include_str!("skia_lowering.doc/to_sk_color.md")]
+/// Maps a domain [`Color`] (straight-alpha sRGB, `f32`) onto a
+/// [`tiny_skia::Color`], clamping each component to `0.0..=1.0`. Returns `None`
+/// only if `tiny-skia` rejects the clamped components.
 pub(crate) fn to_sk_color(color: Color) -> Option<tiny_skia::Color> {
     tiny_skia::Color::from_rgba(
         color.r.clamp(0.0, 1.0),
@@ -95,7 +113,8 @@ pub(crate) fn to_sk_color(color: Color) -> Option<tiny_skia::Color> {
     )
 }
 
-#[doc = include_str!("skia_lowering.doc/solid_paint.md")]
+/// Builds an anti-aliased solid-color [`tiny_skia::Paint`] from a domain
+/// [`Color`], or `None` when the color cannot be represented.
 pub(crate) fn solid_paint(color: Color) -> Option<tiny_skia::Paint<'static>> {
     let sk_color = to_sk_color(color)?;
     Some(tiny_skia::Paint {
@@ -111,8 +130,10 @@ mod tests {
 
     #[test]
     fn dimensions_round_to_the_nearest_pixel_and_clamp_negatives() {
-        assert_eq!(sk_dimensions(Size::new(16.4, 16.6)), (16, 17));
-        assert_eq!(sk_dimensions(Size::new(-3.0, 0.0)), (0, 0));
+        assert_eq!(sk_dimensions(Size::new(16.4, 16.6)), Some((16, 17)));
+        assert_eq!(sk_dimensions(Size::new(-3.0, 0.0)), Some((0, 0)));
+        assert_eq!(sk_dimensions(Size::new(f32::NAN, 1.0)), None);
+        assert_eq!(sk_dimensions(Size::new(4_294_967_296.0, 1.0)), None);
     }
 
     #[test]

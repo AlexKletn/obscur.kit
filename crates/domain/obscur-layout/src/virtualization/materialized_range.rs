@@ -1,16 +1,17 @@
-#![doc = include_str!("materialized_range.doc/_module.md")]
+#![doc = include_str!("../../docs/api/virtualization/materialized_range.doc/_module.md")]
 
-#[doc = include_str!("materialized_range.doc/MaterializedRange.md")]
+#[doc = include_str!("../../docs/api/virtualization/materialized_range.doc/MaterializedRange.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MaterializedRange {
-    #[doc = include_str!("materialized_range.doc/start.md")]
+    /// First materialized index (inclusive).
     start: usize,
-    #[doc = include_str!("materialized_range.doc/end.md")]
+    /// One past the last materialized index (exclusive); never below `start`.
     end: usize,
 }
 
 impl MaterializedRange {
-    #[doc = include_str!("materialized_range.doc/new.md")]
+    /// Creates a range `[start, end)`, clamping `end` up to `start` so the range
+    /// is never inverted (spec §4.9).
     #[must_use]
     pub const fn new(start: usize, end: usize) -> Self {
         Self {
@@ -19,55 +20,56 @@ impl MaterializedRange {
         }
     }
 
-    #[doc = include_str!("materialized_range.doc/empty.md")]
+    /// The empty range `[0, 0)`.
     #[must_use]
     pub const fn empty() -> Self {
         Self { start: 0, end: 0 }
     }
 
-    #[doc = include_str!("materialized_range.doc/start_2.md")]
+    /// First materialized index (inclusive).
     #[must_use]
     pub const fn start(self) -> usize {
         self.start
     }
 
-    #[doc = include_str!("materialized_range.doc/end_2.md")]
+    /// One past the last materialized index (exclusive).
     #[must_use]
     pub const fn end(self) -> usize {
         self.end
     }
 
-    #[doc = include_str!("materialized_range.doc/len.md")]
+    /// The number of materialized items (`end - start`).
     #[must_use]
     pub const fn len(self) -> usize {
         self.end - self.start
     }
 
-    #[doc = include_str!("materialized_range.doc/is_empty.md")]
+    /// Whether the range materializes no items.
     #[must_use]
     pub const fn is_empty(self) -> bool {
         self.start == self.end
     }
 
-    #[doc = include_str!("materialized_range.doc/contains.md")]
+    /// Whether `index` falls within `[start, end)`.
     #[must_use]
     pub const fn contains(&self, index: usize) -> bool {
         index >= self.start && index < self.end
     }
 
-    #[doc = include_str!("materialized_range.doc/overlaps.md")]
+    /// Whether this range shares at least one index with `other`.
     #[must_use]
     pub const fn overlaps(&self, other: &MaterializedRange) -> bool {
         self.start < other.end && other.start < self.end
     }
 
-    #[doc = include_str!("materialized_range.doc/iter.md")]
+    /// A `Range` iterator over the materialized indices (`start..end`).
     #[must_use]
     pub const fn iter(self) -> std::ops::Range<usize> {
         self.start..self.end
     }
 
-    #[doc = include_str!("materialized_range.doc/union.md")]
+    /// The smallest range covering both this range and `other` (min start, max
+    /// end).
     #[must_use]
     pub const fn union(&self, other: &MaterializedRange) -> MaterializedRange {
         let start = if self.start < other.start {

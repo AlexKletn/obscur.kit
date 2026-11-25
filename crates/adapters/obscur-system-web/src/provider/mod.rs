@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+#![doc = include_str!("../../docs/api/provider/mod.doc/_module.md")]
 
 mod web_dialog_provider;
 pub use web_dialog_provider::WebDialogProvider;

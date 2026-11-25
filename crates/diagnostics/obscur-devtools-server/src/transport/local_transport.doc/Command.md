@@ -1,1 +1,0 @@
-A capability-scoped command.

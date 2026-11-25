@@ -1,24 +1,29 @@
-#![doc = include_str!("path_converter.doc/_module.md")]
+#![doc = include_str!("../../docs/api/conversion/path_converter.doc/_module.md")]
 
 use obscur_scene::path::{FillRule, Path, PathSegment};
 use vello::kurbo::BezPath;
 use vello::peniko;
 
-#[doc = include_str!("path_converter.doc/PathConverter.md")]
+#[doc = include_str!("../../docs/api/conversion/path_converter.doc/PathConverter.md")]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct PathConverter;
 
 impl PathConverter {
-    #[doc = include_str!("path_converter.doc/new.md")]
+    /// Creates a path converter.
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    #[doc = include_str!("path_converter.doc/convert.md")]
+    #[doc = include_str!("../../docs/api/conversion/path_converter.doc/convert.md")]
     #[must_use]
     pub fn convert(&self, path: &Path) -> BezPath {
-        let mut bez = BezPath::new();
+        // Exactly one `PathEl` per source segment — `every_segment_kind_maps_to_one_element`
+        // below is that statement, and it is what makes the final length known before
+        // the loop instead of discovered by it. A `PathEl` is 56 bytes, so an
+        // unreserved `Vec` growing 4→8→16→32 recopies the whole path several times,
+        // for every path of every frame.
+        let mut bez = BezPath::with_capacity(path.segments().len());
         for segment in path.segments() {
             match *segment {
                 PathSegment::MoveTo(p) => bez.move_to((f64::from(p.x), f64::from(p.y))),
@@ -42,7 +47,7 @@ impl PathConverter {
         bez
     }
 
-    #[doc = include_str!("path_converter.doc/fill_rule.md")]
+    /// Maps an obscur-scene [`FillRule`] to a [`peniko::Fill`].
     #[must_use]
     pub fn fill_rule(&self, rule: FillRule) -> peniko::Fill {
         match rule {

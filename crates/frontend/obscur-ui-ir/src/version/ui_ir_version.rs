@@ -1,6 +1,6 @@
-#![doc = include_str!("ui_ir_version.doc/_module.md")]
+//! The versioned IR format version [`UiIrVersion`] (spec §2.5 versioned IR).
 
-#[doc = include_str!("ui_ir_version.doc/UiIrVersion.md")]
+#[doc = include_str!("../../docs/api/version/ui_ir_version.doc/UiIrVersion.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct UiIrVersion {
     major: u16,
@@ -8,28 +8,28 @@ pub struct UiIrVersion {
 }
 
 impl UiIrVersion {
-    #[doc = include_str!("ui_ir_version.doc/CURRENT.md")]
+    /// The current IR format version emitted by this crate.
     pub const CURRENT: UiIrVersion = UiIrVersion::new(1, 0);
 
-    #[doc = include_str!("ui_ir_version.doc/new.md")]
+    /// Creates a version from its `major` and `minor` components.
     #[must_use]
     pub const fn new(major: u16, minor: u16) -> Self {
         Self { major, minor }
     }
 
-    #[doc = include_str!("ui_ir_version.doc/major.md")]
+    /// Returns the major component (breaking-change gate).
     #[must_use]
     pub const fn major(self) -> u16 {
         self.major
     }
 
-    #[doc = include_str!("ui_ir_version.doc/minor.md")]
+    /// Returns the minor component (backward-compatible-addition gate).
     #[must_use]
     pub const fn minor(self) -> u16 {
         self.minor
     }
 
-    #[doc = include_str!("ui_ir_version.doc/is_compatible_with.md")]
+    #[doc = include_str!("../../docs/api/version/ui_ir_version.doc/is_compatible_with.md")]
     #[must_use]
     pub const fn is_compatible_with(self, other: UiIrVersion) -> bool {
         self.major == other.major && self.minor >= other.minor

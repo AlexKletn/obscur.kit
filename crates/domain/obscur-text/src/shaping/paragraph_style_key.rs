@@ -1,29 +1,36 @@
-#![doc = include_str!("paragraph_style_key.doc/_module.md")]
+//! The non-text half of a shaped paragraph's identity: [`ParagraphStyleKey`].
 
 use crate::font::{FontAttributes, FontFace, FontFallback, FontFamily};
 use crate::shaping::TextDirection;
 use crate::shaping::face_source_key::FaceSourceKey;
 
-#[doc = include_str!("paragraph_style_key.doc/ParagraphStyleKey.md")]
+#[doc = include_str!("../../docs/api/shaping/paragraph_style_key.doc/ParagraphStyleKey.md")]
 pub(crate) struct ParagraphStyleKey {
-    #[doc = include_str!("paragraph_style_key.doc/font_size_bits.md")]
+    /// The used font size, as raw bits so the key compares by exact bit pattern
+    /// rather than by `f32` equality (which has no `Eq`, and would make `NaN`
+    /// mismatch itself).
     font_size_bits: u32,
-    #[doc = include_str!("paragraph_style_key.doc/base_direction.md")]
+    /// The paragraph's base direction, which the itemizer reads to resolve neutrals.
     base_direction: TextDirection,
-    #[doc = include_str!("paragraph_style_key.doc/families.md")]
+    /// The requested fallback chain, in order. The resolution of a run depends on
+    /// the whole chain, not just the family it happened to land on.
     families: Box<[FontFamily]>,
-    #[doc = include_str!("paragraph_style_key.doc/attributes.md")]
+    /// The requested weight / style / stretch, which select among the faces of a
+    /// family and drive synthesis.
     attributes: FontAttributes,
-    #[doc = include_str!("paragraph_style_key.doc/default_family.md")]
+    /// The family of the default face used when nothing in the chain matches.
     default_family: FontFamily,
-    #[doc = include_str!("paragraph_style_key.doc/default_attributes.md")]
+    /// The attributes of that default face.
     default_attributes: FontAttributes,
-    #[doc = include_str!("paragraph_style_key.doc/default_source.md")]
+    /// Where that default face's bytes come from, as a
+    /// [`FaceSourceKey`](crate::shaping::face_source_key::FaceSourceKey) — an
+    /// identity that never hashes or compares the font file itself.
     default_source: FaceSourceKey,
 }
 
 impl ParagraphStyleKey {
-    #[doc = include_str!("paragraph_style_key.doc/new.md")]
+    /// Captures the style half of a shaping call. Called only on a cache **miss**,
+    /// so the clones it makes are paid once per style group, not once per probe.
     pub(crate) fn new(
         families: &FontFallback,
         attributes: FontAttributes,
@@ -42,7 +49,7 @@ impl ParagraphStyleKey {
         }
     }
 
-    #[doc = include_str!("paragraph_style_key.doc/matches.md")]
+    #[doc = include_str!("../../docs/api/shaping/paragraph_style_key.doc/matches.md")]
     pub(crate) fn matches(
         &self,
         families: &FontFallback,

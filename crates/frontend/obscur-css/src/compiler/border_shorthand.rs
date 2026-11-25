@@ -1,26 +1,33 @@
-#![doc = include_str!("border_shorthand.doc/_module.md")]
+#![doc = include_str!("../../docs/api/compiler/border_shorthand.doc/_module.md")]
 
+mod border_components;
+
+use border_components::BorderComponents;
+
+use super::CssSymbolInterner;
 use super::color_lowering::{color_from_function, named_color, parse_hex_color};
-use super::property_compiler::{CompiledDeclaration, value_unsupported_kind};
-use super::stylesheet_compiler::CssSymbolInterner;
 use super::value_lowering::{custom_ref, dimension_length};
+use super::{CompiledDeclaration, property_compiler::value_unsupported_kind};
 use crate::error::UnsupportedCssFeature;
 use crate::parser::{ParsedDeclaration, ParsedValue};
 use obscur_style::cascade::{CascadeOrigin, Declaration, ImportantFlag};
 use obscur_style::property::{Length, PropertyId, PropertyValue, layout_keyword};
 use obscur_style::selector::{SelectorId, SelectorSpecificity};
 
-#[doc = include_str!("border_shorthand.doc/BorderSide.md")]
+/// The three longhand ids of one border edge, in `width` / `style` / `color`
+/// order — the sub-properties the `border` and `border-<side>` shorthands set.
 pub(super) struct BorderSide {
-    #[doc = include_str!("border_shorthand.doc/width.md")]
+    /// The edge's `border-*-width` longhand.
     width: PropertyId,
-    #[doc = include_str!("border_shorthand.doc/style.md")]
+    /// The edge's `border-*-style` longhand.
     style: PropertyId,
-    #[doc = include_str!("border_shorthand.doc/color.md")]
+    /// The edge's `border-*-color` longhand.
     color: PropertyId,
 }
 
-#[doc = include_str!("border_shorthand.doc/BORDER_SIDES.md")]
+/// The four border edges in top/right/bottom/left order (the target of the
+/// `border` shorthand and the per-edge fan-out of `border-width` / `-style` /
+/// `-color`).
 pub(super) const BORDER_SIDES: &[BorderSide] = &[
     BorderSide {
         width: PropertyId::BorderTopWidth,
@@ -44,7 +51,8 @@ pub(super) const BORDER_SIDES: &[BorderSide] = &[
     },
 ];
 
-#[doc = include_str!("border_shorthand.doc/border_side_shorthand.md")]
+/// Returns the single [`BorderSide`] a `border-top` / `-right` / `-bottom` /
+/// `-left` shorthand targets, or [`None`] for any other name.
 pub(super) fn border_side_shorthand(name: &str) -> Option<&'static [BorderSide]> {
     if name.eq_ignore_ascii_case("border-top") {
         Some(&BORDER_SIDES[0..1])
@@ -59,14 +67,7 @@ pub(super) fn border_side_shorthand(name: &str) -> Option<&'static [BorderSide]>
     }
 }
 
-#[doc = include_str!("border_shorthand.doc/BorderComponents.md")]
-struct BorderComponents {
-    width: Option<PropertyValue>,
-    style: Option<PropertyValue>,
-    color: Option<PropertyValue>,
-}
-
-#[doc = include_str!("border_shorthand.doc/classify_border.md")]
+#[doc = include_str!("../../docs/api/compiler/border_shorthand.doc/classify_border.md")]
 fn classify_border(
     values: &[ParsedValue],
     interner: &mut CssSymbolInterner,
@@ -107,18 +108,20 @@ fn classify_border(
     Some(out)
 }
 
-#[doc = include_str!("border_shorthand.doc/border_width_component.md")]
+/// Lowers one `border` component as a `<line-width>`: a `<length>` or a unitless
+/// `0` (`0px`). Percentages and keywords are not border widths and yield [`None`].
 fn border_width_component(value: &ParsedValue) -> Option<PropertyValue> {
     match value {
         ParsedValue::Number(n) if *n == 0.0 => Some(PropertyValue::Length(Length::px(0.0))),
-        ParsedValue::Dimension { value, unit } => {
+        ParsedValue::Dimension { value, unit } if *value >= 0.0 => {
             dimension_length(*value, unit).map(PropertyValue::Length)
         }
         _ => None,
     }
 }
 
-#[doc = include_str!("border_shorthand.doc/border_color_component.md")]
+/// Lowers one `border` component as a `<color>`: a hex hash, an `rgb()`/`rgba()`
+/// function, or a modelled named color. Anything else yields [`None`].
 fn border_color_component(
     value: &ParsedValue,
     _interner: &mut CssSymbolInterner,
@@ -140,7 +143,7 @@ fn border_color_component(
     }
 }
 
-#[doc = include_str!("border_shorthand.doc/expand_border.md")]
+#[doc = include_str!("../../docs/api/compiler/border_shorthand.doc/expand_border.md")]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn expand_border(
     decl: &ParsedDeclaration,
@@ -191,7 +194,7 @@ pub(super) fn expand_border(
     out
 }
 
-#[doc = include_str!("border_shorthand.doc/expand_outline.md")]
+#[doc = include_str!("../../docs/api/compiler/border_shorthand.doc/expand_outline.md")]
 pub(super) fn expand_outline(
     decl: &ParsedDeclaration,
     specificity: SelectorSpecificity,
@@ -237,7 +240,7 @@ pub(super) fn expand_outline(
     out
 }
 
-#[doc = include_str!("border_shorthand.doc/expand_border_color.md")]
+#[doc = include_str!("../../docs/api/compiler/border_shorthand.doc/expand_border_color.md")]
 pub(super) fn expand_border_color(
     decl: &ParsedDeclaration,
     specificity: SelectorSpecificity,
@@ -270,7 +273,7 @@ pub(super) fn expand_border_color(
     )
 }
 
-#[doc = include_str!("border_shorthand.doc/expand_border_style.md")]
+#[doc = include_str!("../../docs/api/compiler/border_shorthand.doc/expand_border_style.md")]
 pub(super) fn expand_border_style(
     decl: &ParsedDeclaration,
     specificity: SelectorSpecificity,
@@ -311,14 +314,17 @@ pub(super) fn expand_border_style(
     )
 }
 
-#[doc = include_str!("border_shorthand.doc/border_side_unsupported.md")]
+/// The single unsupported-feature fallback for a malformed `border-color` /
+/// `border-style` value.
 fn border_side_unsupported(decl: &ParsedDeclaration) -> Vec<CompiledDeclaration> {
     vec![CompiledDeclaration::Unsupported(
         UnsupportedCssFeature::new(value_unsupported_kind(&decl.value), &*decl.name, decl.span),
     )]
 }
 
-#[doc = include_str!("border_shorthand.doc/emit_four.md")]
+/// Fans 1-4 pre-lowered `components` out to the four `ids` (top/right/bottom/left)
+/// using the CSS edge-replication rules, emitting one [`Declaration`] per side.
+/// An empty or over-long component list degrades to a single unsupported feature.
 fn emit_four(
     decl: &ParsedDeclaration,
     ids: [PropertyId; 4],

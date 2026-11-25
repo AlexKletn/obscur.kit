@@ -1,4 +1,6 @@
-#![doc = include_str!("slider_control.doc/_module.md")]
+#![doc = include_str!("../../docs/api/runtime/slider_control.doc/_module.md")]
+
+use super::slider_grab::Grab;
 
 use obscur_geometry::{Point, Rect};
 use obscur_identity::NodeId;
@@ -8,37 +10,28 @@ use obscur_view::view::{SLIDER_HIGH, SLIDER_LOW, SLIDER_RANGED, SliderScale, Vie
 use super::AncestorChain;
 use crate::orchestration::LayoutBoxes;
 
-#[doc = include_str!("slider_control.doc/THUMB_INSET.md")]
+#[doc = include_str!("../../docs/api/runtime/slider_control.doc/THUMB_INSET.md")]
 const THUMB_INSET: f32 = 8.0;
 
-#[doc = include_str!("slider_control.doc/SliderControl.md")]
+/// A slider found in the tree, with everything a press needs to know about it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct SliderControl {
-    #[doc = include_str!("slider_control.doc/node.md")]
+    /// The node that IS the slider — not necessarily the one that was hit.
     pub(crate) node: NodeId,
-    #[doc = include_str!("slider_control.doc/scale.md")]
+    /// The bounds and step it offers.
     pub(crate) scale: SliderScale,
-    #[doc = include_str!("slider_control.doc/low.md")]
+    /// Its value, or the low end of its range.
     pub(crate) low: f32,
-    #[doc = include_str!("slider_control.doc/high.md")]
+    /// The high end of its range; equal to the low end on a single slider.
     pub(crate) high: f32,
-    #[doc = include_str!("slider_control.doc/ranged.md")]
+    /// Whether it picks a range rather than a single value.
     pub(crate) ranged: bool,
-    #[doc = include_str!("slider_control.doc/track.md")]
+    /// Its laid-out box.
     pub(crate) track: Rect,
 }
 
-#[doc = include_str!("slider_control.doc/Grab.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Grab {
-    #[doc = include_str!("slider_control.doc/Low.md")]
-    Low,
-    #[doc = include_str!("slider_control.doc/High.md")]
-    High,
-}
-
 impl SliderControl {
-    #[doc = include_str!("slider_control.doc/enclosing.md")]
+    #[doc = include_str!("../../docs/api/runtime/slider_control.doc/enclosing.md")]
     pub(crate) fn enclosing(
         tree: &RetainedTree,
         boxes: &LayoutBoxes,
@@ -65,7 +58,7 @@ impl SliderControl {
             })
     }
 
-    #[doc = include_str!("slider_control.doc/fraction_at.md")]
+    /// Where along the track a point falls, from 0 to 1, clamped.
     pub(crate) fn fraction_at(&self, point: Point) -> f32 {
         // The same inset the painter uses, so the value under the pointer is the
         // value the thumb is drawn at. A track measured to the box's edges would
@@ -80,7 +73,7 @@ impl SliderControl {
         ((point.x - left) / usable).clamp(0.0, 1.0)
     }
 
-    #[doc = include_str!("slider_control.doc/grab_for.md")]
+    #[doc = include_str!("../../docs/api/runtime/slider_control.doc/grab_for.md")]
     pub(crate) fn grab_for(&self, point: Point) -> Grab {
         if !self.ranged {
             return Grab::Low;
@@ -100,13 +93,13 @@ impl SliderControl {
         }
     }
 
-    #[doc = include_str!("slider_control.doc/moved_to.md")]
+    /// The ends after dragging `grab` to this point.
     pub(crate) fn moved_to(&self, grab: Grab, point: Point) -> (f32, f32) {
         let value = self.scale.value_at(self.fraction_at(point));
         self.with(grab, value)
     }
 
-    #[doc = include_str!("slider_control.doc/nudged.md")]
+    #[doc = include_str!("../../docs/api/runtime/slider_control.doc/nudged.md")]
     pub(crate) fn nudged(&self, grab: Grab, steps: f32) -> (f32, f32) {
         // A free slider has no step to move by, so it moves by a hundredth of
         // its span — the smallest amount that still crosses the whole track in a
@@ -119,12 +112,12 @@ impl SliderControl {
         self.with(grab, self.scale.quantize(from + steps * step))
     }
 
-    #[doc = include_str!("slider_control.doc/set.md")]
+    #[doc = include_str!("../../docs/api/runtime/slider_control.doc/set.md")]
     pub(crate) fn set(&self, grab: Grab, value: f32) -> (f32, f32) {
         self.with(grab, self.scale.quantize(value))
     }
 
-    #[doc = include_str!("slider_control.doc/with.md")]
+    #[doc = include_str!("../../docs/api/runtime/slider_control.doc/with.md")]
     fn with(&self, grab: Grab, value: f32) -> (f32, f32) {
         // A single slider is a range of one point, and both of its ends move
         // together. Applying the no-crossing rule to it would clamp its value
@@ -143,7 +136,7 @@ impl SliderControl {
     }
 }
 
-#[doc = include_str!("slider_control.doc/number.md")]
+/// A numeric property, whichever way it was written.
 fn number(
     props: &[obscur_view::view::ViewProperty],
     name: obscur_identity::InternedSymbol,
@@ -161,7 +154,7 @@ fn number(
         .filter(|v| v.is_finite())
 }
 
-#[doc = include_str!("slider_control.doc/flag.md")]
+/// A boolean property, defaulting to false.
 fn flag(props: &[obscur_view::view::ViewProperty], name: obscur_identity::InternedSymbol) -> bool {
     props
         .iter()

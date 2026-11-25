@@ -1,22 +1,22 @@
-#![doc = include_str!("solid_brush.doc/_module.md")]
+//! A flat, single-color brush.
 
 use crate::color::Color;
 
-#[doc = include_str!("solid_brush.doc/SolidBrush.md")]
+/// A brush that paints a shape with a single flat [`Color`] (spec §5.1).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SolidBrush {
-    #[doc = include_str!("solid_brush.doc/color.md")]
+    /// The fill color.
     pub color: Color,
 }
 
 impl SolidBrush {
-    #[doc = include_str!("solid_brush.doc/new.md")]
+    /// Creates a solid brush that paints with `color`.
     #[must_use]
     pub const fn new(color: Color) -> Self {
         Self { color }
     }
 
-    #[doc = include_str!("solid_brush.doc/color_2.md")]
+    /// Returns the brush's color.
     #[must_use]
     pub const fn color(self) -> Color {
         self.color

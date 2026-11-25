@@ -1,8 +1,8 @@
-#![doc = include_str!("scene_statistics.doc/_module.md")]
+//! Per-scene diagnostic counters for `DevTools` and telemetry.
 
 use crate::command::{DisplayList, PaintCommand};
 
-#[doc = include_str!("scene_statistics.doc/SceneStatistics.md")]
+#[doc = include_str!("../../docs/api/scene/scene_statistics.doc/SceneStatistics.md")]
 // The shared `_count` postfix is intentional: every field is a diagnostic
 // tally, and the postfix documents that uniformly (spec §7.9).
 #[allow(clippy::struct_field_names)]
@@ -15,7 +15,7 @@ pub struct SceneStatistics {
 }
 
 impl SceneStatistics {
-    #[doc = include_str!("scene_statistics.doc/new.md")]
+    #[doc = include_str!("../../docs/api/scene/scene_statistics.doc/new.md")]
     #[must_use]
     pub const fn new(
         command_count: usize,
@@ -31,31 +31,31 @@ impl SceneStatistics {
         }
     }
 
-    #[doc = include_str!("scene_statistics.doc/command_count.md")]
+    /// The total number of [`PaintCommand`]s in the scene.
     #[must_use]
     pub const fn command_count(self) -> usize {
         self.command_count
     }
 
-    #[doc = include_str!("scene_statistics.doc/draw_count.md")]
+    /// The number of [`PaintCommand::DrawPath`] commands in the scene.
     #[must_use]
     pub const fn draw_count(self) -> usize {
         self.draw_count
     }
 
-    #[doc = include_str!("scene_statistics.doc/layer_count.md")]
+    /// The number of [`PaintCommand::PushLayer`] commands in the scene.
     #[must_use]
     pub const fn layer_count(self) -> usize {
         self.layer_count
     }
 
-    #[doc = include_str!("scene_statistics.doc/clip_count.md")]
+    /// The number of [`PaintCommand::PushClip`] commands in the scene.
     #[must_use]
     pub const fn clip_count(self) -> usize {
         self.clip_count
     }
 
-    #[doc = include_str!("scene_statistics.doc/from_display_list.md")]
+    #[doc = include_str!("../../docs/api/scene/scene_statistics.doc/from_display_list.md")]
     #[must_use]
     pub fn from_display_list(list: &DisplayList) -> Self {
         let mut stats = Self::new(list.len(), 0, 0, 0);

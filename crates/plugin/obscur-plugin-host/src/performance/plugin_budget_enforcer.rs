@@ -1,5 +1,6 @@
-#![doc = include_str!("plugin_budget_enforcer.doc/_module.md")]
+//! `PluginBudgetEnforcer` (skeleton stub for the spec-defined entity; not yet implemented).
 
-#[doc = include_str!("plugin_budget_enforcer.doc/PluginBudgetEnforcer.md")]
+/// Placeholder for the `PluginBudgetEnforcer` entity. See the Obscur Kit 2 specs for its
+/// contract; this stub exists to materialise the target source layout.
 #[derive(Debug)]
 pub struct PluginBudgetEnforcer;

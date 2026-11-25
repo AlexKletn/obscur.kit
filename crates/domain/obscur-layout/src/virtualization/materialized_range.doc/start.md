@@ -1,1 +1,0 @@
-First materialized index (inclusive).

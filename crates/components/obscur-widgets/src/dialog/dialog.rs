@@ -1,11 +1,11 @@
-#![doc = include_str!("dialog.doc/_module.md")]
+//! `Dialog`: a headless modal/modeless dialog surface (spec §2.6, §6.9).
 
 use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_interaction::focus::FOCUS_TRAP;
 use obscur_view::view::{View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-#[doc = include_str!("dialog.doc/Dialog.md")]
+#[doc = include_str!("../../docs/api/dialog/dialog.doc/Dialog.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Dialog {
     title: Box<str>,
@@ -15,17 +15,19 @@ pub struct Dialog {
 }
 
 impl Dialog {
-    #[doc = include_str!("dialog.doc/COMPONENT_ID.md")]
+    #[doc = include_str!("../../docs/api/dialog/dialog.doc/COMPONENT_ID.md")]
     pub const COMPONENT_ID: ComponentId = ComponentId::from_raw(0x00D0_0006);
 
-    #[doc = include_str!("dialog.doc/PROP_ROLE.md")]
+    /// Interned name of the semantic-role property (`role`); shares the
+    /// `0x00D1_NNXX` scheme with `NN = 06` (dialog): role=`00`, modal=`01`,
+    /// title=`02`.
     const PROP_ROLE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0600);
-    #[doc = include_str!("dialog.doc/PROP_MODAL.md")]
+    #[doc = include_str!("../../docs/api/dialog/dialog.doc/PROP_MODAL.md")]
     const PROP_MODAL: InternedSymbol = FOCUS_TRAP;
-    #[doc = include_str!("dialog.doc/PROP_TITLE.md")]
+    /// Interned name of the `title` property.
     const PROP_TITLE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0602);
 
-    #[doc = include_str!("dialog.doc/new.md")]
+    /// Creates a closed, modal dialog with the given `title` and no content.
     #[must_use]
     pub fn new(title: impl Into<Box<str>>) -> Self {
         Self {
@@ -36,60 +38,61 @@ impl Dialog {
         }
     }
 
-    #[doc = include_str!("dialog.doc/child.md")]
+    /// Appends a content child node, returning the updated dialog (fluent
+    /// builder).
     #[must_use]
     pub fn child(mut self, node: ViewNode) -> Self {
         self.content.push(node);
         self
     }
 
-    #[doc = include_str!("dialog.doc/modal.md")]
+    #[doc = include_str!("../../docs/api/dialog/dialog.doc/modal.md")]
     #[must_use]
     pub fn modal(mut self, modal: bool) -> Self {
         self.modal = modal;
         self
     }
 
-    #[doc = include_str!("dialog.doc/open.md")]
+    /// Opens the dialog.
     pub fn open(&mut self) {
         self.open = true;
     }
 
-    #[doc = include_str!("dialog.doc/close.md")]
+    /// Closes the dialog.
     pub fn close(&mut self) {
         self.open = false;
     }
 
-    #[doc = include_str!("dialog.doc/toggle_open.md")]
+    /// Toggles the dialog open/closed.
     pub fn toggle_open(&mut self) {
         self.open = !self.open;
     }
 
-    #[doc = include_str!("dialog.doc/is_open.md")]
+    /// Returns whether the dialog is open.
     #[must_use]
     pub const fn is_open(&self) -> bool {
         self.open
     }
 
-    #[doc = include_str!("dialog.doc/is_modal.md")]
+    /// Returns whether the dialog is modal.
     #[must_use]
     pub const fn is_modal(&self) -> bool {
         self.modal
     }
 
-    #[doc = include_str!("dialog.doc/title.md")]
+    /// Returns the dialog title.
     #[must_use]
     pub fn title(&self) -> &str {
         &self.title
     }
 
-    #[doc = include_str!("dialog.doc/semantic_role.md")]
+    /// Returns the accessible role of this control ([`SemanticRole::Dialog`]).
     #[must_use]
     pub const fn semantic_role(&self) -> SemanticRole {
         SemanticRole::Dialog
     }
 
-    #[doc = include_str!("dialog.doc/view.md")]
+    #[doc = include_str!("../../docs/api/dialog/dialog.doc/view.md")]
     #[must_use]
     pub fn view(&self) -> View {
         if !self.open {

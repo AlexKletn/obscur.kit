@@ -1,1 +1,0 @@
-A touchscreen contact.

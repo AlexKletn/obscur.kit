@@ -1,21 +1,21 @@
-#![doc = include_str!("frame_request.doc/_module.md")]
+//! A request to schedule a frame: [`FrameRequest`].
 
 use super::FrameReason;
 
-#[doc = include_str!("frame_request.doc/FrameRequest.md")]
+#[doc = include_str!("../../docs/api/frame/frame_request.doc/FrameRequest.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FrameRequest {
     reason: FrameReason,
 }
 
 impl FrameRequest {
-    #[doc = include_str!("frame_request.doc/new.md")]
+    /// Creates a request to schedule a frame for `reason`.
     #[must_use]
     pub const fn new(reason: FrameReason) -> Self {
         Self { reason }
     }
 
-    #[doc = include_str!("frame_request.doc/reason.md")]
+    /// Returns the reason this frame is being requested for.
     #[must_use]
     pub const fn reason(self) -> FrameReason {
         self.reason

@@ -1,23 +1,23 @@
-#![doc = include_str!("tokio_spawner.doc/_module.md")]
+#![doc = include_str!("../../docs/api/spawner/tokio_spawner.doc/_module.md")]
 
 use obscur_task::{BoxFuture, Spawner};
 use tokio::runtime::Handle;
 
-#[doc = include_str!("tokio_spawner.doc/TokioSpawner.md")]
+#[doc = include_str!("../../docs/api/spawner/tokio_spawner.doc/TokioSpawner.md")]
 #[derive(Debug, Clone)]
 pub struct TokioSpawner {
-    #[doc = include_str!("tokio_spawner.doc/handle.md")]
+    /// The Tokio runtime handle work is spawned onto.
     handle: Handle,
 }
 
 impl TokioSpawner {
-    #[doc = include_str!("tokio_spawner.doc/new.md")]
+    /// Creates a spawner that schedules onto the given Tokio [`Handle`].
     #[must_use]
     pub fn new(handle: Handle) -> Self {
         Self { handle }
     }
 
-    #[doc = include_str!("tokio_spawner.doc/current.md")]
+    #[doc = include_str!("../../docs/api/spawner/tokio_spawner.doc/current.md")]
     #[must_use]
     pub fn current() -> Self {
         Self {
@@ -25,7 +25,7 @@ impl TokioSpawner {
         }
     }
 
-    #[doc = include_str!("tokio_spawner.doc/handle_2.md")]
+    /// Returns the Tokio [`Handle`] this spawner schedules onto.
     #[must_use]
     pub fn handle(&self) -> &Handle {
         &self.handle
@@ -33,7 +33,7 @@ impl TokioSpawner {
 }
 
 impl Spawner for TokioSpawner {
-    #[doc = include_str!("tokio_spawner.doc/spawn.md")]
+    #[doc = include_str!("../../docs/api/spawner/tokio_spawner.doc/spawn.md")]
     fn spawn(&self, future: BoxFuture) {
         self.handle.spawn(future);
     }

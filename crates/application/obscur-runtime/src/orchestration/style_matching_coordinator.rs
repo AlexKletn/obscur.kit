@@ -1,4 +1,5 @@
-#![doc = include_str!("style_matching_coordinator.doc/_module.md")]
+//! Matches authored stylesheets against the retained tree to build the
+//! per-node cascade inputs: [`StyleMatchingCoordinator`].
 
 use std::collections::HashMap;
 
@@ -10,22 +11,23 @@ use obscur_style::property::PropertyValue;
 use obscur_style::selector::{MatchElement, SelectorMatcher};
 use obscur_tree::tree::RetainedTree;
 
+use super::lazy_rule_index::LazyRuleIndex;
 use super::{
     PseudoStates, StyleInputs, TreeElement, component_host, part_specificity_for, subject_part_name,
 };
 
-#[doc = include_str!("style_matching_coordinator.doc/StyleMatchingCoordinator.md")]
+#[doc = include_str!("../../docs/api/orchestration/style_matching_coordinator.doc/StyleMatchingCoordinator.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct StyleMatchingCoordinator;
 
 impl StyleMatchingCoordinator {
-    #[doc = include_str!("style_matching_coordinator.doc/new.md")]
+    /// Creates a style-matching coordinator.
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    #[doc = include_str!("style_matching_coordinator.doc/build_inputs.md")]
+    #[doc = include_str!("../../docs/api/orchestration/style_matching_coordinator.doc/build_inputs.md")]
     #[must_use]
     pub fn build_inputs(&self, tree: &RetainedTree, sheets: &[Stylesheet]) -> StyleInputs {
         // The stateless path: no interaction state, so `:hover`/`:focus` never
@@ -35,7 +37,7 @@ impl StyleMatchingCoordinator {
         self.build_inputs_with_pseudo(tree, sheets, &PseudoStates::new())
     }
 
-    #[doc = include_str!("style_matching_coordinator.doc/build_inputs_env.md")]
+    #[doc = include_str!("../../docs/api/orchestration/style_matching_coordinator.doc/build_inputs_env.md")]
     #[must_use]
     pub fn build_inputs_env(
         &self,
@@ -46,7 +48,7 @@ impl StyleMatchingCoordinator {
         self.build_inputs_with_pseudo_env(tree, sheets, &PseudoStates::new(), environment)
     }
 
-    #[doc = include_str!("style_matching_coordinator.doc/build_inputs_with_pseudo.md")]
+    #[doc = include_str!("../../docs/api/orchestration/style_matching_coordinator.doc/build_inputs_with_pseudo.md")]
     #[must_use]
     pub fn build_inputs_with_pseudo(
         &self,
@@ -57,7 +59,7 @@ impl StyleMatchingCoordinator {
         self.build_inputs_with_pseudo_env(tree, sheets, pseudo, &MediaEnvironment::unbounded())
     }
 
-    #[doc = include_str!("style_matching_coordinator.doc/build_inputs_with_pseudo_env.md")]
+    #[doc = include_str!("../../docs/api/orchestration/style_matching_coordinator.doc/build_inputs_with_pseudo_env.md")]
     #[must_use]
     pub fn build_inputs_with_pseudo_env(
         &self,
@@ -68,15 +70,20 @@ impl StyleMatchingCoordinator {
     ) -> StyleInputs {
         let mut inputs = StyleInputs::new();
         let matcher = StyleMatcher::new();
+        // One index for the whole pass, not one per node: this is the only
+        // reason the index is cheaper than the walk it replaces.
+        let mut index = LazyRuleIndex::wanted();
         for (id, node) in tree.iter() {
             if !node.kind().is_element() {
                 continue;
             }
-            let resolved = resolved_for_node(&matcher, sheets, tree, id, pseudo, environment);
+            let resolved =
+                resolved_for_node(&matcher, &mut index, sheets, tree, id, pseudo, environment);
             if !resolved.is_empty() {
                 inputs.set_cascaded(id, resolved);
             }
-            let custom = custom_for_node(matcher, sheets, tree, id, pseudo, environment);
+            let custom =
+                custom_for_node(matcher, &mut index, sheets, tree, id, pseudo, environment);
             if !custom.is_empty() {
                 inputs.set_custom(id, custom);
             }
@@ -84,7 +91,7 @@ impl StyleMatchingCoordinator {
         inputs
     }
 
-    #[doc = include_str!("style_matching_coordinator.doc/rematch_into.md")]
+    #[doc = include_str!("../../docs/api/orchestration/style_matching_coordinator.doc/rematch_into.md")]
     pub fn rematch_into(
         &self,
         inputs: &mut StyleInputs,
@@ -95,12 +102,22 @@ impl StyleMatchingCoordinator {
         dirty: &StyleInvalidation,
     ) -> usize {
         let matcher = StyleMatcher::new();
+        // Building the index costs the same whether one node or two hundred read
+        // it, so a rematch of a handful of nodes pays for a structure it barely
+        // uses. Below the threshold the unindexed walk is the cheaper answer and
+        // is also, being the older path, the one with nothing new to get wrong.
+        let mut index = if dirty.len() >= INDEX_WORTH_BUILDING {
+            LazyRuleIndex::wanted()
+        } else {
+            LazyRuleIndex::unwanted()
+        };
         let mut matched = 0;
         for (&id, _) in dirty {
             if !tree.get(id).is_some_and(|node| node.kind().is_element()) {
                 continue;
             }
-            let resolved = resolved_for_node(&matcher, sheets, tree, id, pseudo, environment);
+            let resolved =
+                resolved_for_node(&matcher, &mut index, sheets, tree, id, pseudo, environment);
             if resolved.is_empty() {
                 inputs.clear_cascaded(id);
             } else {
@@ -109,7 +126,8 @@ impl StyleMatchingCoordinator {
             // Rematched with the declarations, not left behind: a node that
             // stopped matching `.dark` must stop carrying `.dark`'s `--brand`,
             // and the whole subtree below it inherits the difference.
-            let custom = custom_for_node(matcher, sheets, tree, id, pseudo, environment);
+            let custom =
+                custom_for_node(matcher, &mut index, sheets, tree, id, pseudo, environment);
             if custom.is_empty() {
                 inputs.clear_custom(id);
             } else {
@@ -120,13 +138,14 @@ impl StyleMatchingCoordinator {
         matched
     }
 
-    #[doc = include_str!("style_matching_coordinator.doc/match_single.md")]
+    /// Matches a single `sheet` against `tree`, a convenience over
+    /// [`build_inputs`](Self::build_inputs) for the one-origin case.
     #[must_use]
     pub fn match_single(&self, tree: &RetainedTree, sheet: &Stylesheet) -> StyleInputs {
         self.build_inputs(tree, std::slice::from_ref(sheet))
     }
 
-    #[doc = include_str!("style_matching_coordinator.doc/collect_invalid_value_faults.md")]
+    #[doc = include_str!("../../docs/api/orchestration/style_matching_coordinator.doc/collect_invalid_value_faults.md")]
     #[must_use]
     pub fn collect_invalid_value_faults(
         &self,
@@ -148,7 +167,7 @@ impl StyleMatchingCoordinator {
                     }
                     let condition_holds = rule
                         .condition()
-                        .is_none_or(|condition| condition.holds(environment));
+                        .is_none_or(|condition| condition.holds(&environment.for_subject(id)));
                     if condition_holds
                         && SelectorMatcher::matches_list(rule.selectors(), &element).is_some()
                     {
@@ -162,31 +181,46 @@ impl StyleMatchingCoordinator {
     }
 }
 
-#[doc = include_str!("style_matching_coordinator.doc/resolved_for_node.md")]
+#[doc = include_str!("../../docs/api/orchestration/style_matching_coordinator.doc/INDEX_WORTH_BUILDING.md")]
+const INDEX_WORTH_BUILDING: usize = 24;
+
+#[doc = include_str!("../../docs/api/orchestration/style_matching_coordinator.doc/resolved_for_node.md")]
+#[allow(clippy::too_many_arguments)]
 fn resolved_for_node(
     matcher: &StyleMatcher,
+    index: &mut LazyRuleIndex,
     sheets: &[Stylesheet],
     tree: &RetainedTree,
     node: NodeId,
     pseudo: &PseudoStates,
     environment: &MediaEnvironment,
 ) -> ResolvedDeclarations {
+    let environment = &environment.for_subject(node);
     let element = TreeElement::with_pseudo(tree, node, pseudo);
     match component_host(tree, node) {
-        None => matcher.match_element_in(sheets, &element, environment),
+        // The index keys on the subject compound, which is the wrong question
+        // inside a component boundary: there the door is `::part(name)`, decided
+        // against the host. That path stays unindexed.
+        None => match index.get(sheets) {
+            Some(index) => matcher.match_element_indexed(index, sheets, &element, environment),
+            None => matcher.match_element_in(sheets, &element, environment),
+        },
         Some(host) => scoped_internal_declarations(sheets, tree, node, host, pseudo, environment),
     }
 }
 
-#[doc = include_str!("style_matching_coordinator.doc/custom_for_node.md")]
+#[doc = include_str!("../../docs/api/orchestration/style_matching_coordinator.doc/custom_for_node.md")]
+#[allow(clippy::too_many_arguments)]
 fn custom_for_node(
     matcher: StyleMatcher,
+    index: &mut LazyRuleIndex,
     sheets: &[Stylesheet],
     tree: &RetainedTree,
     node: NodeId,
     pseudo: &PseudoStates,
     environment: &MediaEnvironment,
 ) -> FastMap<InternedSymbol, PropertyValue> {
+    let environment = &environment.for_subject(node);
     // A component's internals declare none of their own: an app sheet's
     // `.card { --pad: 8px }` must not reach inside a component that happens to
     // use the class, exactly as its longhands do not. They still SEE the host's
@@ -196,10 +230,15 @@ fn custom_for_node(
         return HashMap::default();
     }
     let element = TreeElement::with_pseudo(tree, node, pseudo);
-    matcher.match_custom_properties_in(sheets, &element, environment)
+    match index.get(sheets) {
+        Some(index) => {
+            matcher.match_custom_properties_indexed(index, sheets, &element, environment)
+        }
+        None => matcher.match_custom_properties_in(sheets, &element, environment),
+    }
 }
 
-#[doc = include_str!("style_matching_coordinator.doc/scoped_internal_declarations.md")]
+#[doc = include_str!("../../docs/api/orchestration/style_matching_coordinator.doc/scoped_internal_declarations.md")]
 fn scoped_internal_declarations(
     sheets: &[Stylesheet],
     tree: &RetainedTree,
@@ -238,13 +277,20 @@ fn scoped_internal_declarations(
                     })
                     .max()
             };
+            let Some(specificity) = specificity else {
+                // Nothing this rule declares can land on this element, and the
+                // block was only ever entered to count past it.
+                source_order = source_order
+                    .wrapping_add(u32::try_from(rule.block().len()).unwrap_or(u32::MAX));
+                continue;
+            };
             let condition_holds = rule
                 .condition()
                 .is_none_or(|condition| condition.holds(environment));
             for block_decl in rule.block() {
                 let order = source_order;
                 source_order = source_order.wrapping_add(1);
-                if condition_holds && let Some(specificity) = specificity {
+                if condition_holds {
                     collected.push(Declaration::new(
                         block_decl.property(),
                         block_decl.value().clone(),
@@ -487,6 +533,70 @@ mod tests {
         assert!(
             inputs.custom_for(child).is_empty(),
             "no sheet declares it any more"
+        );
+    }
+
+    /// `::part(name)` selector list, with an optional leading host compound.
+    fn part_selectors(name: &str) -> SelectorList {
+        SelectorList::new(vec![ComplexSelector::new(
+            CompoundSelector::new(vec![SimpleSelector::Part(name.into())]),
+            Vec::new(),
+        )])
+    }
+
+    #[test]
+    fn a_scoped_declaration_carries_the_source_order_its_position_in_the_sheets_gives_it() {
+        // The component-boundary walk skips a rule the element cannot match
+        // instead of stepping through its block one declaration at a time. The
+        // step was never for the declarations — it was for the counter — so the
+        // skip has to add the block's length by hand. Nothing but this number
+        // can show whether it did: relative order survives either way, which is
+        // exactly why it needs asserting rather than trusting.
+        let view = View::from_fragment(ViewFragment::from_nodes(vec![
+            ViewNode::element(ComponentId::from_raw(10))
+                .with_prop(ViewProperty::new(CLASS, ViewValue::Text("label".into()))),
+        ]));
+        let tree = reconcile(&view);
+        let host = tree.root().unwrap();
+        let inner = tree.get(host).unwrap().child_nodes().to_vec()[0];
+
+        let sheet = Stylesheet::new(
+            CascadeOrigin::GlobalApp,
+            vec![
+                // Four declarations the boundary refuses: `::part(other)` names a
+                // part this element does not export.
+                StyleRule::new(
+                    part_selectors("other"),
+                    vec![
+                        BlockDeclaration::normal(PropertyId::Width, PropertyValue::Number(1.0)),
+                        BlockDeclaration::normal(PropertyId::Height, PropertyValue::Number(2.0)),
+                        BlockDeclaration::normal(PropertyId::Top, PropertyValue::Number(3.0)),
+                        BlockDeclaration::normal(PropertyId::Left, PropertyValue::Number(4.0)),
+                    ],
+                ),
+                // The fifth declaration in the sheet, and the one that lands.
+                StyleRule::new(
+                    part_selectors("label"),
+                    vec![BlockDeclaration::normal(PropertyId::BackgroundColor, red())],
+                ),
+            ],
+        );
+
+        let resolved = scoped_internal_declarations(
+            std::slice::from_ref(&sheet),
+            &tree,
+            inner,
+            host,
+            &PseudoStates::new(),
+            &MediaEnvironment::unbounded(),
+        );
+        assert_eq!(resolved.get(PropertyId::BackgroundColor), Some(&red()));
+        assert_eq!(
+            resolved
+                .priority_of(PropertyId::BackgroundColor)
+                .map(obscur_style::cascade::CascadePriority::source_order),
+            Some(4),
+            "four declarations stand before it in the sheet, matched or not"
         );
     }
 

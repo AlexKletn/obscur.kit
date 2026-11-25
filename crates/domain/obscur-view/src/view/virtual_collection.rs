@@ -1,65 +1,78 @@
-#![doc = include_str!("virtual_collection.doc/_module.md")]
+#![doc = include_str!("../../docs/api/view/virtual_collection.doc/_module.md")]
 
 use obscur_identity::{ComponentId, InternedSymbol};
 
 use super::{View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-#[doc = include_str!("virtual_collection.doc/VIRTUAL_COLLECTION.md")]
+#[doc = include_str!("../../docs/api/view/virtual_collection.doc/VIRTUAL_COLLECTION.md")]
 pub const VIRTUAL_COLLECTION: ComponentId = ComponentId::from_raw(0x00B0_0002);
 
-#[doc = include_str!("virtual_collection.doc/VIRTUAL_ROW_EXTENT.md")]
+#[doc = include_str!("../../docs/api/view/virtual_collection.doc/VIRTUAL_ROW_EXTENT.md")]
 pub const VIRTUAL_ROW_EXTENT: InternedSymbol = InternedSymbol::from_raw(0x0000_0302);
 
-#[doc = include_str!("virtual_collection.doc/VIRTUAL_SPACER.md")]
+#[doc = include_str!("../../docs/api/view/virtual_collection.doc/VIRTUAL_SPACER.md")]
 pub const VIRTUAL_SPACER: ComponentId = ComponentId::from_raw(0x00B0_0003);
 
-#[doc = include_str!("virtual_collection.doc/VIRTUAL_LIST_ID.md")]
+#[doc = include_str!("../../docs/api/view/virtual_collection.doc/VIRTUAL_LIST_ID.md")]
 pub const VIRTUAL_LIST_ID: InternedSymbol = InternedSymbol::from_raw(0x0000_0303);
 
-#[doc = include_str!("virtual_collection.doc/VIRTUAL_ITEM_COUNT.md")]
+#[doc = include_str!("../../docs/api/view/virtual_collection.doc/VIRTUAL_ITEM_COUNT.md")]
 pub const VIRTUAL_ITEM_COUNT: InternedSymbol = InternedSymbol::from_raw(0x0000_0304);
 
-#[doc = include_str!("virtual_collection.doc/VIRTUAL_SCROLL_RESET.md")]
+#[doc = include_str!("../../docs/api/view/virtual_collection.doc/VIRTUAL_SCROLL_RESET.md")]
 pub const VIRTUAL_SCROLL_RESET: InternedSymbol = InternedSymbol::from_raw(0x0000_0305);
 
-#[doc = include_str!("virtual_collection.doc/DEFAULT_VIRTUAL_ROW_EXTENT.md")]
+pub(super) const VIRTUAL_SEPARATOR_EXTENT: InternedSymbol = InternedSymbol::from_raw(0x0000_0306);
+
+#[doc = include_str!("../../docs/api/view/virtual_collection.doc/DEFAULT_VIRTUAL_ROW_EXTENT.md")]
 pub const DEFAULT_VIRTUAL_ROW_EXTENT: f32 = 24.0;
 
-#[doc = include_str!("virtual_collection.doc/virtual_row_extent.md")]
+/// The marker's estimated row extent in logical pixels, if valid.
 #[must_use]
 pub fn virtual_row_extent(props: &[ViewProperty]) -> Option<f32> {
     props
         .iter()
         .find(|prop| prop.name() == VIRTUAL_ROW_EXTENT)
-        .and_then(|prop| match prop.value() {
-            #[expect(
-                clippy::cast_possible_truncation,
-                reason = "the extent is authored as a small pixel count; f32 is its real precision"
-            )]
-            ViewValue::Float(extent) => Some(*extent as f32),
-            ViewValue::Int(extent) => Some(*extent as f32),
-            _ => None,
-        })
+        .and_then(|prop| declared_extent_px(prop.value()))
 }
 
-#[doc = include_str!("virtual_collection.doc/is_virtual_collection.md")]
+fn declared_extent_px(value: &ViewValue) -> Option<f32> {
+    match value {
+        ViewValue::Float(px) if (0.0..=f64::from(f32::MAX)).contains(px) => {
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "the f32 range is checked before rounding to layout precision"
+            )]
+            let extent_px = *px as f32;
+            Some(extent_px)
+        }
+        ViewValue::Int(px) if *px >= 0 => Some(*px as f32),
+        _ => None,
+    }
+}
+
+#[doc = include_str!("../../docs/api/view/virtual_collection.doc/is_virtual_collection.md")]
 #[must_use]
 pub fn is_virtual_collection(node: &ViewNode) -> bool {
     matches!(node, ViewNode::Element { component, .. } if *component == VIRTUAL_COLLECTION)
 }
 
-#[doc = include_str!("virtual_collection.doc/has_virtual_collection.md")]
+#[doc = include_str!("../../docs/api/view/virtual_collection.doc/has_virtual_collection.md")]
 #[must_use]
 pub fn has_virtual_collection(nodes: &[ViewNode]) -> bool {
-    nodes.iter().any(|node| match node {
-        ViewNode::Element { children, .. } => {
-            is_virtual_collection(node) || has_virtual_collection(children.nodes())
-        }
-        ViewNode::Text { .. } => false,
+    super::view_fragment::any_node(nodes, is_virtual_collection)
+}
+
+/// Reports whether the view contains a virtual list with an owned row builder.
+#[must_use]
+pub fn has_inline_virtual_rows(nodes: &[ViewNode]) -> bool {
+    super::view_fragment::any_node(nodes, |node| {
+        matches!(node, ViewNode::Element { component, props, .. }
+            if *component == VIRTUAL_COLLECTION && props.iter().any(|prop| prop.virtual_rows().is_some()))
     })
 }
 
-#[doc = include_str!("virtual_collection.doc/realize_virtual_collections.md")]
+#[doc = include_str!("../../docs/api/view/virtual_collection.doc/realize_virtual_collections.md")]
 #[must_use]
 pub fn realize_virtual_collections<F>(view: View, window_len: &F) -> View
 where
@@ -71,7 +84,7 @@ where
     View::from_fragment(realize_fragment(view.into_fragment(), window_len))
 }
 
-#[doc = include_str!("virtual_collection.doc/realize_fragment.md")]
+/// [`realize_virtual_collections`] over one fragment.
 fn realize_fragment<F>(fragment: ViewFragment, window_len: &F) -> ViewFragment
 where
     F: Fn(f32) -> usize,
@@ -100,7 +113,7 @@ where
     ViewFragment::from_nodes(realized)
 }
 
-#[doc = include_str!("virtual_collection.doc/realize_node.md")]
+/// [`realize_virtual_collections`] into one node's children. Text has none.
 fn realize_node<F>(node: ViewNode, window_len: &F) -> ViewNode
 where
     F: Fn(f32) -> usize,
@@ -247,6 +260,37 @@ mod tests {
         };
         assert_eq!(virtual_row_extent(props), Some(20.0));
     }
+
+    #[test]
+    fn invalid_row_extents_fall_back_to_the_default() {
+        for px in [-1.0, f64::NAN, f64::INFINITY, f64::MAX] {
+            let props = [ViewProperty::new(VIRTUAL_ROW_EXTENT, ViewValue::Float(px))];
+            assert_eq!(virtual_row_extent(&props), None);
+        }
+    }
+
+    #[test]
+    fn large_generated_spacers_keep_a_layout_extent() {
+        let spacer = super::spacer(obscur_identity::InternedSymbol::from_raw(1), f64::MAX);
+        let ViewNode::Element { props, .. } = spacer else {
+            panic!("spacer must be an element");
+        };
+        let attributes = crate::view::StyleAttributes::extract(&props);
+        assert_eq!(attributes.virtual_extent(), Some(u32::MAX as f32));
+    }
+
+    #[test]
+    fn virtual_list_count_round_trips_at_the_platform_limit() {
+        let list = ViewNode::virtual_list(
+            obscur_identity::InternedSymbol::from_raw(1),
+            usize::MAX,
+            20.0,
+        );
+        let ViewNode::Element { props, .. } = list else {
+            panic!("virtual list must be an element");
+        };
+        assert_eq!(super::virtual_item_count(&props), usize::MAX);
+    }
 }
 
 /// The registered builder name a virtual-list marker names, if it is one.
@@ -321,6 +365,7 @@ pub fn virtual_item_count(props: &[ViewProperty]) -> usize {
         .find_map(|p| {
             (p.name() == VIRTUAL_ITEM_COUNT).then(|| match p.value() {
                 ViewValue::Int(n) => usize::try_from(*n).ok(),
+                ViewValue::Text(decimal) => decimal.parse::<usize>().ok(),
                 _ => None,
             })?
         })
@@ -333,7 +378,7 @@ pub fn virtual_item_count(props: &[ViewProperty]) -> usize {
 /// viewport can show; `row` builds one item's node. The realized children are
 /// **a leading spacer, the window's rows, then a trailing spacer**, each spacer
 /// sized to the items it stands in for — so the container's content extent is the
-/// true `count * row_extent` even though only the window exists as nodes. That is
+/// full row and separator extent even though only the window exists as nodes. That is
 /// what a scroll container needs in order to size a scrollbar honestly, and it is
 /// exactly the half an app cannot supply for itself: to state the full height it
 /// would have to build the full list, which is the cost virtualization exists to
@@ -346,12 +391,14 @@ where
     View::from_fragment(realize_list_fragment(view.into_fragment(), window, row))
 }
 
-/// A spacer standing in for `items` unbuilt rows of `extent` each.
-fn spacer(list: InternedSymbol, items: usize, extent: f32) -> ViewNode {
+/// A fixed-height spacer for a realized separator or an unrealized range.
+fn spacer(list: InternedSymbol, height_px: f64) -> ViewNode {
+    // Layout stores spacer extents in u32 pixels.
+    let stored_height_px = height_px.clamp(0.0, f64::from(u32::MAX));
     ViewNode::element(VIRTUAL_SPACER)
         .with_prop(ViewProperty::new(
             VIRTUAL_ROW_EXTENT,
-            ViewValue::Float(f64::from(items as f32 * extent)),
+            ViewValue::Float(stored_height_px),
         ))
         // Names the list this spacer belongs to, so the runtime can find the
         // container it was realized into and read that container's scroll offset.
@@ -372,7 +419,10 @@ where
     let mut out = Vec::new();
     for node in fragment.into_nodes() {
         let ViewNode::Element {
-            component, props, ..
+            component,
+            props,
+            children,
+            ..
         } = &node
         else {
             out.push(node);
@@ -402,20 +452,49 @@ where
             continue;
         };
         let count = virtual_item_count(props);
+        let inline_rows = props.iter().find_map(ViewProperty::virtual_rows);
+        let separator = props
+            .iter()
+            .filter(|prop| prop.name() == VIRTUAL_SEPARATOR_EXTENT)
+            .find_map(|prop| declared_extent_px(prop.value()));
+        let separator_height = separator.unwrap_or(0.0);
         let extent = virtual_row_extent(props).unwrap_or(DEFAULT_VIRTUAL_ROW_EXTENT);
-        let range = window(id, count, extent);
+        let stride_px = f64::from(extent) + f64::from(separator_height);
+        let range = window(id, count, (extent + separator_height).min(f32::MAX));
         let first = range.start.min(count);
         let last = range.end.min(count);
         if first > 0 {
-            out.push(spacer(id, first, extent));
+            let height = first as f64 * stride_px
+                - if first == count {
+                    f64::from(separator_height)
+                } else {
+                    0.0
+                };
+            out.push(spacer(id, height));
         }
         for index in first..last {
-            if let Some(built) = row(id, index) {
+            if let Some(build) = inline_rows {
+                out.extend(realize_list_fragment(build.build(index), window, row).into_nodes());
+            } else if let Some(built) = row(id, index) {
                 out.push(built);
+            }
+            if index + 1 < count
+                && let Some(height) = separator
+            {
+                out.push(
+                    spacer(id, f64::from(height)).with_children(realize_list_fragment(
+                        children.clone(),
+                        window,
+                        row,
+                    )),
+                );
             }
         }
         if last < count {
-            out.push(spacer(id, count - last, extent));
+            out.push(spacer(
+                id,
+                (count - last) as f64 * stride_px - f64::from(separator_height),
+            ));
         }
     }
     ViewFragment::from_nodes(out)

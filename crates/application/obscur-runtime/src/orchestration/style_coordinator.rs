@@ -1,4 +1,6 @@
-#![doc = include_str!("style_coordinator.doc/_module.md")]
+//! Resolves computed styles across the retained tree: [`StyleCoordinator`].
+
+use super::IncrementalRestyle;
 
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -6,38 +8,31 @@ use std::rc::Rc;
 use obscur_geometry::Size;
 use obscur_identity::{FastBuildHasher, FastMap, FastSet, NodeId};
 use obscur_style::computed::{
-    ChMetrics, ComputedStyle, CustomValueParser, ResolutionContext, StyleResolver,
+    ChMetrics, ComputedStyle, ComputedValue, CustomValueParser, ResolutionContext, StyleResolver,
 };
 use obscur_style::invalidation::StyleInvalidation;
-use obscur_style::property::EnvironmentValues;
+use obscur_style::matching::MediaEnvironment;
+use obscur_style::property::{EnvironmentValues, PropertyId, layout_keyword};
 use obscur_tree::tree::RetainedTree;
 
 use super::StyleInputs;
 
-#[doc = include_str!("style_coordinator.doc/ComputedStyles.md")]
+/// The computed style for every node the coordinator resolved, keyed by
+/// [`NodeId`].
 pub type ComputedStyles = FastMap<NodeId, ComputedStyle>;
 
-#[doc = include_str!("style_coordinator.doc/IncrementalRestyle.md")]
-#[derive(Debug, Clone, Default)]
-pub struct IncrementalRestyle {
-    #[doc = include_str!("style_coordinator.doc/resolved.md")]
-    pub resolved: usize,
-    #[doc = include_str!("style_coordinator.doc/previous.md")]
-    pub previous: ComputedStyles,
-    #[doc = include_str!("style_coordinator.doc/introduced.md")]
-    pub introduced: bool,
-}
-
-#[doc = include_str!("style_coordinator.doc/CustomValues.md")]
+/// The installed grammar for a substituted custom property, shared by reference
+/// so a rebuilt resolution context can carry it without cloning it.
 pub type CustomValues = Rc<dyn CustomValueParser>;
 
-#[doc = include_str!("style_coordinator.doc/StyleCoordinator.md")]
+#[doc = include_str!("../../docs/api/orchestration/style_coordinator.doc/StyleCoordinator.md")]
 #[derive(Clone, Default)]
 pub struct StyleCoordinator {
-    #[doc = include_str!("style_coordinator.doc/resolver.md")]
+    /// The stateless resolver that computes each node's style.
     resolver: StyleResolver,
-    #[doc = include_str!("style_coordinator.doc/custom_values.md")]
+    #[doc = include_str!("../../docs/api/orchestration/style_coordinator.doc/custom_values.md")]
     custom_values: Option<CustomValues>,
+    locale_parent_style: Option<ComputedStyle>,
 }
 
 impl std::fmt::Debug for StyleCoordinator {
@@ -50,27 +45,46 @@ impl std::fmt::Debug for StyleCoordinator {
 }
 
 impl StyleCoordinator {
-    #[doc = include_str!("style_coordinator.doc/new.md")]
+    /// Creates a coordinator with a fresh resolver.
     #[must_use]
     pub fn new() -> Self {
         Self {
             resolver: StyleResolver::new(),
             custom_values: None,
+            locale_parent_style: None,
         }
     }
 
-    #[doc = include_str!("style_coordinator.doc/set_custom_values.md")]
+    pub(crate) fn set_locale_direction(&mut self, direction: obscur_text::shaping::TextDirection) {
+        self.locale_parent_style = (direction == obscur_text::shaping::TextDirection::RightToLeft)
+            .then(|| {
+                let mut style = ComputedStyle::new();
+                style.set(
+                    PropertyId::Direction,
+                    ComputedValue::keyword(layout_keyword::DIRECTION_RTL),
+                );
+                style
+            });
+    }
+
+    #[doc = include_str!("../../docs/api/orchestration/style_coordinator.doc/set_custom_values.md")]
     pub fn set_custom_values(&mut self, parser: CustomValues) {
         self.custom_values = Some(parser);
     }
 
-    #[doc = include_str!("style_coordinator.doc/has_custom_values.md")]
+    pub(crate) fn custom_value_parser(&self) -> Option<&dyn CustomValueParser> {
+        self.custom_values.as_deref()
+    }
+
+    /// Whether a grammar has been installed. A host that installs one on every
+    /// stylesheet replacement asks this first, so re-installing does not become a
+    /// per-frame allocation.
     #[must_use]
     pub fn has_custom_values(&self) -> bool {
         self.custom_values.is_some()
     }
 
-    #[doc = include_str!("style_coordinator.doc/attach.md")]
+    #[doc = include_str!("../../docs/api/orchestration/style_coordinator.doc/attach.md")]
     fn attach<'a>(
         &'a self,
         ctx: ResolutionContext<'a>,
@@ -88,7 +102,7 @@ impl StyleCoordinator {
         }
     }
 
-    #[doc = include_str!("style_coordinator.doc/resolve.md")]
+    #[doc = include_str!("../../docs/api/orchestration/style_coordinator.doc/resolve.md")]
     #[must_use]
     pub fn resolve(
         &self,
@@ -97,6 +111,26 @@ impl StyleCoordinator {
         viewport: Size,
         environment: EnvironmentValues,
         metrics: Option<&dyn ChMetrics>,
+    ) -> ComputedStyles {
+        self.resolve_with_media(
+            tree,
+            inputs,
+            viewport,
+            environment,
+            metrics,
+            &MediaEnvironment::unbounded(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn resolve_with_media(
+        &self,
+        tree: &RetainedTree,
+        inputs: &StyleInputs,
+        viewport: Size,
+        environment: EnvironmentValues,
+        metrics: Option<&dyn ChMetrics>,
+        media: &MediaEnvironment,
     ) -> ComputedStyles {
         let Some(root) = tree.root() else {
             return ComputedStyles::default();
@@ -109,10 +143,18 @@ impl StyleCoordinator {
             .iter()
             .map(|&(node, _)| node)
             .find(|&node| tree.get(node).is_some_and(|n| n.kind().is_element()));
-        self.resolve_in_order(&order, inputs, viewport, environment, root_element, metrics)
+        self.resolve_in_order(
+            &order,
+            inputs,
+            viewport,
+            environment,
+            root_element,
+            metrics,
+            media,
+        )
     }
 
-    #[doc = include_str!("style_coordinator.doc/resolve_incremental.md")]
+    #[doc = include_str!("../../docs/api/orchestration/style_coordinator.doc/resolve_incremental.md")]
     #[must_use]
     pub fn resolve_incremental(
         &self,
@@ -123,6 +165,30 @@ impl StyleCoordinator {
         dirty: &StyleInvalidation,
         styles: &mut ComputedStyles,
         metrics: Option<&dyn ChMetrics>,
+    ) -> IncrementalRestyle {
+        self.resolve_incremental_with_media(
+            tree,
+            inputs,
+            viewport,
+            environment,
+            dirty,
+            styles,
+            metrics,
+            &MediaEnvironment::unbounded(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn resolve_incremental_with_media(
+        &self,
+        tree: &RetainedTree,
+        inputs: &StyleInputs,
+        viewport: Size,
+        environment: EnvironmentValues,
+        dirty: &StyleInvalidation,
+        styles: &mut ComputedStyles,
+        metrics: Option<&dyn ChMetrics>,
+        media: &MediaEnvironment,
     ) -> IncrementalRestyle {
         let mut out = IncrementalRestyle::default();
         let Some(root) = tree.root() else {
@@ -149,12 +215,14 @@ impl StyleCoordinator {
             // — but the caller must then not treat unlisted nodes as unchanged, which
             // is what `introduced` tells it.
             if dirty.is_invalidated(node) || !styles.contains_key(&node) {
-                let parent_style = parent.and_then(|p| styles.get(&p));
+                let parent_style = parent
+                    .and_then(|p| styles.get(&p))
+                    .or(self.locale_parent_style.as_ref());
                 let computed = self.resolver.resolve(
                     inputs.cascaded_for(node),
                     inputs.custom_for(node),
                     parent_style,
-                    ctx,
+                    ctx.with_query_unit_dimensions(media.query_unit_dimensions(node)),
                 );
                 out.resolved += 1;
                 match styles.insert(node, computed) {
@@ -184,7 +252,7 @@ impl StyleCoordinator {
         out
     }
 
-    #[doc = include_str!("style_coordinator.doc/preorder.md")]
+    #[doc = include_str!("../../docs/api/orchestration/style_coordinator.doc/preorder.md")]
     fn preorder<F>(root: NodeId, children_of: F) -> Vec<(NodeId, Option<NodeId>)>
     where
         F: Fn(NodeId) -> Vec<NodeId>,
@@ -211,7 +279,8 @@ impl StyleCoordinator {
         order
     }
 
-    #[doc = include_str!("style_coordinator.doc/resolve_in_order.md")]
+    #[doc = include_str!("../../docs/api/orchestration/style_coordinator.doc/resolve_in_order.md")]
+    #[allow(clippy::too_many_arguments)]
     fn resolve_in_order(
         &self,
         order: &[(NodeId, Option<NodeId>)],
@@ -220,6 +289,7 @@ impl StyleCoordinator {
         environment: EnvironmentValues,
         root_element: Option<NodeId>,
         metrics: Option<&dyn ChMetrics>,
+        media: &MediaEnvironment,
     ) -> ComputedStyles {
         let mut out: ComputedStyles =
             ComputedStyles::with_capacity_and_hasher(order.len(), FastBuildHasher::default());
@@ -229,12 +299,14 @@ impl StyleCoordinator {
             environment,
         );
         for &(node, parent) in order {
-            let parent_style = parent.and_then(|p| out.get(&p));
+            let parent_style = parent
+                .and_then(|p| out.get(&p))
+                .or(self.locale_parent_style.as_ref());
             let computed = self.resolver.resolve(
                 inputs.cascaded_for(node),
                 inputs.custom_for(node),
                 parent_style,
-                ctx,
+                ctx.with_query_unit_dimensions(media.query_unit_dimensions(node)),
             );
             if Some(node) == root_element {
                 ctx = self.attach(
@@ -365,6 +437,7 @@ mod tests {
             EnvironmentValues::none(),
             Some(root),
             None,
+            &MediaEnvironment::unbounded(),
         );
 
         assert_eq!(color_of(&styles, root), Some(red));
@@ -399,6 +472,7 @@ mod tests {
             EnvironmentValues::none(),
             Some(root),
             None,
+            &MediaEnvironment::unbounded(),
         );
         let weight = |id| match styles
             .get(&id)
@@ -429,6 +503,7 @@ mod tests {
             EnvironmentValues::none(),
             Some(root),
             None,
+            &MediaEnvironment::unbounded(),
         );
 
         // Both nodes are resolved; the child gets defaults/inheritance.

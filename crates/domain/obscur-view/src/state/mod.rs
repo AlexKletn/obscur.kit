@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! State module.
 mod local_state;
 pub use local_state::LocalState;
 mod read_signal;
@@ -8,6 +8,8 @@ pub use signal_generations::SignalGenerations;
 mod state_generation;
 pub use state_generation::StateGeneration;
 mod subscription;
-pub use subscription::{Subscription, SubscriptionId};
+pub use subscription::Subscription;
+mod subscription_id;
+pub use subscription_id::SubscriptionId;
 mod subscription_scope;
 pub use subscription_scope::SubscriptionScope;

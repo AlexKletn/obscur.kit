@@ -1,23 +1,29 @@
-#![doc = include_str!("style_rule.doc/_module.md")]
+//! A single authored style rule (a selector list plus a declaration block):
+//! [`StyleRule`].
 
 use crate::matching::{BlockDeclaration, RuleCondition};
 use crate::property::{CustomProperty, PropertyId};
 use crate::selector::SelectorList;
 
-#[doc = include_str!("style_rule.doc/StyleRule.md")]
+#[doc = include_str!("../../docs/api/matching/style_rule.doc/StyleRule.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct StyleRule {
     selectors: SelectorList,
     block: Vec<BlockDeclaration>,
     condition: Option<RuleCondition>,
-    #[doc = include_str!("style_rule.doc/invalid_values.md")]
+    /// The longhand properties whose authored value could not be parsed and was
+    /// therefore dropped from [`block`](Self::block) (§4.13). An element that
+    /// matches this rule carries a recoverable, per-node style fault for each —
+    /// the value never reached the cascade, so the rest of the block still
+    /// applies. Empty for a rule every declaration of which lowered cleanly.
     invalid_values: Vec<PropertyId>,
-    #[doc = include_str!("style_rule.doc/custom_properties.md")]
+    #[doc = include_str!("../../docs/api/matching/style_rule.doc/custom_properties.md")]
     custom_properties: Vec<CustomProperty>,
 }
 
 impl StyleRule {
-    #[doc = include_str!("style_rule.doc/new.md")]
+    /// Creates an unconditional rule from its selector list and declaration
+    /// block.
     #[must_use]
     pub const fn new(selectors: SelectorList, block: Vec<BlockDeclaration>) -> Self {
         Self {
@@ -29,52 +35,61 @@ impl StyleRule {
         }
     }
 
-    #[doc = include_str!("style_rule.doc/with_custom_properties.md")]
+    /// Returns a copy of this rule carrying `properties` as the custom properties
+    /// its block declared, in authored order, replacing any previously recorded
+    /// set.
     #[must_use]
     pub fn with_custom_properties(mut self, properties: Vec<CustomProperty>) -> Self {
         self.custom_properties = properties;
         self
     }
 
-    #[doc = include_str!("style_rule.doc/custom_properties_2.md")]
+    /// Returns the custom properties this rule's block declared, in authored
+    /// order. Empty for the overwhelming majority of rules, which declare none.
     #[must_use]
     pub fn custom_properties(&self) -> &[CustomProperty] {
         &self.custom_properties
     }
 
-    #[doc = include_str!("style_rule.doc/with_invalid_values.md")]
+    /// Returns a copy of this rule that records `properties` as the longhands
+    /// whose authored value could not be parsed and was dropped (§4.13),
+    /// replacing any previously recorded set.
     #[must_use]
     pub fn with_invalid_values(mut self, properties: Vec<PropertyId>) -> Self {
         self.invalid_values = properties;
         self
     }
 
-    #[doc = include_str!("style_rule.doc/invalid_values_2.md")]
+    /// Returns the longhand properties whose authored value was dropped as
+    /// unparseable, in authored order. Empty when every declaration lowered
+    /// cleanly.
     #[must_use]
     pub fn invalid_values(&self) -> &[PropertyId] {
         &self.invalid_values
     }
 
-    #[doc = include_str!("style_rule.doc/with_condition.md")]
+    /// Returns a copy of this rule gated behind `condition`, replacing any
+    /// existing condition.
     #[must_use]
     pub fn with_condition(mut self, condition: RuleCondition) -> Self {
         self.condition = Some(condition);
         self
     }
 
-    #[doc = include_str!("style_rule.doc/selectors.md")]
+    /// Returns the rule's selector list.
     #[must_use]
     pub const fn selectors(&self) -> &SelectorList {
         &self.selectors
     }
 
-    #[doc = include_str!("style_rule.doc/block.md")]
+    /// Returns the rule's declaration block in authored order.
     #[must_use]
     pub fn block(&self) -> &[BlockDeclaration] {
         &self.block
     }
 
-    #[doc = include_str!("style_rule.doc/condition.md")]
+    /// Returns the `@media`/`@container` condition gating this rule, or [`None`]
+    /// for an unconditional rule (which always applies).
     #[must_use]
     pub const fn condition(&self) -> Option<&RuleCondition> {
         self.condition.as_ref()

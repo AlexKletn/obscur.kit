@@ -1,4 +1,4 @@
-#![doc = include_str!("computed_value.doc/_module.md")]
+#![doc = include_str!("../../docs/api/computed/computed_value.doc/_module.md")]
 
 use crate::property::{
     BackgroundLayer, BackgroundPosition, BackgroundRepeat, BackgroundSize, BoxShadow,
@@ -7,12 +7,12 @@ use crate::property::{
 };
 use obscur_identity::InternedSymbol;
 
-#[doc = include_str!("computed_value.doc/ComputedValue.md")]
+#[doc = include_str!("../../docs/api/computed/computed_value.doc/ComputedValue.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ComputedValue(PropertyValue);
 
 impl ComputedValue {
-    #[doc = include_str!("computed_value.doc/from_concrete.md")]
+    #[doc = include_str!("../../docs/api/computed/computed_value.doc/from_concrete.md")]
     #[must_use]
     pub fn from_concrete(value: PropertyValue) -> Option<Self> {
         match value {
@@ -27,8 +27,19 @@ impl ComputedValue {
             | PropertyValue::BackgroundImageUrl(_)
             | PropertyValue::BackgroundLayers(_)
             | PropertyValue::BackgroundSize(_)
+            | PropertyValue::BackgroundSizes(_)
             | PropertyValue::BackgroundPosition(_)
-            | PropertyValue::BackgroundRepeat(_)
+            | PropertyValue::BackgroundPositions(_)
+            | PropertyValue::BackgroundRepeat(_) | PropertyValue::BackgroundRepeats(_)
+            | PropertyValue::BackgroundBlendModes(_)
+            | PropertyValue::ClipPolygon { .. }
+            | PropertyValue::ClipEllipse { .. }
+            | PropertyValue::ClipRectangle { .. }
+            | PropertyValue::ClipBox(_)
+            | PropertyValue::ClipSvgPath { .. }
+            | PropertyValue::BackgroundClips(_)
+            | PropertyValue::BackgroundOrigins(_)
+            | PropertyValue::BackgroundAttachments(_)
             | PropertyValue::ObjectFit(_)
             | PropertyValue::BoxShadow(_)
             | PropertyValue::Filter(_)
@@ -42,6 +53,7 @@ impl ComputedValue {
             // `Keyword` could not: its symbol is minted by the interner of the
             // stylesheet that happened to be compiling, so the same word in two
             // sheets is two different symbols and neither matches a registry.
+            | PropertyValue::ContainerNames(_)
             | PropertyValue::Name(_)
             | PropertyValue::Transform(_)
             // The two specified-value list forms are concrete in the same sense
@@ -56,6 +68,11 @@ impl ComputedValue {
             // `content` is a generated-content decoration, never a computed value
             // of a real element's box, so it has no place in a `ComputedValue`.
             PropertyValue::String(_)
+            | PropertyValue::ContainerRef { .. }
+            | PropertyValue::ContainerTemplate(_)
+            | PropertyValue::FlexFlowTemplate(_)
+            | PropertyValue::GapTemplate(_)
+            | PropertyValue::VariableTemplate(_)
             | PropertyValue::CustomRef(_)
             // A custom property's declared text is a pre-substitution
             // placeholder in exactly the sense a `CustomRef` is: no element's
@@ -67,138 +84,143 @@ impl ComputedValue {
         }
     }
 
-    #[doc = include_str!("computed_value.doc/color.md")]
+    /// Constructs a computed color value.
     #[must_use]
     pub const fn color(color: StyleColor) -> Self {
         Self(PropertyValue::Color(color))
     }
 
-    #[doc = include_str!("computed_value.doc/length.md")]
+    /// Constructs a computed length value.
     #[must_use]
     pub const fn length(length: Length) -> Self {
         Self(PropertyValue::Length(length))
     }
 
-    #[doc = include_str!("computed_value.doc/calc.md")]
+    /// Constructs a computed `calc()` / `min()` / `max()` / `clamp()` value.
     #[must_use]
     pub const fn calc(expr: LengthExpr) -> Self {
         Self(PropertyValue::Calc(expr))
     }
 
-    #[doc = include_str!("computed_value.doc/number.md")]
+    /// Constructs a computed bare-number value (for example `opacity`).
     #[must_use]
     pub const fn number(value: f32) -> Self {
         Self(PropertyValue::Number(value))
     }
 
-    #[doc = include_str!("computed_value.doc/map_value.md")]
+    #[doc = include_str!("../../docs/api/computed/computed_value.doc/map_value.md")]
     pub(super) fn map_value(self, f: impl FnOnce(PropertyValue) -> PropertyValue) -> Self {
         Self(f(self.0))
     }
 
-    #[doc = include_str!("computed_value.doc/keyword.md")]
+    /// Constructs a computed keyword value from its interned symbol.
     #[must_use]
     pub const fn keyword(symbol: InternedSymbol) -> Self {
         Self(PropertyValue::Keyword(symbol))
     }
 
-    #[doc = include_str!("computed_value.doc/value.md")]
+    /// Returns the underlying concrete [`PropertyValue`].
     #[must_use]
     pub const fn value(&self) -> &PropertyValue {
         &self.0
     }
 
-    #[doc = include_str!("computed_value.doc/as_color.md")]
+    /// Returns the color if this computed value is a color.
     #[must_use]
     pub const fn as_color(&self) -> Option<StyleColor> {
         self.0.as_color()
     }
 
-    #[doc = include_str!("computed_value.doc/as_length.md")]
+    /// Returns the length if this computed value is a length.
     #[must_use]
     pub const fn as_length(&self) -> Option<Length> {
         self.0.as_length()
     }
 
-    #[doc = include_str!("computed_value.doc/as_linear_gradient.md")]
+    /// Returns the linear gradient if this computed value is a `linear-gradient`.
     #[must_use]
     pub const fn as_linear_gradient(&self) -> Option<&LinearGradient> {
         self.0.as_linear_gradient()
     }
 
-    #[doc = include_str!("computed_value.doc/as_radial_gradient.md")]
+    /// Returns the radial gradient if this computed value is a `radial-gradient`.
     #[must_use]
     pub const fn as_radial_gradient(&self) -> Option<&RadialGradient> {
         self.0.as_radial_gradient()
     }
 
-    #[doc = include_str!("computed_value.doc/as_conic_gradient.md")]
+    /// Returns the conic gradient if this computed value is a `conic-gradient`.
     #[must_use]
     pub const fn as_conic_gradient(&self) -> Option<&ConicGradient> {
         self.0.as_conic_gradient()
     }
 
-    #[doc = include_str!("computed_value.doc/as_calc.md")]
+    /// Returns the length expression if this computed value is a `calc()` /
+    /// `min()` / `max()` / `clamp()`.
     #[must_use]
     pub const fn as_calc(&self) -> Option<&LengthExpr> {
         self.0.as_calc()
     }
 
-    #[doc = include_str!("computed_value.doc/as_background_image_url.md")]
+    /// Returns the raw `url(...)` string if this computed value is a
+    /// `background-image: url(...)` reference (unresolved).
     #[must_use]
     pub fn as_background_image_url(&self) -> Option<&str> {
         self.0.as_background_image_url()
     }
 
-    #[doc = include_str!("computed_value.doc/as_background_layers.md")]
+    /// Returns the multi-layer `background-image` list if this computed value is a
+    /// [`PropertyValue::BackgroundLayers`] (two or more comma-separated layers, in
+    /// author order). A single-layer background stays a flat gradient/url value.
     #[must_use]
     pub fn as_background_layers(&self) -> Option<&[BackgroundLayer]> {
         self.0.as_background_layers()
     }
 
-    #[doc = include_str!("computed_value.doc/as_box_shadows.md")]
+    /// Returns the `box-shadow` list if this computed value is a `box-shadow`.
     #[must_use]
     pub fn as_box_shadows(&self) -> Option<&[BoxShadow]> {
         self.0.as_box_shadows()
     }
 
-    #[doc = include_str!("computed_value.doc/as_background_size.md")]
+    /// Returns the `background-size` if this computed value is one.
     #[must_use]
     pub const fn as_background_size(&self) -> Option<BackgroundSize> {
         self.0.as_background_size()
     }
 
-    #[doc = include_str!("computed_value.doc/as_background_position.md")]
+    /// Returns the `background-position` if this computed value is one.
     #[must_use]
     pub const fn as_background_position(&self) -> Option<BackgroundPosition> {
         self.0.as_background_position()
     }
 
-    #[doc = include_str!("computed_value.doc/as_background_repeat.md")]
+    /// Returns the `background-repeat` if this computed value is one.
     #[must_use]
     pub const fn as_background_repeat(&self) -> Option<BackgroundRepeat> {
         self.0.as_background_repeat()
     }
 
-    #[doc = include_str!("computed_value.doc/as_object_fit.md")]
+    /// Returns the `object-fit` if this computed value is one.
     #[must_use]
     pub const fn as_object_fit(&self) -> Option<ObjectFit> {
         self.0.as_object_fit()
     }
 
-    #[doc = include_str!("computed_value.doc/as_filter_ops.md")]
+    /// Returns the `filter` op list if this computed value is a `filter`.
     #[must_use]
     pub fn as_filter_ops(&self) -> Option<&[FilterOp]> {
         self.0.as_filter_ops()
     }
 
-    #[doc = include_str!("computed_value.doc/as_transform.md")]
+    /// Returns the resolved 2D `transform` if this computed value is a transform.
     #[must_use]
     pub const fn as_transform(&self) -> Option<Transform> {
         self.0.as_transform()
     }
 
-    #[doc = include_str!("computed_value.doc/as_transform_origin.md")]
+    /// Returns the `transform-origin` if this computed value is a transform
+    /// origin.
     #[must_use]
     pub const fn as_transform_origin(&self) -> Option<TransformOrigin> {
         self.0.as_transform_origin()

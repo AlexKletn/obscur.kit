@@ -1,22 +1,23 @@
-#![doc = include_str!("cascade.doc/_module.md")]
+//! The cascade engine: [`Cascade`] resolves the winning declaration per
+//! property (§4.14).
 use obscur_identity::FastMap;
 
 use crate::cascade::{CascadePriority, Declaration, ResolvedDeclarations};
 use crate::property::PropertyId;
 use std::collections::HashMap;
 
-#[doc = include_str!("cascade.doc/Cascade.md")]
+#[doc = include_str!("../../docs/api/cascade/cascade.doc/Cascade.md")]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Cascade;
 
 impl Cascade {
-    #[doc = include_str!("cascade.doc/new.md")]
+    /// Creates a cascade engine.
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    #[doc = include_str!("cascade.doc/resolve.md")]
+    #[doc = include_str!("../../docs/api/cascade/cascade.doc/resolve.md")]
     #[must_use]
     pub fn resolve(&self, declarations: &[Declaration]) -> ResolvedDeclarations {
         // For each property, remember the winning declaration's priority so we

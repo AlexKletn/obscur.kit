@@ -1,8 +1,8 @@
-#![doc = include_str!("computed_property_set.doc/_module.md")]
+#![doc = include_str!("../../docs/api/computed/computed_property_set.doc/_module.md")]
 
 use crate::property::PropertyId;
 
-#[doc = include_str!("computed_property_set.doc/COMPUTED_PROPERTIES.md")]
+#[doc = include_str!("../../docs/api/computed/computed_property_set.doc/COMPUTED_PROPERTIES.md")]
 pub(super) const COMPUTED_PROPERTIES: &[PropertyId] = &[
     // Paint.
     PropertyId::Color,
@@ -72,6 +72,12 @@ pub(super) const COMPUTED_PROPERTIES: &[PropertyId] = &[
     PropertyId::TransformOrigin,
     // Compositing.
     PropertyId::MixBlendMode,
+    PropertyId::BackgroundBlendMode,
+    PropertyId::BackgroundClip,
+    PropertyId::ClipPath,
+    PropertyId::BackgroundOrigin,
+    PropertyId::BackgroundAttachment,
+    PropertyId::Isolation,
     // Flex container / item.
     PropertyId::Display,
     PropertyId::FlexDirection,
@@ -83,8 +89,11 @@ pub(super) const COMPUTED_PROPERTIES: &[PropertyId] = &[
     PropertyId::AlignSelf,
     PropertyId::JustifySelf,
     PropertyId::Gap,
+    PropertyId::RowGap,
+    PropertyId::ColumnGap,
     PropertyId::FlexBasis,
     PropertyId::FlexGrow,
+    PropertyId::Order,
     PropertyId::FlexShrink,
     // Grid container.
     PropertyId::GridTemplateColumns,
@@ -125,11 +134,18 @@ pub(super) const COMPUTED_PROPERTIES: &[PropertyId] = &[
     // Hit testing. It inherits, so it must be computed on every node: that is
     // how a `pointer-events: none` subtree learns it is transparent.
     PropertyId::PointerEvents,
+    PropertyId::PixelSnap,
+    PropertyId::OverscrollBehaviorX,
+    PropertyId::OverscrollBehaviorY,
     // The kit's own namespace.
     PropertyId::Painter,
+    PropertyId::ContainIntrinsicWidth,
+    PropertyId::ContainIntrinsicHeight,
+    PropertyId::ContainerType,
+    PropertyId::ContainerName,
 ];
 
-#[doc = include_str!("computed_property_set.doc/FACE_PROPERTIES.md")]
+#[doc = include_str!("../../docs/api/computed/computed_property_set.doc/FACE_PROPERTIES.md")]
 pub(super) const FACE_PROPERTIES: &[PropertyId] = &[
     PropertyId::FontFamily,
     PropertyId::FontWeight,
@@ -205,12 +221,21 @@ mod tests {
                 | PropertyId::Transform
                 | PropertyId::TransformOrigin
                 | PropertyId::MixBlendMode
+                | PropertyId::BackgroundBlendMode
+                | PropertyId::BackgroundClip
+                | PropertyId::ClipPath
+                | PropertyId::BackgroundOrigin
+                | PropertyId::BackgroundAttachment
+                | PropertyId::Isolation
                 | PropertyId::MinWidth
                 | PropertyId::MinHeight
                 | PropertyId::MaxWidth
                 | PropertyId::MaxHeight
                 | PropertyId::Gap
+                | PropertyId::RowGap
+                | PropertyId::ColumnGap
                 | PropertyId::FlexBasis
+                | PropertyId::Order
                 | PropertyId::FlexGrow
                 | PropertyId::FlexShrink
                 | PropertyId::FlexDirection
@@ -251,6 +276,9 @@ mod tests {
                 | PropertyId::OverflowX
                 | PropertyId::OverflowY
                 | PropertyId::PointerEvents
+                | PropertyId::PixelSnap
+                | PropertyId::OverscrollBehaviorX
+                | PropertyId::OverscrollBehaviorY
                 // Logical properties are classified but deliberately NOT computed:
                 // each resolves into its physical counterpart via
                 // `cascaded_for`, so the computed style holds `margin-left` and
@@ -276,6 +304,12 @@ mod tests {
                 | PropertyId::BorderInlineEndStyle
                 | PropertyId::BorderBlockStartStyle
                 | PropertyId::BorderBlockEndStyle
+                | PropertyId::ContainIntrinsicWidth
+                | PropertyId::ContainIntrinsicHeight
+                | PropertyId::ContainIntrinsicInlineSize
+                | PropertyId::ContainIntrinsicBlockSize
+                | PropertyId::ContainerType
+                | PropertyId::ContainerName
                 // `content` is generated-content-only: like the logical properties
                 // it is deliberately NOT a computed property of a real box (it
                 // decorates a `::before`/`::after` pseudo-element), so it is
@@ -339,13 +373,22 @@ mod tests {
             PropertyId::Transform,
             PropertyId::TransformOrigin,
             PropertyId::MixBlendMode,
+            PropertyId::BackgroundBlendMode,
+            PropertyId::BackgroundClip,
+            PropertyId::ClipPath,
+            PropertyId::BackgroundOrigin,
+            PropertyId::BackgroundAttachment,
+            PropertyId::Isolation,
             PropertyId::MinWidth,
             PropertyId::MinHeight,
             PropertyId::MaxWidth,
             PropertyId::MaxHeight,
             PropertyId::Gap,
+            PropertyId::RowGap,
+            PropertyId::ColumnGap,
             PropertyId::FlexBasis,
             PropertyId::FlexGrow,
+            PropertyId::Order,
             PropertyId::FlexShrink,
             PropertyId::FlexDirection,
             PropertyId::FlexWrap,
@@ -385,7 +428,14 @@ mod tests {
             PropertyId::OverflowX,
             PropertyId::OverflowY,
             PropertyId::PointerEvents,
+            PropertyId::PixelSnap,
+            PropertyId::OverscrollBehaviorX,
+            PropertyId::OverscrollBehaviorY,
             PropertyId::Painter,
+            PropertyId::ContainIntrinsicWidth,
+            PropertyId::ContainIntrinsicHeight,
+            PropertyId::ContainerType,
+            PropertyId::ContainerName,
         ];
         for id in all {
             assert_known(id);

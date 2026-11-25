@@ -1,94 +1,21 @@
-#![doc = include_str!("css_tokenizer.doc/_module.md")]
+#![doc = include_str!("../../docs/api/parser/css_tokenizer.doc/_module.md")]
 
 use crate::error::{CssParseError, CssParseErrorKind};
 use crate::source::SourceSpan;
 
-#[doc = include_str!("css_tokenizer.doc/CssTokenKind.md")]
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum CssTokenKind {
-    #[doc = include_str!("css_tokenizer.doc/Ident.md")]
-    Ident(Box<str>),
-    #[doc = include_str!("css_tokenizer.doc/AtKeyword.md")]
-    AtKeyword(Box<str>),
-    #[doc = include_str!("css_tokenizer.doc/Hash.md")]
-    Hash(Box<str>),
-    #[doc = include_str!("css_tokenizer.doc/Str.md")]
-    Str(Box<str>),
-    #[doc = include_str!("css_tokenizer.doc/Number.md")]
-    Number(f64),
-    #[doc = include_str!("css_tokenizer.doc/Percentage.md")]
-    Percentage(f64),
-    #[doc = include_str!("css_tokenizer.doc/Dimension.md")]
-    Dimension {
-        #[doc = include_str!("css_tokenizer.doc/value.md")]
-        value: f64,
-        #[doc = include_str!("css_tokenizer.doc/unit.md")]
-        unit: Box<str>,
-    },
-    #[doc = include_str!("css_tokenizer.doc/Delim.md")]
-    Delim(char),
-    #[doc = include_str!("css_tokenizer.doc/Colon.md")]
-    Colon,
-    #[doc = include_str!("css_tokenizer.doc/Semicolon.md")]
-    Semicolon,
-    #[doc = include_str!("css_tokenizer.doc/Comma.md")]
-    Comma,
-    #[doc = include_str!("css_tokenizer.doc/LBrace.md")]
-    LBrace,
-    #[doc = include_str!("css_tokenizer.doc/RBrace.md")]
-    RBrace,
-    #[doc = include_str!("css_tokenizer.doc/LParen.md")]
-    LParen,
-    #[doc = include_str!("css_tokenizer.doc/RParen.md")]
-    RParen,
-    #[doc = include_str!("css_tokenizer.doc/LBracket.md")]
-    LBracket,
-    #[doc = include_str!("css_tokenizer.doc/RBracket.md")]
-    RBracket,
-    #[doc = include_str!("css_tokenizer.doc/Whitespace.md")]
-    Whitespace,
-}
+use super::{css_token::CssToken, css_token_kind::CssTokenKind};
 
-#[doc = include_str!("css_tokenizer.doc/CssToken.md")]
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct CssToken {
-    kind: CssTokenKind,
-    span: SourceSpan,
-}
-
-impl CssToken {
-    #[doc = include_str!("css_tokenizer.doc/new.md")]
-    pub(crate) fn new(kind: CssTokenKind, span: SourceSpan) -> Self {
-        Self { kind, span }
-    }
-
-    #[doc = include_str!("css_tokenizer.doc/kind.md")]
-    pub(crate) fn kind(&self) -> &CssTokenKind {
-        &self.kind
-    }
-
-    #[doc = include_str!("css_tokenizer.doc/span.md")]
-    pub(crate) fn span(&self) -> SourceSpan {
-        self.span
-    }
-
-    #[doc = include_str!("css_tokenizer.doc/is_whitespace.md")]
-    pub(crate) fn is_whitespace(&self) -> bool {
-        matches!(self.kind, CssTokenKind::Whitespace)
-    }
-}
-
-#[doc = include_str!("css_tokenizer.doc/is_ident_start.md")]
+/// Returns whether `c` may start a CSS identifier.
 fn is_ident_start(c: char) -> bool {
     c.is_ascii_alphabetic() || c == '_' || (c as u32) >= 0x80
 }
 
-#[doc = include_str!("css_tokenizer.doc/is_ident_continue.md")]
+/// Returns whether `c` may continue a CSS identifier.
 fn is_ident_continue(c: char) -> bool {
     is_ident_start(c) || c.is_ascii_digit() || c == '-'
 }
 
-#[doc = include_str!("css_tokenizer.doc/Tokenizer.md")]
+#[doc = include_str!("../../docs/api/parser/css_tokenizer.doc/Tokenizer.md")]
 pub(crate) struct Tokenizer<'a> {
     text: &'a str,
     chars: Vec<(usize, char)>,
@@ -97,7 +24,7 @@ pub(crate) struct Tokenizer<'a> {
 }
 
 impl<'a> Tokenizer<'a> {
-    #[doc = include_str!("css_tokenizer.doc/new_2.md")]
+    /// Creates a tokenizer over `text`.
     pub(crate) fn new(text: &'a str) -> Self {
         Self {
             text,
@@ -107,7 +34,8 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
-    #[doc = include_str!("css_tokenizer.doc/tokenize.md")]
+    /// Consumes the tokenizer, returning the token stream and any errors
+    /// collected (unterminated strings or comments).
     pub(crate) fn tokenize(mut self) -> (Vec<CssToken>, Vec<CssParseError>) {
         let mut tokens = Vec::new();
         while self.pos < self.chars.len() {
@@ -118,35 +46,35 @@ impl<'a> Tokenizer<'a> {
         (tokens, self.errors)
     }
 
-    #[doc = include_str!("css_tokenizer.doc/cur.md")]
+    /// Returns the char at the current position.
     fn cur(&self) -> Option<char> {
         self.chars.get(self.pos).map(|&(_, c)| c)
     }
 
-    #[doc = include_str!("css_tokenizer.doc/peek.md")]
+    /// Returns the char `k` positions ahead of the current position.
     fn peek(&self, k: usize) -> Option<char> {
         self.chars.get(self.pos + k).map(|&(_, c)| c)
     }
 
-    #[doc = include_str!("css_tokenizer.doc/byte.md")]
+    /// Returns the byte offset for char index `idx` (or the text length at end).
     fn byte(&self, idx: usize) -> u32 {
         let b = self.chars.get(idx).map_or(self.text.len(), |&(b, _)| b);
         u32::try_from(b).unwrap_or(u32::MAX)
     }
 
-    #[doc = include_str!("css_tokenizer.doc/slice.md")]
+    /// Returns the substring covered by char indices `[start, end)`.
     fn slice(&self, start: usize, end: usize) -> &str {
         let a = self.chars.get(start).map_or(self.text.len(), |&(b, _)| b);
         let b = self.chars.get(end).map_or(self.text.len(), |&(b, _)| b);
         &self.text[a..b]
     }
 
-    #[doc = include_str!("css_tokenizer.doc/span_2.md")]
+    /// Builds a span covering char indices `[start, end)`.
     fn span(&self, start: usize, end: usize) -> SourceSpan {
         SourceSpan::new(self.byte(start), self.byte(end))
     }
 
-    #[doc = include_str!("css_tokenizer.doc/next_token.md")]
+    /// Scans the next token, or [`None`] for skipped input (comments).
     fn next_token(&mut self) -> Option<CssToken> {
         let start = self.pos;
         let c = self.cur()?;
@@ -205,12 +133,13 @@ impl<'a> Tokenizer<'a> {
         Some(self.emit(kind, start))
     }
 
-    #[doc = include_str!("css_tokenizer.doc/emit.md")]
+    /// Emits a token of `kind` spanning from char index `start` to the current
+    /// position.
     fn emit(&self, kind: CssTokenKind, start: usize) -> CssToken {
         CssToken::new(kind, self.span(start, self.pos))
     }
 
-    #[doc = include_str!("css_tokenizer.doc/skip_comment.md")]
+    /// Skips a `/* … */` comment; records an error if it is unterminated.
     fn skip_comment(&mut self, start: usize) {
         self.pos += 2;
         while self.pos < self.chars.len() {
@@ -227,7 +156,8 @@ impl<'a> Tokenizer<'a> {
         ));
     }
 
-    #[doc = include_str!("css_tokenizer.doc/scan_string.md")]
+    /// Scans a quoted string opened by `quote`; records an error and runs to
+    /// end-of-input if unterminated.
     fn scan_string(&mut self, quote: char, start: usize) -> CssToken {
         self.pos += 1;
         let content_start = self.pos;
@@ -253,7 +183,8 @@ impl<'a> Tokenizer<'a> {
         self.emit(CssTokenKind::Str(content), start)
     }
 
-    #[doc = include_str!("css_tokenizer.doc/is_ident_start_here.md")]
+    /// Returns whether an identifier starts at the current position (including
+    /// leading hyphens for custom properties and vendor prefixes).
     fn is_ident_start_here(&self) -> bool {
         match self.cur() {
             Some(c) if is_ident_start(c) => true,
@@ -262,7 +193,7 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
-    #[doc = include_str!("css_tokenizer.doc/is_number_start.md")]
+    /// Returns whether a number starts at the current position.
     fn is_number_start(&self) -> bool {
         match self.cur() {
             Some(c) if c.is_ascii_digit() => true,
@@ -276,7 +207,7 @@ impl<'a> Tokenizer<'a> {
         }
     }
 
-    #[doc = include_str!("css_tokenizer.doc/scan_ident.md")]
+    /// Scans an identifier (already known to start here) into owned text.
     fn scan_ident(&mut self) -> Box<str> {
         let start = self.pos;
         self.pos += 1;
@@ -286,7 +217,7 @@ impl<'a> Tokenizer<'a> {
         self.slice(start, self.pos).into()
     }
 
-    #[doc = include_str!("css_tokenizer.doc/scan_name.md")]
+    /// Scans a hash/name run (letters, digits, `-`, `_`) into owned text.
     fn scan_name(&mut self) -> Box<str> {
         let start = self.pos;
         while matches!(self.cur(), Some(c) if is_ident_continue(c)) {
@@ -295,7 +226,9 @@ impl<'a> Tokenizer<'a> {
         self.slice(start, self.pos).into()
     }
 
-    #[doc = include_str!("css_tokenizer.doc/scan_number.md")]
+    /// Scans a number, returning [`Number`](CssTokenKind::Number),
+    /// [`Percentage`](CssTokenKind::Percentage), or
+    /// [`Dimension`](CssTokenKind::Dimension) depending on the trailing unit.
     fn scan_number(&mut self) -> CssTokenKind {
         let start = self.pos;
         if matches!(self.cur(), Some('+' | '-')) {

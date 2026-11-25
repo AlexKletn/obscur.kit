@@ -1,31 +1,40 @@
-#![doc = include_str!("margin.doc/_module.md")]
+//! One margin edge, which is a length or `auto`.
 
-#[doc = include_str!("margin.doc/Margin.md")]
-#[derive(Debug, Clone, Copy, PartialEq)]
+use std::sync::Arc;
+
+use super::TrackLimit;
+
+#[doc = include_str!("../../docs/api/model/margin.doc/Margin.md")]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Margin {
-    #[doc = include_str!("margin.doc/Px.md")]
+    /// An absolute margin, in logical pixels. May be negative.
     Px(f32),
-    #[doc = include_str!("margin.doc/Percent.md")]
+    #[doc = include_str!("../../docs/api/model/margin.doc/Percent.md")]
     Percent(f32),
-    #[doc = include_str!("margin.doc/Auto.md")]
+    /// A signed margin expression resolved against the containing inline extent.
+    Math(Arc<TrackLimit>),
+    /// The `auto` keyword: this edge absorbs leftover space in its axis.
     Auto,
 }
 
 impl Margin {
-    #[doc = include_str!("margin.doc/ZERO.md")]
+    /// A zero margin — the initial value of every margin edge.
     pub const ZERO: Self = Self::Px(0.0);
 
-    #[doc = include_str!("margin.doc/is_auto.md")]
+    /// Returns `true` when this edge is `auto`.
     #[must_use]
-    pub const fn is_auto(self) -> bool {
+    pub const fn is_auto(&self) -> bool {
         matches!(self, Self::Auto)
     }
 
-    #[doc = include_str!("margin.doc/resolve.md")]
+    #[doc = include_str!("../../docs/api/model/margin.doc/resolve.md")]
     #[must_use]
-    pub fn resolve(self, basis: f32) -> f32 {
+    pub fn resolve(&self, basis: f32) -> f32 {
         match self {
-            Self::Px(value) => value,
+            Self::Px(value) => *value,
+            Self::Math(expression) => expression
+                .resolve(if basis.is_finite() { basis } else { 0.0 })
+                .unwrap_or(0.0),
             Self::Percent(percent) if basis.is_finite() => basis * percent / 100.0,
             Self::Percent(_) | Self::Auto => 0.0,
         }

@@ -1,65 +1,19 @@
-#![doc = include_str!("keyframe_track.doc/_module.md")]
+//! The [`KeyframeTrack`] ordered-keyframe track and its [`Keyframe`] (spec §4.17).
 
-use crate::track::{Easing, MotionTrack};
+use crate::track::MotionTrack;
 use crate::value::MotionValue;
 
-#[doc = include_str!("keyframe_track.doc/Keyframe.md")]
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Keyframe {
-    #[doc = include_str!("keyframe_track.doc/offset.md")]
-    offset: f32,
-    #[doc = include_str!("keyframe_track.doc/value.md")]
-    value: MotionValue,
-    #[doc = include_str!("keyframe_track.doc/easing.md")]
-    easing: Easing,
-}
+use super::Keyframe;
 
-impl Keyframe {
-    #[doc = include_str!("keyframe_track.doc/new.md")]
-    #[must_use]
-    pub const fn new(offset: f32, value: MotionValue) -> Self {
-        Self {
-            offset,
-            value,
-            easing: Easing::Linear,
-        }
-    }
-
-    #[doc = include_str!("keyframe_track.doc/with_easing.md")]
-    #[must_use]
-    pub const fn with_easing(mut self, easing: Easing) -> Self {
-        self.easing = easing;
-        self
-    }
-
-    #[doc = include_str!("keyframe_track.doc/offset_2.md")]
-    #[must_use]
-    pub const fn offset(&self) -> f32 {
-        self.offset
-    }
-
-    #[doc = include_str!("keyframe_track.doc/value_2.md")]
-    #[must_use]
-    pub const fn value(&self) -> MotionValue {
-        self.value
-    }
-
-    #[doc = include_str!("keyframe_track.doc/easing_2.md")]
-    #[must_use]
-    pub const fn easing(&self) -> Easing {
-        self.easing
-    }
-}
-
-#[doc = include_str!("keyframe_track.doc/KeyframeTrack.md")]
+#[doc = include_str!("../../docs/api/track/keyframe_track.doc/KeyframeTrack.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct KeyframeTrack {
-    #[doc = include_str!("keyframe_track.doc/keyframes.md")]
+    /// The keyframes, kept sorted ascending by [`Keyframe::offset`].
     keyframes: Vec<Keyframe>,
 }
 
 impl KeyframeTrack {
-    #[doc = include_str!("keyframe_track.doc/new_2.md")]
+    /// Creates an empty track with no keyframes.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -67,18 +21,18 @@ impl KeyframeTrack {
         }
     }
 
-    #[doc = include_str!("keyframe_track.doc/from_keyframes.md")]
+    /// Creates a track from `keyframes`, sorting them (stably) by offset.
     #[must_use]
     pub fn from_keyframes(mut keyframes: Vec<Keyframe>) -> Self {
         keyframes.sort_by(|a, b| {
-            a.offset
-                .partial_cmp(&b.offset)
+            a.offset()
+                .partial_cmp(&b.offset())
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
         Self { keyframes }
     }
 
-    #[doc = include_str!("keyframe_track.doc/from_endpoints.md")]
+    #[doc = include_str!("../../docs/api/track/keyframe_track.doc/from_endpoints.md")]
     #[must_use]
     pub fn from_endpoints(start: MotionValue, end: MotionValue) -> Self {
         Self {
@@ -86,37 +40,37 @@ impl KeyframeTrack {
         }
     }
 
-    #[doc = include_str!("keyframe_track.doc/with_start_value.md")]
+    #[doc = include_str!("../../docs/api/track/keyframe_track.doc/with_start_value.md")]
     #[must_use]
     pub fn with_start_value(&self, start: MotionValue) -> Self {
         let mut keyframes = self.keyframes.clone();
         if let Some(first) = keyframes.first_mut() {
-            *first = Keyframe::new(first.offset, start).with_easing(first.easing);
+            *first = Keyframe::new(first.offset(), start).with_easing(first.easing());
         }
         Self { keyframes }
     }
 
-    #[doc = include_str!("keyframe_track.doc/push.md")]
+    #[doc = include_str!("../../docs/api/track/keyframe_track.doc/push.md")]
     pub fn push(&mut self, keyframe: Keyframe) {
         let index = self
             .keyframes
-            .partition_point(|k| k.offset <= keyframe.offset);
+            .partition_point(|k| k.offset() <= keyframe.offset());
         self.keyframes.insert(index, keyframe);
     }
 
-    #[doc = include_str!("keyframe_track.doc/keyframes_2.md")]
+    /// Returns the keyframes in ascending offset order.
     #[must_use]
     pub fn keyframes(&self) -> &[Keyframe] {
         &self.keyframes
     }
 
-    #[doc = include_str!("keyframe_track.doc/len.md")]
+    /// Returns the number of keyframes.
     #[must_use]
     pub fn len(&self) -> usize {
         self.keyframes.len()
     }
 
-    #[doc = include_str!("keyframe_track.doc/is_empty.md")]
+    /// Returns whether the track holds no keyframes.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.keyframes.is_empty()
@@ -130,7 +84,7 @@ impl Default for KeyframeTrack {
 }
 
 impl MotionTrack for KeyframeTrack {
-    #[doc = include_str!("keyframe_track.doc/sample.md")]
+    #[doc = include_str!("../../docs/api/track/keyframe_track.doc/sample.md")]
     fn sample(&self, t: f32) -> MotionValue {
         let t = t.clamp(0.0, 1.0);
         let frames = &self.keyframes;
@@ -139,32 +93,32 @@ impl MotionTrack for KeyframeTrack {
         };
         // Safe: non-empty, so `last` exists.
         let last = frames[frames.len() - 1];
-        if t <= first.offset {
-            return first.value;
+        if t <= first.offset() {
+            return first.value();
         }
-        if t >= last.offset {
-            return last.value;
+        if t >= last.offset() {
+            return last.value();
         }
         let lower_index = last_keyframe_at_or_before(frames, t);
         let lower = frames[lower_index];
         let upper = frames[lower_index + 1];
-        let span = upper.offset - lower.offset;
+        let span = upper.offset() - lower.offset();
         let local = if span == 0.0 {
             0.0
         } else {
-            (t - lower.offset) / span
+            (t - lower.offset()) / span
         };
-        let eased = lower.easing.apply(local);
+        let eased = lower.easing().apply(local);
         lower
-            .value
-            .interpolate_checked(&upper.value, eased)
-            .unwrap_or(upper.value)
+            .value()
+            .interpolate_checked(&upper.value(), eased)
+            .unwrap_or(upper.value())
     }
 }
 
 fn last_keyframe_at_or_before(frames: &[Keyframe], t: f32) -> usize {
     let mut index = 0;
-    while index + 1 < frames.len() && frames[index + 1].offset <= t {
+    while index + 1 < frames.len() && frames[index + 1].offset() <= t {
         index += 1;
     }
     index
@@ -173,6 +127,7 @@ fn last_keyframe_at_or_before(frames: &[Keyframe], t: f32) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::track::Easing;
     use obscur_geometry::Point;
 
     #[test]

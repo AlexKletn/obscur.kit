@@ -668,3 +668,55 @@ fn an_author_width_and_height_override_every_one_of_the_defaults() {
         }
     }
 }
+
+#[doc = include_str!("ua_stylesheet_vocabulary.doc/a_bad_progress_path_reports_and_paints_the_default_track.md")]
+#[test]
+fn a_bad_progress_path_reports_and_paints_the_default_track() {
+    use obscur_kit::bootstrap::BuiltinPainters;
+    use obscur_kit::diagnostics::{Diagnostic, DiagnosticSink, RecoveryAction};
+    use obscur_kit::scene::paint::Paint;
+    use std::{cell::RefCell, rc::Rc};
+
+    struct Recorder(Rc<RefCell<Vec<Diagnostic>>>);
+
+    impl DiagnosticSink for Recorder {
+        fn emit(&self, diagnostic: &Diagnostic) {
+            self.0.borrow_mut().push(diagnostic.clone());
+        }
+    }
+
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(600.0, 400.0));
+    runtime.set_default_stylesheet(ua_stylesheet());
+    runtime.set_diagnostic_sink(Box::new(Recorder(Rc::clone(&seen))));
+    BuiltinPainters::new().install(&mut runtime);
+
+    let good = Progress::new(0.5).along("M0 0 A50 50 0 0150 0").view();
+    let bad = Progress::new(0.5).along("M0 0 A50 50 0 2150 0").view();
+    for (view, expected) in [(&bad, 1), (&bad, 1), (&good, 1), (&bad, 2)] {
+        let frame = runtime.render_now(view, &[]);
+        assert!(
+            frame
+                .snapshot()
+                .display_list()
+                .commands()
+                .iter()
+                .any(|command| {
+                    matches!(
+                        command,
+                        PaintCommand::DrawPath {
+                            paint: Paint::Stroke(_),
+                            ..
+                        }
+                    )
+                })
+        );
+        assert_eq!(seen.borrow().len(), expected);
+    }
+    for diagnostic in seen.borrow().iter() {
+        assert_eq!(diagnostic.code.as_str(), "progress.invalid_path");
+        assert_eq!(diagnostic.recovery, RecoveryAction::Fallback);
+        assert!(diagnostic.context.node.is_some());
+        assert!(diagnostic.message.contains("InvalidArcFlag"));
+    }
+}

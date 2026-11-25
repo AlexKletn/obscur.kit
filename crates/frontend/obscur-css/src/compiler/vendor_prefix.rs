@@ -1,18 +1,18 @@
-#![doc = include_str!("vendor_prefix.doc/_module.md")]
+#![doc = include_str!("../../docs/api/compiler/vendor_prefix.doc/_module.md")]
 
-#[doc = include_str!("vendor_prefix.doc/OWN_PREFIX.md")]
+/// This kit's vendor prefix.
 pub(crate) const OWN_PREFIX: &str = "-obscur-";
 
-#[doc = include_str!("vendor_prefix.doc/VendorNamespace.md")]
+/// The namespace a property name belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum VendorNamespace<'a> {
-    #[doc = include_str!("vendor_prefix.doc/Own.md")]
+    /// Ours — a `-obscur-` property, which this compiler is expected to know.
     Own,
-    #[doc = include_str!("vendor_prefix.doc/Foreign.md")]
+    /// Another implementation's, named by the vendor identifier it was written with.
     Foreign(&'a str),
 }
 
-#[doc = include_str!("vendor_prefix.doc/vendor_namespace.md")]
+#[doc = include_str!("../../docs/api/compiler/vendor_prefix.doc/vendor_namespace.md")]
 pub(crate) fn vendor_namespace(name: &str) -> Option<VendorNamespace<'_>> {
     // A custom property is not a vendor one, and the two are told apart by the
     // second character alone: `--x` is an author's own name, `-x-y` is a

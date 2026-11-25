@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Node module.
 mod retained_node;
 
 pub use retained_node::RetainedNode;

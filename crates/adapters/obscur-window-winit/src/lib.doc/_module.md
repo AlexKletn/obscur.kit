@@ -1,1 +1,0 @@
-Winit `WindowBackend` adapter.

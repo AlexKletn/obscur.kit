@@ -1,5 +1,6 @@
-#![doc = include_str!("contribution_derive.doc/_module.md")]
+//! `ContributionDerive` (skeleton stub for the spec-defined entity; not yet implemented).
 
-#[doc = include_str!("contribution_derive.doc/ContributionDerive.md")]
+/// Placeholder for the `ContributionDerive` entity. See the Obscur Kit 2 specs for its
+/// contract; this stub exists to materialise the target source layout.
 #[derive(Debug)]
 pub struct ContributionDerive;

@@ -1,5 +1,12 @@
-#![doc = include_str!("shutdown_concern.doc/_module.md")]
+//! Advisory plugin response to a host shutdown request.
 
-#[doc = include_str!("shutdown_concern.doc/ShutdownConcern.md")]
-#[derive(Debug)]
-pub struct ShutdownConcern;
+use std::time::Duration;
+
+/// Describes pending work and the time requested to finish it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShutdownConcern {
+    /// Plugin-supplied description for the host to present or log.
+    pub message: Box<str>,
+    /// Requested time for pending work. The host can grant less time.
+    pub requested_time: Duration,
+}

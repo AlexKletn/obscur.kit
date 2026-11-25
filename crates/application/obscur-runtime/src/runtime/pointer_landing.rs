@@ -1,42 +1,38 @@
-#![doc = include_str!("pointer_landing.doc/_module.md")]
+//! Where a pointer event landed: [`PointerLanding`], resolved by
+//! [`PointerLandingResolver`].
+
+use super::pointer_landing_result::PointerLanding;
 
 use obscur_geometry::Point;
 use obscur_identity::{FastMap, NodeId};
 use obscur_interaction::pointer::{PointerEvent, PointerId};
+use obscur_interaction::spatial::{HitChain, HitTest};
 use obscur_tree::tree::RetainedTree;
 
-use super::{HitTesting, PointerSessions, ScrollOffsets, ScrollTargets, SurfaceGeometry};
-use crate::orchestration::{ComputedStyles, LayoutBoxes};
+use super::{
+    AncestorChain, HitTesting, PointerSessions, ScrollOffsets, ScrollTargets, SurfaceGeometry,
+};
+use crate::orchestration::{ComputedStyles, LayoutBoxes, effective_stacking};
 
-#[doc = include_str!("pointer_landing.doc/PointerLanding.md")]
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct PointerLanding {
-    #[doc = include_str!("pointer_landing.doc/screen.md")]
-    pub(crate) screen: Point,
-    #[doc = include_str!("pointer_landing.doc/folded.md")]
-    pub(crate) folded: Point,
-    #[doc = include_str!("pointer_landing.doc/target.md")]
-    pub(crate) target: Option<NodeId>,
-}
-
-#[doc = include_str!("pointer_landing.doc/PointerLandingResolver.md")]
+#[doc = include_str!("../../docs/api/runtime/pointer_landing.doc/PointerLandingResolver.md")]
 pub(crate) struct PointerLandingResolver<'a> {
-    #[doc = include_str!("pointer_landing.doc/surface.md")]
+    /// The surface the event's physical coordinates are mapped through.
     surface: SurfaceGeometry,
-    #[doc = include_str!("pointer_landing.doc/tree.md")]
+    /// The retained tree the capture is validated against and the hit test runs
+    /// over.
     tree: &'a RetainedTree,
-    #[doc = include_str!("pointer_landing.doc/computed.md")]
+    /// This frame's computed styles: which boxes clip, and how.
     computed: &'a ComputedStyles,
-    #[doc = include_str!("pointer_landing.doc/boxes.md")]
+    /// This frame's arranged boxes, in unscrolled layout space.
     boxes: &'a LayoutBoxes,
-    #[doc = include_str!("pointer_landing.doc/scroll.md")]
+    /// Every scroll container's live vertical offset.
     scroll: &'a ScrollOffsets,
-    #[doc = include_str!("pointer_landing.doc/hits.md")]
+    /// The z-order index the topmost hit is resolved through.
     hits: &'a HitTesting,
 }
 
 impl<'a> PointerLandingResolver<'a> {
-    #[doc = include_str!("pointer_landing.doc/new.md")]
+    /// Bundles the retained frame and its live offsets for one event.
     pub(crate) const fn new(
         surface: SurfaceGeometry,
         tree: &'a RetainedTree,
@@ -55,7 +51,7 @@ impl<'a> PointerLandingResolver<'a> {
         }
     }
 
-    #[doc = include_str!("pointer_landing.doc/resolve.md")]
+    #[doc = include_str!("../../docs/api/runtime/pointer_landing.doc/resolve.md")]
     pub(crate) fn resolve(
         &self,
         event: &PointerEvent,
@@ -63,15 +59,10 @@ impl<'a> PointerLandingResolver<'a> {
     ) -> PointerLanding {
         let screen = self.surface.to_content_point(event.position());
         let targets = ScrollTargets::new(self.tree, self.computed, self.boxes, self.scroll);
-        let scrolls: FastMap<NodeId, f32> = targets
-            .paint(self.computed)
-            .into_iter()
-            .map(|(node, paint)| (node, paint.scroll_top))
-            .collect();
-        let target = self.captured_target(pointers, event.pointer()).or_else(|| {
-            self.hits
-                .resolve(self.tree, self.computed, self.boxes, screen, &scrolls)
-        });
+        let scrolls = self.scroll_points(&targets);
+        let target = self
+            .captured_target(pointers, event.pointer())
+            .or_else(|| self.target_at(screen, &scrolls));
         // The fold belongs to the node that took the event, not to the pointer:
         // a fixed toolbar over a scrolled list, or the scroll container's own
         // border, rides no scroll and must be told where the pointer really is.
@@ -86,7 +77,48 @@ impl<'a> PointerLandingResolver<'a> {
         }
     }
 
-    #[doc = include_str!("pointer_landing.doc/captured_target.md")]
+    /// Queries the visual target and maps it to its logical event ancestry.
+    pub(crate) fn hit_chain(&self, position: Point) -> HitChain {
+        let screen = self.surface.to_content_point(position);
+        let targets = ScrollTargets::new(self.tree, self.computed, self.boxes, self.scroll);
+        let scrolls = self.scroll_points(&targets);
+        let Some(target) = self.target_at(screen, &scrolls) else {
+            return HitChain::new();
+        };
+        let stacking = effective_stacking(self.tree, self.computed);
+        HitChain::from_hits(
+            AncestorChain::of(self.tree, Some(target))
+                .into_iter()
+                .map(|node| {
+                    let folded = HitTesting::folded_point(self.tree, &scrolls, node, screen);
+                    let point = self.hits.local_point(node, folded);
+                    let origin = self
+                        .boxes
+                        .get(&node)
+                        .map_or(Point::ORIGIN, |bounds| bounds.origin());
+                    let local = Point::new(point.x - origin.x, point.y - origin.y);
+                    HitTest::new(node, local, stacking.z.get(&node).copied().unwrap_or(0))
+                })
+                .collect(),
+        )
+    }
+
+    /// Resolves the visual target at a content-space point.
+    fn target_at(&self, screen: Point, scrolls: &FastMap<NodeId, Point>) -> Option<NodeId> {
+        self.hits
+            .resolve(self.tree, self.computed, self.boxes, screen, scrolls)
+    }
+
+    /// Resolves the visual offsets of scroll containers.
+    fn scroll_points(&self, targets: &ScrollTargets<'_>) -> FastMap<NodeId, Point> {
+        targets
+            .paint(self.computed)
+            .into_iter()
+            .map(|(node, paint)| (node, paint.offset()))
+            .collect()
+    }
+
+    #[doc = include_str!("../../docs/api/runtime/pointer_landing.doc/captured_target.md")]
     fn captured_target(
         &self,
         pointers: &mut PointerSessions,

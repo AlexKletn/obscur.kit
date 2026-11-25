@@ -1,31 +1,29 @@
-#![doc = include_str!("main_entity.doc/_module.md")]
+#![doc = include_str!("../../docs/api/rule/main_entity.doc/_module.md")]
 
 use std::path::Path;
 
-use crate::violation::{Violation, collect_rs};
+use syn::Item;
+
+use crate::violation::{Violation, collect_rs, read_text};
+use crate::workspace_manifests::workspace_manifests;
 
 const RULE: &str = "main-entity";
 
-#[doc = include_str!("main_entity.doc/MARKER.md")]
+#[doc = include_str!("../../docs/api/rule/main_entity.doc/MARKER.md")]
 const MARKER: &str = "xtask:allow(multiple-entities)";
 
-#[doc = include_str!("main_entity.doc/MIN_BEHAVIOUR_LINES.md")]
-const MIN_BEHAVIOUR_LINES: usize = 60;
+#[doc = include_str!("../../docs/api/rule/main_entity.doc/KNOWN.md")]
+const KNOWN: &[(&str, &str)] = &[];
 
-#[doc = include_str!("main_entity.doc/KNOWN.md")]
-const KNOWN: &[(&str, &str)] = &[(
-    "crates/frontend/obscur-okui-compiler/src/validation/contract_validator.rs",
-    "spec §3.11 names `contract_validator.rs` and gives `ComponentContract` \
-         no file of its own — the contract is the validator's input grammar \
-         (§2.13) and its module doc says so in its first sentence. The pair is \
-         colocated deliberately: a contract's meaning IS what the validator does \
-         with it, and the two would have to be read together wherever they lived.",
-)];
-
-#[doc = include_str!("main_entity.doc/check.md")]
+/// Checks that no source file defines several main entities without a marker, and that
+/// no marker or ledger entry has gone stale.
 pub(crate) fn check(root: &Path) -> Vec<Violation> {
     let mut files = Vec::new();
-    collect_rs(root, &mut files);
+    for manifest in workspace_manifests(root) {
+        if let Some(member) = manifest.parent() {
+            collect_rs(&member.join("src"), &mut files);
+        }
+    }
     files.sort();
 
     let mut out = Vec::new();
@@ -35,11 +33,25 @@ pub(crate) fn check(root: &Path) -> Vec<Violation> {
             continue;
         };
         let relative = relative.to_string_lossy().replace('\\', "/");
-        let Ok(text) = std::fs::read_to_string(&file) else {
-            continue;
+        let text = match read_text(RULE, &file) {
+            Ok(text) => text,
+            Err(violation) => {
+                out.push(violation);
+                continue;
+            }
         };
 
-        let entities = main_entities(&text);
+        let entities = match main_entities(&text) {
+            Ok(entities) => entities,
+            Err(error) => {
+                out.push(Violation::new(
+                    RULE,
+                    &file,
+                    format!("line {}: {error}", error.span().start().line),
+                ));
+                continue;
+            }
+        };
         let marked = claims_exception(&text);
         let known = KNOWN.iter().position(|(path, _)| *path == relative);
         if let Some(index) = known {
@@ -78,8 +90,8 @@ pub(crate) fn check(root: &Path) -> Vec<Violation> {
                     RULE,
                     &file,
                     format!(
-                        "exports {} main entities ({}) — spec §3.16: one file does not \
-                         export several main entities without an explicit exception \
+                        "defines {} file-scope entities ({}) — spec §3.16: one file does not \
+                         define several entities without an explicit exception \
                          marker. Give each its own file beside this one, or claim the \
                          exception with a `{MARKER}` comment and an entry in the \
                          `KNOWN` ledger in tools/xtask/src/rule/main_entity.rs",
@@ -95,7 +107,7 @@ pub(crate) fn check(root: &Path) -> Vec<Violation> {
                 RULE,
                 &file,
                 format!(
-                    "exports {} main entity but still claims the multiple-entity \
+                    "defines {} file-scope entities but still claims the multiple-entity \
                      exception — remove the `{MARKER}` marker and its `KNOWN` entry in \
                      tools/xtask/src/rule/main_entity.rs",
                     entities.len()
@@ -118,7 +130,7 @@ pub(crate) fn check(root: &Path) -> Vec<Violation> {
     out
 }
 
-#[doc = include_str!("main_entity.doc/claims_exception.md")]
+#[doc = include_str!("../../docs/api/rule/main_entity.doc/claims_exception.md")]
 fn claims_exception(text: &str) -> bool {
     text.lines().any(|line| {
         line.trim_start()
@@ -127,360 +139,52 @@ fn claims_exception(text: &str) -> bool {
     })
 }
 
-#[doc = include_str!("main_entity.doc/main_entities.md")]
-fn main_entities(text: &str) -> Vec<String> {
-    let lines: Vec<&str> = text.lines().collect();
-    let depths = line_depths(&lines);
-
-    let mut candidates: Vec<&str> = Vec::new();
-    let mut behaviour: Vec<(String, usize)> = Vec::new();
-    for (index, raw) in lines.iter().enumerate() {
-        if depths[index] != Some(0) {
-            continue;
-        }
-        let line = raw.trim();
-        if let Some((name, is_trait)) = declared_entity(line) {
-            candidates.push(name);
-            if is_trait {
-                let span = block_span(&depths, index);
-                add_behaviour(&mut behaviour, name, span);
-            }
-        } else if let Some(name) = inherent_impl_target(line) {
-            let span = block_span(&depths, index);
-            add_behaviour(&mut behaviour, name, span);
-        }
-    }
-
-    candidates
+/// File-scope types are candidates regardless of visibility or method count.
+fn main_entities(source: &str) -> syn::Result<Vec<String>> {
+    Ok(syn::parse_file(source)?
+        .items
         .into_iter()
-        .filter(|name| {
-            behaviour
-                .iter()
-                .find(|(target, _)| target == name)
-                .is_some_and(|(_, lines)| *lines >= MIN_BEHAVIOUR_LINES)
+        .filter_map(|item| match item {
+            Item::Struct(item) => Some(item.ident),
+            Item::Enum(item) => Some(item.ident),
+            Item::Trait(item) => Some(item.ident),
+            Item::Union(item) => Some(item.ident),
+            _ => None,
         })
-        .map(str::to_owned)
-        .collect()
-}
-
-#[doc = include_str!("main_entity.doc/add_behaviour.md")]
-fn add_behaviour(behaviour: &mut Vec<(String, usize)>, name: &str, span: usize) {
-    if let Some(entry) = behaviour.iter_mut().find(|(target, _)| target == name) {
-        entry.1 += span;
-    } else {
-        behaviour.push((name.to_owned(), span));
-    }
-}
-
-#[doc = include_str!("main_entity.doc/declared_entity.md")]
-fn declared_entity(line: &str) -> Option<(&str, bool)> {
-    let rest = strip_visibility(line)?;
-    let rest = strip_word(rest, "unsafe").unwrap_or(rest);
-    let rest = strip_word(rest, "auto").unwrap_or(rest);
-    for (keyword, is_trait) in [("struct", false), ("enum", false), ("trait", true)] {
-        if let Some(rest) = strip_word(rest, keyword) {
-            let name = identifier(rest);
-            if !name.is_empty() {
-                return Some((name, is_trait));
-            }
-        }
-    }
-    None
-}
-
-#[doc = include_str!("main_entity.doc/inherent_impl_target.md")]
-fn inherent_impl_target(line: &str) -> Option<&str> {
-    let rest = line.strip_prefix("impl")?;
-    if !rest.starts_with(['<', ' ', '\t']) {
-        return None;
-    }
-    let rest = skip_generics(rest.trim_start());
-    let header = rest.split('{').next().unwrap_or(rest);
-    if header.contains(" for ") {
-        return None;
-    }
-    let name = identifier(rest);
-    (!name.is_empty()).then_some(name)
-}
-
-#[doc = include_str!("main_entity.doc/strip_visibility.md")]
-fn strip_visibility(line: &str) -> Option<&str> {
-    let rest = line.strip_prefix("pub")?;
-    if let Some(rest) = rest.strip_prefix('(') {
-        let close = rest.find(')')?;
-        return Some(rest[close + 1..].trim_start());
-    }
-    rest.starts_with(char::is_whitespace)
-        .then(|| rest.trim_start())
-}
-
-#[doc = include_str!("main_entity.doc/strip_word.md")]
-fn strip_word<'a>(text: &'a str, word: &str) -> Option<&'a str> {
-    let rest = text.strip_prefix(word)?;
-    rest.starts_with(char::is_whitespace)
-        .then(|| rest.trim_start())
-}
-
-#[doc = include_str!("main_entity.doc/skip_generics.md")]
-fn skip_generics(text: &str) -> &str {
-    if !text.starts_with('<') {
-        return text;
-    }
-    let mut depth = 0usize;
-    for (index, ch) in text.char_indices() {
-        match ch {
-            '<' => depth += 1,
-            '>' => {
-                depth -= 1;
-                if depth == 0 {
-                    return text[index + 1..].trim_start();
-                }
-            }
-            _ => {}
-        }
-    }
-    text
-}
-
-#[doc = include_str!("main_entity.doc/identifier.md")]
-fn identifier(text: &str) -> &str {
-    let end = text
-        .find(|c: char| !c.is_alphanumeric() && c != '_')
-        .unwrap_or(text.len());
-    &text[..end]
-}
-
-#[doc = include_str!("main_entity.doc/block_span.md")]
-fn block_span(depths: &[Option<usize>], start: usize) -> usize {
-    let base = depths[start].unwrap_or(0);
-    let mut opened = false;
-    for (offset, depth) in depths.iter().enumerate().skip(start + 1) {
-        match depth {
-            Some(d) if *d > base => opened = true,
-            Some(d) if *d <= base => {
-                return if opened { offset - start } else { 1 };
-            }
-            _ => {}
-        }
-    }
-    if opened { depths.len() - start } else { 1 }
-}
-
-#[doc = include_str!("main_entity.doc/line_depths.md")]
-fn line_depths(lines: &[&str]) -> Vec<Option<usize>> {
-    let mut out = Vec::with_capacity(lines.len());
-    let mut depth = 0usize;
-    let mut state = Scan::Code;
-    for line in lines {
-        out.push(matches!(state, Scan::Code).then_some(depth));
-        scan_line(line, &mut depth, &mut state);
-    }
-    out
-}
-
-#[doc = include_str!("main_entity.doc/Scan.md")]
-enum Scan {
-    #[doc = include_str!("main_entity.doc/Code.md")]
-    Code,
-    #[doc = include_str!("main_entity.doc/BlockComment.md")]
-    BlockComment(usize),
-    #[doc = include_str!("main_entity.doc/Text.md")]
-    Text,
-    #[doc = include_str!("main_entity.doc/RawText.md")]
-    RawText(usize),
-}
-
-#[doc = include_str!("main_entity.doc/scan_line.md")]
-fn scan_line(line: &str, depth: &mut usize, state: &mut Scan) {
-    let bytes: Vec<char> = line.chars().collect();
-    let mut i = 0;
-    while i < bytes.len() {
-        match state {
-            Scan::BlockComment(nesting) => {
-                if bytes[i] == '*' && bytes.get(i + 1) == Some(&'/') {
-                    *nesting -= 1;
-                    if *nesting == 0 {
-                        *state = Scan::Code;
-                    }
-                    i += 2;
-                    continue;
-                }
-                if bytes[i] == '/' && bytes.get(i + 1) == Some(&'*') {
-                    *nesting += 1;
-                    i += 2;
-                    continue;
-                }
-                i += 1;
-            }
-            Scan::Text => {
-                if bytes[i] == '\\' {
-                    i += 2;
-                    continue;
-                }
-                if bytes[i] == '"' {
-                    *state = Scan::Code;
-                }
-                i += 1;
-            }
-            Scan::RawText(hashes) => {
-                if bytes[i] == '"' && closing_hashes(&bytes, i + 1) >= *hashes {
-                    i += 1 + *hashes;
-                    *state = Scan::Code;
-                    continue;
-                }
-                i += 1;
-            }
-            Scan::Code => {
-                match bytes[i] {
-                    '/' if bytes.get(i + 1) == Some(&'/') => return,
-                    '/' if bytes.get(i + 1) == Some(&'*') => {
-                        *state = Scan::BlockComment(1);
-                        i += 2;
-                        continue;
-                    }
-                    '"' => *state = Scan::Text,
-                    'r' if matches!(bytes.get(i + 1), Some('"' | '#')) => {
-                        let hashes = opening_hashes(&bytes, i + 1);
-                        if bytes.get(i + 1 + hashes) == Some(&'"') {
-                            *state = Scan::RawText(hashes);
-                            i += 2 + hashes;
-                            continue;
-                        }
-                    }
-                    '\'' if is_char_literal(&bytes, i) => {
-                        i += char_literal_len(&bytes, i);
-                        continue;
-                    }
-                    '{' => *depth += 1,
-                    '}' => *depth = depth.saturating_sub(1),
-                    _ => {}
-                }
-                i += 1;
-            }
-        }
-    }
-}
-
-#[doc = include_str!("main_entity.doc/opening_hashes.md")]
-fn opening_hashes(bytes: &[char], at: usize) -> usize {
-    bytes[at..].iter().take_while(|c| **c == '#').count()
-}
-
-#[doc = include_str!("main_entity.doc/closing_hashes.md")]
-fn closing_hashes(bytes: &[char], at: usize) -> usize {
-    bytes.get(at..).map_or(0, opening_hashes_from_start)
-}
-
-#[doc = include_str!("main_entity.doc/opening_hashes_from_start.md")]
-fn opening_hashes_from_start(bytes: &[char]) -> usize {
-    bytes.iter().take_while(|c| **c == '#').count()
-}
-
-#[doc = include_str!("main_entity.doc/is_char_literal.md")]
-fn is_char_literal(bytes: &[char], at: usize) -> bool {
-    match bytes.get(at + 1) {
-        Some('\\') => true,
-        Some(_) => bytes.get(at + 2) == Some(&'\''),
-        None => false,
-    }
-}
-
-#[doc = include_str!("main_entity.doc/char_literal_len.md")]
-fn char_literal_len(bytes: &[char], at: usize) -> usize {
-    let mut i = at + 1;
-    if bytes.get(i) == Some(&'\\') {
-        i += 1;
-    }
-    while i < bytes.len() {
-        if bytes[i] == '\'' {
-            return i - at + 1;
-        }
-        i += 1;
-    }
-    bytes.len() - at
+        .map(|name| name.to_string())
+        .collect())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{MIN_BEHAVIOUR_LINES, main_entities};
+    use super::main_entities;
 
-    /// Builds a type with `body` lines of inherent `impl`.
-    fn entity(name: &str, body: usize) -> String {
-        let filler = "    fn f(&self) {}\n".repeat(body);
-        format!("pub struct {name};\n\nimpl {name} {{\n{filler}}}\n")
+    #[test]
+    fn private_and_restricted_types_count_without_inherent_methods() {
+        let source = "pub(super) struct State; enum Mode { Active }";
+        assert_eq!(main_entities(source).unwrap(), ["State", "Mode"]);
     }
 
     #[test]
-    fn a_lone_entity_is_not_a_violation() {
-        let found = main_entities(&entity("Alpha", MIN_BEHAVIOUR_LINES));
-        assert_eq!(found, vec!["Alpha".to_owned()]);
+    fn related_implementations_and_test_doubles_stay_with_the_entity() {
+        let source = r#"
+            struct State;
+            impl State {
+                fn label() -> &'static str { r"state { active }" }
+            }
+            impl Default for State {
+                fn default() -> Self { Self }
+            }
+            #[cfg(test)]
+            mod tests { struct Fixture; }
+        "#;
+        assert_eq!(main_entities(source).unwrap(), ["State"]);
     }
 
     #[test]
-    fn two_behaving_entities_are_both_main() {
-        let text = format!(
-            "{}{}",
-            entity("Alpha", MIN_BEHAVIOUR_LINES),
-            entity("Beta", MIN_BEHAVIOUR_LINES)
-        );
-        assert_eq!(
-            main_entities(&text),
-            vec!["Alpha".to_owned(), "Beta".to_owned()]
-        );
-    }
-
-    #[test]
-    fn an_entitys_own_vocabulary_is_not_a_second_entity() {
-        let text = format!(
-            "pub enum Kind {{ A, B }}\n\nimpl Kind {{\n    fn f(&self) {{}}\n}}\n\n{}",
-            entity("Alpha", MIN_BEHAVIOUR_LINES)
-        );
-        assert_eq!(main_entities(&text), vec!["Alpha".to_owned()]);
-    }
-
-    #[test]
-    fn a_trait_impl_is_not_the_types_own_behaviour() {
-        let filler = "    fn f(&self) {}\n".repeat(MIN_BEHAVIOUR_LINES);
-        let text = format!(
-            "pub struct Stub;\n\nimpl Port for Stub {{\n{filler}}}\n\n{}",
-            entity("Alpha", MIN_BEHAVIOUR_LINES)
-        );
-        assert_eq!(main_entities(&text), vec!["Alpha".to_owned()]);
-    }
-
-    #[test]
-    fn a_private_type_is_never_a_main_entity() {
-        let text = format!(
-            "{}{}",
-            entity("Alpha", MIN_BEHAVIOUR_LINES),
-            entity("Beta", MIN_BEHAVIOUR_LINES).replacen("pub ", "", 1)
-        );
-        assert_eq!(main_entities(&text), vec!["Alpha".to_owned()]);
-    }
-
-    #[test]
-    fn a_nested_type_is_not_at_file_scope() {
-        let text = format!(
-            "{}\n#[cfg(test)]\nmod tests {{\n{}}}\n",
-            entity("Alpha", MIN_BEHAVIOUR_LINES),
-            entity("Beta", MIN_BEHAVIOUR_LINES)
-        );
-        assert_eq!(main_entities(&text), vec!["Alpha".to_owned()]);
-    }
-
-    #[test]
-    fn braces_inside_a_raw_string_do_not_move_file_scope() {
-        let text = format!(
-            "pub const CSS: &str = r\"body {{ color: red; }}\";\n\n{}",
-            entity("Alpha", MIN_BEHAVIOUR_LINES)
-        );
-        assert_eq!(main_entities(&text), vec!["Alpha".to_owned()]);
-    }
-
-    #[test]
-    fn generic_impl_headers_bind_to_their_type() {
-        let filler = "    fn f(&self) {}\n".repeat(MIN_BEHAVIOUR_LINES);
-        let text = format!("pub struct Alpha<T>(T);\n\nimpl<T> Alpha<T> {{\n{filler}}}\n");
-        assert_eq!(main_entities(&text), vec!["Alpha".to_owned()]);
+    fn multiline_declarations_and_unsafe_traits_count() {
+        let source = "pub(crate)
+struct State<T>(T); unsafe trait Port {}";
+        assert_eq!(main_entities(source).unwrap(), ["State", "Port"]);
     }
 }

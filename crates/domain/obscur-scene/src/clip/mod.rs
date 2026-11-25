@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Clip module.
 mod clip;
 pub use clip::Clip;
 mod clip_shape;

@@ -1,81 +1,24 @@
-#![doc = include_str!("flex_line_placement.doc/_module.md")]
+#![doc = include_str!("../../docs/api/algorithm/flex_line_placement.doc/_module.md")]
 
 use obscur_geometry::{Point, Rect, Size};
 
-use crate::model::{AlignItems, JustifyContent, LayoutBox, LayoutStyle, Margin};
+use super::content_distribution::content_distribution;
+use crate::model::{AlignItems, LayoutBox, LayoutStyle};
 
 use super::flex_axis_bounds::clamp_cross;
 use super::flex_cross_size::cross_item_size;
+pub(super) use super::flex_line_args::LineArgs;
 use super::flex_main_margins::{reserved, used};
 use super::flex_main_probe::content_max_main;
+use super::placed_line::PlacedLine;
 use super::resolve_flexible_lengths::resolve_flexible_lengths;
-use super::{ChildMeasurer, LayoutChild};
 
-#[doc = include_str!("flex_line_placement.doc/item_align.md")]
+#[doc = include_str!("../../docs/api/algorithm/flex_line_placement.doc/item_align.md")]
 fn item_align(item: &LayoutStyle, container: &LayoutStyle) -> AlignItems {
     item.align_self.resolve(container.align_items)
 }
 
-#[doc = include_str!("flex_line_placement.doc/LineArgs.md")]
-pub(super) struct LineArgs<'a, 'm> {
-    #[doc = include_str!("flex_line_placement.doc/line.md")]
-    pub(super) line: &'a [usize],
-    #[doc = include_str!("flex_line_placement.doc/base_main.md")]
-    pub(super) base_main: &'a [f32],
-    #[doc = include_str!("flex_line_placement.doc/flex_base.md")]
-    pub(super) flex_base: &'a [f32],
-    #[doc = include_str!("flex_line_placement.doc/main_min.md")]
-    pub(super) main_min: &'a [f32],
-    pub(super) main_max: &'a [f32],
-    #[doc = include_str!("flex_line_placement.doc/deferred_floor.md")]
-    pub(super) deferred_floor: &'a [bool],
-    #[doc = include_str!("flex_line_placement.doc/children.md")]
-    pub(super) children: &'a [LayoutChild],
-    #[doc = include_str!("flex_line_placement.doc/style.md")]
-    pub(super) style: &'a LayoutStyle,
-    #[doc = include_str!("flex_line_placement.doc/is_row.md")]
-    pub(super) is_row: bool,
-    #[doc = include_str!("flex_line_placement.doc/is_reverse.md")]
-    pub(super) is_reverse: bool,
-    #[doc = include_str!("flex_line_placement.doc/line_main.md")]
-    pub(super) line_main: f32,
-    #[doc = include_str!("flex_line_placement.doc/gap.md")]
-    pub(super) gap: f32,
-    #[doc = include_str!("flex_line_placement.doc/main_lead.md")]
-    pub(super) main_lead: &'a [Margin],
-    pub(super) main_trail: &'a [Margin],
-    #[doc = include_str!("flex_line_placement.doc/cross_lead.md")]
-    pub(super) cross_lead: &'a [Margin],
-    #[doc = include_str!("flex_line_placement.doc/stretch_target.md")]
-    pub(super) stretch_target: Option<f32>,
-    #[doc = include_str!("flex_line_placement.doc/container_cross.md")]
-    pub(super) container_cross: f32,
-    #[doc = include_str!("flex_line_placement.doc/percent_basis.md")]
-    pub(super) percent_basis: Size,
-    #[doc = include_str!("flex_line_placement.doc/bp_left.md")]
-    pub(super) bp_left: f32,
-    pub(super) bp_top: f32,
-    #[doc = include_str!("flex_line_placement.doc/cross_offset.md")]
-    pub(super) cross_offset: f32,
-    #[doc = include_str!("flex_line_placement.doc/content_cross_needed.md")]
-    pub(super) content_cross_needed: bool,
-    #[doc = include_str!("flex_line_placement.doc/line_cross_stretch.md")]
-    pub(super) line_cross_stretch: Option<f32>,
-    #[doc = include_str!("flex_line_placement.doc/measurer.md")]
-    pub(super) measurer: &'m mut dyn ChildMeasurer,
-    #[doc = include_str!("flex_line_placement.doc/child_boxes.md")]
-    pub(super) child_boxes: &'a mut [LayoutBox],
-}
-
-#[doc = include_str!("flex_line_placement.doc/PlacedLine.md")]
-pub(super) struct PlacedLine {
-    #[doc = include_str!("flex_line_placement.doc/cross.md")]
-    pub(super) cross: f32,
-    #[doc = include_str!("flex_line_placement.doc/content_cross.md")]
-    pub(super) content_cross: f32,
-}
-
-#[doc = include_str!("flex_line_placement.doc/place_line.md")]
+#[doc = include_str!("../../docs/api/algorithm/flex_line_placement.doc/place_line.md")]
 pub(super) fn place_line(args: LineArgs) -> PlacedLine {
     let LineArgs {
         line,
@@ -112,7 +55,7 @@ pub(super) fn place_line(args: LineArgs) -> PlacedLine {
     // do not flex, so the justification pass below reuses this sum.
     let sum_margin_main: f32 = line
         .iter()
-        .map(|&i| reserved(main_lead[i]) + reserved(main_trail[i]))
+        .map(|&i| reserved(&main_lead[i]) + reserved(&main_trail[i]))
         .sum();
 
     // §4.5 content floors for the DEFERRED items (row main axis / definite basis)
@@ -226,9 +169,9 @@ pub(super) fn place_line(args: LineArgs) -> PlacedLine {
         for (pos, &i) in line.iter().enumerate() {
             let cross_style = &children[i].style;
             let cross_dim = if is_row {
-                cross_style.height
+                cross_style.height.clone()
             } else {
-                cross_style.width
+                cross_style.width.clone()
             };
             let has_explicit = cross_dim.resolve(container_cross).is_some();
             let cross = if item_align(cross_style, style) == AlignItems::Stretch && !has_explicit {
@@ -255,7 +198,13 @@ pub(super) fn place_line(args: LineArgs) -> PlacedLine {
     // Step 6: distribute the line's free space — to `auto` margins first, and to
     // `justify_content` only if they leave any (CSS Flexbox §8.1).
     let total_final: f32 = final_main.iter().copied().sum();
-    let remaining = line_main - total_final - gap_span - sum_margin_main;
+    let occupied_main = total_final + gap_span + sum_margin_main;
+    let positioning_main = if line_main.is_finite() {
+        line_main
+    } else {
+        occupied_main.max(0.0)
+    };
+    let remaining = positioning_main - occupied_main;
 
     // §8.1: "if the remaining free space is positive and at least one main-axis
     // margin on this line is `auto`, the free space is distributed equally among
@@ -274,73 +223,51 @@ pub(super) fn place_line(args: LineArgs) -> PlacedLine {
     } else {
         0.0
     };
-    // What `justify_content` still has to work with: nothing, once any `auto`
-    // margin has claimed it.
-    let free_for_justify = if auto_main > 0 { 0.0 } else { remaining };
-
-    let (leading, spacing) = if free_for_justify <= 0.0 || count == 0 {
-        (0.0, 0.0)
-    } else {
-        let n = count as f32;
-        match style.justify_content {
-            // `stretch` has no distinct main-axis effect in a flex container; the
-            // free space is left as a leading offset of zero, i.e. flex-start.
-            JustifyContent::FlexStart | JustifyContent::Stretch => (0.0, 0.0),
-            JustifyContent::FlexEnd => (free_for_justify, 0.0),
-            JustifyContent::Center => (free_for_justify / 2.0, 0.0),
-            JustifyContent::SpaceBetween => {
-                if count > 1 {
-                    (0.0, free_for_justify / (n - 1.0))
-                } else {
-                    (0.0, 0.0)
-                }
-            }
-            JustifyContent::SpaceAround => {
-                let s = free_for_justify / n;
-                (s / 2.0, s)
-            }
-            JustifyContent::SpaceEvenly => {
-                let s = free_for_justify / (n + 1.0);
-                (s, s)
-            }
-        }
-    };
+    // Auto margins absorb positive space only. On overflow they resolve to
+    // zero and positional justification still receives the negative remainder.
+    let free_for_justify = if auto_share > 0.0 { 0.0 } else { remaining };
+    let (leading, spacing) = content_distribution(count, free_for_justify, style.justify_content);
 
     // Steps 7 & 8: position each item and map back to (x, y).
     let mut cursor = leading;
-    let order: Vec<usize> = if is_reverse {
-        (0..count).rev().collect()
-    } else {
-        (0..count).collect()
-    };
-    for &pos in &order {
+    for pos in 0..count {
         let i = line[pos];
         // A leading main-axis margin pushes the item further along the main axis
         // before it is placed — by its own length, or by its share of the line's
         // free space when it is `auto`.
-        cursor += used(main_lead[i], auto_share);
+        cursor += used(&main_lead[i], auto_share);
         let main = final_main[pos];
         let cross = cross_size[pos];
         let cross_start = cross_offset
-            + reserved(cross_lead[i])
+            + reserved(&cross_lead[i])
             + match item_align(&children[i].style, style) {
-                AlignItems::FlexStart | AlignItems::Start | AlignItems::Stretch => 0.0,
-                AlignItems::FlexEnd | AlignItems::End => align_ref - cross,
+                AlignItems::FlexStart
+                | AlignItems::Start
+                | AlignItems::Stretch
+                | AlignItems::Baseline => 0.0,
+                AlignItems::FlexEnd | AlignItems::End | AlignItems::LastBaseline => {
+                    align_ref - cross
+                }
                 AlignItems::Center => (align_ref - cross) / 2.0,
             };
+        let main_start = if is_reverse {
+            positioning_main - cursor - main
+        } else {
+            cursor
+        };
         let (origin, size) = if is_row {
             (
-                Point::new(bp_left + cursor, bp_top + cross_start),
+                Point::new(bp_left + main_start, bp_top + cross_start),
                 Size::new(main, cross),
             )
         } else {
             (
-                Point::new(bp_left + cross_start, bp_top + cursor),
+                Point::new(bp_left + cross_start, bp_top + main_start),
                 Size::new(cross, main),
             )
         };
         child_boxes[i] = LayoutBox::new(Rect::new(origin, size));
-        cursor += main + used(main_trail[i], auto_share) + gap + spacing;
+        cursor += main + used(&main_trail[i], auto_share) + gap + spacing;
     }
 
     PlacedLine {

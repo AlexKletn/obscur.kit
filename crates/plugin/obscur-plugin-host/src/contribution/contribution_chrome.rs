@@ -1,5 +1,6 @@
-#![doc = include_str!("contribution_chrome.doc/_module.md")]
+//! `ContributionChrome` (skeleton stub for the spec-defined entity; not yet implemented).
 
-#[doc = include_str!("contribution_chrome.doc/ContributionChrome.md")]
+/// Placeholder for the `ContributionChrome` entity. See the Obscur Kit 2 specs for its
+/// contract; this stub exists to materialise the target source layout.
 #[derive(Debug)]
 pub struct ContributionChrome;

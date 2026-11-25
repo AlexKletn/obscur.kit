@@ -1,13 +1,74 @@
-#![doc = include_str!("path.doc/_module.md")]
+//! A vector outline: an ordered list of segments plus a fill rule.
 
 use obscur_geometry::{CornerRadii, Point, Rect, Size};
 
 use super::{FillRule, PathSegment};
 
-#[doc = include_str!("path.doc/KAPPA.md")]
+/// The Bézier arc approximation constant (`4/3 * (sqrt(2) - 1)`), used to place
+/// cubic control points that closely approximate a quarter-circle.
 const KAPPA: f32 = 0.552_284_8;
 
-#[doc = include_str!("path.doc/Path.md")]
+#[doc = include_str!("../../docs/api/path/path.doc/RECT_SEGMENTS.md")]
+const RECT_SEGMENTS: usize = 5;
+
+#[doc = include_str!("../../docs/api/path/path.doc/ROUNDED_RECT_SEGMENTS.md")]
+const ROUNDED_RECT_SEGMENTS: usize = 10;
+
+#[doc = include_str!("../../docs/api/path/path.doc/push_rounded_rect.md")]
+fn push_rounded_rect(segments: &mut Vec<PathSegment>, rect: Rect, radii: CornerRadii) {
+    let x0 = rect.origin.x;
+    let y0 = rect.origin.y;
+    let x1 = rect.right();
+    let y1 = rect.bottom();
+
+    let radii = radii.non_negative().normalized(rect);
+    let (tl, tr, br, bl) = (
+        radii.top_left,
+        radii.top_right,
+        radii.bottom_right,
+        radii.bottom_left,
+    );
+    // The Bézier handle length along each axis: the distance from the corner
+    // point back towards the edge tangent.
+    let k = |r: f32| r * (1.0 - KAPPA);
+
+    // Top edge, starting after the top-left corner.
+    segments.push(PathSegment::MoveTo(Point::new(x0 + tl.x, y0)));
+    segments.push(PathSegment::LineTo(Point::new(x1 - tr.x, y0)));
+    // Top-right corner.
+    segments.push(PathSegment::CubicTo {
+        control1: Point::new(x1 - k(tr.x), y0),
+        control2: Point::new(x1, y0 + k(tr.y)),
+        end: Point::new(x1, y0 + tr.y),
+    });
+    // Right edge.
+    segments.push(PathSegment::LineTo(Point::new(x1, y1 - br.y)));
+    // Bottom-right corner.
+    segments.push(PathSegment::CubicTo {
+        control1: Point::new(x1, y1 - k(br.y)),
+        control2: Point::new(x1 - k(br.x), y1),
+        end: Point::new(x1 - br.x, y1),
+    });
+    // Bottom edge.
+    segments.push(PathSegment::LineTo(Point::new(x0 + bl.x, y1)));
+    // Bottom-left corner.
+    segments.push(PathSegment::CubicTo {
+        control1: Point::new(x0 + k(bl.x), y1),
+        control2: Point::new(x0, y1 - k(bl.y)),
+        end: Point::new(x0, y1 - bl.y),
+    });
+    // Left edge.
+    segments.push(PathSegment::LineTo(Point::new(x0, y0 + tl.y)));
+    // Top-left corner.
+    segments.push(PathSegment::CubicTo {
+        control1: Point::new(x0, y0 + k(tl.y)),
+        control2: Point::new(x0 + k(tl.x), y0),
+        end: Point::new(x0 + tl.x, y0),
+    });
+    segments.push(PathSegment::Close);
+}
+
+#[doc = include_str!("../../docs/api/path/path.doc/Path.md")]
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Path {
     segments: Vec<PathSegment>,
@@ -15,13 +76,13 @@ pub struct Path {
 }
 
 impl Path {
-    #[doc = include_str!("path.doc/new.md")]
+    /// Creates an empty path with the default [`FillRule::NonZero`].
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    #[doc = include_str!("path.doc/with_fill_rule.md")]
+    /// Creates an empty path with the given fill rule.
     #[must_use]
     pub fn with_fill_rule(rule: FillRule) -> Self {
         Self {
@@ -30,25 +91,27 @@ impl Path {
         }
     }
 
-    #[doc = include_str!("path.doc/move_to.md")]
+    /// Starts a new subpath at `p`. Returns `&mut Self` for chaining.
     pub fn move_to(&mut self, p: Point) -> &mut Self {
         self.segments.push(PathSegment::MoveTo(p));
         self
     }
 
-    #[doc = include_str!("path.doc/line_to.md")]
+    /// Adds a straight line to `p`. Returns `&mut Self` for chaining.
     pub fn line_to(&mut self, p: Point) -> &mut Self {
         self.segments.push(PathSegment::LineTo(p));
         self
     }
 
-    #[doc = include_str!("path.doc/quad_to.md")]
+    /// Adds a quadratic Bézier curve to `end` via `control`. Returns
+    /// `&mut Self` for chaining.
     pub fn quad_to(&mut self, control: Point, end: Point) -> &mut Self {
         self.segments.push(PathSegment::QuadTo { control, end });
         self
     }
 
-    #[doc = include_str!("path.doc/cubic_to.md")]
+    /// Adds a cubic Bézier curve to `end` via `c1` and `c2`. Returns
+    /// `&mut Self` for chaining.
     pub fn cubic_to(&mut self, c1: Point, c2: Point, end: Point) -> &mut Self {
         self.segments.push(PathSegment::CubicTo {
             control1: c1,
@@ -58,50 +121,54 @@ impl Path {
         self
     }
 
-    #[doc = include_str!("path.doc/close.md")]
+    /// Closes the current subpath. Returns `&mut Self` for chaining.
     pub fn close(&mut self) -> &mut Self {
         self.segments.push(PathSegment::Close);
         self
     }
 
-    #[doc = include_str!("path.doc/segments.md")]
+    /// The ordered segments making up this path.
     #[must_use]
     pub fn segments(&self) -> &[PathSegment] {
         &self.segments
     }
 
-    #[doc = include_str!("path.doc/fill_rule.md")]
+    /// The fill rule used to determine this path's interior.
     #[must_use]
     pub fn fill_rule(&self) -> FillRule {
         self.fill_rule
     }
 
-    #[doc = include_str!("path.doc/set_fill_rule.md")]
+    /// Replaces the fill rule.
     pub fn set_fill_rule(&mut self, rule: FillRule) -> &mut Self {
         self.fill_rule = rule;
         self
     }
 
-    #[doc = include_str!("path.doc/is_empty.md")]
+    /// Whether the path has no segments.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.segments.is_empty()
     }
 
-    #[doc = include_str!("path.doc/len.md")]
+    /// The number of segments in the path.
     #[must_use]
     pub fn len(&self) -> usize {
         self.segments.len()
     }
 
-    #[doc = include_str!("path.doc/rect.md")]
+    /// Builds a closed rectangular path (four line segments plus a close).
     #[must_use]
     pub fn rect(rect: Rect) -> Path {
         let x0 = rect.origin.x;
         let y0 = rect.origin.y;
         let x1 = rect.right();
         let y1 = rect.bottom();
-        let mut path = Path::new();
+        // The length is known here, not discovered by pushing: reserve it once.
+        let mut path = Path {
+            segments: Vec::with_capacity(RECT_SEGMENTS),
+            fill_rule: FillRule::default(),
+        };
         path.move_to(Point::new(x0, y0))
             .line_to(Point::new(x1, y0))
             .line_to(Point::new(x1, y1))
@@ -110,64 +177,18 @@ impl Path {
         path
     }
 
-    #[doc = include_str!("path.doc/rounded_rect.md")]
+    #[doc = include_str!("../../docs/api/path/path.doc/rounded_rect.md")]
     #[must_use]
     pub fn rounded_rect(rect: Rect, radii: CornerRadii) -> Path {
-        let x0 = rect.origin.x;
-        let y0 = rect.origin.y;
-        let x1 = rect.right();
-        let y1 = rect.bottom();
-
-        let radii = radii.non_negative().normalized(rect);
-        let (tl, tr, br, bl) = (
-            radii.top_left,
-            radii.top_right,
-            radii.bottom_right,
-            radii.bottom_left,
-        );
-        // The Bézier handle length along each axis: the distance from the corner
-        // point back towards the edge tangent.
-        let k = |r: f32| r * (1.0 - KAPPA);
-
-        let mut path = Path::new();
-        // Top edge, starting after the top-left corner.
-        path.move_to(Point::new(x0 + tl.x, y0))
-            .line_to(Point::new(x1 - tr.x, y0));
-        // Top-right corner.
-        path.cubic_to(
-            Point::new(x1 - k(tr.x), y0),
-            Point::new(x1, y0 + k(tr.y)),
-            Point::new(x1, y0 + tr.y),
-        );
-        // Right edge.
-        path.line_to(Point::new(x1, y1 - br.y));
-        // Bottom-right corner.
-        path.cubic_to(
-            Point::new(x1, y1 - k(br.y)),
-            Point::new(x1 - k(br.x), y1),
-            Point::new(x1 - br.x, y1),
-        );
-        // Bottom edge.
-        path.line_to(Point::new(x0 + bl.x, y1));
-        // Bottom-left corner.
-        path.cubic_to(
-            Point::new(x0 + k(bl.x), y1),
-            Point::new(x0, y1 - k(bl.y)),
-            Point::new(x0, y1 - bl.y),
-        );
-        // Left edge.
-        path.line_to(Point::new(x0, y0 + tl.y));
-        // Top-left corner.
-        path.cubic_to(
-            Point::new(x0, y0 + k(tl.y)),
-            Point::new(x0 + k(tl.x), y0),
-            Point::new(x0 + tl.x, y0),
-        );
-        path.close();
-        path
+        let mut segments = Vec::with_capacity(ROUNDED_RECT_SEGMENTS);
+        push_rounded_rect(&mut segments, rect, radii);
+        Path {
+            segments,
+            fill_rule: FillRule::default(),
+        }
     }
 
-    #[doc = include_str!("path.doc/rounded_rect_ring.md")]
+    #[doc = include_str!("../../docs/api/path/path.doc/rounded_rect_ring.md")]
     #[must_use]
     pub fn rounded_rect_ring(
         outer: Rect,
@@ -175,14 +196,21 @@ impl Path {
         inner: Rect,
         inner_radii: CornerRadii,
     ) -> Path {
-        let mut path = Path::rounded_rect(outer, outer_radii);
-        let inner_path = Path::rounded_rect(inner, inner_radii);
-        path.segments.extend_from_slice(inner_path.segments());
-        path.fill_rule = FillRule::EvenOdd;
-        path
+        // Both contours are written straight into one buffer reserved for both.
+        // This used to build the inner contour as a whole second `Path`, copy its
+        // segments across, and drop it — an allocation and a copy per ring, and a
+        // regrow of the outer buffer on top, on every bordered or shadowed node of
+        // every frame.
+        let mut segments = Vec::with_capacity(2 * ROUNDED_RECT_SEGMENTS);
+        push_rounded_rect(&mut segments, outer, outer_radii);
+        push_rounded_rect(&mut segments, inner, inner_radii);
+        Path {
+            segments,
+            fill_rule: FillRule::EvenOdd,
+        }
     }
 
-    #[doc = include_str!("path.doc/bounds.md")]
+    #[doc = include_str!("../../docs/api/path/path.doc/bounds.md")]
     #[must_use]
     pub fn bounds(&self) -> Option<Rect> {
         let mut bounds: Option<(Point, Point)> = None;
@@ -267,6 +295,44 @@ mod tests {
         );
         assert_eq!(path.segments()[4], PathSegment::Close);
         assert_eq!(path.bounds(), Some(r));
+    }
+
+    /// `rect` and `rounded_rect` reserve their buffers from `RECT_SEGMENTS` and
+    /// `ROUNDED_RECT_SEGMENTS` before pushing anything, and `rounded_rect_ring`
+    /// reserves twice the latter for its two contours. A reservation that is
+    /// merely *close* still works — `Vec` grows — so nothing would fail loudly if
+    /// the shape were emitted with a different number of segments and the constant
+    /// left behind. This is the test that fails instead, in both directions and
+    /// across the radii cases that could plausibly change the count.
+    #[test]
+    fn the_reserved_lengths_are_the_lengths_actually_emitted() {
+        let r = Rect::new(Point::new(1.0, 2.0), Size::new(20.0, 10.0));
+        assert_eq!(Path::rect(r).len(), RECT_SEGMENTS);
+        for radii in [
+            CornerRadii::uniform(0.0),
+            CornerRadii::uniform(3.0),
+            // Clamped: bigger than half the shorter side.
+            CornerRadii::uniform(100.0),
+            // Negative, i.e. clamped up to zero.
+            CornerRadii::uniform(-4.0),
+        ] {
+            assert_eq!(
+                Path::rounded_rect(r, radii).len(),
+                ROUNDED_RECT_SEGMENTS,
+                "{radii:?} changed the segment count"
+            );
+        }
+        let inner = Rect::new(Point::new(3.0, 4.0), Size::new(14.0, 6.0));
+        assert_eq!(
+            Path::rounded_rect_ring(
+                r,
+                CornerRadii::uniform(3.0),
+                inner,
+                CornerRadii::uniform(1.0)
+            )
+            .len(),
+            2 * ROUNDED_RECT_SEGMENTS
+        );
     }
 
     #[test]

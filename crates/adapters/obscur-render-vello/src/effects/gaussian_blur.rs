@@ -1,28 +1,32 @@
-#![doc = include_str!("gaussian_blur.doc/_module.md")]
+#![doc = include_str!("../../docs/api/effects/gaussian_blur.doc/_module.md")]
+
+mod composite_mask;
+
+use composite_mask::CompositeMask;
 
 use crate::conversion::BlurLayer;
 use crate::renderer::VelloFrame;
 
-#[doc = include_str!("gaussian_blur.doc/BLUR_FORMAT.md")]
+/// The render-target texture format the blur pipelines are built for. Both the
+/// Vello offscreen frame and the per-blur sub-scene textures use
+/// [`wgpu::TextureFormat::Rgba8Unorm`], so a single pipeline set suffices.
 const BLUR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
-#[doc = include_str!("gaussian_blur.doc/MAX_BLUR_EXTENT.md")]
-const MAX_BLUR_EXTENT: u32 = 8192;
-
-#[doc = include_str!("gaussian_blur.doc/GaussianBlur.md")]
+#[doc = include_str!("../../docs/api/effects/gaussian_blur.doc/GaussianBlur.md")]
 pub struct GaussianBlur {
-    #[doc = include_str!("gaussian_blur.doc/blur_pipeline.md")]
+    /// One separable gaussian pass (horizontal or vertical, per its uniform).
     blur_pipeline: wgpu::RenderPipeline,
     blur_layout: wgpu::BindGroupLayout,
-    #[doc = include_str!("gaussian_blur.doc/composite_pipeline.md")]
+    /// The premultiplied-over composite of a blurred texture onto the target.
     composite_pipeline: wgpu::RenderPipeline,
+    backdrop_pipeline: wgpu::RenderPipeline,
     composite_layout: wgpu::BindGroupLayout,
-    #[doc = include_str!("gaussian_blur.doc/sampler.md")]
+    /// Clamp-to-edge linear sampler shared by every pass.
     sampler: wgpu::Sampler,
 }
 
 impl GaussianBlur {
-    #[doc = include_str!("gaussian_blur.doc/new.md")]
+    /// Builds the blur + composite pipelines on `device` for [`BLUR_FORMAT`].
     #[must_use]
     pub fn new(device: &wgpu::Device) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -30,41 +34,48 @@ impl GaussianBlur {
             source: wgpu::ShaderSource::Wgsl(include_str!("gaussian_blur.wgsl").into()),
         });
 
-        let bind_layout = |label: &'static str| {
+        let bind_layout = |label: &'static str, backdrop: bool| {
+            let mut entries = vec![
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ];
+            if backdrop {
+                entries.extend([3, 4].map(|binding| wgpu::BindGroupLayoutEntry {
+                    binding,
+                    ..entries[0]
+                }));
+            }
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
                 label: Some(label),
-                entries: &[
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Texture {
-                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                            view_dimension: wgpu::TextureViewDimension::D2,
-                            multisampled: false,
-                        },
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
-                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                        count: None,
-                    },
-                    wgpu::BindGroupLayoutEntry {
-                        binding: 2,
-                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                        ty: wgpu::BindingType::Buffer {
-                            ty: wgpu::BufferBindingType::Uniform,
-                            has_dynamic_offset: false,
-                            min_binding_size: None,
-                        },
-                        count: None,
-                    },
-                ],
+                entries: &entries,
             })
         };
-        let blur_layout = bind_layout("obscur-gaussian-blur-bgl");
-        let composite_layout = bind_layout("obscur-gaussian-composite-bgl");
+        let blur_layout = bind_layout("obscur-gaussian-blur-bgl", false);
+        let composite_layout = bind_layout("obscur-gaussian-composite-bgl", true);
 
         let blur_pipeline = build_pipeline(
             device,
@@ -98,6 +109,15 @@ impl GaussianBlur {
             }),
         );
 
+        let backdrop_pipeline = build_pipeline(
+            device,
+            &shader,
+            &composite_layout,
+            "obscur-masked-backdrop-pipeline",
+            "composite_vs",
+            "backdrop_fs",
+            None,
+        );
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("obscur-gaussian-sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -113,12 +133,13 @@ impl GaussianBlur {
             blur_pipeline,
             blur_layout,
             composite_pipeline,
+            backdrop_pipeline,
             composite_layout,
             sampler,
         }
     }
 
-    #[doc = include_str!("gaussian_blur.doc/render.md")]
+    #[doc = include_str!("../../docs/api/effects/gaussian_blur.doc/render.md")]
     #[allow(clippy::cast_precision_loss, clippy::too_many_arguments)]
     pub fn render(
         &self,
@@ -146,7 +167,7 @@ impl GaussianBlur {
         );
     }
 
-    #[doc = include_str!("gaussian_blur.doc/render_view.md")]
+    #[doc = include_str!("../../docs/api/effects/gaussian_blur.doc/render_view.md")]
     #[allow(clippy::cast_precision_loss, clippy::too_many_arguments)]
     pub fn render_view(
         &self,
@@ -161,7 +182,8 @@ impl GaussianBlur {
     ) {
         let (sw, sh) = source_size;
         let (tw, th) = target_size;
-        if sw == 0 || sh == 0 || tw == 0 || th == 0 {
+        let limit = device.limits().max_texture_dimension_2d;
+        if sw == 0 || sh == 0 || sw > limit || sh > limit || tw == 0 || th == 0 {
             return;
         }
 
@@ -178,6 +200,8 @@ impl GaussianBlur {
             &horizontally_blurred_view,
             [1.0 / sw as f32, 0.0],
             radius,
+            None,
+            true,
         );
         self.blur_pass(
             device,
@@ -186,11 +210,12 @@ impl GaussianBlur {
             &fully_blurred_view,
             [0.0, 1.0 / sh as f32],
             radius,
+            None,
+            false,
         );
 
         // `filter: blur` composites the whole blurred quad, no rounded mask. The
-        // source is a blurred Vello sub-scene (straight alpha); premultiplied `false`
-        // keeps the shipped opaque path byte-identical.
+        // The blur passes output premultiplied RGBA.
         self.composite_texture(
             device,
             encoder,
@@ -203,7 +228,7 @@ impl GaussianBlur {
         );
     }
 
-    #[doc = include_str!("gaussian_blur.doc/composite_texture.md")]
+    #[doc = include_str!("../../docs/api/effects/gaussian_blur.doc/composite_texture.md")]
     #[allow(clippy::cast_precision_loss, clippy::too_many_arguments)]
     pub fn composite_texture(
         &self,
@@ -234,10 +259,11 @@ impl GaussianBlur {
             [x0, y_top, x1, y_bottom],
             None,
             premultiply,
+            None,
         );
     }
 
-    #[doc = include_str!("gaussian_blur.doc/clippy.md")]
+    #[doc = include_str!("../../docs/api/effects/gaussian_blur.doc/clippy.md")]
     #[allow(
         clippy::cast_precision_loss,
         clippy::cast_possible_truncation,
@@ -255,8 +281,70 @@ impl GaussianBlur {
         radii: [f32; 4],
         blur_radius: f32,
     ) {
+        self.render_backdrop_impl(
+            device,
+            encoder,
+            accum,
+            accum_view,
+            accum_size,
+            bounds,
+            radii,
+            blur_radius,
+            None,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn render_masked_backdrop(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        accum: &wgpu::Texture,
+        accum_view: &wgpu::TextureView,
+        accum_size: (u32, u32),
+        bounds: [f32; 4],
+        blur_radius: f32,
+        coverage: &wgpu::TextureView,
+    ) {
+        self.render_backdrop_impl(
+            device,
+            encoder,
+            accum,
+            accum_view,
+            accum_size,
+            bounds,
+            [0.0; 4],
+            blur_radius,
+            Some(coverage),
+        );
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        clippy::cast_precision_loss,
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss
+    )]
+    fn render_backdrop_impl(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        accum: &wgpu::Texture,
+        accum_view: &wgpu::TextureView,
+        accum_size: (u32, u32),
+        bounds: [f32; 4],
+        radii: [f32; 4],
+        blur_radius: f32,
+        coverage: Option<&wgpu::TextureView>,
+    ) {
         let (tw, th) = accum_size;
-        if tw == 0 || th == 0 || blur_radius <= 0.0 {
+        if tw == 0
+            || th == 0
+            || accum_size != (accum.width(), accum.height())
+            || !blur_radius.is_finite()
+            || blur_radius <= 0.0
+            || !bounds.iter().all(|value| value.is_finite())
+        {
             return;
         }
         // Padded region (panel + ~3σ margin), clamped to the frame extent.
@@ -308,6 +396,8 @@ impl GaussianBlur {
             &horizontally_blurred_view,
             [1.0 / sw as f32, 0.0],
             blur_radius,
+            None,
+            false,
         );
         self.blur_pass(
             device,
@@ -316,6 +406,8 @@ impl GaussianBlur {
             &fully_blurred_view,
             [0.0, 1.0 / sh as f32],
             blur_radius,
+            None,
+            false,
         );
 
         // Composite the blurred region back over the frame at the clamped region's
@@ -343,12 +435,15 @@ impl GaussianBlur {
             &fully_blurred_view,
             accum_view,
             [x0, y_top, x1, y_bottom],
-            Some(mask),
+            coverage.is_none().then_some(mask),
             false,
+            coverage.map(|coverage| (&copied_region_view, coverage)),
         );
     }
 
-    #[doc = include_str!("gaussian_blur.doc/composite_over.md")]
+    /// Composites the whole of `source` premultiplied-over `target` (both the same
+    /// extent) — the per-segment layering of the backdrop-filter path, which stacks
+    /// each rendered segment onto the accumulating frame in paint order.
     pub fn composite_over(
         &self,
         device: &wgpu::Device,
@@ -367,11 +462,15 @@ impl GaussianBlur {
             [-1.0, 1.0, 1.0, -1.0],
             None,
             true,
+            None,
         );
     }
 
-    #[doc = include_str!("gaussian_blur.doc/blur_pass.md")]
-    fn blur_pass(
+    /// Records one separable gaussian pass sampling `input` into `output`.
+    /// The output always stores premultiplied RGBA. Pass `straight_input` for raw
+    /// Vello or color-matrix texture output.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn blur_pass(
         &self,
         device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
@@ -379,9 +478,22 @@ impl GaussianBlur {
         output: &wgpu::TextureView,
         direction: [f32; 2],
         radius: f32,
+        bounds: Option<[u32; 4]>,
+        straight_input: bool,
     ) {
-        // BlurParams { direction: vec2, radius: f32, _pad: f32 } — 16 bytes.
-        let uniform = f32s_to_bytes(&[direction[0], direction[1], radius, 0.0]);
+        // Lyon scratch attachments are cropped at the viewport and need
+        // transparent pixels beyond it. The older padded targets clamp edges.
+        let transparent_edges = if bounds.is_some() { 1.0 } else { 0.0 };
+        let uniform = f32s_to_bytes(&[
+            direction[0],
+            direction[1],
+            radius,
+            transparent_edges,
+            if straight_input { 1.0 } else { 0.0 },
+            0.0,
+            0.0,
+            0.0,
+        ]);
         let buffer = uniform_buffer(device, &uniform, "obscur-gaussian-blur-uniform");
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("obscur-gaussian-blur-bind"),
@@ -404,12 +516,15 @@ impl GaussianBlur {
             occlusion_query_set: None,
             multiview_mask: None,
         });
+        if let Some([x, y, width, height]) = bounds {
+            pass.set_scissor_rect(x, y, width, height);
+        }
         pass.set_pipeline(&self.blur_pipeline);
         pass.set_bind_group(0, &bind, &[]);
         pass.draw(0..3, 0..1);
     }
 
-    #[doc = include_str!("gaussian_blur.doc/composite_pass.md")]
+    #[doc = include_str!("../../docs/api/effects/gaussian_blur.doc/composite_pass.md")]
     #[allow(clippy::too_many_arguments)]
     fn composite_pass(
         &self,
@@ -420,6 +535,7 @@ impl GaussianBlur {
         rect: [f32; 4],
         mask: Option<CompositeMask>,
         premultiply: bool,
+        backdrop: Option<(&wgpu::TextureView, &wgpu::TextureView)>,
     ) {
         let mask = mask.unwrap_or_default();
         // CompositeParams: rect(4) + panel(4) + radii(4) + (quad_w, quad_h,
@@ -448,10 +564,24 @@ impl GaussianBlur {
             0.0,
         ]);
         let buffer = uniform_buffer(device, &uniform, "obscur-gaussian-composite-uniform");
+        let (original, coverage) = backdrop.unwrap_or((input, input));
+        let [texture, sampler, uniform] = Self::bind_entries(input, &self.sampler, &buffer);
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("obscur-gaussian-composite-bind"),
             layout: &self.composite_layout,
-            entries: &Self::bind_entries(input, &self.sampler, &buffer),
+            entries: &[
+                texture,
+                sampler,
+                uniform,
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(original),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(coverage),
+                },
+            ],
         });
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("obscur-gaussian-composite-pass"),
@@ -470,12 +600,16 @@ impl GaussianBlur {
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        pass.set_pipeline(&self.composite_pipeline);
+        pass.set_pipeline(if backdrop.is_some() {
+            &self.backdrop_pipeline
+        } else {
+            &self.composite_pipeline
+        });
         pass.set_bind_group(0, &bind, &[]);
         pass.draw(0..6, 0..1);
     }
 
-    #[doc = include_str!("gaussian_blur.doc/bind_entries.md")]
+    /// The three bind-group entries (texture, sampler, uniform) both pipelines use.
     fn bind_entries<'a>(
         texture: &'a wgpu::TextureView,
         sampler: &'a wgpu::Sampler,
@@ -498,30 +632,6 @@ impl GaussianBlur {
     }
 }
 
-#[doc = include_str!("gaussian_blur.doc/CompositeMask.md")]
-#[derive(Clone, Copy, Default)]
-struct CompositeMask {
-    #[doc = include_str!("gaussian_blur.doc/panel.md")]
-    panel: [f32; 4],
-    #[doc = include_str!("gaussian_blur.doc/radii.md")]
-    radii: [f32; 4],
-    #[doc = include_str!("gaussian_blur.doc/quad.md")]
-    quad: [f32; 2],
-    #[doc = include_str!("gaussian_blur.doc/aa.md")]
-    aa: f32,
-}
-
-impl CompositeMask {
-    #[doc = include_str!("gaussian_blur.doc/enabled.md")]
-    fn enabled(&self) -> f32 {
-        if self.quad[0] > 0.0 && self.quad[1] > 0.0 {
-            1.0
-        } else {
-            0.0
-        }
-    }
-}
-
 impl std::fmt::Debug for GaussianBlur {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("GaussianBlur")
@@ -530,7 +640,8 @@ impl std::fmt::Debug for GaussianBlur {
     }
 }
 
-#[doc = include_str!("gaussian_blur.doc/build_pipeline.md")]
+/// Builds one fullscreen render pipeline from `vs`/`fs` entry points, with the
+/// given optional color blend (`None` = replace).
 fn build_pipeline(
     device: &wgpu::Device,
     shader: &wgpu::ShaderModule,
@@ -572,7 +683,7 @@ fn build_pipeline(
     })
 }
 
-#[doc = include_str!("gaussian_blur.doc/uniform_buffer.md")]
+/// A transient uniform buffer initialised with `bytes`.
 fn uniform_buffer(device: &wgpu::Device, bytes: &[u8], label: &'static str) -> wgpu::Buffer {
     use wgpu::util::DeviceExt;
     device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -582,7 +693,8 @@ fn uniform_buffer(device: &wgpu::Device, bytes: &[u8], label: &'static str) -> w
     })
 }
 
-#[doc = include_str!("gaussian_blur.doc/scratch_texture.md")]
+/// A scratch color texture (`BLUR_FORMAT`, sampled + render target) for a blur
+/// pass, with the exact dimensions of the validated source region.
 fn scratch_texture(
     device: &wgpu::Device,
     width: u32,
@@ -592,8 +704,8 @@ fn scratch_texture(
     device.create_texture(&wgpu::TextureDescriptor {
         label: Some(label),
         size: wgpu::Extent3d {
-            width: width.clamp(1, MAX_BLUR_EXTENT),
-            height: height.clamp(1, MAX_BLUR_EXTENT),
+            width,
+            height,
             depth_or_array_layers: 1,
         },
         mip_level_count: 1,
@@ -609,7 +721,8 @@ fn scratch_texture(
     })
 }
 
-#[doc = include_str!("gaussian_blur.doc/f32s_to_bytes.md")]
+/// Serialises `f32`s to little-endian bytes for a uniform buffer, avoiding a
+/// `bytemuck` dependency (no new external deps).
 fn f32s_to_bytes(values: &[f32]) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(values.len() * 4);
     for value in values {
@@ -620,7 +733,7 @@ fn f32s_to_bytes(values: &[f32]) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    #![doc = include_str!("gaussian_blur.doc/_module_2.md")]
+    #![doc = include_str!("../../docs/api/effects/gaussian_blur.doc/_module_2.md")]
 
     /// sRGB electro-optical transfer (decode gamma → linear), matching the shader.
     fn srgb_to_linear(c: f32) -> f32 {

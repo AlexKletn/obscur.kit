@@ -1,20 +1,20 @@
-#![doc = include_str!("grid_area_rect.doc/_module.md")]
+//! `GridAreaRect`: the line-number rectangle a named grid area occupies.
 
-#[doc = include_str!("grid_area_rect.doc/GridAreaRect.md")]
+#[doc = include_str!("../../docs/api/property/grid_area_rect.doc/GridAreaRect.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GridAreaRect {
-    #[doc = include_str!("grid_area_rect.doc/row_start.md")]
+    /// The 1-based grid line the area's first row starts on.
     pub row_start: u32,
-    #[doc = include_str!("grid_area_rect.doc/row_end.md")]
+    /// The 1-based grid line the area's last row ends on (last row + 1).
     pub row_end: u32,
-    #[doc = include_str!("grid_area_rect.doc/column_start.md")]
+    /// The 1-based grid line the area's first column starts on.
     pub column_start: u32,
-    #[doc = include_str!("grid_area_rect.doc/column_end.md")]
+    /// The 1-based grid line the area's last column ends on (last column + 1).
     pub column_end: u32,
 }
 
 impl GridAreaRect {
-    #[doc = include_str!("grid_area_rect.doc/new.md")]
+    /// Builds a rectangle from its four bounding grid lines (1-based).
     #[must_use]
     pub const fn new(row_start: u32, row_end: u32, column_start: u32, column_end: u32) -> Self {
         Self {

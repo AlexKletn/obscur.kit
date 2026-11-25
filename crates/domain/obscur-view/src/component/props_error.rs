@@ -1,38 +1,46 @@
-#![doc = include_str!("props_error.doc/_module.md")]
+//! `PropsError`: why a node's properties could not become a component's typed props.
+
+mod property_name;
 
 use core::fmt;
 
+use property_name::PropertyName;
+
 use obscur_identity::InternedSymbol;
 
-#[doc = include_str!("props_error.doc/PropsError.md")]
+#[doc = include_str!("../../docs/api/component/props_error.doc/PropsError.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PropsError {
-    #[doc = include_str!("props_error.doc/Missing.md")]
+    /// A required property was absent (or explicitly
+    /// [`Null`](crate::view::ViewValue::Null), which is *absence of a value*).
     Missing {
-        #[doc = include_str!("props_error.doc/name.md")]
+        /// The property that was required but not supplied.
         name: InternedSymbol,
-        #[doc = include_str!("props_error.doc/label.md")]
+        #[doc = include_str!("../../docs/api/component/props_error.doc/label.md")]
         label: &'static str,
     },
-    #[doc = include_str!("props_error.doc/Type.md")]
+    /// A property was present but its value could not become the field's type —
+    /// e.g. a `Text` where a `bool` was wanted, or an integer outside the
+    /// field's range.
     Type {
-        #[doc = include_str!("props_error.doc/name_2.md")]
+        /// The property whose value did not fit.
         name: InternedSymbol,
-        #[doc = include_str!("props_error.doc/label_2.md")]
+        #[doc = include_str!("../../docs/api/component/props_error.doc/label_2.md")]
         label: &'static str,
-        #[doc = include_str!("props_error.doc/expected.md")]
+        /// The type that was wanted, as
+        /// [`FromViewValue::TYPE_NAME`](crate::component::FromViewValue::TYPE_NAME).
         expected: &'static str,
     },
 }
 
 impl PropsError {
-    #[doc = include_str!("props_error.doc/missing_2.md")]
+    /// A required property was not supplied, named both ways.
     #[must_use]
     pub const fn missing(name: InternedSymbol, label: &'static str) -> Self {
         Self::Missing { name, label }
     }
 
-    #[doc = include_str!("props_error.doc/wrong_type.md")]
+    /// A property was supplied but could not be read as the type the field wants.
     #[must_use]
     pub const fn wrong_type(
         name: InternedSymbol,
@@ -46,7 +54,7 @@ impl PropsError {
         }
     }
 
-    #[doc = include_str!("props_error.doc/name_3.md")]
+    /// The property this error is about.
     #[must_use]
     pub const fn name(self) -> InternedSymbol {
         match self {
@@ -54,7 +62,7 @@ impl PropsError {
         }
     }
 
-    #[doc = include_str!("props_error.doc/label_3.md")]
+    /// The property's name in words, or `""` when it was decoded by bare symbol.
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
@@ -67,7 +75,11 @@ impl fmt::Display for PropsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Missing { name, label } => {
-                write!(f, "required property {} is missing", Named(*name, label))
+                write!(
+                    f,
+                    "required property {} is missing",
+                    PropertyName(*name, label)
+                )
             }
             Self::Type {
                 name,
@@ -77,25 +89,9 @@ impl fmt::Display for PropsError {
                 write!(
                     f,
                     "property {} could not be read as {expected}",
-                    Named(*name, label)
+                    PropertyName(*name, label)
                 )
             }
-        }
-    }
-}
-
-#[doc = include_str!("props_error.doc/Named.md")]
-struct Named<'a>(InternedSymbol, &'a str);
-
-impl fmt::Display for Named<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // The number is kept even when the name is known: it is what every other
-        // report about this property prints, and a reader correlating two of
-        // them needs the two to agree on something.
-        if self.1.is_empty() {
-            write!(f, "#{}", self.0.raw())
-        } else {
-            write!(f, "`{}` (#{})", self.1, self.0.raw())
         }
     }
 }

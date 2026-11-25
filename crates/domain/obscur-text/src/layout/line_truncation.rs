@@ -1,4 +1,5 @@
-#![doc = include_str!("line_truncation.doc/_module.md")]
+//! Cutting a line that still overflows its box down to what fits
+//! (`text-overflow`, spec §5.10).
 
 use crate::shaping::ShapedGlyph;
 
@@ -6,7 +7,7 @@ use super::TextOverflow;
 use super::packed_line::PackedLine;
 use super::tagged_glyph::TaggedGlyph;
 
-#[doc = include_str!("line_truncation.doc/truncate_lines.md")]
+#[doc = include_str!("../../docs/api/layout/line_truncation.doc/truncate_lines.md")]
 pub(super) fn truncate_lines(
     lines: &mut [PackedLine],
     max_width: f32,
@@ -20,7 +21,7 @@ pub(super) fn truncate_lines(
     }
 }
 
-#[doc = include_str!("line_truncation.doc/truncate_line.md")]
+#[doc = include_str!("../../docs/api/layout/line_truncation.doc/truncate_line.md")]
 fn truncate_line(
     glyphs: &mut Vec<TaggedGlyph>,
     max_width: f32,

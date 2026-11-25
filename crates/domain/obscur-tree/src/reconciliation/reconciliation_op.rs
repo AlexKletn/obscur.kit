@@ -1,42 +1,44 @@
-#![doc = include_str!("reconciliation_op.doc/_module.md")]
+//! `ReconciliationOp`: a normalized structural operation from a reconcile pass.
 
 use obscur_identity::NodeId;
 
-#[doc = include_str!("reconciliation_op.doc/ReconciliationOp.md")]
+#[doc = include_str!("../../docs/api/reconciliation/reconciliation_op.doc/ReconciliationOp.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ReconciliationOp {
-    #[doc = include_str!("reconciliation_op.doc/Insert.md")]
+    /// A newly created node placed under `parent` at child position `index`.
     Insert {
-        #[doc = include_str!("reconciliation_op.doc/id.md")]
+        /// The freshly minted node's id.
         id: NodeId,
-        #[doc = include_str!("reconciliation_op.doc/parent.md")]
+        /// The parent the node was inserted under.
         parent: NodeId,
-        #[doc = include_str!("reconciliation_op.doc/index.md")]
+        /// The final child index of the node within `parent`.
         index: usize,
     },
-    #[doc = include_str!("reconciliation_op.doc/Remove.md")]
+    /// An existing node (and, transitively, its subtree) removed from the tree.
     Remove {
-        #[doc = include_str!("reconciliation_op.doc/id_2.md")]
+        /// The removed node's id.
         id: NodeId,
-        #[doc = include_str!("reconciliation_op.doc/parent_2.md")]
+        #[doc = include_str!("../../docs/api/reconciliation/reconciliation_op.doc/parent_2.md")]
         parent: Option<NodeId>,
     },
-    #[doc = include_str!("reconciliation_op.doc/Move.md")]
+    /// A reused node repositioned to child `index` under its parent (a reorder
+    /// that preserves the node's identity).
     Move {
-        #[doc = include_str!("reconciliation_op.doc/id_3.md")]
+        /// The reused node's id (unchanged across the move).
         id: NodeId,
-        #[doc = include_str!("reconciliation_op.doc/index_2.md")]
+        /// The node's new child index within its parent.
         index: usize,
     },
-    #[doc = include_str!("reconciliation_op.doc/Update.md")]
+    /// A reused node whose content changed in place (for example, updated text
+    /// content), keeping its identity.
     Update {
-        #[doc = include_str!("reconciliation_op.doc/id_4.md")]
+        /// The reused node's id.
         id: NodeId,
     },
 }
 
 impl ReconciliationOp {
-    #[doc = include_str!("reconciliation_op.doc/id_5.md")]
+    /// Returns the primary node id this op acts on.
     #[must_use]
     pub const fn id(self) -> NodeId {
         match self {
@@ -47,25 +49,25 @@ impl ReconciliationOp {
         }
     }
 
-    #[doc = include_str!("reconciliation_op.doc/is_insert.md")]
+    /// Returns `true` if this op creates a node.
     #[must_use]
     pub const fn is_insert(self) -> bool {
         matches!(self, Self::Insert { .. })
     }
 
-    #[doc = include_str!("reconciliation_op.doc/is_remove.md")]
+    /// Returns `true` if this op removes a node.
     #[must_use]
     pub const fn is_remove(self) -> bool {
         matches!(self, Self::Remove { .. })
     }
 
-    #[doc = include_str!("reconciliation_op.doc/is_move.md")]
+    /// Returns `true` if this op repositions a reused node.
     #[must_use]
     pub const fn is_move(self) -> bool {
         matches!(self, Self::Move { .. })
     }
 
-    #[doc = include_str!("reconciliation_op.doc/is_update.md")]
+    /// Returns `true` if this op updates a reused node in place.
     #[must_use]
     pub const fn is_update(self) -> bool {
         matches!(self, Self::Update { .. })

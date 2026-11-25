@@ -1,65 +1,69 @@
-#![doc = include_str!("semantic_role.doc/_module.md")]
+//! The ARIA-like semantic role of an accessibility node (spec §7.1).
 
-#[doc = include_str!("semantic_role.doc/SemanticRole.md")]
+#[doc = include_str!("../../docs/api/semantic/semantic_role.doc/SemanticRole.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum SemanticRole {
-    #[doc = include_str!("semantic_role.doc/Unknown.md")]
+    /// An unclassified node. The default.
     #[default]
     Unknown,
-    #[doc = include_str!("semantic_role.doc/Group.md")]
+    /// A generic grouping of related nodes with no stronger semantics.
     Group,
-    #[doc = include_str!("semantic_role.doc/Region.md")]
+    /// A landmark region of the interface.
     Region,
-    #[doc = include_str!("semantic_role.doc/Button.md")]
+    /// A push button that performs an action when activated.
     Button,
-    #[doc = include_str!("semantic_role.doc/Link.md")]
+    /// A hyperlink to another location or resource.
     Link,
-    #[doc = include_str!("semantic_role.doc/Text.md")]
+    /// A run of static, non-editable text.
     Text,
-    #[doc = include_str!("semantic_role.doc/Heading.md")]
+    /// A heading that introduces a section of content.
     Heading,
-    #[doc = include_str!("semantic_role.doc/Image.md")]
+    /// A graphical image.
     Image,
-    #[doc = include_str!("semantic_role.doc/Checkbox.md")]
+    /// A two- or tri-state checkbox.
     Checkbox,
-    #[doc = include_str!("semantic_role.doc/RadioButton.md")]
+    /// A radio button, one choice within a mutually exclusive group.
     RadioButton,
-    #[doc = include_str!("semantic_role.doc/TextInput.md")]
+    /// An editable text field.
     TextInput,
-    #[doc = include_str!("semantic_role.doc/List.md")]
+    /// A list of items.
     List,
-    #[doc = include_str!("semantic_role.doc/ListItem.md")]
+    /// A single item within a list.
     ListItem,
-    #[doc = include_str!("semantic_role.doc/Table.md")]
+    /// A data table.
     Table,
-    #[doc = include_str!("semantic_role.doc/Row.md")]
+    /// A grid with expandable hierarchical rows.
+    TreeGrid,
+    /// A row within a table.
     Row,
-    #[doc = include_str!("semantic_role.doc/Cell.md")]
+    /// A cell within a table row.
     Cell,
-    #[doc = include_str!("semantic_role.doc/Dialog.md")]
+    /// A dialog or modal surface.
     Dialog,
-    #[doc = include_str!("semantic_role.doc/Menu.md")]
+    /// A menu of choices.
     Menu,
-    #[doc = include_str!("semantic_role.doc/MenuItem.md")]
+    /// A single item within a menu.
     MenuItem,
-    #[doc = include_str!("semantic_role.doc/Tab.md")]
+    /// A tab in a tab strip.
     Tab,
-    #[doc = include_str!("semantic_role.doc/TabPanel.md")]
+    /// The content panel associated with a tab.
     TabPanel,
-    #[doc = include_str!("semantic_role.doc/Slider.md")]
+    /// A slider for selecting a value from a range.
     Slider,
-    #[doc = include_str!("semantic_role.doc/ProgressBar.md")]
+    /// A progress indicator.
     ProgressBar,
-    #[doc = include_str!("semantic_role.doc/Separator.md")]
+    /// A visual or semantic separator between content.
     Separator,
-    #[doc = include_str!("semantic_role.doc/Toolbar.md")]
+    /// A toolbar grouping controls.
     Toolbar,
-    #[doc = include_str!("semantic_role.doc/Tooltip.md")]
+    /// A tooltip providing contextual help.
     Tooltip,
 }
 
 impl SemanticRole {
-    #[doc = include_str!("semantic_role.doc/is_interactive.md")]
+    /// Returns whether this role names a control the user can directly operate
+    /// (spec §7.1): buttons, links, checkboxes, radio buttons, text inputs,
+    /// menu items, tabs, and sliders.
     #[must_use]
     pub const fn is_interactive(&self) -> bool {
         matches!(
@@ -75,7 +79,9 @@ impl SemanticRole {
         )
     }
 
-    #[doc = include_str!("semantic_role.doc/is_container.md")]
+    /// Returns whether this role primarily groups other nodes (spec §7.1):
+    /// groups, regions, lists, tables, rows, dialogs, menus, toolbars, and tab
+    /// panels.
     #[must_use]
     pub const fn is_container(&self) -> bool {
         matches!(
@@ -83,6 +89,7 @@ impl SemanticRole {
             Self::Group
                 | Self::Region
                 | Self::List
+                | Self::TreeGrid
                 | Self::Table
                 | Self::Row
                 | Self::Dialog

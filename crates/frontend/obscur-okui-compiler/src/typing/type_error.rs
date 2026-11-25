@@ -1,21 +1,10 @@
-#![doc = include_str!("type_error.doc/_module.md")]
+//! `TypeError`: why a type check failed for an expression (spec §2.9).
 
 use crate::typing::ValueType;
 
-#[doc = include_str!("type_error.doc/TypeErrorKind.md")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TypeErrorKind {
-    #[doc = include_str!("type_error.doc/Mismatch.md")]
-    Mismatch,
-    #[doc = include_str!("type_error.doc/NotComparable.md")]
-    NotComparable,
-    #[doc = include_str!("type_error.doc/NotBoolean.md")]
-    NotBoolean,
-    #[doc = include_str!("type_error.doc/UnknownType.md")]
-    UnknownType,
-}
+use super::TypeErrorKind;
 
-#[doc = include_str!("type_error.doc/TypeError.md")]
+#[doc = include_str!("../../docs/api/typing/type_error.doc/TypeError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypeError {
     kind: TypeErrorKind,
@@ -25,7 +14,8 @@ pub struct TypeError {
 }
 
 impl TypeError {
-    #[doc = include_str!("type_error.doc/new.md")]
+    /// Creates a type error of `kind` with the `expected` and `found` types at
+    /// byte `offset`.
     #[must_use]
     pub const fn new(
         kind: TypeErrorKind,
@@ -41,37 +31,39 @@ impl TypeError {
         }
     }
 
-    #[doc = include_str!("type_error.doc/mismatch.md")]
+    /// Creates a [`Mismatch`](TypeErrorKind::Mismatch) error: `found` is not
+    /// assignable to `expected`.
     #[must_use]
     pub const fn mismatch(expected: ValueType, found: ValueType, offset: u32) -> Self {
         Self::new(TypeErrorKind::Mismatch, expected, found, offset)
     }
 
-    #[doc = include_str!("type_error.doc/not_boolean.md")]
+    /// Creates a [`NotBoolean`](TypeErrorKind::NotBoolean) error: a condition of
+    /// type `found` is not boolean-assignable.
     #[must_use]
     pub const fn not_boolean(found: ValueType, offset: u32) -> Self {
         Self::new(TypeErrorKind::NotBoolean, ValueType::Bool, found, offset)
     }
 
-    #[doc = include_str!("type_error.doc/kind.md")]
+    /// Returns the error's kind.
     #[must_use]
     pub const fn kind(&self) -> &TypeErrorKind {
         &self.kind
     }
 
-    #[doc = include_str!("type_error.doc/expected.md")]
+    /// Returns the expected type.
     #[must_use]
     pub const fn expected(&self) -> &ValueType {
         &self.expected
     }
 
-    #[doc = include_str!("type_error.doc/found.md")]
+    /// Returns the type that was actually found.
     #[must_use]
     pub const fn found(&self) -> &ValueType {
         &self.found
     }
 
-    #[doc = include_str!("type_error.doc/offset.md")]
+    /// Returns the byte offset into the source where the failure was detected.
     #[must_use]
     pub const fn offset(&self) -> u32 {
         self.offset

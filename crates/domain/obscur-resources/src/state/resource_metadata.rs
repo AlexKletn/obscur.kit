@@ -1,22 +1,25 @@
-#![doc = include_str!("resource_metadata.doc/_module.md")]
+//! Descriptive metadata about a loaded resource (spec §5.16).
 
 use obscur_geometry::Size;
 
-#[doc = include_str!("resource_metadata.doc/ResourceMetadata.md")]
+#[doc = include_str!("../../docs/api/state/resource_metadata.doc/ResourceMetadata.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResourceMetadata {
-    #[doc = include_str!("resource_metadata.doc/byte_size.md")]
+    /// The encoded or CPU byte size of the resource, or `None` if unknown.
     pub byte_size: Option<u64>,
-    #[doc = include_str!("resource_metadata.doc/mime_type.md")]
+    /// The MIME type of the resource (for example `image/png`), or `None` if
+    /// unknown.
     pub mime_type: Option<Box<str>>,
-    #[doc = include_str!("resource_metadata.doc/intrinsic_size.md")]
+    /// The intrinsic size in pixels (spec §5.16), or `None` for non-visual
+    /// resources such as CSS.
     pub intrinsic_size: Option<Size>,
-    #[doc = include_str!("resource_metadata.doc/scale.md")]
+    /// The DPI-variant scale of this representation (spec §5.16); `1.0` is the
+    /// base scale.
     pub scale: f32,
 }
 
 impl ResourceMetadata {
-    #[doc = include_str!("resource_metadata.doc/new.md")]
+    /// Creates empty metadata: all fields unknown and `scale` at the base `1.0`.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -27,59 +30,61 @@ impl ResourceMetadata {
         }
     }
 
-    #[doc = include_str!("resource_metadata.doc/with_byte_size.md")]
+    /// Returns this metadata with its byte size set (spec §5.16).
     #[must_use]
     pub fn with_byte_size(mut self, byte_size: u64) -> Self {
         self.byte_size = Some(byte_size);
         self
     }
 
-    #[doc = include_str!("resource_metadata.doc/with_mime_type.md")]
+    /// Returns this metadata with its MIME type set (spec §5.16).
     #[must_use]
     pub fn with_mime_type(mut self, mime_type: impl Into<Box<str>>) -> Self {
         self.mime_type = Some(mime_type.into());
         self
     }
 
-    #[doc = include_str!("resource_metadata.doc/with_intrinsic_size.md")]
+    /// Returns this metadata with its intrinsic pixel size set (spec §5.16).
     #[must_use]
     pub fn with_intrinsic_size(mut self, intrinsic_size: Size) -> Self {
         self.intrinsic_size = Some(intrinsic_size);
         self
     }
 
-    #[doc = include_str!("resource_metadata.doc/with_scale.md")]
+    /// Returns this metadata with its DPI-variant scale set (spec §5.16).
     #[must_use]
     pub fn with_scale(mut self, scale: f32) -> Self {
         self.scale = scale;
         self
     }
 
-    #[doc = include_str!("resource_metadata.doc/byte_size_2.md")]
+    /// Returns the byte size, if known.
     #[must_use]
     pub const fn byte_size(&self) -> Option<u64> {
         self.byte_size
     }
 
-    #[doc = include_str!("resource_metadata.doc/mime_type_2.md")]
+    /// Returns the MIME type, if known.
     #[must_use]
     pub fn mime_type(&self) -> Option<&str> {
         self.mime_type.as_deref()
     }
 
-    #[doc = include_str!("resource_metadata.doc/intrinsic_size_2.md")]
+    /// Returns the intrinsic pixel size, if any (spec §5.16).
     #[must_use]
     pub const fn intrinsic_size(&self) -> Option<Size> {
         self.intrinsic_size
     }
 
-    #[doc = include_str!("resource_metadata.doc/scale_2.md")]
+    /// Returns the DPI-variant scale (spec §5.16).
     #[must_use]
     pub const fn scale(&self) -> f32 {
         self.scale
     }
 
-    #[doc = include_str!("resource_metadata.doc/aspect_ratio.md")]
+    /// Returns the intrinsic aspect ratio (width / height) when an intrinsic
+    /// size is present with both dimensions strictly positive, else `None`
+    /// (spec §5.16).
     #[must_use]
     pub fn aspect_ratio(&self) -> Option<f32> {
         match self.intrinsic_size {
@@ -90,7 +95,7 @@ impl ResourceMetadata {
 }
 
 impl Default for ResourceMetadata {
-    #[doc = include_str!("resource_metadata.doc/default.md")]
+    /// The default metadata is [`ResourceMetadata::new`].
     fn default() -> Self {
         Self::new()
     }

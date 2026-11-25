@@ -1,4 +1,12 @@
-#![doc = include_str!("socket_stream.doc/_module.md")]
+#![doc = include_str!("../../docs/api/transport/socket_stream.doc/_module.md")]
+
+mod kernel_stream;
+
+use kernel_stream::KernelStream;
+
+mod socket_read_state;
+
+use socket_read_state::SocketReadState;
 
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
@@ -6,91 +14,63 @@ use std::net::TcpStream;
 use std::os::unix::net::UnixStream;
 use std::time::Duration;
 
-#[doc = include_str!("socket_stream.doc/MAX_FRAME_LEN.md")]
+#[doc = include_str!("../../docs/api/transport/socket_stream.doc/MAX_FRAME_LEN.md")]
 pub const MAX_FRAME_LEN: usize = 1 << 20;
 
-#[doc = include_str!("socket_stream.doc/SocketStream.md")]
+#[doc = include_str!("../../docs/api/transport/socket_stream.doc/SocketStream.md")]
 #[derive(Debug)]
 pub struct SocketStream {
-    inner: Inner,
-    #[doc = include_str!("socket_stream.doc/reading.md")]
-    reading: ReadState,
-}
-
-#[doc = include_str!("socket_stream.doc/ReadState.md")]
-#[derive(Debug)]
-enum ReadState {
-    #[doc = include_str!("socket_stream.doc/Header.md")]
-    Header { buf: [u8; 4], filled: usize },
-    #[doc = include_str!("socket_stream.doc/Body.md")]
-    Body { buf: Vec<u8>, filled: usize },
-}
-
-impl Default for ReadState {
-    fn default() -> Self {
-        Self::Header {
-            buf: [0; 4],
-            filled: 0,
-        }
-    }
-}
-
-#[doc = include_str!("socket_stream.doc/Inner.md")]
-#[derive(Debug)]
-enum Inner {
-    #[doc = include_str!("socket_stream.doc/Tcp.md")]
-    Tcp(TcpStream),
-    #[doc = include_str!("socket_stream.doc/Unix.md")]
-    #[cfg(unix)]
-    Unix(UnixStream),
+    inner: KernelStream,
+    #[doc = include_str!("../../docs/api/transport/socket_stream.doc/reading.md")]
+    reading: SocketReadState,
 }
 
 impl SocketStream {
-    #[doc = include_str!("socket_stream.doc/from_tcp.md")]
+    /// Wraps an accepted or connected loopback TCP stream.
     #[must_use]
     pub fn from_tcp(stream: TcpStream) -> Self {
         Self {
-            inner: Inner::Tcp(stream),
-            reading: ReadState::default(),
+            inner: KernelStream::Tcp(stream),
+            reading: SocketReadState::default(),
         }
     }
 
-    #[doc = include_str!("socket_stream.doc/from_unix.md")]
+    /// Wraps an accepted or connected Unix domain stream.
     #[cfg(unix)]
     #[must_use]
     pub fn from_unix(stream: UnixStream) -> Self {
         Self {
-            inner: Inner::Unix(stream),
-            reading: ReadState::default(),
+            inner: KernelStream::Unix(stream),
+            reading: SocketReadState::default(),
         }
     }
 
-    #[doc = include_str!("socket_stream.doc/set_read_timeout.md")]
+    #[doc = include_str!("../../docs/api/transport/socket_stream.doc/set_read_timeout.md")]
     pub fn set_read_timeout(&mut self, timeout: Option<Duration>) -> io::Result<()> {
         match &self.inner {
-            Inner::Tcp(stream) => stream.set_read_timeout(timeout),
+            KernelStream::Tcp(stream) => stream.set_read_timeout(timeout),
             #[cfg(unix)]
-            Inner::Unix(stream) => stream.set_read_timeout(timeout),
+            KernelStream::Unix(stream) => stream.set_read_timeout(timeout),
         }
     }
 
-    #[doc = include_str!("socket_stream.doc/try_clone.md")]
+    #[doc = include_str!("../../docs/api/transport/socket_stream.doc/try_clone.md")]
     pub fn try_clone(&self) -> io::Result<Self> {
         let inner = match &self.inner {
-            Inner::Tcp(stream) => Inner::Tcp(stream.try_clone()?),
+            KernelStream::Tcp(stream) => KernelStream::Tcp(stream.try_clone()?),
             #[cfg(unix)]
-            Inner::Unix(stream) => Inner::Unix(stream.try_clone()?),
+            KernelStream::Unix(stream) => KernelStream::Unix(stream.try_clone()?),
         };
         // The clone starts its own read state: partial progress belongs to the
         // handle that made it, and two handles reading one socket would interleave
         // bytes anyway.
         Ok(Self {
             inner,
-            reading: ReadState::default(),
+            reading: SocketReadState::default(),
         })
     }
 
-    #[doc = include_str!("socket_stream.doc/write_frame.md")]
+    #[doc = include_str!("../../docs/api/transport/socket_stream.doc/write_frame.md")]
     pub fn write_frame(&mut self, body: &[u8]) -> io::Result<()> {
         if body.len() > MAX_FRAME_LEN {
             return Err(io::Error::new(
@@ -106,11 +86,11 @@ impl SocketStream {
         self.flush()
     }
 
-    #[doc = include_str!("socket_stream.doc/read_frame.md")]
+    #[doc = include_str!("../../docs/api/transport/socket_stream.doc/read_frame.md")]
     pub fn read_frame(&mut self) -> io::Result<Option<Vec<u8>>> {
         loop {
             match &mut self.reading {
-                ReadState::Header { buf, filled } => {
+                SocketReadState::Header { buf, filled } => {
                     // A clean EOF is only clean *between* frames.
                     let at_start = *filled == 0;
                     if !fill(&mut self.inner, buf, filled, at_start)? {
@@ -125,18 +105,18 @@ impl SocketStream {
                             "declared frame length exceeds MAX_FRAME_LEN",
                         ));
                     }
-                    self.reading = ReadState::Body {
+                    self.reading = SocketReadState::Body {
                         buf: vec![0u8; len],
                         filled: 0,
                     };
                 }
-                ReadState::Body { buf, filled } => {
+                SocketReadState::Body { buf, filled } => {
                     // Never a clean EOF: the header promised these bytes.
                     if !fill(&mut self.inner, buf, filled, false)? {
                         return Ok(None);
                     }
                     let body = std::mem::take(buf);
-                    self.reading = ReadState::default();
+                    self.reading = SocketReadState::default();
                     return Ok(Some(body));
                 }
             }
@@ -144,13 +124,18 @@ impl SocketStream {
     }
 }
 
-#[doc = include_str!("socket_stream.doc/fill.md")]
-fn fill(inner: &mut Inner, buf: &mut [u8], filled: &mut usize, at_start: bool) -> io::Result<bool> {
+#[doc = include_str!("../../docs/api/transport/socket_stream.doc/fill.md")]
+fn fill(
+    inner: &mut KernelStream,
+    buf: &mut [u8],
+    filled: &mut usize,
+    at_start: bool,
+) -> io::Result<bool> {
     while *filled < buf.len() {
         let read = match inner {
-            Inner::Tcp(stream) => stream.read(&mut buf[*filled..]),
+            KernelStream::Tcp(stream) => stream.read(&mut buf[*filled..]),
             #[cfg(unix)]
-            Inner::Unix(stream) => stream.read(&mut buf[*filled..]),
+            KernelStream::Unix(stream) => stream.read(&mut buf[*filled..]),
         };
         match read {
             Ok(0) if at_start && *filled == 0 => return Ok(false),
@@ -171,9 +156,9 @@ fn fill(inner: &mut Inner, buf: &mut [u8], filled: &mut usize, at_start: bool) -
 impl Read for SocketStream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match &mut self.inner {
-            Inner::Tcp(stream) => stream.read(buf),
+            KernelStream::Tcp(stream) => stream.read(buf),
             #[cfg(unix)]
-            Inner::Unix(stream) => stream.read(buf),
+            KernelStream::Unix(stream) => stream.read(buf),
         }
     }
 }
@@ -181,17 +166,17 @@ impl Read for SocketStream {
 impl Write for SocketStream {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         match &mut self.inner {
-            Inner::Tcp(stream) => stream.write(buf),
+            KernelStream::Tcp(stream) => stream.write(buf),
             #[cfg(unix)]
-            Inner::Unix(stream) => stream.write(buf),
+            KernelStream::Unix(stream) => stream.write(buf),
         }
     }
 
     fn flush(&mut self) -> io::Result<()> {
         match &mut self.inner {
-            Inner::Tcp(stream) => stream.flush(),
+            KernelStream::Tcp(stream) => stream.flush(),
             #[cfg(unix)]
-            Inner::Unix(stream) => stream.flush(),
+            KernelStream::Unix(stream) => stream.flush(),
         }
     }
 }

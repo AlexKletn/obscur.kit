@@ -1,4 +1,4 @@
-#![doc = include_str!("child_matcher.doc/_module.md")]
+//! `ChildMatcher`: the pure keyed-then-unkeyed child matching policy.
 
 use std::collections::{HashMap, HashSet};
 
@@ -10,24 +10,34 @@ use crate::tree::RetainedTree;
 
 use super::{ChildMatching, IdentityMatch};
 
-#[doc = include_str!("child_matcher.doc/ChildMatcher.md")]
+#[doc = include_str!("../../docs/api/reconciliation/child_matcher.doc/ChildMatcher.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ChildMatcher;
 
 impl ChildMatcher {
-    #[doc = include_str!("child_matcher.doc/new.md")]
+    /// Creates a matcher. The matcher is stateless.
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    #[doc = include_str!("child_matcher.doc/match_children.md")]
+    #[doc = include_str!("../../docs/api/reconciliation/child_matcher.doc/match_children.md")]
     #[must_use]
     pub fn match_children(
         &self,
         tree: &RetainedTree,
         existing: &[NodeId],
         desired: &[ViewNode],
+    ) -> ChildMatching {
+        self.match_desired(tree, existing, desired.iter())
+    }
+
+    /// Matches an iterator of desired children against the current siblings.
+    pub(super) fn match_desired<'a>(
+        &self,
+        tree: &RetainedTree,
+        existing: &[NodeId],
+        desired: impl Iterator<Item = &'a ViewNode>,
     ) -> ChildMatching {
         // Snapshot the resolvable existing children with their key and kind.
         // Stale ids (whose slot was reused or removed) are dropped here and are
@@ -56,7 +66,8 @@ impl ChildMatcher {
             .collect();
 
         let mut used: FastSet<NodeId> = HashSet::default();
-        let mut matches: Vec<IdentityMatch> = Vec::with_capacity(desired.len());
+        let mut matches: Vec<IdentityMatch> =
+            Vec::with_capacity(desired.size_hint().1.unwrap_or(0));
         let mut cursor: usize = 0;
 
         for node in desired {
@@ -110,7 +121,8 @@ fn next_unused_compatible(
     None
 }
 
-#[doc = include_str!("child_matcher.doc/compatible.md")]
+/// Returns `true` if `desired` may reuse an existing node of `kind` in place:
+/// same variant, and the same component for elements.
 fn compatible(desired: &ViewNode, kind: &NodeKind) -> bool {
     match (desired, kind) {
         (

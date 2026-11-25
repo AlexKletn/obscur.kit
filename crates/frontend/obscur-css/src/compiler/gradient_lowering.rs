@@ -1,4 +1,10 @@
-#![doc = include_str!("gradient_lowering.doc/_module.md")]
+#![doc = include_str!("../../docs/api/compiler/gradient_lowering.doc/_module.md")]
+
+mod gradient_direction;
+mod repeat_pos;
+
+use gradient_direction::{GradientDirection, parse_gradient_direction};
+use repeat_pos::RepeatPos;
 
 use super::color_lowering::parse_stop_color;
 use super::property_compiler::narrow_f32;
@@ -6,11 +12,11 @@ use super::transform_lowering::{OriginAxis, origin_component};
 use super::value_lowering::{angle_to_degrees, dimension_length};
 use crate::parser::ParsedValue;
 use obscur_style::property::{
-    ConicGradient, Corner, GradientStop, Length, LinearGradient, RadialGradient, RadialShape,
-    RadialSize, StyleColor,
+    ConicGradient, GradientStop, Length, LinearGradient, RadialGradient, RadialShape, RadialSize,
+    StyleColor,
 };
 
-#[doc = include_str!("gradient_lowering.doc/lower_linear_gradient.md")]
+#[doc = include_str!("../../docs/api/compiler/gradient_lowering.doc/lower_linear_gradient.md")]
 pub(super) fn lower_linear_gradient(args: &[ParsedValue]) -> Option<LinearGradient> {
     let parts: Vec<&[ParsedValue]> = args.split(|v| matches!(v, ParsedValue::Comma)).collect();
     if parts.is_empty() {
@@ -33,30 +39,7 @@ pub(super) fn lower_linear_gradient(args: &[ParsedValue]) -> Option<LinearGradie
     Some(direction.into_linear(stops))
 }
 
-#[doc = include_str!("gradient_lowering.doc/RepeatPos.md")]
-#[derive(Clone, Copy)]
-enum RepeatPos {
-    #[doc = include_str!("gradient_lowering.doc/Px.md")]
-    Px(f32),
-    #[doc = include_str!("gradient_lowering.doc/Pct.md")]
-    Pct(f32),
-}
-
-impl RepeatPos {
-    #[doc = include_str!("gradient_lowering.doc/value.md")]
-    fn value(self) -> f32 {
-        match self {
-            Self::Px(v) | Self::Pct(v) => v,
-        }
-    }
-
-    #[doc = include_str!("gradient_lowering.doc/is_px.md")]
-    fn is_px(self) -> bool {
-        matches!(self, Self::Px(_))
-    }
-}
-
-#[doc = include_str!("gradient_lowering.doc/lower_repeating_linear_gradient.md")]
+#[doc = include_str!("../../docs/api/compiler/gradient_lowering.doc/lower_repeating_linear_gradient.md")]
 pub(super) fn lower_repeating_linear_gradient(args: &[ParsedValue]) -> Option<LinearGradient> {
     let parts: Vec<&[ParsedValue]> = args.split(|v| matches!(v, ParsedValue::Comma)).collect();
     if parts.is_empty() {
@@ -69,12 +52,29 @@ pub(super) fn lower_repeating_linear_gradient(args: &[ParsedValue]) -> Option<Li
     if stop_parts.len() < 2 {
         return None;
     }
+    let gradient = if let Some((stops, period)) = normalized_linear_repeat(stop_parts) {
+        LinearGradient::new_repeating(direction.nominal_angle(), stops, period)
+    } else {
+        let (stops, positions) = positioned_repeat_stops(stop_parts)?;
+        LinearGradient::new(direction.nominal_angle(), stops).with_repeat_positions(positions)
+    };
+    Some(match direction {
+        GradientDirection::Corner(corner, _) => gradient.with_corner(corner),
+        GradientDirection::Angle(_) => gradient,
+    })
+}
+
+/// Retains the normalized representation for origin-aligned repeats with one unit and a known positive period.
+fn normalized_linear_repeat(stop_parts: &[&[ParsedValue]]) -> Option<(Vec<GradientStop>, Length)> {
     // Flatten stops, expanding the two-position hard-band form into two stops.
     let mut colored: Vec<(StyleColor, Option<RepeatPos>)> = Vec::with_capacity(stop_parts.len());
     for part in stop_parts {
         parse_repeating_color_stop(part, &mut colored)?;
     }
     if colored.len() < 2 {
+        return None;
+    }
+    if colored[0].1.is_some_and(|position| position.value() != 0.0) {
         return None;
     }
     // The period unit: taken from the first positioned stop; every positioned
@@ -106,14 +106,13 @@ pub(super) fn lower_repeating_linear_gradient(args: &[ParsedValue]) -> Option<Li
     } else {
         Length::Percent(period)
     };
-    let gradient = LinearGradient::new_repeating(direction.nominal_angle(), stops, period_len);
-    Some(match direction {
-        GradientDirection::Corner(corner, _) => gradient.with_corner(corner),
-        GradientDirection::Angle(_) => gradient,
-    })
+    Some((stops, period_len))
 }
 
-#[doc = include_str!("gradient_lowering.doc/parse_repeating_color_stop.md")]
+/// Parses one `repeating-linear-gradient` color stop into `out`, supporting the
+/// `<color>`, `<color> <pos>`, and hard-band `<color> <pos> <pos>` forms. The
+/// hard-band form pushes the color twice (once at each position). Returns [`None`]
+/// for an unparseable color or position.
 fn parse_repeating_color_stop(
     part: &[ParsedValue],
     out: &mut Vec<(StyleColor, Option<RepeatPos>)>,
@@ -131,7 +130,9 @@ fn parse_repeating_color_stop(
     Some(())
 }
 
-#[doc = include_str!("gradient_lowering.doc/repeat_stop_position.md")]
+/// Reads a repeating-gradient stop position: a `<percentage>` (kept as its
+/// `0..=100` value), an absolute `px` `<length>`, or a bare `0` (a unitless zero
+/// offset). Any other length unit or shape yields [`None`].
 fn repeat_stop_position(value: &ParsedValue) -> Option<RepeatPos> {
     match value {
         ParsedValue::Percentage(p) => Some(RepeatPos::Pct(narrow_f32(*p))),
@@ -143,7 +144,7 @@ fn repeat_stop_position(value: &ParsedValue) -> Option<RepeatPos> {
     }
 }
 
-#[doc = include_str!("gradient_lowering.doc/resolve_repeating_positions.md")]
+#[doc = include_str!("../../docs/api/compiler/gradient_lowering.doc/resolve_repeating_positions.md")]
 fn resolve_repeating_positions(colored: &[(StyleColor, Option<RepeatPos>)]) -> Option<Vec<f32>> {
     let n = colored.len();
     let mut mags: Vec<Option<f32>> = colored
@@ -187,8 +188,11 @@ fn resolve_repeating_positions(colored: &[(StyleColor, Option<RepeatPos>)]) -> O
     Some(mags.into_iter().map(|m| m.unwrap_or(0.0)).collect())
 }
 
-#[doc = include_str!("gradient_lowering.doc/lower_radial_gradient.md")]
-pub(super) fn lower_radial_gradient(args: &[ParsedValue]) -> Option<RadialGradient> {
+#[doc = include_str!("../../docs/api/compiler/gradient_lowering.doc/lower_radial_gradient.md")]
+pub(super) fn lower_radial_gradient(
+    args: &[ParsedValue],
+    repeating: bool,
+) -> Option<RadialGradient> {
     let parts: Vec<&[ParsedValue]> = args.split(|v| matches!(v, ParsedValue::Comma)).collect();
     if parts.is_empty() {
         return None;
@@ -207,6 +211,12 @@ pub(super) fn lower_radial_gradient(args: &[ParsedValue]) -> Option<RadialGradie
     if stop_parts.len() < 2 {
         return None;
     }
+    if repeating {
+        let (stops, positions) = positioned_repeat_stops(stop_parts)?;
+        return Some(
+            RadialGradient::new(shape, size, cx, cy, stops).with_repeat_positions(positions),
+        );
+    }
     let mut stops: Vec<GradientStop> = Vec::with_capacity(stop_parts.len());
     for part in stop_parts {
         stops.push(parse_color_stop(part)?);
@@ -215,7 +225,37 @@ pub(super) fn lower_radial_gradient(args: &[ParsedValue]) -> Option<RadialGradie
     Some(RadialGradient::new(shape, size, cx, cy, stops))
 }
 
-#[doc = include_str!("gradient_lowering.doc/parse_radial_prelude.md")]
+/// Parses stop distances for a repeat whose gradient-line length is resolved later.
+fn positioned_repeat_stops(
+    parts: &[&[ParsedValue]],
+) -> Option<(Vec<GradientStop>, Box<[Option<Length>]>)> {
+    let mut stops = Vec::new();
+    let mut positions = Vec::new();
+    let position = |value: &ParsedValue| match value {
+        ParsedValue::Dimension { value, unit } => dimension_length(*value, unit),
+        ParsedValue::Percentage(value) => Some(Length::Percent(narrow_f32(*value))),
+        ParsedValue::Number(value) if *value == 0.0 => Some(Length::px(0.0)),
+        _ => None,
+    };
+    for part in parts {
+        let (color, offsets) = part.split_first()?;
+        let color = parse_stop_color(color)?;
+        if offsets.is_empty() {
+            stops.push(GradientStop::auto(color));
+            positions.push(None);
+        } else if offsets.len() <= 2 {
+            for offset in offsets {
+                stops.push(GradientStop::auto(color));
+                positions.push(Some(position(offset)?));
+            }
+        } else {
+            return None;
+        }
+    }
+    Some((stops, positions.into_boxed_slice()))
+}
+
+#[doc = include_str!("../../docs/api/compiler/gradient_lowering.doc/parse_radial_prelude.md")]
 fn parse_radial_prelude(part: &[ParsedValue]) -> Option<(RadialShape, RadialSize, Length, Length)> {
     let at_index = part
         .iter()
@@ -224,46 +264,70 @@ fn parse_radial_prelude(part: &[ParsedValue]) -> Option<(RadialShape, RadialSize
         Some(i) => (&part[..i], Some(&part[i + 1..])),
         None => (part, None),
     };
-    let mut shape: Option<RadialShape> = None;
-    let mut size: Option<RadialSize> = None;
-    let mut saw_any = position.is_some();
+    let mut shape = None;
+    let mut extent = None;
+    let mut radii = [None; 2];
+    let mut count = 0;
     for token in dims {
-        match token {
-            ParsedValue::Keyword(keyword) => match keyword.to_ascii_lowercase().as_str() {
-                "circle" => shape = Some(RadialShape::Circle),
-                "ellipse" => shape = Some(RadialShape::Ellipse),
-                "closest-side" => size = Some(RadialSize::ClosestSide),
-                "closest-corner" => size = Some(RadialSize::ClosestCorner),
-                "farthest-side" => size = Some(RadialSize::FarthestSide),
-                "farthest-corner" => size = Some(RadialSize::FarthestCorner),
-                // Not a prelude keyword (e.g. a named color): treat as a stop.
-                _ => return None,
-            },
-            ParsedValue::Dimension { value, unit } => {
-                size = Some(RadialSize::Length(dimension_length(*value, unit)?));
+        let radius = match token {
+            ParsedValue::Keyword(keyword) => {
+                let value = match keyword.to_ascii_lowercase().as_str() {
+                    "circle" if shape.is_none() => {
+                        shape = Some(RadialShape::Circle);
+                        continue;
+                    }
+                    "ellipse" if shape.is_none() => {
+                        shape = Some(RadialShape::Ellipse);
+                        continue;
+                    }
+                    "closest-side" => RadialSize::ClosestSide,
+                    "closest-corner" => RadialSize::ClosestCorner,
+                    "farthest-side" => RadialSize::FarthestSide,
+                    "farthest-corner" => RadialSize::FarthestCorner,
+                    _ => return None,
+                };
+                if extent.replace(value).is_some() {
+                    return None;
+                }
+                continue;
             }
-            ParsedValue::Percentage(p) => {
-                size = Some(RadialSize::Length(Length::Percent(narrow_f32(*p))));
+            ParsedValue::Dimension { value, unit } if *value >= 0.0 => {
+                dimension_length(*value, unit)?
             }
-            ParsedValue::Number(n) if *n == 0.0 => {
-                size = Some(RadialSize::Length(Length::px(0.0)));
-            }
+            ParsedValue::Percentage(p) if *p >= 0.0 => Length::Percent(narrow_f32(*p)),
+            ParsedValue::Number(n) if *n == 0.0 => Length::px(0.0),
             _ => return None,
-        }
-        saw_any = true;
+        };
+        *radii.get_mut(count)? = Some(radius);
+        count += 1;
     }
-    if !saw_any {
+    if dims.is_empty() && position.is_none() {
         return None;
     }
+    let (shape, size) = match (extent, radii) {
+        (extent, [None, None]) => (shape.unwrap_or_default(), extent.unwrap_or_default()),
+        (None, [Some(radius), None]) => (
+            shape.unwrap_or(if matches!(radius, Length::Percent(_)) {
+                RadialShape::Ellipse
+            } else {
+                RadialShape::Circle
+            }),
+            RadialSize::Length(radius),
+        ),
+        (None, [Some(x), Some(y)]) if shape != Some(RadialShape::Circle) => {
+            (RadialShape::Ellipse, RadialSize::Ellipse(x, y))
+        }
+        _ => return None,
+    };
     let center = Length::Percent(50.0);
     let (cx, cy) = match position {
         Some(tokens) => parse_at_position(tokens)?,
         None => (center, center),
     };
-    Some((shape.unwrap_or_default(), size.unwrap_or_default(), cx, cy))
+    Some((shape, size, cx, cy))
 }
 
-#[doc = include_str!("gradient_lowering.doc/lower_conic_gradient.md")]
+#[doc = include_str!("../../docs/api/compiler/gradient_lowering.doc/lower_conic_gradient.md")]
 pub(super) fn lower_conic_gradient(args: &[ParsedValue]) -> Option<ConicGradient> {
     let parts: Vec<&[ParsedValue]> = args.split(|v| matches!(v, ParsedValue::Comma)).collect();
     if parts.is_empty() {
@@ -285,7 +349,10 @@ pub(super) fn lower_conic_gradient(args: &[ParsedValue]) -> Option<ConicGradient
     Some(ConicGradient::new(angle, cx, cy, stops))
 }
 
-#[doc = include_str!("gradient_lowering.doc/parse_conic_prelude.md")]
+/// Parses the optional leading prelude of a `conic-gradient`: an optional
+/// `from <angle>` followed by an optional `at <position>`. Returns [`None`] when
+/// the part carries neither `from` nor `at` (so it is treated as the first color
+/// stop) or when it is malformed (leftover tokens, bad angle/position).
 fn parse_conic_prelude(part: &[ParsedValue]) -> Option<(f32, Length, Length)> {
     let center = Length::Percent(50.0);
     let mut angle = 0.0_f32;
@@ -321,7 +388,7 @@ fn parse_conic_prelude(part: &[ParsedValue]) -> Option<(f32, Length, Length)> {
     Some((angle, cx, cy))
 }
 
-#[doc = include_str!("gradient_lowering.doc/parse_at_position.md")]
+#[doc = include_str!("../../docs/api/compiler/gradient_lowering.doc/parse_at_position.md")]
 fn parse_at_position(tokens: &[ParsedValue]) -> Option<(Length, Length)> {
     let center = Length::Percent(50.0);
     match tokens {
@@ -346,93 +413,9 @@ fn parse_at_position(tokens: &[ParsedValue]) -> Option<(Length, Length)> {
     }
 }
 
-#[doc = include_str!("gradient_lowering.doc/GradientDirection.md")]
-#[derive(Clone, Copy)]
-enum GradientDirection {
-    #[doc = include_str!("gradient_lowering.doc/Angle.md")]
-    Angle(f32),
-    #[doc = include_str!("gradient_lowering.doc/Corner.md")]
-    Corner(Corner, f32),
-}
-
-impl GradientDirection {
-    #[doc = include_str!("gradient_lowering.doc/nominal_angle.md")]
-    fn nominal_angle(self) -> f32 {
-        match self {
-            Self::Angle(a) | Self::Corner(_, a) => a,
-        }
-    }
-
-    #[doc = include_str!("gradient_lowering.doc/into_linear.md")]
-    fn into_linear(self, stops: Vec<GradientStop>) -> LinearGradient {
-        match self {
-            Self::Angle(a) => LinearGradient::new(a, stops),
-            Self::Corner(c, a) => LinearGradient::new_corner(c, a, stops),
-        }
-    }
-}
-
-#[doc = include_str!("gradient_lowering.doc/parse_gradient_direction.md")]
-fn parse_gradient_direction(part: &[ParsedValue]) -> Option<GradientDirection> {
-    match part {
-        [ParsedValue::Dimension { value, unit }] => {
-            angle_to_degrees(*value, unit).map(GradientDirection::Angle)
-        }
-        [ParsedValue::Keyword(to), rest @ ..] if to.eq_ignore_ascii_case("to") => {
-            to_side_direction(rest)
-        }
-        _ => None,
-    }
-}
-
-#[doc = include_str!("gradient_lowering.doc/to_side_direction.md")]
-fn to_side_direction(sides: &[ParsedValue]) -> Option<GradientDirection> {
-    let mut names: Vec<String> = Vec::new();
-    for side in sides {
-        match side {
-            ParsedValue::Keyword(keyword) => names.push(keyword.to_ascii_lowercase()),
-            _ => return None,
-        }
-    }
-    match names.as_slice() {
-        [a] => single_side_angle(a).map(GradientDirection::Angle),
-        [a, b] => corner_direction(a, b),
-        _ => None,
-    }
-}
-
-#[doc = include_str!("gradient_lowering.doc/single_side_angle.md")]
-fn single_side_angle(side: &str) -> Option<f32> {
-    match side {
-        "top" => Some(0.0),
-        "right" => Some(90.0),
-        "bottom" => Some(180.0),
-        "left" => Some(270.0),
-        _ => None,
-    }
-}
-
-#[doc = include_str!("gradient_lowering.doc/corner_direction.md")]
-fn corner_direction(a: &str, b: &str) -> Option<GradientDirection> {
-    if a == b {
-        return None;
-    }
-    let has = |name: &str| a == name || b == name;
-    let (corner, nominal) = if has("top") && has("right") {
-        (Corner::TopRight, 45.0)
-    } else if has("bottom") && has("right") {
-        (Corner::BottomRight, 135.0)
-    } else if has("bottom") && has("left") {
-        (Corner::BottomLeft, 225.0)
-    } else if has("top") && has("left") {
-        (Corner::TopLeft, 315.0)
-    } else {
-        return None;
-    };
-    Some(GradientDirection::Corner(corner, nominal))
-}
-
-#[doc = include_str!("gradient_lowering.doc/parse_color_stop.md")]
+/// Parses one `<color> [<percentage>]?` color stop from a comma-delimited part: a
+/// lone color (auto-positioned) or a color followed by a `<percentage>` position.
+/// Returns [`None`] for an unparseable color or an extra component.
 fn parse_color_stop(part: &[ParsedValue]) -> Option<GradientStop> {
     match part {
         [color] => Some(GradientStop::auto(parse_stop_color(color)?)),
@@ -445,7 +428,9 @@ fn parse_color_stop(part: &[ParsedValue]) -> Option<GradientStop> {
     }
 }
 
-#[doc = include_str!("gradient_lowering.doc/stop_position.md")]
+/// Reads a color-stop position as a normalized `0.0..=1.0` value from a
+/// `<percentage>`; other value shapes (lengths, bare numbers) are out of scope and
+/// yield [`None`].
 fn stop_position(value: &ParsedValue) -> Option<f32> {
     match value {
         ParsedValue::Percentage(p) => Some(narrow_f32(*p) / 100.0),
@@ -453,7 +438,7 @@ fn stop_position(value: &ParsedValue) -> Option<f32> {
     }
 }
 
-#[doc = include_str!("gradient_lowering.doc/parse_conic_color_stop.md")]
+#[doc = include_str!("../../docs/api/compiler/gradient_lowering.doc/parse_conic_color_stop.md")]
 fn parse_conic_color_stop(part: &[ParsedValue]) -> Option<GradientStop> {
     match part {
         [color] => Some(GradientStop::auto(parse_stop_color(color)?)),
@@ -466,7 +451,9 @@ fn parse_conic_color_stop(part: &[ParsedValue]) -> Option<GradientStop> {
     }
 }
 
-#[doc = include_str!("gradient_lowering.doc/conic_stop_position.md")]
+/// Reads a conic-gradient stop's used position as a normalized `0.0..=1.0` fraction
+/// of a full turn: a `<percentage>` divides by 100, an `<angle>` divides by 360deg,
+/// and a bare `0` is the zero angle. Any other shape is out of grammar ([`None`]).
 fn conic_stop_position(value: &ParsedValue) -> Option<f32> {
     match value {
         ParsedValue::Percentage(p) => Some(narrow_f32(*p) / 100.0),
@@ -478,7 +465,7 @@ fn conic_stop_position(value: &ParsedValue) -> Option<f32> {
     }
 }
 
-#[doc = include_str!("gradient_lowering.doc/resolve_stop_positions.md")]
+#[doc = include_str!("../../docs/api/compiler/gradient_lowering.doc/resolve_stop_positions.md")]
 fn resolve_stop_positions(stops: &mut [GradientStop]) {
     let n = stops.len();
     if n == 0 {
@@ -537,7 +524,8 @@ pub(crate) mod tests {
         RadialSize, StyleColor,
     };
 
-    #[doc = include_str!("gradient_lowering.doc/gradient_of.md")]
+    /// Extracts the lowered [`LinearGradient`] from a `background-image`
+    /// declaration.
     pub(crate) fn gradient_of(text: &str) -> LinearGradient {
         match value_of(text) {
             PropertyValue::LinearGradient(g) => g,
@@ -545,7 +533,8 @@ pub(crate) mod tests {
         }
     }
 
-    #[doc = include_str!("gradient_lowering.doc/radial_of.md")]
+    /// Extracts the lowered [`RadialGradient`] from a `background-image`
+    /// declaration.
     fn radial_of(text: &str) -> RadialGradient {
         match value_of(text) {
             PropertyValue::RadialGradient(g) => g,
@@ -553,7 +542,8 @@ pub(crate) mod tests {
         }
     }
 
-    #[doc = include_str!("gradient_lowering.doc/conic_of.md")]
+    /// Extracts the lowered [`ConicGradient`] from a `background-image`
+    /// declaration.
     fn conic_of(text: &str) -> ConicGradient {
         match value_of(text) {
             PropertyValue::ConicGradient(g) => g,
@@ -739,6 +729,27 @@ pub(crate) mod tests {
         let g2 = radial_of("background-image: radial-gradient(40px at center, red, blue)");
         assert_eq!(g2.size(), RadialSize::Length(Length::px(40.0)));
         assert_eq!(g2.center_x(), Length::Percent(50.0));
+    }
+
+    /// Checks explicit ellipse axis radii and rejects contradictory or excessive sizes.
+    #[test]
+    fn radial_gradient_preserves_both_explicit_axes() {
+        let gradient =
+            radial_of("background-image: radial-gradient(20px 30% ellipse at center, red, blue)");
+        assert_eq!(gradient.shape(), RadialShape::Ellipse);
+        assert_eq!(
+            gradient.size(),
+            RadialSize::Ellipse(Length::px(20.0), Length::Percent(30.0)),
+        );
+        for prelude in ["circle 20px 10px", "closest-side 20px", "20px 10px 5px"] {
+            assert!(matches!(
+                compile(&format!(
+                    "background-image: radial-gradient({prelude}, red, blue)"
+                ))
+                .0,
+                CompiledDeclaration::Unsupported(_)
+            ));
+        }
     }
 
     #[test]

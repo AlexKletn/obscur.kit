@@ -1,17 +1,17 @@
-#![doc = include_str!("display_list.doc/_module.md")]
+//! An ordered, immutable sequence of paint commands.
 
 use core::slice::Iter;
 
 use super::PaintCommand;
 
-#[doc = include_str!("display_list.doc/DisplayList.md")]
+#[doc = include_str!("../../docs/api/command/display_list.doc/DisplayList.md")]
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct DisplayList {
     commands: Vec<PaintCommand>,
 }
 
 impl DisplayList {
-    #[doc = include_str!("display_list.doc/new.md")]
+    /// Creates an empty display list.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -19,52 +19,61 @@ impl DisplayList {
         }
     }
 
-    #[doc = include_str!("display_list.doc/from_commands.md")]
+    /// Creates a display list from an existing sequence of commands, preserving
+    /// their order as the paint order. The commands are taken verbatim and are
+    /// not validated for balance.
     #[must_use]
     pub fn from_commands(commands: Vec<PaintCommand>) -> Self {
         Self { commands }
     }
 
-    #[doc = include_str!("display_list.doc/into_commands.md")]
+    #[doc = include_str!("../../docs/api/command/display_list.doc/into_commands.md")]
     #[must_use]
     pub fn into_commands(self) -> Vec<PaintCommand> {
         self.commands
     }
 
-    #[doc = include_str!("display_list.doc/commands.md")]
+    /// The commands in paint order.
     #[must_use]
     pub fn commands(&self) -> &[PaintCommand] {
         &self.commands
     }
 
-    #[doc = include_str!("display_list.doc/iter.md")]
+    /// Iterates over the commands in paint order.
     pub fn iter(&self) -> Iter<'_, PaintCommand> {
         self.commands.iter()
     }
 
-    #[doc = include_str!("display_list.doc/len.md")]
+    /// The number of commands in the list.
     #[must_use]
     pub fn len(&self) -> usize {
         self.commands.len()
     }
 
-    #[doc = include_str!("display_list.doc/is_empty.md")]
+    /// Whether the list contains no commands.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.commands.is_empty()
     }
 
-    #[doc = include_str!("display_list.doc/is_balanced.md")]
+    #[doc = include_str!("../../docs/api/command/display_list.doc/is_balanced.md")]
     #[must_use]
     pub fn is_balanced(&self) -> bool {
-        let mut depth: i32 = 0;
-        for command in &self.commands {
-            depth += command.nesting_delta();
-            if depth < 0 {
+        Self::commands_are_balanced(&self.commands)
+    }
+
+    pub(super) fn commands_are_balanced(commands: &[PaintCommand]) -> bool {
+        let mut scopes = Vec::new();
+        for command in commands {
+            if command.is_push() {
+                scopes.push(command);
+            } else if command.is_pop()
+                && !scopes.pop().is_some_and(|open| command.closes_scope(open))
+            {
                 return false;
             }
         }
-        depth == 0
+        scopes.is_empty()
     }
 }
 
@@ -92,6 +101,17 @@ mod tests {
             path: Path::rect(Rect::default()),
             paint: Paint::solid_fill(Color::WHITE),
         }
+    }
+
+    #[test]
+    fn equal_push_and_pop_counts_do_not_make_crossed_scopes_balanced() {
+        let list = DisplayList::from_commands(vec![
+            PaintCommand::PushLayer(SceneLayer::new()),
+            PaintCommand::PushClip(Clip::rect(Rect::default())),
+            PaintCommand::PopLayer,
+            PaintCommand::PopClip,
+        ]);
+        assert!(!list.is_balanced());
     }
 
     #[test]

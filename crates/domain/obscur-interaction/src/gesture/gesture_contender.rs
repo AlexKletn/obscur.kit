@@ -1,10 +1,11 @@
-#![doc = include_str!("gesture_contender.doc/_module.md")]
+//! The [`GestureContender`] — a recognizer entered into the arena (spec §6.16
+//! mobile gestures).
 
 use obscur_identity::NodeId;
 
 use super::RecognizerId;
 
-#[doc = include_str!("gesture_contender.doc/GestureContender.md")]
+#[doc = include_str!("../../docs/api/gesture/gesture_contender.doc/GestureContender.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GestureContender {
     recognizer: RecognizerId,
@@ -13,7 +14,7 @@ pub struct GestureContender {
 }
 
 impl GestureContender {
-    #[doc = include_str!("gesture_contender.doc/new.md")]
+    /// Creates a contender binding `recognizer` to `node` with priority `0`.
     #[must_use]
     pub const fn new(recognizer: RecognizerId, node: NodeId) -> Self {
         Self {
@@ -23,26 +24,26 @@ impl GestureContender {
         }
     }
 
-    #[doc = include_str!("gesture_contender.doc/with_priority.md")]
+    /// Returns this contender with its priority set to `priority` (higher wins).
     #[must_use]
     pub const fn with_priority(mut self, priority: i32) -> Self {
         self.priority = priority;
         self
     }
 
-    #[doc = include_str!("gesture_contender.doc/recognizer.md")]
+    /// Returns the recognizer this contender represents.
     #[must_use]
     pub const fn recognizer(self) -> RecognizerId {
         self.recognizer
     }
 
-    #[doc = include_str!("gesture_contender.doc/node.md")]
+    /// Returns the node this contender is bound to.
     #[must_use]
     pub const fn node(self) -> NodeId {
         self.node
     }
 
-    #[doc = include_str!("gesture_contender.doc/priority.md")]
+    /// Returns the contender's priority (higher is preferred).
     #[must_use]
     pub const fn priority(self) -> i32 {
         self.priority

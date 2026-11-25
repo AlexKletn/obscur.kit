@@ -1,10 +1,10 @@
-#![doc = include_str!("transaction_commit.doc/_module.md")]
+//! [`TransactionCommit`]: the immutable record of a committed UI transaction (spec §3.2).
 
 use obscur_identity::VersionStamp;
 
 use super::ui_operation::UiOperation;
 
-#[doc = include_str!("transaction_commit.doc/TransactionCommit.md")]
+#[doc = include_str!("../../docs/api/transaction/transaction_commit.doc/TransactionCommit.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TransactionCommit {
     operations: Vec<UiOperation>,
@@ -12,7 +12,8 @@ pub struct TransactionCommit {
 }
 
 impl TransactionCommit {
-    #[doc = include_str!("transaction_commit.doc/new.md")]
+    /// Creates a commit record from the applied `operations` and the `version`
+    /// stamped at the frame boundary.
     #[must_use]
     pub fn new(operations: Vec<UiOperation>, version: VersionStamp) -> Self {
         Self {
@@ -21,31 +22,31 @@ impl TransactionCommit {
         }
     }
 
-    #[doc = include_str!("transaction_commit.doc/operations.md")]
+    /// Returns the committed normalized operations in application order.
     #[must_use]
     pub fn operations(&self) -> &[UiOperation] {
         &self.operations
     }
 
-    #[doc = include_str!("transaction_commit.doc/version.md")]
+    /// Returns the commit version stamped at the frame boundary.
     #[must_use]
     pub const fn version(&self) -> VersionStamp {
         self.version
     }
 
-    #[doc = include_str!("transaction_commit.doc/is_empty.md")]
+    /// Returns `true` if the commit carries no operations.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.operations.is_empty()
     }
 
-    #[doc = include_str!("transaction_commit.doc/len.md")]
+    /// Returns the number of committed operations.
     #[must_use]
     pub fn len(&self) -> usize {
         self.operations.len()
     }
 
-    #[doc = include_str!("transaction_commit.doc/is_root_replacement.md")]
+    /// Returns `true` if any committed operation is a root replacement.
     #[must_use]
     pub fn is_root_replacement(&self) -> bool {
         self.operations.iter().any(UiOperation::is_root_replacement)

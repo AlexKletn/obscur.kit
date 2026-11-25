@@ -1,20 +1,20 @@
-#![doc = include_str!("performance_counter.doc/_module.md")]
+//! A named monotonic performance counter.
 
 use crate::diagnostic::DiagnosticSubsystem;
 
-#[doc = include_str!("performance_counter.doc/PerformanceCounter.md")]
+#[doc = include_str!("../../docs/api/performance/performance_counter.doc/PerformanceCounter.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PerformanceCounter {
-    #[doc = include_str!("performance_counter.doc/subsystem.md")]
+    /// Subsystem the counter is attributed to.
     subsystem: DiagnosticSubsystem,
-    #[doc = include_str!("performance_counter.doc/label.md")]
+    /// Stable, human-readable counter label.
     label: Box<str>,
-    #[doc = include_str!("performance_counter.doc/value.md")]
+    /// Current accumulated value.
     value: u64,
 }
 
 impl PerformanceCounter {
-    #[doc = include_str!("performance_counter.doc/new.md")]
+    /// Creates a counter for `subsystem` named `label`, starting at zero.
     #[must_use]
     pub fn new(subsystem: DiagnosticSubsystem, label: impl Into<Box<str>>) -> Self {
         Self {
@@ -24,34 +24,34 @@ impl PerformanceCounter {
         }
     }
 
-    #[doc = include_str!("performance_counter.doc/increment.md")]
+    /// Increments the counter by one (saturating at [`u64::MAX`]).
     pub fn increment(&mut self) {
         self.value = self.value.saturating_add(1);
     }
 
-    #[doc = include_str!("performance_counter.doc/add.md")]
+    /// Adds `n` to the counter (saturating at [`u64::MAX`]).
     pub fn add(&mut self, n: u64) {
         self.value = self.value.saturating_add(n);
     }
 
-    #[doc = include_str!("performance_counter.doc/reset.md")]
+    /// Resets the counter back to zero.
     pub fn reset(&mut self) {
         self.value = 0;
     }
 
-    #[doc = include_str!("performance_counter.doc/value_2.md")]
+    /// Returns the current value.
     #[must_use]
     pub fn value(&self) -> u64 {
         self.value
     }
 
-    #[doc = include_str!("performance_counter.doc/subsystem_2.md")]
+    /// Returns the subsystem this counter is attributed to.
     #[must_use]
     pub fn subsystem(&self) -> DiagnosticSubsystem {
         self.subsystem
     }
 
-    #[doc = include_str!("performance_counter.doc/label_2.md")]
+    /// Returns the counter label.
     #[must_use]
     pub fn label(&self) -> &str {
         &self.label

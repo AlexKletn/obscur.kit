@@ -1,46 +1,47 @@
-#![doc = include_str!("overscan_policy.doc/_module.md")]
+#![doc = include_str!("../../docs/api/virtualization/overscan_policy.doc/_module.md")]
 
-#[doc = include_str!("overscan_policy.doc/OverscanPolicy.md")]
+#[doc = include_str!("../../docs/api/virtualization/overscan_policy.doc/OverscanPolicy.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OverscanPolicy {
-    #[doc = include_str!("overscan_policy.doc/leading.md")]
+    /// Extra items to materialize before the first visible item.
     leading: usize,
-    #[doc = include_str!("overscan_policy.doc/trailing.md")]
+    /// Extra items to materialize after the last visible item.
     trailing: usize,
 }
 
 impl OverscanPolicy {
-    #[doc = include_str!("overscan_policy.doc/new.md")]
+    /// Creates a policy with `leading` extra items before and `trailing` extra
+    /// items after the visible range (spec §4.9).
     #[must_use]
     pub const fn new(leading: usize, trailing: usize) -> Self {
         Self { leading, trailing }
     }
 
-    #[doc = include_str!("overscan_policy.doc/symmetric.md")]
+    /// Creates a policy with the same `count` of extra items on both sides.
     #[must_use]
     pub const fn symmetric(count: usize) -> Self {
         Self::new(count, count)
     }
 
-    #[doc = include_str!("overscan_policy.doc/none.md")]
+    /// A policy with no overscan on either side (`0`, `0`).
     #[must_use]
     pub const fn none() -> Self {
         Self::new(0, 0)
     }
 
-    #[doc = include_str!("overscan_policy.doc/leading_2.md")]
+    /// Extra items materialized before the first visible item.
     #[must_use]
     pub const fn leading(self) -> usize {
         self.leading
     }
 
-    #[doc = include_str!("overscan_policy.doc/trailing_2.md")]
+    /// Extra items materialized after the last visible item.
     #[must_use]
     pub const fn trailing(self) -> usize {
         self.trailing
     }
 
-    #[doc = include_str!("overscan_policy.doc/expand.md")]
+    #[doc = include_str!("../../docs/api/virtualization/overscan_policy.doc/expand.md")]
     #[must_use]
     pub const fn expand(&self, start: usize, end: usize, item_count: usize) -> (usize, usize) {
         let expanded_start = start.saturating_sub(self.leading);
@@ -55,7 +56,7 @@ impl OverscanPolicy {
 }
 
 impl Default for OverscanPolicy {
-    #[doc = include_str!("overscan_policy.doc/default.md")]
+    /// The default policy has no overscan (spec §4.9): [`OverscanPolicy::none`].
     fn default() -> Self {
         Self::none()
     }

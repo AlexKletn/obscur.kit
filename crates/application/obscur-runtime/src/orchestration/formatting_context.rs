@@ -1,4 +1,4 @@
-#![doc = include_str!("formatting_context.doc/_module.md")]
+#![doc = include_str!("../../docs/api/orchestration/formatting_context.doc/_module.md")]
 
 use obscur_identity::NodeId;
 use obscur_layout::algorithm::{FlexLayout, FlowLayout, GridLayout, LayoutAlgorithm, LayoutChild};
@@ -8,7 +8,7 @@ use obscur_tree::tree::RetainedTree;
 use super::GridTemplates;
 use super::layout_coordinator::LayoutStyles;
 
-#[doc = include_str!("formatting_context.doc/algorithm_for.md")]
+#[doc = include_str!("../../docs/api/orchestration/formatting_context.doc/algorithm_for.md")]
 pub(super) fn algorithm_for(
     display: LayoutDisplay,
     node: NodeId,
@@ -29,22 +29,19 @@ pub(super) fn algorithm_for(
     }
 }
 
-#[doc = include_str!("formatting_context.doc/style_of.md")]
+/// Looks up a node's [`LayoutStyle`], falling back to the default.
 pub(super) fn style_of(styles: &LayoutStyles, node: NodeId) -> LayoutStyle {
-    styles.get(&node).copied().unwrap_or_default()
+    styles.get(&node).cloned().unwrap_or_default()
 }
 
-#[doc = include_str!("formatting_context.doc/children_of.md")]
+#[doc = include_str!("../../docs/api/orchestration/formatting_context.doc/children_of.md")]
 pub(super) fn children_of(
     tree: &RetainedTree,
     styles: &LayoutStyles,
     node: NodeId,
 ) -> Vec<LayoutChild> {
-    let Some(n) = tree.get(node) else {
-        return Vec::new();
-    };
     let mut out = Vec::new();
-    for &child in n.child_nodes() {
+    for child in tree.visual_children(node) {
         let style = style_of(styles, child);
         // `display: contents` (css-display-3 §2.5): the element generates no box.
         // It contributes no [`LayoutChild`] of its own; instead its own children
@@ -61,7 +58,7 @@ pub(super) fn children_of(
     out
 }
 
-#[doc = include_str!("formatting_context.doc/in_flow_children.md")]
+#[doc = include_str!("../../docs/api/orchestration/formatting_context.doc/in_flow_children.md")]
 pub(super) fn in_flow_children(
     tree: &RetainedTree,
     styles: &LayoutStyles,
@@ -73,7 +70,7 @@ pub(super) fn in_flow_children(
         .collect()
 }
 
-#[doc = include_str!("formatting_context.doc/partition_children.md")]
+#[doc = include_str!("../../docs/api/orchestration/formatting_context.doc/partition_children.md")]
 pub(super) fn partition_children(
     tree: &RetainedTree,
     styles: &LayoutStyles,

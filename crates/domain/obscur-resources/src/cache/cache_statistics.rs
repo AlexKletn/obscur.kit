@@ -1,24 +1,24 @@
-#![doc = include_str!("cache_statistics.doc/_module.md")]
+//! `DevTools` metrics for one cache (spec §5.19 metrics, correctness transparency).
 
-#[doc = include_str!("cache_statistics.doc/CacheStatistics.md")]
+#[doc = include_str!("../../docs/api/cache/cache_statistics.doc/CacheStatistics.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct CacheStatistics {
-    #[doc = include_str!("cache_statistics.doc/hits.md")]
+    /// Number of lookups that found a live entry.
     hits: u64,
-    #[doc = include_str!("cache_statistics.doc/misses.md")]
+    /// Number of lookups that found nothing.
     misses: u64,
-    #[doc = include_str!("cache_statistics.doc/evictions.md")]
+    /// Number of entries evicted to stay within budget (spec §5.19 eviction).
     evictions: u64,
-    #[doc = include_str!("cache_statistics.doc/insertions.md")]
+    /// Number of entries inserted over the cache's lifetime.
     insertions: u64,
-    #[doc = include_str!("cache_statistics.doc/entries.md")]
+    /// Current number of live entries.
     entries: usize,
-    #[doc = include_str!("cache_statistics.doc/bytes.md")]
+    /// Current total bytes held.
     bytes: u64,
 }
 
 impl CacheStatistics {
-    #[doc = include_str!("cache_statistics.doc/new.md")]
+    /// Creates a zeroed set of metrics.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -31,31 +31,33 @@ impl CacheStatistics {
         }
     }
 
-    #[doc = include_str!("cache_statistics.doc/record_hit.md")]
+    /// Records a cache hit (spec §5.19 metrics).
     pub fn record_hit(&mut self) {
         self.hits = self.hits.saturating_add(1);
     }
 
-    #[doc = include_str!("cache_statistics.doc/record_miss.md")]
+    /// Records a cache miss (spec §5.19 metrics).
     pub fn record_miss(&mut self) {
         self.misses = self.misses.saturating_add(1);
     }
 
-    #[doc = include_str!("cache_statistics.doc/record_eviction.md")]
+    #[doc = include_str!("../../docs/api/cache/cache_statistics.doc/record_eviction.md")]
     pub fn record_eviction(&mut self, freed_bytes: u64) {
         self.evictions = self.evictions.saturating_add(1);
         self.entries = self.entries.saturating_sub(1);
         self.bytes = self.bytes.saturating_sub(freed_bytes);
     }
 
-    #[doc = include_str!("cache_statistics.doc/record_insertion.md")]
+    /// Records the insertion of an entry of `byte_size`, incrementing the live
+    /// entry count and byte total (spec §5.19 metrics).
     pub fn record_insertion(&mut self, byte_size: u64) {
         self.insertions = self.insertions.saturating_add(1);
         self.entries = self.entries.saturating_add(1);
         self.bytes = self.bytes.saturating_add(byte_size);
     }
 
-    #[doc = include_str!("cache_statistics.doc/hit_rate.md")]
+    /// Returns the hit rate `hits / (hits + misses)`, or `0.0` when there have
+    /// been no accesses (spec §5.19 correctness transparency).
     #[must_use]
     pub fn hit_rate(&self) -> f32 {
         let accesses = self.hits.saturating_add(self.misses);
@@ -66,43 +68,43 @@ impl CacheStatistics {
         }
     }
 
-    #[doc = include_str!("cache_statistics.doc/hits_2.md")]
+    /// Returns the number of recorded hits.
     #[must_use]
     pub const fn hits(&self) -> u64 {
         self.hits
     }
 
-    #[doc = include_str!("cache_statistics.doc/misses_2.md")]
+    /// Returns the number of recorded misses.
     #[must_use]
     pub const fn misses(&self) -> u64 {
         self.misses
     }
 
-    #[doc = include_str!("cache_statistics.doc/evictions_2.md")]
+    /// Returns the number of recorded evictions.
     #[must_use]
     pub const fn evictions(&self) -> u64 {
         self.evictions
     }
 
-    #[doc = include_str!("cache_statistics.doc/insertions_2.md")]
+    /// Returns the number of recorded insertions.
     #[must_use]
     pub const fn insertions(&self) -> u64 {
         self.insertions
     }
 
-    #[doc = include_str!("cache_statistics.doc/entries_2.md")]
+    /// Returns the current number of live entries.
     #[must_use]
     pub const fn entries(&self) -> usize {
         self.entries
     }
 
-    #[doc = include_str!("cache_statistics.doc/bytes_2.md")]
+    /// Returns the current total bytes held.
     #[must_use]
     pub const fn bytes(&self) -> u64 {
         self.bytes
     }
 
-    #[doc = include_str!("cache_statistics.doc/reset.md")]
+    /// Resets every metric back to zero.
     pub fn reset(&mut self) {
         *self = Self::new();
     }

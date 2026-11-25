@@ -1,4 +1,4 @@
-#![doc = include_str!("class_rule.doc/_module.md")]
+//! A style rule selecting one class.
 
 use obscur_style::matching::{BlockDeclaration, StyleRule};
 use obscur_style::property::{Length, PropertyId, PropertyValue, StyleColor, layout_keyword};
@@ -6,19 +6,19 @@ use obscur_style::selector::{
     ComplexSelector, CompoundSelector, PseudoClassSelector, SelectorList, SimpleSelector,
 };
 
-#[doc = include_str!("class_rule.doc/ClassRule.md")]
+#[doc = include_str!("../../docs/api/fixture/class_rule.doc/ClassRule.md")]
 #[derive(Debug, Clone)]
 pub struct ClassRule {
-    #[doc = include_str!("class_rule.doc/class.md")]
+    /// The class name the selector matches.
     class: Box<str>,
-    #[doc = include_str!("class_rule.doc/pseudo.md")]
+    /// The pseudo-class qualifying the match, if any.
     pseudo: Option<PseudoClassSelector>,
-    #[doc = include_str!("class_rule.doc/declarations.md")]
+    /// The declarations the rule applies, in the order they were added.
     declarations: Vec<BlockDeclaration>,
 }
 
 impl ClassRule {
-    #[doc = include_str!("class_rule.doc/new.md")]
+    /// A rule matching `.class` in any state.
     #[must_use]
     pub fn new(class: &str) -> Self {
         Self {
@@ -28,7 +28,7 @@ impl ClassRule {
         }
     }
 
-    #[doc = include_str!("class_rule.doc/hover.md")]
+    #[doc = include_str!("../../docs/api/fixture/class_rule.doc/hover.md")]
     #[must_use]
     pub fn hover(class: &str) -> Self {
         Self {
@@ -37,7 +37,7 @@ impl ClassRule {
         }
     }
 
-    #[doc = include_str!("class_rule.doc/focus.md")]
+    /// A rule matching `.class:focus`, the focus counterpart of [`hover`](Self::hover).
     #[must_use]
     pub fn focus(class: &str) -> Self {
         Self {
@@ -46,7 +46,7 @@ impl ClassRule {
         }
     }
 
-    #[doc = include_str!("class_rule.doc/sized.md")]
+    /// Adds `width` and `height`, both in `px`.
     #[must_use]
     pub fn sized(self, width: f32, height: f32) -> Self {
         self.declaring(vec![
@@ -58,7 +58,7 @@ impl ClassRule {
         ])
     }
 
-    #[doc = include_str!("class_rule.doc/background.md")]
+    /// Adds an opaque `background-color` from the three channels.
     #[must_use]
     pub fn background(self, red: f32, green: f32, blue: f32) -> Self {
         self.declaring(vec![BlockDeclaration::normal(
@@ -67,7 +67,7 @@ impl ClassRule {
         )])
     }
 
-    #[doc = include_str!("class_rule.doc/scrollable.md")]
+    #[doc = include_str!("../../docs/api/fixture/class_rule.doc/scrollable.md")]
     #[must_use]
     pub fn scrollable(self) -> Self {
         // What `overflow: auto` compiles to: the shorthand is expanded into the
@@ -84,14 +84,14 @@ impl ClassRule {
         ])
     }
 
-    #[doc = include_str!("class_rule.doc/declaring.md")]
+    /// Appends declarations the named methods do not cover.
     #[must_use]
     pub fn declaring(mut self, declarations: Vec<BlockDeclaration>) -> Self {
         self.declarations.extend(declarations);
         self
     }
 
-    #[doc = include_str!("class_rule.doc/build.md")]
+    /// Assembles the selector and the declarations into the rule.
     #[must_use]
     pub fn build(self) -> StyleRule {
         let mut compound = vec![SimpleSelector::Class(self.class)];

@@ -1,4 +1,4 @@
-#![doc = include_str!("main.doc/_module.md")]
+#![doc = include_str!("../docs/api/main.doc/_module.md")]
 #![forbid(unsafe_code)]
 
 use std::io::{self, Read, Write};
@@ -6,7 +6,7 @@ use std::process::ExitCode;
 
 use obscur_okui_lsp::{Analyzer, DocumentSymbol, LspDiagnostic, LspSeverity, Server};
 
-#[doc = include_str!("main.doc/STDIN_URI.md")]
+/// The synthetic URI used for the document read from standard input in `--check`.
 const STDIN_URI: &str = "stdin://input.okui";
 
 fn main() -> ExitCode {
@@ -16,7 +16,7 @@ fn main() -> ExitCode {
     run_server()
 }
 
-#[doc = include_str!("main.doc/run_server.md")]
+/// Runs the JSON-RPC/stdio language server over real standard input/output.
 fn run_server() -> ExitCode {
     let stdin = io::stdin();
     let stdout = io::stdout();
@@ -31,7 +31,7 @@ fn run_server() -> ExitCode {
     }
 }
 
-#[doc = include_str!("main.doc/run_check.md")]
+/// Runs the single-shot `.okui` checker over standard input (the `--check` mode).
 fn run_check() -> ExitCode {
     let mut source = String::new();
     if let Err(error) = io::stdin().read_to_string(&mut source) {
@@ -56,7 +56,8 @@ fn run_check() -> ExitCode {
     }
 }
 
-#[doc = include_str!("main.doc/report.md")]
+/// Writes the diagnostics and symbol outline to `out`, returning whether any
+/// error-severity diagnostic was present.
 fn report(
     out: &mut impl Write,
     diagnostics: &[LspDiagnostic],
@@ -89,7 +90,7 @@ fn report(
     Ok(has_errors)
 }
 
-#[doc = include_str!("main.doc/write_symbol.md")]
+/// Writes one symbol and its children, indented by `depth` levels.
 fn write_symbol(out: &mut impl Write, symbol: &DocumentSymbol, depth: usize) -> io::Result<()> {
     writeln!(
         out,

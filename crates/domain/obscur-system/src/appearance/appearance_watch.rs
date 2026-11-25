@@ -1,12 +1,12 @@
-#![doc = include_str!("appearance_watch.doc/_module.md")]
+//! A live subscription to the desktop's appearance settings.
 
-#[doc = include_str!("appearance_watch.doc/AppearanceWatch.md")]
+#[doc = include_str!("../../docs/api/appearance/appearance_watch.doc/AppearanceWatch.md")]
 pub struct AppearanceWatch {
     stop: Option<Box<dyn FnOnce() + Send>>,
 }
 
 impl AppearanceWatch {
-    #[doc = include_str!("appearance_watch.doc/new.md")]
+    /// A watch that runs this when it ends.
     #[must_use]
     pub fn new(stop: impl FnOnce() + Send + 'static) -> Self {
         Self {
@@ -14,18 +14,18 @@ impl AppearanceWatch {
         }
     }
 
-    #[doc = include_str!("appearance_watch.doc/inert.md")]
+    #[doc = include_str!("../../docs/api/appearance/appearance_watch.doc/inert.md")]
     #[must_use]
     pub fn inert() -> Self {
         Self { stop: None }
     }
 
-    #[doc = include_str!("appearance_watch.doc/stop.md")]
+    /// End the watch now rather than when it goes out of scope.
     pub fn stop(mut self) {
         self.run_stop();
     }
 
-    #[doc = include_str!("appearance_watch.doc/run_stop.md")]
+    /// Run the teardown at most once, whichever way the end arrives.
     fn run_stop(&mut self) {
         if let Some(stop) = self.stop.take() {
             stop();

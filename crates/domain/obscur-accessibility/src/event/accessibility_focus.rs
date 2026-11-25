@@ -1,24 +1,24 @@
-#![doc = include_str!("accessibility_focus.doc/_module.md")]
+//! An accessibility focus change (spec §7.1 focus).
 
 use obscur_identity::NodeId;
 
-#[doc = include_str!("accessibility_focus.doc/AccessibilityFocus.md")]
+#[doc = include_str!("../../docs/api/event/accessibility_focus.doc/AccessibilityFocus.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AccessibilityFocus {
-    #[doc = include_str!("accessibility_focus.doc/focused.md")]
+    /// The newly focused node, or `None` if focus was cleared.
     focused: Option<NodeId>,
-    #[doc = include_str!("accessibility_focus.doc/previous.md")]
+    /// The previously focused node, or `None` if nothing was focused.
     previous: Option<NodeId>,
 }
 
 impl AccessibilityFocus {
-    #[doc = include_str!("accessibility_focus.doc/new.md")]
+    /// Creates a focus change from `previous` to `focused`.
     #[must_use]
     pub const fn new(focused: Option<NodeId>, previous: Option<NodeId>) -> Self {
         Self { focused, previous }
     }
 
-    #[doc = include_str!("accessibility_focus.doc/moved_to.md")]
+    /// Creates a focus change that moves focus to `node` from `previous`.
     #[must_use]
     pub const fn moved_to(node: NodeId, previous: Option<NodeId>) -> Self {
         Self {
@@ -27,7 +27,7 @@ impl AccessibilityFocus {
         }
     }
 
-    #[doc = include_str!("accessibility_focus.doc/cleared.md")]
+    /// Creates a focus change that clears focus, from `previous`.
     #[must_use]
     pub const fn cleared(previous: Option<NodeId>) -> Self {
         Self {
@@ -36,25 +36,27 @@ impl AccessibilityFocus {
         }
     }
 
-    #[doc = include_str!("accessibility_focus.doc/focused_2.md")]
+    /// Returns the newly focused node, or `None` if focus was cleared.
     #[must_use]
     pub const fn focused(&self) -> Option<NodeId> {
         self.focused
     }
 
-    #[doc = include_str!("accessibility_focus.doc/previous_2.md")]
+    /// Returns the previously focused node, or `None` if nothing was focused.
     #[must_use]
     pub const fn previous(&self) -> Option<NodeId> {
         self.previous
     }
 
-    #[doc = include_str!("accessibility_focus.doc/is_cleared.md")]
+    /// Returns whether this change cleared focus (its
+    /// [`focused`](Self::focused) is `None`).
     #[must_use]
     pub const fn is_cleared(&self) -> bool {
         self.focused.is_none()
     }
 
-    #[doc = include_str!("accessibility_focus.doc/changed.md")]
+    /// Returns whether focus actually changed — the newly focused node differs
+    /// from the previous one.
     #[must_use]
     pub fn changed(&self) -> bool {
         self.focused != self.previous

@@ -1,13 +1,14 @@
-#![doc = include_str!("from_view_value.doc/_module.md")]
+//! `FromViewValue`: reading one authored [`ViewValue`] as a concrete Rust type.
 
 use crate::view::ViewValue;
 
-#[doc = include_str!("from_view_value.doc/FromViewValue.md")]
+#[doc = include_str!("../../docs/api/component/from_view_value.doc/FromViewValue.md")]
 pub trait FromViewValue: Sized {
-    #[doc = include_str!("from_view_value.doc/TYPE_NAME.md")]
+    /// The name this type reports in a
+    /// [`PropsError::Type`](crate::component::PropsError::Type) diagnostic.
     const TYPE_NAME: &'static str;
 
-    #[doc = include_str!("from_view_value.doc/from_view_value.md")]
+    /// Reads `value` as `Self`, or [`None`] when it cannot be read.
     fn from_view_value(value: &ViewValue) -> Option<Self>;
 }
 
@@ -22,7 +23,8 @@ impl FromViewValue for bool {
     }
 }
 
-#[doc = include_str!("from_view_value.doc/impl_from_view_value_int.md")]
+/// Implements [`FromViewValue`] for an integer type via `i64::try_into`, so a
+/// value outside the target's range is a decode failure rather than a wrap.
 macro_rules! impl_from_view_value_int {
     ($($ty:ty),* $(,)?) => {
         $(

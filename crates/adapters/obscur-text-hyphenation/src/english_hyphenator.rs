@@ -1,15 +1,15 @@
-#![doc = include_str!("english_hyphenator.doc/_module.md")]
+//! The US-English Knuth-Liang [`Hyphenator`] adapter (spec §5.10).
 
 use hyphenation::{Hyphenator as _, Language, Load, Standard};
 use obscur_text::layout::Hyphenator;
 
-#[doc = include_str!("english_hyphenator.doc/EnglishHyphenator.md")]
+#[doc = include_str!("../docs/api/english_hyphenator.doc/EnglishHyphenator.md")]
 pub struct EnglishHyphenator {
     dictionary: Standard,
 }
 
 impl EnglishHyphenator {
-    #[doc = include_str!("english_hyphenator.doc/new.md")]
+    #[doc = include_str!("../docs/api/english_hyphenator.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         let dictionary = Standard::from_embedded(Language::EnglishUS)
@@ -25,7 +25,8 @@ impl Default for EnglishHyphenator {
 }
 
 impl Hyphenator for EnglishHyphenator {
-    #[doc = include_str!("english_hyphenator.doc/hyphenate.md")]
+    /// Returns the interior byte offsets within `word` at which US-English
+    /// hyphenation permits a break, ascending (spec §5.10).
     fn hyphenate(&self, word: &str) -> Vec<usize> {
         self.dictionary.hyphenate(word).breaks
     }

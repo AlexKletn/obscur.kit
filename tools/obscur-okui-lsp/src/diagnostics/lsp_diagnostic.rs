@@ -1,22 +1,25 @@
-#![doc = include_str!("lsp_diagnostic.doc/_module.md")]
+//! `LspDiagnostic`: a transport-agnostic diagnostic ready to be published to an
+//! LSP client.
 
 use crate::diagnostics::{LspSeverity, Range};
 
-#[doc = include_str!("lsp_diagnostic.doc/LspDiagnostic.md")]
+#[doc = include_str!("../../docs/api/diagnostics/lsp_diagnostic.doc/LspDiagnostic.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LspDiagnostic {
-    #[doc = include_str!("lsp_diagnostic.doc/range.md")]
+    /// The source span the diagnostic applies to.
     pub range: Range,
-    #[doc = include_str!("lsp_diagnostic.doc/severity.md")]
+    /// The severity of the diagnostic.
     pub severity: LspSeverity,
-    #[doc = include_str!("lsp_diagnostic.doc/message.md")]
+    /// The human-readable message.
     pub message: Box<str>,
-    #[doc = include_str!("lsp_diagnostic.doc/source.md")]
+    /// A short label naming the pass that produced the diagnostic
+    /// (e.g. `"okui-parse"`, `"okui-compile"`).
     pub source: &'static str,
 }
 
 impl LspDiagnostic {
-    #[doc = include_str!("lsp_diagnostic.doc/new.md")]
+    /// Creates a diagnostic over `range` with `severity`, `message` and
+    /// `source`.
     #[must_use]
     pub fn new(
         range: Range,

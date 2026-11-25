@@ -1,4 +1,4 @@
-#![doc = include_str!("input_props.doc/_module.md")]
+#![doc = include_str!("../../docs/api/input/input_props.doc/_module.md")]
 
 use obscur_identity::InternedSymbol;
 use obscur_view::component::{ComponentContract, FromProps, PropsError, prop_value};
@@ -7,23 +7,27 @@ use obscur_view::view::{ViewProperty, ViewValue};
 
 use super::Input;
 
-#[doc = include_str!("input_props.doc/InputProps.md")]
+#[doc = include_str!("../../docs/api/input/input_props.doc/InputProps.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InputProps {
-    #[doc = include_str!("input_props.doc/value.md")]
+    /// The field's text — what it displays, and what the editing session seeds from.
     pub value: String,
 }
 
 impl InputProps {
-    #[doc = include_str!("input_props.doc/VALUE.md")]
+    #[doc = include_str!("../../docs/api/input/input_props.doc/VALUE.md")]
     pub const VALUE: InternedSymbol = InternedSymbol::from_raw(0xC25E_D3CA);
 
-    #[doc = include_str!("input_props.doc/NAME.md")]
+    /// Symbol of the component's name, `"Input"` — the FNV-1a-32 hash
+    /// `#[derive(Contract)]` puts on `ComponentContract::with_name`.
     const NAME: InternedSymbol = InternedSymbol::from_raw(0x9F93_E11B);
-    #[doc = include_str!("input_props.doc/VALUE_TYPE.md")]
+    /// Opaque type identity of the `value` prop: the FNV-1a-32 hash of the Rust type
+    /// spelling `String`, which is what `#[derive(Contract)]` records as a
+    /// `PropContract`'s `value_type`. It names no view property and is compared,
+    /// never interpreted.
     const VALUE_TYPE: InternedSymbol = InternedSymbol::from_raw(0x604F_4858);
 
-    #[doc = include_str!("input_props.doc/contract.md")]
+    #[doc = include_str!("../../docs/api/input/input_props.doc/contract.md")]
     #[must_use]
     pub fn contract() -> ComponentContract {
         ComponentContract::new(Input::COMPONENT_ID)
@@ -33,7 +37,7 @@ impl InputProps {
 }
 
 impl FromProps for InputProps {
-    #[doc = include_str!("input_props.doc/from_props.md")]
+    #[doc = include_str!("../../docs/api/input/input_props.doc/from_props.md")]
     fn from_props(props: &[ViewProperty]) -> Result<Self, PropsError> {
         let value = match prop_value(props, Input::PROP_VALUE) {
             Some(ViewValue::Text(text)) => text.to_string(),

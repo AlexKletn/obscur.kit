@@ -1,4 +1,4 @@
-#![doc = include_str!("node_converter.doc/_module.md")]
+//! Builds an AccessKit [`Node`] from a domain [`SemanticNode`] (§7.1).
 
 use accesskit::{Invalid, Node, NodeId, Rect, Toggled};
 use obscur_accessibility::semantic::{SemanticNode, SemanticValue};
@@ -6,7 +6,7 @@ use obscur_identity::NodeId as DomainNodeId;
 
 use super::{ActionConverter, RoleConverter};
 
-#[doc = include_str!("node_converter.doc/NodeConverter.md")]
+#[doc = include_str!("../../docs/api/conversion/node_converter.doc/NodeConverter.md")]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct NodeConverter {
     role: RoleConverter,
@@ -14,7 +14,7 @@ pub struct NodeConverter {
 }
 
 impl NodeConverter {
-    #[doc = include_str!("node_converter.doc/new.md")]
+    /// Creates a converter with the stateless role and action converters.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -23,13 +23,14 @@ impl NodeConverter {
         }
     }
 
-    #[doc = include_str!("node_converter.doc/node_id.md")]
+    /// Maps a domain [`NodeId`](DomainNodeId) to its AccessKit [`NodeId`],
+    /// preserving the raw handle value so the two trees share identities.
     #[must_use]
     pub const fn node_id(&self, id: DomainNodeId) -> NodeId {
         NodeId(id.raw())
     }
 
-    #[doc = include_str!("node_converter.doc/convert.md")]
+    #[doc = include_str!("../../docs/api/conversion/node_converter.doc/convert.md")]
     #[must_use]
     pub fn convert(&self, node: &SemanticNode, children: &[DomainNodeId]) -> Node {
         let mut out = Node::new(self.role.convert(node.role()));

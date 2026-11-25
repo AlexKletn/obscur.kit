@@ -1,22 +1,22 @@
-#![doc = include_str!("route_state.doc/_module.md")]
+//! Opaque typed state attached to a navigation entry (spec §6.13).
 
-#[doc = include_str!("route_state.doc/RouteState.md")]
+#[doc = include_str!("../../docs/api/route/route_state.doc/RouteState.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RouteState {
-    #[doc = include_str!("route_state.doc/kind.md")]
+    /// The application-chosen type tag identifying the payload's shape.
     kind: Box<str>,
-    #[doc = include_str!("route_state.doc/payload.md")]
+    /// The application's serialized state blob, opaque to the toolkit.
     payload: Box<str>,
 }
 
 impl RouteState {
-    #[doc = include_str!("route_state.doc/empty.md")]
+    /// Creates an empty state with an empty kind and payload.
     #[must_use]
     pub fn empty() -> Self {
         Self::default()
     }
 
-    #[doc = include_str!("route_state.doc/new.md")]
+    /// Creates a state from an application `kind` tag and serialized `payload`.
     #[must_use]
     pub fn new(kind: impl Into<Box<str>>, payload: impl Into<Box<str>>) -> Self {
         Self {
@@ -25,19 +25,19 @@ impl RouteState {
         }
     }
 
-    #[doc = include_str!("route_state.doc/kind_2.md")]
+    /// Returns the application-chosen type tag.
     #[must_use]
     pub fn kind(&self) -> &str {
         &self.kind
     }
 
-    #[doc = include_str!("route_state.doc/payload_2.md")]
+    /// Returns the serialized payload.
     #[must_use]
     pub fn payload(&self) -> &str {
         &self.payload
     }
 
-    #[doc = include_str!("route_state.doc/is_empty.md")]
+    /// Returns whether both the kind and payload are empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.kind.is_empty() && self.payload.is_empty()

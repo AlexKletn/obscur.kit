@@ -1,23 +1,24 @@
-#![doc = include_str!("interned_symbol.doc/_module.md")]
+//! Interned symbol handle.
 
-#[doc = include_str!("interned_symbol.doc/InternedSymbol.md")]
+/// An opaque handle into a symbol interner. The backing table lives in the
+/// subsystem that owns interning; this type is only the stable handle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct InternedSymbol(u32);
 
 impl InternedSymbol {
-    #[doc = include_str!("interned_symbol.doc/from_raw.md")]
+    /// Wraps a raw interner index.
     #[must_use]
     pub const fn from_raw(raw: u32) -> Self {
         Self(raw)
     }
 
-    #[doc = include_str!("interned_symbol.doc/raw.md")]
+    /// Returns the raw interner index.
     #[must_use]
     pub const fn raw(self) -> u32 {
         self.0
     }
 
-    #[doc = include_str!("interned_symbol.doc/named.md")]
+    #[doc = include_str!("../../docs/api/key/interned_symbol.doc/named.md")]
     #[must_use]
     pub const fn named(name: &str) -> Self {
         let bytes = name.as_bytes();
@@ -31,13 +32,13 @@ impl InternedSymbol {
         Self(hash | 0x8000_0000)
     }
 
-    #[doc = include_str!("interned_symbol.doc/from_index.md")]
+    #[doc = include_str!("../../docs/api/key/interned_symbol.doc/from_index.md")]
     #[must_use]
     pub const fn from_index(index: u32) -> Self {
         Self(index | 0x8000_0000)
     }
 
-    #[doc = include_str!("interned_symbol.doc/index.md")]
+    #[doc = include_str!("../../docs/api/key/interned_symbol.doc/index.md")]
     #[must_use]
     pub const fn index(self) -> Option<u32> {
         if self.0 & 0x8000_0000 == 0 {

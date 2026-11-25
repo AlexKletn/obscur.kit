@@ -1,14 +1,14 @@
-#![doc = include_str!("web_dialog_provider.doc/_module.md")]
+#![doc = include_str!("../../docs/api/provider/web_dialog_provider.doc/_module.md")]
 
 use obscur_capability::SupportLevel;
 use obscur_system::dialog::{DialogProvider, DialogRequest, DialogResult};
 
-#[doc = include_str!("web_dialog_provider.doc/WebDialogProvider.md")]
+#[doc = include_str!("../../docs/api/provider/web_dialog_provider.doc/WebDialogProvider.md")]
 #[derive(Debug, Clone, Default)]
 pub struct WebDialogProvider;
 
 impl WebDialogProvider {
-    #[doc = include_str!("web_dialog_provider.doc/new.md")]
+    /// Creates a web dialog provider (spec §6.9).
     #[must_use]
     pub const fn new() -> Self {
         Self

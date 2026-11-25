@@ -1,32 +1,33 @@
-#![doc = include_str!("shell_result.doc/_module.md")]
+//! The outcome of a shell open request (spec §6.11 — shell integration).
 
-#[doc = include_str!("shell_result.doc/ShellResult.md")]
+#[doc = include_str!("../../docs/api/shell/shell_result.doc/ShellResult.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShellResult {
-    #[doc = include_str!("shell_result.doc/Opened.md")]
+    /// The shell opened the target.
     Opened,
-    #[doc = include_str!("shell_result.doc/Denied.md")]
+    /// Opening was denied by permission policy.
     Denied,
-    #[doc = include_str!("shell_result.doc/Unsupported.md")]
+    /// The provider does not support this kind of target.
     Unsupported,
-    #[doc = include_str!("shell_result.doc/Failed.md")]
+    /// Opening was attempted but failed, carrying a human-readable reason.
     Failed(Box<str>),
 }
 
 impl ShellResult {
-    #[doc = include_str!("shell_result.doc/is_opened.md")]
+    /// Returns whether the target was opened (spec §6.11).
     #[must_use]
     pub const fn is_opened(&self) -> bool {
         matches!(self, Self::Opened)
     }
 
-    #[doc = include_str!("shell_result.doc/is_recoverable.md")]
+    #[doc = include_str!("../../docs/api/shell/shell_result.doc/is_recoverable.md")]
     #[must_use]
     pub const fn is_recoverable(&self) -> bool {
         matches!(self, Self::Denied | Self::Unsupported)
     }
 
-    #[doc = include_str!("shell_result.doc/failure_reason.md")]
+    /// Returns the failure reason when the outcome is [`Failed`](Self::Failed),
+    /// else `None` (spec §6.11).
     #[must_use]
     pub fn failure_reason(&self) -> Option<&str> {
         match self {

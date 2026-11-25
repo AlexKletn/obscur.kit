@@ -1,4 +1,4 @@
-#![doc = include_str!("fs_resource_loader.doc/_module.md")]
+#![doc = include_str!("../../docs/api/loader/fs_resource_loader.doc/_module.md")]
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -7,21 +7,25 @@ use obscur_resources::port::{LoadedBytes, ResourceLoader};
 use obscur_resources::source::ResourceSource;
 use obscur_resources::state::{ResourceError, ResourceMetadata};
 
-#[doc = include_str!("fs_resource_loader.doc/FsResourceLoader.md")]
+#[doc = include_str!("../../docs/api/loader/fs_resource_loader.doc/FsResourceLoader.md")]
 #[derive(Debug, Clone)]
 pub struct FsResourceLoader {
-    #[doc = include_str!("fs_resource_loader.doc/root.md")]
+    /// The optional sandbox root. When `Some`, `File` paths resolve relative to
+    /// it and must stay within its canonicalized subtree.
     root: Option<PathBuf>,
 }
 
 impl FsResourceLoader {
-    #[doc = include_str!("fs_resource_loader.doc/new.md")]
+    /// Creates a loader with no sandbox root: `File` paths are used as-is
+    /// (absolute, or relative to the process working directory).
     #[must_use]
     pub fn new() -> Self {
         Self { root: None }
     }
 
-    #[doc = include_str!("fs_resource_loader.doc/with_root.md")]
+    /// Creates a loader confined to `root`: every `File` path resolves relative
+    /// to `root` and is rejected if it escapes the canonicalized root subtree
+    /// (spec §5.15 file, §2.7).
     #[must_use]
     pub fn with_root(root: impl Into<PathBuf>) -> Self {
         Self {
@@ -31,7 +35,7 @@ impl FsResourceLoader {
 }
 
 impl Default for FsResourceLoader {
-    #[doc = include_str!("fs_resource_loader.doc/default.md")]
+    /// The default loader is [`FsResourceLoader::new`] (no sandbox root).
     fn default() -> Self {
         Self::new()
     }
@@ -85,7 +89,11 @@ impl ResourceLoader for FsResourceLoader {
     }
 }
 
-#[doc = include_str!("fs_resource_loader.doc/map_io_error.md")]
+/// Maps a filesystem [`std::io::Error`] onto a [`ResourceError`] (spec §5.15
+/// failed state): a missing file is [`ResourceError::NotFound`], a permission
+/// failure is a [`ResourceError::SourceUnavailable`] with a fixed reason, and any
+/// other I/O failure is [`ResourceError::SourceUnavailable`] carrying the I/O
+/// error's own message.
 fn map_io_error(err: &std::io::Error) -> ResourceError {
     match err.kind() {
         std::io::ErrorKind::NotFound => ResourceError::NotFound,
@@ -96,7 +104,7 @@ fn map_io_error(err: &std::io::Error) -> ResourceError {
     }
 }
 
-#[doc = include_str!("fs_resource_loader.doc/mime_for_extension.md")]
+#[doc = include_str!("../../docs/api/loader/fs_resource_loader.doc/mime_for_extension.md")]
 fn mime_for_extension(extension: &str) -> Option<&'static str> {
     let lower = extension.to_ascii_lowercase();
     let mime = match lower.as_str() {

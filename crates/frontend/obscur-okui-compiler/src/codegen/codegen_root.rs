@@ -1,6 +1,7 @@
-#![doc = include_str!("codegen_root.doc/_module.md")]
+//! [`CodegenRoot`]: the crate paths generated code names the engine's types
+//! through.
 
-#[doc = include_str!("codegen_root.doc/CodegenRoot.md")]
+#[doc = include_str!("../../docs/api/codegen/codegen_root.doc/CodegenRoot.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodegenRoot {
     view: Box<str>,
@@ -8,19 +9,19 @@ pub struct CodegenRoot {
 }
 
 impl CodegenRoot {
-    #[doc = include_str!("codegen_root.doc/facade.md")]
+    #[doc = include_str!("../../docs/api/codegen/codegen_root.doc/facade.md")]
     #[must_use]
     pub fn facade() -> Self {
         Self::new("::obscur_kit::view::view", "::obscur_kit::identity")
     }
 
-    #[doc = include_str!("codegen_root.doc/internal.md")]
+    #[doc = include_str!("../../docs/api/codegen/codegen_root.doc/internal.md")]
     #[must_use]
     pub fn internal() -> Self {
         Self::new("::obscur_view::view", "::obscur_identity")
     }
 
-    #[doc = include_str!("codegen_root.doc/new.md")]
+    #[doc = include_str!("../../docs/api/codegen/codegen_root.doc/new.md")]
     #[must_use]
     pub fn new(view: impl Into<Box<str>>, identity: impl Into<Box<str>>) -> Self {
         Self {
@@ -29,13 +30,13 @@ impl CodegenRoot {
         }
     }
 
-    #[doc = include_str!("codegen_root.doc/view.md")]
+    /// The module path the view types are named through.
     #[must_use]
     pub fn view(&self) -> &str {
         &self.view
     }
 
-    #[doc = include_str!("codegen_root.doc/identity.md")]
+    /// The crate path the identity handles are named through.
     #[must_use]
     pub fn identity(&self) -> &str {
         &self.identity

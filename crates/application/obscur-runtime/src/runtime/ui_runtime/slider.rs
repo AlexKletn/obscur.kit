@@ -1,4 +1,4 @@
-#![doc = include_str!("slider.doc/_module.md")]
+#![doc = include_str!("../../../docs/api/runtime/ui_runtime/slider.doc/_module.md")]
 
 use obscur_geometry::Point;
 use obscur_identity::NodeId;
@@ -12,7 +12,7 @@ use crate::runtime::{CommandDispatch, Grab, SliderControl};
 use super::UiRuntime;
 
 impl UiRuntime {
-    #[doc = include_str!("slider.doc/begin_slider_drag.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/slider.doc/begin_slider_drag.md")]
     pub(super) fn begin_slider_drag(
         &mut self,
         pointer: PointerId,
@@ -34,7 +34,7 @@ impl UiRuntime {
         self.report_slider(&control, control.moved_to(grab, at))
     }
 
-    #[doc = include_str!("slider.doc/continue_slider_drag.md")]
+    /// Steers the grabbed end to the pointer, or does nothing if this pointer is not dragging a slider.
     pub(super) fn continue_slider_drag(&mut self, pointer: PointerId, at: Point) -> bool {
         let Some((node, grab)) = self.slider_drags.get(&pointer).copied() else {
             return false;
@@ -48,12 +48,12 @@ impl UiRuntime {
         self.report_slider(&control, control.moved_to(grab, at))
     }
 
-    #[doc = include_str!("slider.doc/end_slider_drag.md")]
+    /// Forgets a drag, on release or cancel.
     pub(super) fn end_slider_drag(&mut self, pointer: PointerId) {
         self.slider_drags.remove(&pointer);
     }
 
-    #[doc = include_str!("slider.doc/nudge_focused_slider.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/slider.doc/nudge_focused_slider.md")]
     pub(super) fn nudge_focused_slider(&mut self, key: LogicalKey) -> bool {
         let Some(focused) = self.focused else {
             return false;
@@ -85,7 +85,7 @@ impl UiRuntime {
         self.report_slider(&control, ends)
     }
 
-    #[doc = include_str!("slider.doc/report_slider.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/slider.doc/report_slider.md")]
     fn report_slider(&mut self, control: &SliderControl, ends: (f32, f32)) -> bool {
         let (low, high) = ends;
         // Nothing to report when the control did not move: a drag along a

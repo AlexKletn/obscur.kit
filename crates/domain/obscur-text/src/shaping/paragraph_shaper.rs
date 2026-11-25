@@ -1,4 +1,5 @@
-#![doc = include_str!("paragraph_shaper.doc/_module.md")]
+//! The multi-font paragraph orchestrator composing itemize → resolve → shape
+//! (spec §5.10).
 
 use std::cell::RefCell;
 use std::sync::Arc;
@@ -16,22 +17,32 @@ use crate::shaping::{
 };
 use crate::span::TextRange;
 
-#[doc = include_str!("paragraph_shaper.doc/ParagraphShaper.md")]
+#[doc = include_str!("../../docs/api/shaping/paragraph_shaper.doc/ParagraphShaper.md")]
 pub struct ParagraphShaper {
     itemizer: Box<dyn TextItemizer>,
     resolver: Box<dyn FontResolver>,
     shaper: Box<dyn TextShaper>,
-    #[doc = include_str!("paragraph_shaper.doc/language.md")]
+    /// The content locale's BCP-47 language hint, passed to every shaping
+    /// request (spec §7.2). Configuration, like the ports beside it — not a
+    /// per-call input — so it is *not* part of the cache key;
+    /// [`set_language`](Self::set_language) flushes the cache instead, exactly as
+    /// a port swap does.
     language: Option<Box<str>>,
-    #[doc = include_str!("paragraph_shaper.doc/cache.md")]
+    /// Memoized paragraph runs, keyed by every input that affects the output: a
+    /// two-generation, two-level table rather than a single bounded map, so that
+    /// crossing the bound evicts only the least recently used generation and a
+    /// lookup allocates nothing.
     cache: RefCell<ShapeCache>,
 }
 
 impl ParagraphShaper {
-    #[doc = include_str!("paragraph_shaper.doc/MAX_ENTRIES.md")]
+    /// The default cache capacity: the number of distinct shaped paragraphs kept
+    /// across the cache's two generations before the older one is dropped.
     pub const MAX_ENTRIES: usize = 512;
 
-    #[doc = include_str!("paragraph_shaper.doc/new.md")]
+    /// Creates a shaper composing the given `itemizer`, `resolver`, and `shaper`
+    /// ports, with a paragraph cache of the default capacity
+    /// ([`MAX_ENTRIES`](Self::MAX_ENTRIES)).
     #[must_use]
     pub fn new(
         itemizer: Box<dyn TextItemizer>,
@@ -41,7 +52,7 @@ impl ParagraphShaper {
         Self::with_capacity(itemizer, resolver, shaper, Self::MAX_ENTRIES)
     }
 
-    #[doc = include_str!("paragraph_shaper.doc/with_capacity.md")]
+    #[doc = include_str!("../../docs/api/shaping/paragraph_shaper.doc/with_capacity.md")]
     #[must_use]
     pub fn with_capacity(
         itemizer: Box<dyn TextItemizer>,
@@ -58,60 +69,66 @@ impl ParagraphShaper {
         }
     }
 
-    #[doc = include_str!("paragraph_shaper.doc/set_shaper.md")]
+    #[doc = include_str!("../../docs/api/shaping/paragraph_shaper.doc/set_shaper.md")]
     pub fn set_shaper(&mut self, shaper: Box<dyn TextShaper>) {
         self.shaper = shaper;
         self.clear_cache();
     }
 
-    #[doc = include_str!("paragraph_shaper.doc/set_itemizer.md")]
+    /// Installs `itemizer` as the run itemizer, replacing the previous one and
+    /// leaving the resolver and inner shaper in place. The paragraph cache is
+    /// flushed so no run itemized by the old itemizer survives.
     pub fn set_itemizer(&mut self, itemizer: Box<dyn TextItemizer>) {
         self.itemizer = itemizer;
         self.clear_cache();
     }
 
-    #[doc = include_str!("paragraph_shaper.doc/set_resolver.md")]
+    /// Installs `resolver` as the font resolver, replacing the previous one and
+    /// leaving the itemizer and inner shaper in place. The paragraph cache is
+    /// flushed so no run resolved by the old resolver survives.
     pub fn set_resolver(&mut self, resolver: Box<dyn FontResolver>) {
         self.resolver = resolver;
         self.clear_cache();
     }
 
-    #[doc = include_str!("paragraph_shaper.doc/set_language.md")]
+    #[doc = include_str!("../../docs/api/shaping/paragraph_shaper.doc/set_language.md")]
     pub fn set_language(&mut self, language: Option<Box<str>>) {
         self.language = language;
         self.clear_cache();
     }
 
-    #[doc = include_str!("paragraph_shaper.doc/language_2.md")]
+    /// Returns the installed BCP-47 language hint, if any.
     #[must_use]
     pub fn language(&self) -> Option<&str> {
         self.language.as_deref()
     }
 
-    #[doc = include_str!("paragraph_shaper.doc/clear_cache.md")]
+    /// Empties the paragraph cache. Called on any port swap so stale runs never
+    /// leak past a reconfiguration.
     fn clear_cache(&mut self) {
         self.cache.get_mut().clear();
     }
 
-    #[doc = include_str!("paragraph_shaper.doc/cache_len.md")]
+    /// Returns the number of currently cached paragraphs (for tests and
+    /// diagnostics).
     #[must_use]
     pub fn cache_len(&self) -> usize {
         self.cache.borrow().len()
     }
 
-    #[doc = include_str!("paragraph_shaper.doc/line_metrics.md")]
+    #[doc = include_str!("../../docs/api/shaping/paragraph_shaper.doc/line_metrics.md")]
     #[must_use]
     pub fn line_metrics(&self, font_size: f32) -> LineMetrics {
         self.shaper.line_metrics(font_size)
     }
 
-    #[doc = include_str!("paragraph_shaper.doc/line_metrics_for.md")]
+    #[doc = include_str!("../../docs/api/shaping/paragraph_shaper.doc/line_metrics_for.md")]
     #[must_use]
     pub fn line_metrics_for(&self, font: FontId, font_size: f32) -> LineMetrics {
         self.shaper.line_metrics_for(font, font_size)
     }
 
-    #[doc = include_str!("paragraph_shaper.doc/shape_paragraph.md")]
+    #[doc = include_str!("../../docs/api/shaping/paragraph_shaper.doc/shape_paragraph.md")]
     #[must_use]
     pub fn shape_paragraph(
         &self,
@@ -133,7 +150,7 @@ impl ParagraphShaper {
         .to_vec()
     }
 
-    #[doc = include_str!("paragraph_shaper.doc/shape_paragraph_shared.md")]
+    #[doc = include_str!("../../docs/api/shaping/paragraph_shaper.doc/shape_paragraph_shared.md")]
     #[must_use]
     pub fn shape_paragraph_shared(
         &self,
@@ -181,7 +198,7 @@ impl ParagraphShaper {
         runs
     }
 
-    #[doc = include_str!("paragraph_shaper.doc/shape_paragraph_uncached.md")]
+    /// Runs the full itemize → resolve → shape pipeline with no cache lookup.
     // `attributes` stays by reference to mirror the public `shape_paragraph`
     // signature this helper is factored out of and the convention used across
     // this pass.
@@ -239,7 +256,7 @@ impl ParagraphShaper {
         runs
     }
 
-    #[doc = include_str!("paragraph_shaper.doc/canonical_compose.md")]
+    #[doc = include_str!("../../docs/api/shaping/paragraph_shaper.doc/canonical_compose.md")]
     #[allow(clippy::trivially_copy_pass_by_ref)]
     fn canonical_compose(
         &self,
@@ -274,7 +291,8 @@ impl ParagraphShaper {
     }
 }
 
-#[doc = include_str!("paragraph_shaper.doc/rebase_run.md")]
+/// Rewrites a run shaped against a slice into full-text coordinates: shifts each
+/// glyph's cluster by `range.start` and sets the run source to `range`.
 fn rebase_run(run: &GlyphRun, range: TextRange) -> GlyphRun {
     let glyphs: Vec<ShapedGlyph> = run
         .glyphs()

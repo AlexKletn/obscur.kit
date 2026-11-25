@@ -1,26 +1,11 @@
-#![doc = include_str!("focus_scope.doc/_module.md")]
+//! The [`FocusScope`] focus-containment scope for dialogs and menus
+//! (spec §7.1 focus).
 
 use obscur_identity::NodeId;
 
-#[doc = include_str!("focus_scope.doc/FocusScopeId.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct FocusScopeId(u64);
+use super::FocusScopeId;
 
-impl FocusScopeId {
-    #[doc = include_str!("focus_scope.doc/from_raw.md")]
-    #[must_use]
-    pub const fn from_raw(raw: u64) -> Self {
-        Self(raw)
-    }
-
-    #[doc = include_str!("focus_scope.doc/raw.md")]
-    #[must_use]
-    pub const fn raw(self) -> u64 {
-        self.0
-    }
-}
-
-#[doc = include_str!("focus_scope.doc/FocusScope.md")]
+#[doc = include_str!("../../docs/api/focus/focus_scope.doc/FocusScope.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FocusScope {
     id: FocusScopeId,
@@ -29,7 +14,7 @@ pub struct FocusScope {
 }
 
 impl FocusScope {
-    #[doc = include_str!("focus_scope.doc/new.md")]
+    /// Creates an empty, non-trapping scope with identifier `id`.
     #[must_use]
     pub fn new(id: FocusScopeId) -> Self {
         Self {
@@ -39,56 +24,57 @@ impl FocusScope {
         }
     }
 
-    #[doc = include_str!("focus_scope.doc/trapping.md")]
+    #[doc = include_str!("../../docs/api/focus/focus_scope.doc/trapping.md")]
     #[must_use]
     pub fn trapping(mut self, trap: bool) -> Self {
         self.trap = trap;
         self
     }
 
-    #[doc = include_str!("focus_scope.doc/with_member.md")]
+    /// Appends `node` as the next member of this scope, returning the updated
+    /// value.
     #[must_use]
     pub fn with_member(mut self, node: NodeId) -> Self {
         self.members.push(node);
         self
     }
 
-    #[doc = include_str!("focus_scope.doc/add_member.md")]
+    /// Appends `node` as the next member of this scope.
     pub fn add_member(&mut self, node: NodeId) {
         self.members.push(node);
     }
 
-    #[doc = include_str!("focus_scope.doc/id.md")]
+    /// Returns this scope's identifier.
     #[must_use]
     pub const fn id(&self) -> FocusScopeId {
         self.id
     }
 
-    #[doc = include_str!("focus_scope.doc/traps.md")]
+    /// Returns whether this scope traps focus.
     #[must_use]
     pub const fn traps(&self) -> bool {
         self.trap
     }
 
-    #[doc = include_str!("focus_scope.doc/members.md")]
+    /// Returns this scope's ordered members.
     #[must_use]
     pub fn members(&self) -> &[NodeId] {
         &self.members
     }
 
-    #[doc = include_str!("focus_scope.doc/contains.md")]
+    /// Returns whether `node` is a member of this scope.
     #[must_use]
     pub fn contains(&self, node: NodeId) -> bool {
         self.members.contains(&node)
     }
 
-    #[doc = include_str!("focus_scope.doc/len.md")]
+    /// Returns the number of members in this scope.
     #[must_use]
     pub fn len(&self) -> usize {
         self.members.len()
     }
 
-    #[doc = include_str!("focus_scope.doc/is_empty.md")]
+    /// Returns whether this scope has no members.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.members.is_empty()
@@ -101,12 +87,6 @@ mod tests {
 
     fn node(raw: u64) -> NodeId {
         NodeId::from_raw(raw)
-    }
-
-    #[test]
-    fn scope_id_roundtrips() {
-        let id = FocusScopeId::from_raw(7);
-        assert_eq!(id.raw(), 7);
     }
 
     #[test]

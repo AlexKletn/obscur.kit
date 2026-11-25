@@ -1,4 +1,4 @@
-#![doc = include_str!("keyboard.doc/_module.md")]
+#![doc = include_str!("../../../docs/api/runtime/ui_runtime/keyboard.doc/_module.md")]
 
 use obscur_interaction::command::{KeyEvent, LogicalKey, Modifier, Modifiers, NamedKey};
 use obscur_interaction::event::UiEvent;
@@ -10,12 +10,12 @@ use crate::runtime::{CommandDispatch, KeyDispatch};
 use super::UiRuntime;
 
 impl UiRuntime {
-    #[doc = include_str!("keyboard.doc/set_modifiers.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/keyboard.doc/set_modifiers.md")]
     pub fn set_modifiers(&mut self, modifiers: Modifiers) {
         self.modifiers = modifiers;
     }
 
-    #[doc = include_str!("keyboard.doc/handle_key.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/keyboard.doc/handle_key.md")]
     pub fn handle_key(&mut self, event: KeyEvent) -> KeyDispatch {
         if let Some(modifier) = event.physical().modifier() {
             self.modifiers = if event.pressed() {
@@ -58,6 +58,8 @@ impl UiRuntime {
                         event.modifiers().contains(Modifier::Shift),
                         UiEvent::from_key(event),
                     );
+                } else if command.is_none() {
+                    self.try_spatial_key(event);
                 }
             }
             return KeyDispatch::new(self.focused, command);
@@ -106,7 +108,10 @@ impl UiRuntime {
                     // thirty times a second because a key was resting on it is
                     // a defect, not a feature. A held arrow still moves the
                     // caret, because that is the editing path above, not this.
-                    self.activate(target, UiEvent::from_key(event));
+                    let activation = self.dispatch_activation(target, UiEvent::from_key(event));
+                    command = command.or(activation.map(|(_, command, _)| command));
+                } else if command.is_none() {
+                    self.try_spatial_key(event);
                 }
             }
         }
@@ -114,10 +119,10 @@ impl UiRuntime {
         if !consumed_edit {
             self.request_frame(FrameReason::Input);
         }
-        KeyDispatch::new(Some(target), command)
+        KeyDispatch::new(Some(target), command).with_default_prevented(prevented)
     }
 
-    #[doc = include_str!("keyboard.doc/dispatch_raw_key.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/keyboard.doc/dispatch_raw_key.md")]
     fn dispatch_raw_key(&mut self, event: KeyEvent) -> bool {
         let name = if event.pressed() {
             EVENT_KEY_DOWN
@@ -134,7 +139,7 @@ impl UiRuntime {
             .default_prevented
     }
 
-    #[doc = include_str!("keyboard.doc/resolve_and_dispatch_shortcut.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/keyboard.doc/resolve_and_dispatch_shortcut.md")]
     fn resolve_and_dispatch_shortcut(
         &mut self,
         event: KeyEvent,
@@ -150,12 +155,12 @@ impl UiRuntime {
     }
 }
 
-#[doc = include_str!("keyboard.doc/is_tab.md")]
+/// Whether the key is Tab, whose default action is to move focus.
 fn is_tab(key: Option<LogicalKey>) -> bool {
     matches!(key, Some(LogicalKey::Named(NamedKey::Tab)))
 }
 
-#[doc = include_str!("keyboard.doc/is_activation_key.md")]
+#[doc = include_str!("../../../docs/api/runtime/ui_runtime/keyboard.doc/is_activation_key.md")]
 fn is_activation_key(key: Option<LogicalKey>) -> bool {
     matches!(
         key,

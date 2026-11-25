@@ -1,8 +1,8 @@
-#![doc = include_str!("read_signal.doc/_module.md")]
+//! `ReadSignal`: a read-only value source. Values flow down; there is no setter.
 
 use crate::state::StateGeneration;
 
-#[doc = include_str!("read_signal.doc/ReadSignal.md")]
+#[doc = include_str!("../../docs/api/state/read_signal.doc/ReadSignal.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct ReadSignal<T> {
     value: T,
@@ -10,31 +10,32 @@ pub struct ReadSignal<T> {
 }
 
 impl<T> ReadSignal<T> {
-    #[doc = include_str!("read_signal.doc/new.md")]
+    /// Builds a read-only signal snapshot from a value and the generation that
+    /// produced it.
     #[must_use]
     pub const fn new(value: T, generation: StateGeneration) -> Self {
         Self { value, generation }
     }
 
-    #[doc = include_str!("read_signal.doc/get.md")]
+    /// Borrows the current value.
     #[must_use]
     pub const fn get(&self) -> &T {
         &self.value
     }
 
-    #[doc = include_str!("read_signal.doc/generation.md")]
+    /// Returns the generation this snapshot was taken at.
     #[must_use]
     pub const fn generation(&self) -> StateGeneration {
         self.generation
     }
 
-    #[doc = include_str!("read_signal.doc/changed_since.md")]
+    #[doc = include_str!("../../docs/api/state/read_signal.doc/changed_since.md")]
     #[must_use]
     pub fn changed_since(&self, last_seen: StateGeneration) -> bool {
         self.generation.is_newer_than(last_seen)
     }
 
-    #[doc = include_str!("read_signal.doc/into_value.md")]
+    /// Consumes the snapshot and returns the owned value.
     #[must_use]
     pub fn into_value(self) -> T {
         self.value

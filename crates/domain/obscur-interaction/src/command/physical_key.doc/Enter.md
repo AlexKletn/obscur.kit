@@ -1,1 +1,0 @@
-The `Enter` / `Return` key.

@@ -1,4 +1,4 @@
-#![doc = include_str!("tree_inspector.doc/_module.md")]
+//! The §7.6 DevTools projection of a live frame: [`TreeInspector`].
 
 use obscur_identity::{FastMap, NodeId};
 use obscur_scene::command::DisplayList;
@@ -9,40 +9,44 @@ use obscur_tree::tree::RetainedTree;
 use super::ScrollOffsets;
 use crate::orchestration::{
     ComputedStyles, GeneratedContent, InspectInfo, LayoutBoxes, NodeInspection, TreeInspection,
+    horizontal_scrollbar_rects, horizontal_thumb_offset, overflow_scrolls, overflow_scrolls_x,
     overlay_commands, scroll_containers, scrollbar_rects,
 };
 
-#[doc = include_str!("tree_inspector.doc/PLACEHOLDER_PART_ID_SPACE.md")]
+#[doc = include_str!("../../docs/api/runtime/tree_inspector.doc/PLACEHOLDER_PART_ID_SPACE.md")]
 const PLACEHOLDER_PART_ID_SPACE: u64 = 1 << 61;
 
-#[doc = include_str!("tree_inspector.doc/SCROLLBAR_PART_ID_SPACE.md")]
+#[doc = include_str!("../../docs/api/runtime/tree_inspector.doc/SCROLLBAR_PART_ID_SPACE.md")]
 const SCROLLBAR_PART_ID_SPACE: u64 = 1 << 62;
 
-#[doc = include_str!("tree_inspector.doc/TreeInspector.md")]
+#[doc = include_str!("../../docs/api/runtime/tree_inspector.doc/TreeInspector.md")]
 pub(crate) struct TreeInspector {
-    #[doc = include_str!("tree_inspector.doc/mode.md")]
+    /// Whether the in-window inspect overlay is active (spec §7.6). When set, a
+    /// composed frame appends a highlight over the hovered node's border box so a
+    /// developer can debug the running UI directly in the window.
     mode: bool,
 }
 
 impl TreeInspector {
-    #[doc = include_str!("tree_inspector.doc/new.md")]
+    /// Creates an inspector with the overlay off — the state every runtime starts
+    /// in, so an application that never asks for DevTools pays nothing.
     pub(crate) const fn new() -> Self {
         Self { mode: false }
     }
 
-    #[doc = include_str!("tree_inspector.doc/set_mode.md")]
+    #[doc = include_str!("../../docs/api/runtime/tree_inspector.doc/set_mode.md")]
     pub(crate) fn set_mode(&mut self, on: bool) -> bool {
         let changed = self.mode != on;
         self.mode = on;
         changed
     }
 
-    #[doc = include_str!("tree_inspector.doc/mode_2.md")]
+    /// Returns whether the in-window inspect overlay is active.
     pub(crate) const fn mode(&self) -> bool {
         self.mode
     }
 
-    #[doc = include_str!("tree_inspector.doc/info_at.md")]
+    #[doc = include_str!("../../docs/api/runtime/tree_inspector.doc/info_at.md")]
     pub(crate) fn info_at(
         tree: &RetainedTree,
         boxes: &LayoutBoxes,
@@ -80,7 +84,7 @@ impl TreeInspector {
         })
     }
 
-    #[doc = include_str!("tree_inspector.doc/snapshot.md")]
+    #[doc = include_str!("../../docs/api/runtime/tree_inspector.doc/snapshot.md")]
     pub(crate) fn snapshot(
         tree: &RetainedTree,
         computed: &ComputedStyles,
@@ -107,7 +111,9 @@ impl TreeInspector {
         TreeInspection { nodes }
     }
 
-    #[doc = include_str!("tree_inspector.doc/apply_overlay.md")]
+    /// Appends the inspect overlay for the hovered node to `display_list`, or
+    /// returns it unchanged when inspect mode is off, nothing is hovered, or the
+    /// hovered node has no retained box.
     pub(crate) fn apply_overlay(
         &self,
         boxes: &LayoutBoxes,
@@ -125,7 +131,10 @@ impl TreeInspector {
         DisplayList::from_commands(commands)
     }
 
-    #[doc = include_str!("tree_inspector.doc/collect_synthetic_placeholder_parts.md")]
+    /// Appends a synthetic DevTools node for the placeholder part of every field
+    /// currently showing one (§4.16). Like the scrollbar parts these are **not**
+    /// retained-tree nodes and appear in no node's `children()`; they exist only in
+    /// this projection, carrying the field's box and named `placeholder`.
     fn collect_synthetic_placeholder_parts(
         boxes: &LayoutBoxes,
         generated_content: &FastMap<NodeId, GeneratedContent>,
@@ -156,7 +165,7 @@ impl TreeInspector {
         }
     }
 
-    #[doc = include_str!("tree_inspector.doc/collect_synthetic_scrollbar_parts.md")]
+    #[doc = include_str!("../../docs/api/runtime/tree_inspector.doc/collect_synthetic_scrollbar_parts.md")]
     fn collect_synthetic_scrollbar_parts(
         tree: &RetainedTree,
         computed: &ComputedStyles,
@@ -165,39 +174,61 @@ impl TreeInspector {
         out: &mut Vec<NodeInspection>,
     ) {
         for container in scroll_containers(tree, computed, boxes) {
-            let scroll_top = scroll.clamped(container);
-            let Some((track, thumb)) =
-                scrollbar_rects(container.scrollport, scroll_top, container.content_height)
-            else {
-                continue;
-            };
+            let offset = scroll.offset(container);
+            let vertical = overflow_scrolls(computed, container.node)
+                .then(|| scrollbar_rects(container.scrollport, offset.y, container.content_height))
+                .flatten();
+            let horizontal = overflow_scrolls_x(computed, container.node)
+                .then(|| {
+                    horizontal_scrollbar_rects(
+                        container.scrollport,
+                        horizontal_thumb_offset(
+                            container.scrollport,
+                            offset.x,
+                            container.content_width,
+                            container.rtl,
+                        ),
+                        container.content_width,
+                    )
+                })
+                .flatten();
             let depth = out
                 .iter()
                 .find(|n| n.node == container.node)
                 .map_or(0, |n| n.depth + 1);
-            for (index, (name, rect)) in [("scrollbar-track", track), ("scrollbar-thumb", thumb)]
-                .into_iter()
-                .enumerate()
-            {
-                let raw = SCROLLBAR_PART_ID_SPACE | (container.node.raw() << 1) | (index as u64);
-                out.push(NodeInspection {
-                    node: NodeId::from_raw(raw),
-                    parent: Some(container.node),
-                    depth,
-                    kind: "synthetic",
-                    component: None,
-                    local_name: Some(name.to_owned()),
-                    id: None,
-                    classes: Vec::new(),
-                    text: None,
-                    bounds: Some(rect),
-                    styles: Vec::new(),
-                });
+            for (axis, parts) in [vertical, horizontal].into_iter().enumerate() {
+                let Some((track, thumb)) = parts else {
+                    continue;
+                };
+                for (index, (name, rect)) in
+                    [("scrollbar-track", track), ("scrollbar-thumb", thumb)]
+                        .into_iter()
+                        .enumerate()
+                {
+                    let axis_id = (axis as u64) << 63;
+                    let raw = SCROLLBAR_PART_ID_SPACE
+                        | axis_id
+                        | (container.node.raw() << 1)
+                        | (index as u64);
+                    out.push(NodeInspection {
+                        node: NodeId::from_raw(raw),
+                        parent: Some(container.node),
+                        depth,
+                        kind: "synthetic",
+                        component: None,
+                        local_name: Some(name.to_owned()),
+                        id: None,
+                        classes: Vec::new(),
+                        text: None,
+                        bounds: Some(rect),
+                        styles: Vec::new(),
+                    });
+                }
             }
         }
     }
 
-    #[doc = include_str!("tree_inspector.doc/collect_inspection.md")]
+    /// Appends `node` (and its subtree, pre-order) to `out` as [`NodeInspection`]s.
     fn collect_inspection(
         tree: &RetainedTree,
         computed: &ComputedStyles,
@@ -242,7 +273,8 @@ impl TreeInspector {
         }
     }
 
-    #[doc = include_str!("tree_inspector.doc/inspect_styles.md")]
+    /// Reads a small, fixed set of the most diagnostic computed styles for `node`
+    /// as `(name, value)` pairs, omitting any the node did not resolve.
     fn inspect_styles(computed: &ComputedStyles, node: NodeId) -> Vec<(String, String)> {
         const KEYS: &[PropertyId] = &[
             PropertyId::Display,

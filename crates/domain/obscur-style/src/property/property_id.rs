@@ -1,71 +1,90 @@
-#![doc = include_str!("property_id.doc/_module.md")]
+#![doc = include_str!("../../docs/api/property/property_id.doc/_module.md")]
 
 use crate::property::Inheritance;
 
-#[doc = include_str!("property_id.doc/PropertyId.md")]
+#[doc = include_str!("../../docs/api/property/property_id.doc/PropertyId.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PropertyId {
-    #[doc = include_str!("property_id.doc/Color.md")]
+    /// The `color` property (foreground / text color).
     Color,
-    #[doc = include_str!("property_id.doc/BackgroundColor.md")]
+    /// The `background-color` property.
     BackgroundColor,
-    #[doc = include_str!("property_id.doc/BackgroundImage.md")]
+    /// The `background-image` property (a `LinearGradient` value; NOT inherited).
+    /// Only the `linear-gradient(...)` image form is modelled; when present it
+    /// paints the element's background fill over the `background-color`.
     BackgroundImage,
-    #[doc = include_str!("property_id.doc/BackgroundSize.md")]
+    /// The `background-size` property (a `BackgroundSize` value; NOT inherited).
+    /// Sizes one copy of the `background-image` (`cover` / `contain` / `auto` /
+    /// explicit per-axis lengths); initial `auto`.
     BackgroundSize,
-    #[doc = include_str!("property_id.doc/BackgroundPosition.md")]
+    /// The `background-position` property (a `BackgroundPosition` value; NOT
+    /// inherited). Places the sized image tile within the box; initial `0% 0%`.
     BackgroundPosition,
-    #[doc = include_str!("property_id.doc/BackgroundRepeat.md")]
+    /// The `background-repeat` property (a `BackgroundRepeat` value; NOT
+    /// inherited). Tiles the sized image tile to fill the box; initial `repeat`.
     BackgroundRepeat,
-    #[doc = include_str!("property_id.doc/ObjectFit.md")]
+    /// The `object-fit` property (an `ObjectFit` value; NOT inherited). Sizes a
+    /// replaced element's content (e.g. an `<img>`'s pixels) within its content
+    /// box: `fill` (default) / `contain` / `cover` / `none` / `scale-down`.
     ObjectFit,
-    #[doc = include_str!("property_id.doc/ObjectPosition.md")]
+    /// The `object-position` property (a `BackgroundPosition` value — the same
+    /// `<position>` pair; NOT inherited). Places a replaced element's content
+    /// within its content box once `object-fit` has sized it; initial `50% 50%`
+    /// (centered), unlike `background-position`'s `0% 0%` (CSS Images 3 §5.2).
     ObjectPosition,
-    #[doc = include_str!("property_id.doc/Opacity.md")]
+    /// The `opacity` property.
     Opacity,
-    #[doc = include_str!("property_id.doc/Width.md")]
+    /// The `width` property.
     Width,
-    #[doc = include_str!("property_id.doc/Height.md")]
+    /// The `height` property.
     Height,
-    #[doc = include_str!("property_id.doc/BoxSizing.md")]
+    /// The `box-sizing` property (Keyword-valued: `content-box` (initial) /
+    /// `border-box`; NOT inherited). Governs whether an explicit `width` /
+    /// `height` sizes the content box or the border box. See the reserved
+    /// `BOX_SIZING_*` handles in [`crate::property::layout_keyword`].
     BoxSizing,
-    #[doc = include_str!("property_id.doc/Display.md")]
+    /// The `display` property.
     Display,
-    #[doc = include_str!("property_id.doc/Visibility.md")]
+    /// The `visibility` property.
     Visibility,
 
     // ---- Positioning (not inherited) ----
-    #[doc = include_str!("property_id.doc/Position.md")]
+    /// The `position` property (Keyword-valued: `static` / `relative` /
+    /// `absolute` / `fixed`; NOT inherited). See the reserved `POSITION_*`
+    /// handles in [`crate::property::layout_keyword`].
     Position,
-    #[doc = include_str!("property_id.doc/Top.md")]
+    /// The `top` inset longhand (Length-valued, not inherited).
     Top,
-    #[doc = include_str!("property_id.doc/Right.md")]
+    /// The `right` inset longhand (Length-valued, not inherited).
     Right,
-    #[doc = include_str!("property_id.doc/Bottom.md")]
+    /// The `bottom` inset longhand (Length-valued, not inherited).
     Bottom,
-    #[doc = include_str!("property_id.doc/Left.md")]
+    /// The `left` inset longhand (Length-valued, not inherited).
     Left,
-    #[doc = include_str!("property_id.doc/ZIndex.md")]
+    /// The `z-index` property (Number-valued `<integer>`, or the reserved
+    /// [`Z_INDEX_AUTO`](crate::property::layout_keyword::Z_INDEX_AUTO) keyword for
+    /// `auto`; NOT inherited). Only honored on positioned elements; drives the
+    /// scene's stacking (paint) order.
     ZIndex,
 
     // ---- Box model: margins (Length-valued, not inherited) ----
-    #[doc = include_str!("property_id.doc/MarginTop.md")]
+    /// The `margin-top` longhand.
     MarginTop,
-    #[doc = include_str!("property_id.doc/MarginRight.md")]
+    /// The `margin-right` longhand.
     MarginRight,
-    #[doc = include_str!("property_id.doc/MarginBottom.md")]
+    /// The `margin-bottom` longhand.
     MarginBottom,
-    #[doc = include_str!("property_id.doc/MarginLeft.md")]
+    /// The `margin-left` longhand.
     MarginLeft,
 
     // ---- Box model: padding (Length-valued, not inherited) ----
-    #[doc = include_str!("property_id.doc/PaddingTop.md")]
+    /// The `padding-top` longhand.
     PaddingTop,
-    #[doc = include_str!("property_id.doc/PaddingRight.md")]
+    /// The `padding-right` longhand.
     PaddingRight,
-    #[doc = include_str!("property_id.doc/PaddingBottom.md")]
+    /// The `padding-bottom` longhand.
     PaddingBottom,
-    #[doc = include_str!("property_id.doc/PaddingLeft.md")]
+    /// The `padding-left` longhand.
     PaddingLeft,
 
     // ---- Logical box model (spec §4.13 "logical properties") ----
@@ -75,209 +94,307 @@ pub enum PropertyId {
     // them out of `COMPUTED_PROPERTIES` is deliberate — a node's computed style
     // holds `margin-left`, and every downstream phase reads that one place rather
     // than having to ask "or was it declared logically?".
-    #[doc = include_str!("property_id.doc/MarginInlineStart.md")]
+    /// The `margin-inline-start` logical longhand.
     MarginInlineStart,
-    #[doc = include_str!("property_id.doc/MarginInlineEnd.md")]
+    /// The `margin-inline-end` logical longhand.
     MarginInlineEnd,
-    #[doc = include_str!("property_id.doc/MarginBlockStart.md")]
+    /// The `margin-block-start` logical longhand.
     MarginBlockStart,
-    #[doc = include_str!("property_id.doc/MarginBlockEnd.md")]
+    /// The `margin-block-end` logical longhand.
     MarginBlockEnd,
-    #[doc = include_str!("property_id.doc/PaddingInlineStart.md")]
+    /// The `padding-inline-start` logical longhand.
     PaddingInlineStart,
-    #[doc = include_str!("property_id.doc/PaddingInlineEnd.md")]
+    /// The `padding-inline-end` logical longhand.
     PaddingInlineEnd,
-    #[doc = include_str!("property_id.doc/PaddingBlockStart.md")]
+    /// The `padding-block-start` logical longhand.
     PaddingBlockStart,
-    #[doc = include_str!("property_id.doc/PaddingBlockEnd.md")]
+    /// The `padding-block-end` logical longhand.
     PaddingBlockEnd,
-    #[doc = include_str!("property_id.doc/InsetInlineStart.md")]
+    /// The `inset-inline-start` logical longhand.
     InsetInlineStart,
-    #[doc = include_str!("property_id.doc/InsetInlineEnd.md")]
+    /// The `inset-inline-end` logical longhand.
     InsetInlineEnd,
-    #[doc = include_str!("property_id.doc/InsetBlockStart.md")]
+    /// The `inset-block-start` logical longhand.
     InsetBlockStart,
-    #[doc = include_str!("property_id.doc/InsetBlockEnd.md")]
+    /// The `inset-block-end` logical longhand.
     InsetBlockEnd,
-    #[doc = include_str!("property_id.doc/BorderInlineStartWidth.md")]
+    /// The `border-inline-start-width` logical longhand.
     BorderInlineStartWidth,
-    #[doc = include_str!("property_id.doc/BorderInlineEndWidth.md")]
+    /// The `border-inline-end-width` logical longhand.
     BorderInlineEndWidth,
-    #[doc = include_str!("property_id.doc/BorderBlockStartWidth.md")]
+    /// The `border-block-start-width` logical longhand.
     BorderBlockStartWidth,
-    #[doc = include_str!("property_id.doc/BorderBlockEndWidth.md")]
+    /// The `border-block-end-width` logical longhand.
     BorderBlockEndWidth,
-    #[doc = include_str!("property_id.doc/BorderInlineStartStyle.md")]
+    /// The `border-inline-start-style` logical longhand.
     BorderInlineStartStyle,
-    #[doc = include_str!("property_id.doc/BorderInlineEndStyle.md")]
+    /// The `border-inline-end-style` logical longhand.
     BorderInlineEndStyle,
-    #[doc = include_str!("property_id.doc/BorderBlockStartStyle.md")]
+    /// The `border-block-start-style` logical longhand.
     BorderBlockStartStyle,
-    #[doc = include_str!("property_id.doc/BorderBlockEndStyle.md")]
+    /// The `border-block-end-style` logical longhand.
     BorderBlockEndStyle,
 
     // ---- Box model: border width (Length-valued, not inherited) ----
-    #[doc = include_str!("property_id.doc/BorderTopWidth.md")]
+    /// The `border-top-width` longhand. Feeds the box model's border insets and,
+    /// paired with a non-`none` style, the painted border thickness. Initial `0`.
     BorderTopWidth,
-    #[doc = include_str!("property_id.doc/BorderRightWidth.md")]
+    /// The `border-right-width` longhand.
     BorderRightWidth,
-    #[doc = include_str!("property_id.doc/BorderBottomWidth.md")]
+    /// The `border-bottom-width` longhand.
     BorderBottomWidth,
-    #[doc = include_str!("property_id.doc/BorderLeftWidth.md")]
+    /// The `border-left-width` longhand.
     BorderLeftWidth,
 
     // ---- Border style (Keyword-valued: `none` / `solid`; not inherited) ----
-    #[doc = include_str!("property_id.doc/BorderTopStyle.md")]
+    /// The `border-top-style` longhand (Keyword-valued against the reserved
+    /// `BORDER_STYLE_*` handles in [`crate::property::layout_keyword`]). Only
+    /// `none` and `solid` are modelled; other line styles fold to `solid`.
     BorderTopStyle,
-    #[doc = include_str!("property_id.doc/BorderRightStyle.md")]
+    /// The `border-right-style` longhand.
     BorderRightStyle,
-    #[doc = include_str!("property_id.doc/BorderBottomStyle.md")]
+    /// The `border-bottom-style` longhand.
     BorderBottomStyle,
-    #[doc = include_str!("property_id.doc/BorderLeftStyle.md")]
+    /// The `border-left-style` longhand.
     BorderLeftStyle,
 
     // ---- Border color (Color-valued, not inherited) ----
-    #[doc = include_str!("property_id.doc/BorderTopColor.md")]
+    /// The `border-top-color` longhand. When unset but a style + width are
+    /// present, the painted border falls back to the computed `color`
+    /// (CSS `currentColor`).
     BorderTopColor,
-    #[doc = include_str!("property_id.doc/BorderRightColor.md")]
+    /// The `border-right-color` longhand.
     BorderRightColor,
-    #[doc = include_str!("property_id.doc/BorderBottomColor.md")]
+    /// The `border-bottom-color` longhand.
     BorderBottomColor,
-    #[doc = include_str!("property_id.doc/BorderLeftColor.md")]
+    /// The `border-left-color` longhand.
     BorderLeftColor,
 
     // ---- Border radius (Length-valued, not inherited; initial `0`) ----
-    #[doc = include_str!("property_id.doc/BorderTopLeftRadius.md")]
+    /// The `border-top-left-radius` longhand. Rounds the top-left corner of the
+    /// border box (and clips the content there); initial `0` (a square corner).
     BorderTopLeftRadius,
-    #[doc = include_str!("property_id.doc/BorderTopRightRadius.md")]
+    /// The `border-top-right-radius` longhand.
     BorderTopRightRadius,
-    #[doc = include_str!("property_id.doc/BorderBottomRightRadius.md")]
+    /// The `border-bottom-right-radius` longhand.
     BorderBottomRightRadius,
-    #[doc = include_str!("property_id.doc/BorderBottomLeftRadius.md")]
+    /// The `border-bottom-left-radius` longhand.
     BorderBottomLeftRadius,
 
     // ---- Outline (painted OUTSIDE the border box; NOT inherited; no layout) ----
-    #[doc = include_str!("property_id.doc/OutlineWidth.md")]
+    /// The `outline-width` longhand (Length-valued, not inherited; initial `0`).
+    /// Paired with a non-`none` [`OutlineStyle`](Self::OutlineStyle) it is the
+    /// thickness of the focus ring the scene coordinator strokes around — but
+    /// outside — the border box; unlike a border it reserves no layout space.
     OutlineWidth,
-    #[doc = include_str!("property_id.doc/OutlineStyle.md")]
+    /// The `outline-style` longhand (Keyword-valued against the reserved
+    /// `BORDER_STYLE_*` handles in [`crate::property::layout_keyword`]; not
+    /// inherited). Only `none` / `solid` / `dashed` are modelled (`dotted` folds
+    /// to dashed); `none` (the initial) paints no outline.
     OutlineStyle,
-    #[doc = include_str!("property_id.doc/OutlineColor.md")]
+    /// The `outline-color` longhand (Color-valued, not inherited). When unset the
+    /// painted outline falls back to the computed `color` (CSS `currentColor`).
     OutlineColor,
-    #[doc = include_str!("property_id.doc/OutlineOffset.md")]
+    /// The `outline-offset` longhand (Length-valued, not inherited; initial `0`).
+    /// The gap between the border box and the inner edge of the outline; the
+    /// outline is inflated outward by this amount before it is stroked.
     OutlineOffset,
 
     // ---- Box effects (not inherited) ----
-    #[doc = include_str!("property_id.doc/BoxShadow.md")]
+    /// The `box-shadow` property (a `BoxShadow` list value; NOT inherited).
+    /// `box-shadow: none` lowers to an empty list. The scene coordinator paints a
+    /// drop shadow behind the box's background and an inset shadow on top of it.
     BoxShadow,
-    #[doc = include_str!("property_id.doc/Filter.md")]
+    #[doc = include_str!("../../docs/api/property/property_id.doc/Filter.md")]
     Filter,
-    #[doc = include_str!("property_id.doc/BackdropFilter.md")]
+    #[doc = include_str!("../../docs/api/property/property_id.doc/BackdropFilter.md")]
     BackdropFilter,
 
     // ---- 2D transform (not inherited) ----
-    #[doc = include_str!("property_id.doc/Transform.md")]
+    /// The `transform` property (a resolved `Transform` affine; NOT inherited).
+    /// `transform: none` lowers to an absent value. The scene coordinator
+    /// brackets the element's whole subtree paint with the composed affine,
+    /// resolved about [`TransformOrigin`](Self::TransformOrigin).
     Transform,
-    #[doc = include_str!("property_id.doc/TransformOrigin.md")]
+    /// The `transform-origin` property (a `TransformOrigin`; NOT inherited).
+    /// Initial `50% 50%` (the box center).
     TransformOrigin,
 
-    #[doc = include_str!("property_id.doc/MixBlendMode.md")]
+    #[doc = include_str!("../../docs/api/property/property_id.doc/MixBlendMode.md")]
     MixBlendMode,
+    /// Blend modes for the element’s background image layers.
+    BackgroundBlendMode,
+    /// Painting boundary for each background layer.
+    BackgroundClip,
+    /// Geometric clip applied to an element and its descendants.
+    ClipPath,
+    /// Positioning boundary for each background layer.
+    BackgroundOrigin,
+    /// Scrolling behavior of background image layers.
+    BackgroundAttachment,
+    /// Controls whether the element isolates blending in a group.
+    Isolation,
 
     // ---- Sizing constraints (Length-valued, not inherited) ----
-    #[doc = include_str!("property_id.doc/MinWidth.md")]
+    /// The `min-width` property.
     MinWidth,
-    #[doc = include_str!("property_id.doc/MinHeight.md")]
+    /// The `min-height` property.
     MinHeight,
-    #[doc = include_str!("property_id.doc/MaxWidth.md")]
+    /// The `max-width` property.
     MaxWidth,
-    #[doc = include_str!("property_id.doc/MaxHeight.md")]
+    /// The `max-height` property.
     MaxHeight,
 
     // ---- Flex box (not inherited) ----
-    #[doc = include_str!("property_id.doc/Gap.md")]
+    /// The `gap` property (Length-valued).
     Gap,
-    #[doc = include_str!("property_id.doc/FlexBasis.md")]
+    /// The gutter between adjacent rows.
+    RowGap,
+    /// The gutter between adjacent columns.
+    ColumnGap,
+    /// The `flex-basis` property (Length-valued).
     FlexBasis,
-    #[doc = include_str!("property_id.doc/FlexGrow.md")]
+    /// The `flex-grow` property (Number-valued).
     FlexGrow,
-    #[doc = include_str!("property_id.doc/FlexShrink.md")]
+    /// Order group for layout items.
+    Order,
+    /// The `flex-shrink` property (Number-valued).
     FlexShrink,
-    #[doc = include_str!("property_id.doc/FlexDirection.md")]
+    /// The `flex-direction` property (Keyword-valued; see
+    /// [`crate::property::layout_keyword`]).
     FlexDirection,
-    #[doc = include_str!("property_id.doc/FlexWrap.md")]
+    /// The `flex-wrap` property (Keyword-valued: `nowrap` (initial) / `wrap` /
+    /// `wrap-reverse`; NOT inherited). Governs whether a flex container is
+    /// single-line or wraps its items onto multiple cross-axis lines. See the
+    /// reserved `FLEX_WRAP_*` handles in [`crate::property::layout_keyword`].
     FlexWrap,
-    #[doc = include_str!("property_id.doc/JustifyContent.md")]
+    /// The `justify-content` property (Keyword-valued; see
+    /// [`crate::property::layout_keyword`]). On a grid container this is the
+    /// *inline-axis* (column) distribution of leftover track space.
     JustifyContent,
-    #[doc = include_str!("property_id.doc/AlignContent.md")]
+    /// The `align-content` property (Keyword-valued; see
+    /// [`crate::property::layout_keyword`]). On a grid container this is the
+    /// *block-axis* (row) distribution of leftover track space. NOT inherited.
     AlignContent,
-    #[doc = include_str!("property_id.doc/AlignItems.md")]
+    /// The `align-items` property (Keyword-valued; see
+    /// [`crate::property::layout_keyword`]). On a grid container this is also the
+    /// default *block-axis* alignment of each item within its cell.
     AlignItems,
-    #[doc = include_str!("property_id.doc/JustifyItems.md")]
+    /// The `justify-items` property (Keyword-valued; the grid container's default
+    /// *inline-axis* alignment of each item within its cell). See
+    /// [`crate::property::layout_keyword`].
     JustifyItems,
-    #[doc = include_str!("property_id.doc/AlignSelf.md")]
+    /// The `align-self` property (Keyword-valued; a grid item's *block-axis*
+    /// alignment override, `auto` inheriting the container `align-items`). See
+    /// [`crate::property::layout_keyword`].
     AlignSelf,
-    #[doc = include_str!("property_id.doc/JustifySelf.md")]
+    /// The `justify-self` property (Keyword-valued; a grid item's *inline-axis*
+    /// alignment override, `auto` inheriting the container `justify-items`). See
+    /// [`crate::property::layout_keyword`].
     JustifySelf,
 
     // ---- Grid container (not inherited) ----
-    #[doc = include_str!("property_id.doc/GridTemplateColumns.md")]
+    /// The `grid-template-columns` property (a `GridTracks` track list).
     GridTemplateColumns,
-    #[doc = include_str!("property_id.doc/GridTemplateRows.md")]
+    /// The `grid-template-rows` property (a `GridTracks` track list).
     GridTemplateRows,
-    #[doc = include_str!("property_id.doc/GridTemplateAreas.md")]
+    /// The `grid-template-areas` property (a `GridAreas` named-cell grid; NOT
+    /// inherited). The runtime resolves a child's [`GridArea`](Self::GridArea)
+    /// name against the container's parsed template.
     GridTemplateAreas,
-    #[doc = include_str!("property_id.doc/GridArea.md")]
+    #[doc = include_str!("../../docs/api/property/property_id.doc/GridArea.md")]
     GridArea,
 
-    #[doc = include_str!("property_id.doc/GridAutoFlow.md")]
+    /// The `grid-auto-flow` property (Keyword-valued: `row` / `column` /
+    /// `dense` combinations; NOT inherited). See the reserved `GRID_AUTO_FLOW_*`
+    /// handles in [`crate::property::layout_keyword`].
     GridAutoFlow,
-    #[doc = include_str!("property_id.doc/GridAutoColumns.md")]
+    /// The `grid-auto-columns` property (a `GridTracks` track list; NOT inherited).
+    /// Sizes *implicit* column tracks — those created beyond the explicit
+    /// `grid-template-columns` by placement / auto-flow. The list is cycled: the
+    /// n-th implicit column uses index `n % len`. Initial is `auto`.
     GridAutoColumns,
-    #[doc = include_str!("property_id.doc/GridAutoRows.md")]
+    /// The `grid-auto-rows` property (a `GridTracks` track list; NOT inherited).
+    /// Sizes *implicit* row tracks — those created beyond the explicit
+    /// `grid-template-rows` by placement / auto-flow. The list is cycled: the n-th
+    /// implicit row uses index `n % len`. Initial is `auto`.
     GridAutoRows,
 
     // ---- Grid item line placement (a `GridLine` edge; not inherited) ----
-    #[doc = include_str!("property_id.doc/GridColumnStart.md")]
+    /// The `grid-column-start` longhand (the `grid-column` start edge).
     GridColumnStart,
-    #[doc = include_str!("property_id.doc/GridColumnEnd.md")]
+    /// The `grid-column-end` longhand (the `grid-column` end edge).
     GridColumnEnd,
-    #[doc = include_str!("property_id.doc/GridRowStart.md")]
+    /// The `grid-row-start` longhand (the `grid-row` start edge).
     GridRowStart,
-    #[doc = include_str!("property_id.doc/GridRowEnd.md")]
+    /// The `grid-row-end` longhand (the `grid-row` end edge).
     GridRowEnd,
 
     // ---- Typography (inherited) ----
-    #[doc = include_str!("property_id.doc/FontSize.md")]
+    /// The `font-size` property (Length-valued, inherited).
     FontSize,
-    #[doc = include_str!("property_id.doc/FontFamily.md")]
+    /// The `font-family` property (a `FontFamilies` list of family/generic
+    /// names, inherited).
     FontFamily,
-    #[doc = include_str!("property_id.doc/Direction.md")]
+    /// The `direction` property (Keyword-valued: `ltr` / `rtl`; inherited). See
+    /// the reserved `DIRECTION_*` handles in [`crate::property::layout_keyword`].
     Direction,
-    #[doc = include_str!("property_id.doc/WritingMode.md")]
+    #[doc = include_str!("../../docs/api/property/property_id.doc/WritingMode.md")]
     WritingMode,
-    #[doc = include_str!("property_id.doc/FontWeight.md")]
+    /// The `font-weight` property (Number-valued on the `1..=1000` axis;
+    /// inherited).
     FontWeight,
-    #[doc = include_str!("property_id.doc/FontStyle.md")]
+    /// The `font-style` property (Keyword-valued: `normal` / `italic` /
+    /// `oblique`; inherited). See the reserved `FONT_STYLE_*` handles in
+    /// [`crate::property::layout_keyword`].
     FontStyle,
-    #[doc = include_str!("property_id.doc/LineHeight.md")]
+    /// The `line-height` property (a unitless [`PropertyValue::Number`] multiple
+    /// of `font-size`, or a `<length>`; inherited). The keyword initial `normal`
+    /// is left unresolved so an absent value falls back to the font's natural
+    /// line height. See [`crate::property::PropertyValue`].
     LineHeight,
-    #[doc = include_str!("property_id.doc/TextAlign.md")]
+    /// The `text-align` property (Keyword-valued: `left` / `right` / `center` /
+    /// `justify` / `start` / `end`; inherited). See the reserved `TEXT_ALIGN_*`
+    /// handles in [`crate::property::layout_keyword`].
     TextAlign,
-    #[doc = include_str!("property_id.doc/TextOverflow.md")]
+    /// The `text-overflow` property (Keyword-valued: `clip` / `ellipsis`; NOT
+    /// inherited). See the reserved `TEXT_OVERFLOW_*` handles in
+    /// [`crate::property::layout_keyword`].
     TextOverflow,
-    #[doc = include_str!("property_id.doc/LetterSpacing.md")]
+    /// The `letter-spacing` property (a `<length>` [`PropertyValue::Length`], or
+    /// the keyword `normal` ≡ `0`; inherited). Extra tracking added after each
+    /// typographic character unit (CSS Text 3 §8.1). May be negative.
     LetterSpacing,
-    #[doc = include_str!("property_id.doc/WordSpacing.md")]
+    /// The `word-spacing` property (a `<length>` [`PropertyValue::Length`], or the
+    /// keyword `normal` ≡ `0`; inherited). Extra spacing added to each word
+    /// separator (CSS Text 3 §8.2). May be negative.
     WordSpacing,
-    #[doc = include_str!("property_id.doc/TextTransform.md")]
+    /// The `text-transform` property (Keyword-valued: `none` / `uppercase` /
+    /// `lowercase` / `capitalize`; inherited). Casing applied to the text before
+    /// shaping (CSS Text 3 §2.1). See the reserved `TEXT_TRANSFORM_*` handles in
+    /// [`crate::property::layout_keyword`].
     TextTransform,
-    #[doc = include_str!("property_id.doc/WhiteSpace.md")]
+    /// The `white-space` property (Keyword-valued: `normal` / `nowrap` / `pre` /
+    /// `pre-wrap` / `pre-line`; inherited). Selects whitespace collapsing (applied
+    /// before shaping) and the segment-break / soft-wrap behaviour of the line
+    /// breaker (CSS Text 3 §3, §4.1.1). See the reserved `WHITE_SPACE_*` handles in
+    /// [`crate::property::layout_keyword`].
     WhiteSpace,
-    #[doc = include_str!("property_id.doc/OverflowWrap.md")]
+    /// The `overflow-wrap` property (Keyword-valued: `normal` (initial) /
+    /// `break-word` / `anywhere`; inherited). The legacy `word-wrap` name is an
+    /// alias for it. Permits a last-resort grapheme-cluster break of an over-wide
+    /// unbreakable word so it does not overflow its line (CSS Text 3 §5.2). See the
+    /// reserved `OVERFLOW_WRAP_*` handles in [`crate::property::layout_keyword`].
     OverflowWrap,
-    #[doc = include_str!("property_id.doc/WordBreak.md")]
+    /// The `word-break` property (Keyword-valued: `normal` (initial) / `break-all`
+    /// / `keep-all`; inherited). Selects the soft-wrap granularity: `break-all`
+    /// breaks between any two typographic units, `keep-all` forbids breaking
+    /// between CJK-context letters (CSS Text 3 §5.2). See the reserved
+    /// `WORD_BREAK_*` handles in [`crate::property::layout_keyword`].
     WordBreak,
-    #[doc = include_str!("property_id.doc/TabSize.md")]
+    /// The `tab-size` property (a unitless [`PropertyValue::Number`] multiple of a
+    /// space advance, or a `<length>`; inherited; initial `8`). Sets the width of a
+    /// preserved tab stop (CSS Text 3 §4.3).
     TabSize,
 
     // ---- Overflow (Keyword-valued; NOT inherited) ----
@@ -286,25 +403,83 @@ pub enum PropertyId {
     // CSS compiler expands into the pair, exactly as `place-content` expands. An
     // author who states one axis therefore reaches the same place as one who
     // states both, and the cascade orders the two declarations for free.
-    #[doc = include_str!("property_id.doc/OverflowX.md")]
+    #[doc = include_str!("../../docs/api/property/property_id.doc/OverflowX.md")]
     OverflowX,
-    #[doc = include_str!("property_id.doc/OverflowY.md")]
+    #[doc = include_str!("../../docs/api/property/property_id.doc/OverflowY.md")]
     OverflowY,
+    /// The explicit intrinsic inner width used during size containment.
+    ContainIntrinsicWidth,
+    /// The explicit intrinsic inner height used during size containment.
+    ContainIntrinsicHeight,
+    /// The explicit intrinsic inner inline-size used during size containment.
+    ContainIntrinsicInlineSize,
+    /// The explicit intrinsic inner block-size used during size containment.
+    ContainIntrinsicBlockSize,
+    /// Container query configuration.
+    ContainerType,
+    /// Container query configuration.
+    ContainerName,
 
-    #[doc = include_str!("property_id.doc/Content.md")]
+    #[doc = include_str!("../../docs/api/property/property_id.doc/Content.md")]
     Content,
 
     // ---- Hit testing (Keyword-valued; INHERITED; neither layout nor paint) ----
-    #[doc = include_str!("property_id.doc/PointerEvents.md")]
+    #[doc = include_str!("../../docs/api/property/property_id.doc/PointerEvents.md")]
     PointerEvents,
+    /// Controls paint-time alignment of background edges.
+    PixelSnap,
+    /// Controls boundary behavior on the horizontal scroll axis.
+    OverscrollBehaviorX,
+    /// Controls boundary behavior on the vertical scroll axis.
+    OverscrollBehaviorY,
 
     // ---- The kit's own vendor namespace, `-obscur-` (spec §4.13) ----
-    #[doc = include_str!("property_id.doc/Painter.md")]
+    #[doc = include_str!("../../docs/api/property/property_id.doc/Painter.md")]
     Painter,
 }
 
 impl PropertyId {
-    #[doc = include_str!("property_id.doc/name.md")]
+    /// Reports whether container style queries compare this property using length normalization.
+    #[must_use]
+    pub const fn supports_style_query_length(self) -> bool {
+        matches!(
+            self,
+            Self::Width
+                | Self::Height
+                | Self::MinWidth
+                | Self::MinHeight
+                | Self::MaxWidth
+                | Self::MaxHeight
+                | Self::FontSize
+                | Self::FlexBasis
+                | Self::MarginTop
+                | Self::MarginRight
+                | Self::MarginBottom
+                | Self::MarginLeft
+                | Self::PaddingTop
+                | Self::PaddingRight
+                | Self::PaddingBottom
+                | Self::PaddingLeft
+                | Self::Top
+                | Self::Right
+                | Self::Bottom
+                | Self::Left
+                | Self::MarginInlineStart
+                | Self::MarginInlineEnd
+                | Self::MarginBlockStart
+                | Self::MarginBlockEnd
+                | Self::PaddingInlineStart
+                | Self::PaddingInlineEnd
+                | Self::PaddingBlockStart
+                | Self::PaddingBlockEnd
+                | Self::InsetInlineStart
+                | Self::InsetInlineEnd
+                | Self::InsetBlockStart
+                | Self::InsetBlockEnd
+        )
+    }
+
+    #[doc = include_str!("../../docs/api/property/property_id.doc/name.md")]
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
@@ -386,13 +561,22 @@ impl PropertyId {
             Self::Transform => "transform",
             Self::TransformOrigin => "transform-origin",
             Self::MixBlendMode => "mix-blend-mode",
+            Self::BackgroundBlendMode => "background-blend-mode",
+            Self::BackgroundClip => "background-clip",
+            Self::ClipPath => "clip-path",
+            Self::BackgroundOrigin => "background-origin",
+            Self::BackgroundAttachment => "background-attachment",
+            Self::Isolation => "isolation",
             Self::MinWidth => "min-width",
             Self::MinHeight => "min-height",
             Self::MaxWidth => "max-width",
             Self::MaxHeight => "max-height",
             Self::Gap => "gap",
+            Self::RowGap => "row-gap",
+            Self::ColumnGap => "column-gap",
             Self::FlexBasis => "flex-basis",
             Self::FlexGrow => "flex-grow",
+            Self::Order => "order",
             Self::FlexShrink => "flex-shrink",
             Self::FlexDirection => "flex-direction",
             Self::FlexWrap => "flex-wrap",
@@ -431,12 +615,21 @@ impl PropertyId {
             Self::TabSize => "tab-size",
             Self::OverflowX => "overflow-x",
             Self::OverflowY => "overflow-y",
+            Self::ContainIntrinsicWidth => "contain-intrinsic-width",
+            Self::ContainIntrinsicHeight => "contain-intrinsic-height",
+            Self::ContainIntrinsicInlineSize => "contain-intrinsic-inline-size",
+            Self::ContainIntrinsicBlockSize => "contain-intrinsic-block-size",
+            Self::ContainerType => "container-type",
+            Self::ContainerName => "container-name",
             Self::Content => "content",
             Self::PointerEvents => "pointer-events",
+            Self::PixelSnap => "pixel-snap",
+            Self::OverscrollBehaviorX => "overscroll-behavior-x",
+            Self::OverscrollBehaviorY => "overscroll-behavior-y",
         }
     }
 
-    #[doc = include_str!("property_id.doc/default_inheritance.md")]
+    #[doc = include_str!("../../docs/api/property/property_id.doc/default_inheritance.md")]
     #[must_use]
     pub const fn default_inheritance(self) -> Inheritance {
         match self {
@@ -521,7 +714,13 @@ impl PropertyId {
             | Self::BackdropFilter
             | Self::Transform
             | Self::TransformOrigin
+            | Self::BackgroundClip
+            | Self::ClipPath
+            | Self::BackgroundOrigin
+            | Self::BackgroundAttachment
+            | Self::BackgroundBlendMode
             | Self::MixBlendMode
+            | Self::Isolation
             | Self::MinWidth
             | Self::MinHeight
             | Self::MaxWidth
@@ -549,7 +748,10 @@ impl PropertyId {
             | Self::BorderBlockStartStyle
             | Self::BorderBlockEndStyle
             | Self::Gap
+            | Self::RowGap
+            | Self::ColumnGap
             | Self::FlexBasis
+            | Self::Order
             | Self::FlexGrow
             | Self::FlexShrink
             | Self::FlexDirection
@@ -578,11 +780,20 @@ impl PropertyId {
             // per element.
             | Self::OverflowX
             | Self::OverflowY
+            | Self::ContainIntrinsicWidth
+            | Self::ContainIntrinsicHeight
+            | Self::ContainIntrinsicInlineSize
+            | Self::ContainIntrinsicBlockSize
+            | Self::ContainerType
+            | Self::ContainerName
             // `content` selects generated text on a pseudo-element; it does not
             // inherit (CSS Content 3).
             | Self::Content
             // A painter draws ONE element's box. Inheriting it would repaint
             // every descendant with the same routine.
+            | Self::PixelSnap
+            | Self::OverscrollBehaviorX
+            | Self::OverscrollBehaviorY
             | Self::Painter => Inheritance::NotInherited,
         }
     }

@@ -1,26 +1,26 @@
-#![doc = include_str!("scope_id.doc/_module.md")]
+#![doc = include_str!("../../docs/api/scope/scope_id.doc/_module.md")]
 
-#[doc = include_str!("scope_id.doc/ScopeId.md")]
+#[doc = include_str!("../../docs/api/scope/scope_id.doc/ScopeId.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ScopeId(u32);
 
 impl ScopeId {
-    #[doc = include_str!("scope_id.doc/GLOBAL.md")]
+    #[doc = include_str!("../../docs/api/scope/scope_id.doc/GLOBAL.md")]
     pub const GLOBAL: ScopeId = ScopeId(0);
 
-    #[doc = include_str!("scope_id.doc/from_raw.md")]
+    #[doc = include_str!("../../docs/api/scope/scope_id.doc/from_raw.md")]
     #[must_use]
     pub const fn from_raw(raw: u32) -> Self {
         Self(raw)
     }
 
-    #[doc = include_str!("scope_id.doc/raw.md")]
+    /// Returns the raw integer backing this identifier.
     #[must_use]
     pub const fn raw(self) -> u32 {
         self.0
     }
 
-    #[doc = include_str!("scope_id.doc/is_global.md")]
+    /// Returns `true` when this is the reserved global scope identifier.
     #[must_use]
     pub const fn is_global(self) -> bool {
         self.0 == Self::GLOBAL.0

@@ -1,1 +1,0 @@
-Identity of this runtime.

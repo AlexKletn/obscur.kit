@@ -1,23 +1,27 @@
-#![doc = include_str!("message_pattern_error.doc/_module.md")]
+//! `MessagePatternError`: why a message pattern would not parse (spec §7.2).
 
 use std::fmt;
 
-#[doc = include_str!("message_pattern_error.doc/MessagePatternError.md")]
+#[doc = include_str!("../../docs/api/message/message_pattern_error.doc/MessagePatternError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MessagePatternError {
-    #[doc = include_str!("message_pattern_error.doc/UnclosedPlaceholder.md")]
+    /// A `{` was opened and never closed.
     UnclosedPlaceholder,
-    #[doc = include_str!("message_pattern_error.doc/UnexpectedBrace.md")]
+    /// A `}` appeared with nothing open, or a `{`/`#` appeared where a literal
+    /// must not contain one (see [`MessagePattern`](crate::message::MessagePattern)
+    /// on why there is no escape).
     UnexpectedBrace,
-    #[doc = include_str!("message_pattern_error.doc/EmptyArgumentName.md")]
+    /// A placeholder named nothing (`{}`, `{, plural, …}`).
     EmptyArgumentName,
-    #[doc = include_str!("message_pattern_error.doc/UnknownSelector.md")]
+    /// A placeholder's second field was neither `plural` nor `select`.
     UnknownSelector(Box<str>),
-    #[doc = include_str!("message_pattern_error.doc/NoArms.md")]
+    /// A selector placeholder listed no arms.
     NoArms,
-    #[doc = include_str!("message_pattern_error.doc/UnknownPluralArm.md")]
+    /// A `plural` arm was named something that is neither a CLDR plural category
+    /// nor an `=<integer>` exact match.
     UnknownPluralArm(Box<str>),
-    #[doc = include_str!("message_pattern_error.doc/MissingOtherArm.md")]
+    /// A selector placeholder had no `other` arm. CLDR requires one of every rule
+    /// set, and it is what makes an unmatched value renderable at all.
     MissingOtherArm,
 }
 

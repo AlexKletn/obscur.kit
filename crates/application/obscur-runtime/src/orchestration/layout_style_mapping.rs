@@ -1,11 +1,11 @@
-#![doc = include_str!("layout_style_mapping.doc/_module.md")]
+#![doc = include_str!("../../docs/api/orchestration/layout_style_mapping.doc/_module.md")]
 
 use obscur_geometry::Size;
 use obscur_identity::InternedSymbol;
 use obscur_layout::algorithm::{GridAutoFlow, GridLine, GridPlacement};
 use obscur_layout::model::{
-    AlignItems, AlignSelf, BoxSizing, Direction, FlexDirection, FlexWrap, Inset, JustifyContent,
-    LayoutDisplay, LayoutStyle, Position, WritingMode,
+    AlignItems, AlignSelf, BoxSizing, Dimension, Direction, FlexDirection, FlexWrap, Inset,
+    JustifyContent, LayoutDisplay, LayoutStyle, Position, SizeContainment, WritingMode,
 };
 use obscur_style::computed::{ComputedStyle, ComputedValue, OverflowAxes};
 use obscur_style::property::{GridLineValue, PropertyId, PropertyValue, layout_keyword};
@@ -16,8 +16,8 @@ use super::length_resolution::{
     margin_edges_of,
 };
 
-#[doc = include_str!("layout_style_mapping.doc/layout_style_from.md")]
-pub(super) fn layout_style_from(
+#[doc = include_str!("../../docs/api/orchestration/layout_style_mapping.doc/layout_style_from.md")]
+pub(crate) fn layout_style_from(
     computed: &ComputedStyle,
     viewport: Size,
     root_font_size: f32,
@@ -45,6 +45,11 @@ pub(super) fn layout_style_from(
         // longhands were already folded to physical ones under this same value by
         // the style crate.
         writing_mode: writing_mode_of(computed),
+        size_containment: size_containment_of(computed),
+        contained_intrinsic_size: Size::new(
+            length_px_of(computed, PropertyId::ContainIntrinsicWidth, &ctx).max(0.0),
+            length_px_of(computed, PropertyId::ContainIntrinsicHeight, &ctx).max(0.0),
+        ),
         // Positioning scheme + insets. An unauthored `position` stays `Static`
         // and unauthored insets stay `Auto`, so a default node contributes no
         // offset — byte-for-byte identical to before positioning was wired.
@@ -80,6 +85,34 @@ pub(super) fn layout_style_from(
             PropertyId::PaddingLeft,
             &ctx,
         ),
+        padding_lengths: [
+            PropertyId::PaddingTop,
+            PropertyId::PaddingRight,
+            PropertyId::PaddingBottom,
+            PropertyId::PaddingLeft,
+        ]
+        .into_iter()
+        .any(|property| {
+            matches!(
+                computed.get(property).map(ComputedValue::value),
+                Some(PropertyValue::Length(
+                    obscur_style::property::Length::Percent(_)
+                ))
+            ) || matches!(
+                computed.get(property).map(ComputedValue::value),
+                Some(PropertyValue::Calc(expr)) if expr.uses_percent()
+            )
+        })
+        .then(|| {
+            margin_edges_of(
+                computed,
+                PropertyId::PaddingTop,
+                PropertyId::PaddingRight,
+                PropertyId::PaddingBottom,
+                PropertyId::PaddingLeft,
+                &ctx,
+            )
+        }),
         // Border insets from the four `border-*-width` longhands. Unauthored
         // widths compute to `0` (their initial), so a node with no border keeps
         // the zero default — byte-for-byte identical to before borders existed.
@@ -96,8 +129,6 @@ pub(super) fn layout_style_from(
         // container that never wraps is byte-for-byte identical to before.
         flex_wrap: flex_wrap_of(computed),
         justify_content: justify_content_of(computed),
-        // Grid container: block-axis (row) track distribution. Unauthored stays
-        // `FlexStart` (no distribution), so a default grid packs rows at the top.
         align_content: align_content_of(computed),
         align_items: align_items_of(computed),
         // Grid container item-alignment defaults + per-item overrides. Unauthored
@@ -107,6 +138,19 @@ pub(super) fn layout_style_from(
         align_self: align_self_of(computed, PropertyId::AlignSelf),
         justify_self: align_self_of(computed, PropertyId::JustifySelf),
         gap: length_px_of(computed, PropertyId::Gap, &ctx),
+        gap_dimension: match dimension_of(computed, PropertyId::Gap, &ctx) {
+            gap @ (Dimension::Percent(_) | Dimension::Affine { .. } | Dimension::Math(_)) => {
+                Some(gap)
+            }
+            _ => None,
+        },
+        row_gap: computed
+            .get(PropertyId::RowGap)
+            .map(|_| dimension_of(computed, PropertyId::RowGap, &ctx)),
+        column_gap: computed
+            .get(PropertyId::ColumnGap)
+            .map(|_| dimension_of(computed, PropertyId::ColumnGap, &ctx)),
+        order: number_of(computed, PropertyId::Order, 0.0) as i32,
         flex_grow: number_of(computed, PropertyId::FlexGrow, default.flex_grow),
         flex_shrink: number_of(computed, PropertyId::FlexShrink, default.flex_shrink),
         flex_basis: dimension_of(computed, PropertyId::FlexBasis, &ctx),
@@ -127,12 +171,25 @@ pub(super) fn layout_style_from(
     }
 }
 
-#[doc = include_str!("layout_style_mapping.doc/scroll_container_of.md")]
+fn size_containment_of(computed: &ComputedStyle) -> SizeContainment {
+    match computed
+        .get(PropertyId::ContainerType)
+        .map(ComputedValue::value)
+    {
+        Some(PropertyValue::Name(kind)) if kind.as_ref() == "size" => SizeContainment::Both,
+        Some(PropertyValue::Name(kind)) if kind.as_ref() == "inline-size" => {
+            SizeContainment::Inline
+        }
+        _ => SizeContainment::None,
+    }
+}
+
+#[doc = include_str!("../../docs/api/orchestration/layout_style_mapping.doc/scroll_container_of.md")]
 fn scroll_container_of(computed: &ComputedStyle) -> bool {
     OverflowAxes::of(Some(computed)).establishes_scroll_container()
 }
 
-#[doc = include_str!("layout_style_mapping.doc/grid_auto_flow_of.md")]
+#[doc = include_str!("../../docs/api/orchestration/layout_style_mapping.doc/grid_auto_flow_of.md")]
 fn grid_auto_flow_of(computed: &ComputedStyle) -> GridAutoFlow {
     match keyword_sym(computed, PropertyId::GridAutoFlow) {
         Some(sym) if sym == layout_keyword::GRID_AUTO_FLOW_COLUMN => GridAutoFlow::Column,
@@ -144,7 +201,7 @@ fn grid_auto_flow_of(computed: &ComputedStyle) -> GridAutoFlow {
     }
 }
 
-#[doc = include_str!("layout_style_mapping.doc/grid_placement_of.md")]
+#[doc = include_str!("../../docs/api/orchestration/layout_style_mapping.doc/grid_placement_of.md")]
 fn grid_placement_of(computed: &ComputedStyle) -> GridPlacement {
     GridPlacement::new(
         grid_line_of(computed, PropertyId::GridColumnStart),
@@ -154,7 +211,7 @@ fn grid_placement_of(computed: &ComputedStyle) -> GridPlacement {
     )
 }
 
-#[doc = include_str!("layout_style_mapping.doc/grid_line_of.md")]
+#[doc = include_str!("../../docs/api/orchestration/layout_style_mapping.doc/grid_line_of.md")]
 fn grid_line_of(computed: &ComputedStyle, property: PropertyId) -> GridLine {
     match computed
         .get(property)
@@ -163,27 +220,35 @@ fn grid_line_of(computed: &ComputedStyle, property: PropertyId) -> GridLine {
     {
         Some(GridLineValue::Line(index)) => GridLine::Line(*index),
         Some(GridLineValue::Span(n)) => GridLine::Span(*n),
-        Some(GridLineValue::Named(_) | GridLineValue::Auto) | None => GridLine::Auto,
+        Some(
+            GridLineValue::Named(_) | GridLineValue::NamedOccurrence(..) | GridLineValue::Auto,
+        )
+        | None => GridLine::Auto,
     }
 }
 
-#[doc = include_str!("layout_style_mapping.doc/number_of.md")]
-fn number_of(computed: &ComputedStyle, property: PropertyId, default: f32) -> f32 {
+/// Resolves one number-valued property, defaulting to `default` when the
+/// property is absent or not a bare number.
+pub(super) fn number_of(computed: &ComputedStyle, property: PropertyId, default: f32) -> f32 {
     match computed.get(property).map(ComputedValue::value) {
         Some(&PropertyValue::Number(value)) => value,
         _ => default,
     }
 }
 
-#[doc = include_str!("layout_style_mapping.doc/keyword_sym.md")]
-fn keyword_sym(computed: &ComputedStyle, property: PropertyId) -> Option<InternedSymbol> {
+/// Extracts the interned keyword symbol of a keyword-valued property, or [`None`]
+/// when the property is absent or is not a keyword.
+pub(super) fn keyword_sym(
+    computed: &ComputedStyle,
+    property: PropertyId,
+) -> Option<InternedSymbol> {
     match computed.get(property).map(ComputedValue::value) {
         Some(&PropertyValue::Keyword(sym)) => Some(sym),
         _ => None,
     }
 }
 
-#[doc = include_str!("layout_style_mapping.doc/display_of.md")]
+#[doc = include_str!("../../docs/api/orchestration/layout_style_mapping.doc/display_of.md")]
 fn display_of(computed: &ComputedStyle) -> LayoutDisplay {
     match keyword_sym(computed, PropertyId::Display) {
         Some(sym) if sym == layout_keyword::DISPLAY_FLEX => LayoutDisplay::Flex,
@@ -194,7 +259,7 @@ fn display_of(computed: &ComputedStyle) -> LayoutDisplay {
     }
 }
 
-#[doc = include_str!("layout_style_mapping.doc/box_sizing_of.md")]
+#[doc = include_str!("../../docs/api/orchestration/layout_style_mapping.doc/box_sizing_of.md")]
 fn box_sizing_of(computed: &ComputedStyle) -> BoxSizing {
     match keyword_sym(computed, PropertyId::BoxSizing) {
         Some(sym) if sym == layout_keyword::BOX_SIZING_BORDER_BOX => BoxSizing::BorderBox,
@@ -202,16 +267,16 @@ fn box_sizing_of(computed: &ComputedStyle) -> BoxSizing {
     }
 }
 
-#[doc = include_str!("layout_style_mapping.doc/direction_of.md")]
-fn direction_of(computed: &ComputedStyle) -> Direction {
+#[doc = include_str!("../../docs/api/orchestration/layout_style_mapping.doc/direction_of.md")]
+pub(super) fn direction_of(computed: &ComputedStyle) -> Direction {
     match keyword_sym(computed, PropertyId::Direction) {
         Some(sym) if sym == layout_keyword::DIRECTION_RTL => Direction::Rtl,
         _ => Direction::Ltr,
     }
 }
 
-#[doc = include_str!("layout_style_mapping.doc/writing_mode_of.md")]
-fn writing_mode_of(computed: &ComputedStyle) -> WritingMode {
+#[doc = include_str!("../../docs/api/orchestration/layout_style_mapping.doc/writing_mode_of.md")]
+pub(crate) fn writing_mode_of(computed: &ComputedStyle) -> WritingMode {
     match keyword_sym(computed, PropertyId::WritingMode) {
         Some(sym) if sym == layout_keyword::WRITING_MODE_VERTICAL_RL => WritingMode::VerticalRl,
         Some(sym) if sym == layout_keyword::WRITING_MODE_VERTICAL_LR => WritingMode::VerticalLr,
@@ -219,7 +284,7 @@ fn writing_mode_of(computed: &ComputedStyle) -> WritingMode {
     }
 }
 
-#[doc = include_str!("layout_style_mapping.doc/position_of.md")]
+#[doc = include_str!("../../docs/api/orchestration/layout_style_mapping.doc/position_of.md")]
 fn position_of(computed: &ComputedStyle) -> Position {
     match keyword_sym(computed, PropertyId::Position) {
         Some(sym) if sym == layout_keyword::POSITION_RELATIVE => Position::Relative,
@@ -230,7 +295,8 @@ fn position_of(computed: &ComputedStyle) -> Position {
     }
 }
 
-#[doc = include_str!("layout_style_mapping.doc/flex_direction_of.md")]
+/// Resolves the computed `flex-direction` keyword to a [`FlexDirection`],
+/// defaulting to [`FlexDirection::Row`].
 fn flex_direction_of(computed: &ComputedStyle) -> FlexDirection {
     match keyword_sym(computed, PropertyId::FlexDirection) {
         Some(sym) if sym == layout_keyword::FLEX_ROW_REVERSE => FlexDirection::RowReverse,
@@ -240,7 +306,10 @@ fn flex_direction_of(computed: &ComputedStyle) -> FlexDirection {
     }
 }
 
-#[doc = include_str!("layout_style_mapping.doc/justify_content_keyword.md")]
+/// Resolves a reserved `JUSTIFY_*` keyword symbol to a [`JustifyContent`],
+/// defaulting to [`JustifyContent::FlexStart`] for an absent or unrecognized
+/// value. Shared by `justify-content` (flex main axis / grid columns) and
+/// `align-content` (grid rows), which use the same closed keyword set.
 fn justify_content_keyword(sym: Option<InternedSymbol>) -> JustifyContent {
     match sym {
         Some(sym) if sym == layout_keyword::JUSTIFY_CENTER => JustifyContent::Center,
@@ -249,21 +318,28 @@ fn justify_content_keyword(sym: Option<InternedSymbol>) -> JustifyContent {
         Some(sym) if sym == layout_keyword::JUSTIFY_SPACE_AROUND => JustifyContent::SpaceAround,
         Some(sym) if sym == layout_keyword::JUSTIFY_SPACE_EVENLY => JustifyContent::SpaceEvenly,
         Some(sym) if sym == layout_keyword::JUSTIFY_STRETCH => JustifyContent::Stretch,
+        None | Some(layout_keyword::JUSTIFY_NORMAL) => JustifyContent::Normal,
         _ => JustifyContent::FlexStart,
     }
 }
 
-#[doc = include_str!("layout_style_mapping.doc/justify_content_of.md")]
+/// Resolves the computed `justify-content` keyword to a [`JustifyContent`],
+/// defaulting to [`JustifyContent::FlexStart`]. On a grid container this is the
+/// inline-axis (column) distribution of leftover track space.
 fn justify_content_of(computed: &ComputedStyle) -> JustifyContent {
     justify_content_keyword(keyword_sym(computed, PropertyId::JustifyContent))
 }
 
-#[doc = include_str!("layout_style_mapping.doc/align_content_of.md")]
+/// Resolves the computed `align-content` keyword to a [`JustifyContent`],
+/// defaulting to [`JustifyContent::FlexStart`]. On a grid container this is the
+/// block-axis (row) distribution of leftover track space; it shares the
+/// `justify-content` keyword set.
 fn align_content_of(computed: &ComputedStyle) -> JustifyContent {
     justify_content_keyword(keyword_sym(computed, PropertyId::AlignContent))
 }
 
-#[doc = include_str!("layout_style_mapping.doc/flex_wrap_of.md")]
+/// Resolves the computed `flex-wrap` keyword to a [`FlexWrap`], defaulting to
+/// [`FlexWrap::NoWrap`] for an absent or unrecognized value.
 fn flex_wrap_of(computed: &ComputedStyle) -> FlexWrap {
     match keyword_sym(computed, PropertyId::FlexWrap) {
         Some(sym) if sym == layout_keyword::FLEX_WRAP_WRAP => FlexWrap::Wrap,
@@ -272,33 +348,47 @@ fn flex_wrap_of(computed: &ComputedStyle) -> FlexWrap {
     }
 }
 
-#[doc = include_str!("layout_style_mapping.doc/align_items_of.md")]
+/// Resolves the computed `align-items` keyword to an [`AlignItems`], defaulting
+/// to [`AlignItems::Stretch`].
 fn align_items_of(computed: &ComputedStyle) -> AlignItems {
     match keyword_sym(computed, PropertyId::AlignItems) {
         Some(sym) if sym == layout_keyword::ALIGN_START => AlignItems::FlexStart,
         Some(sym) if sym == layout_keyword::ALIGN_CENTER => AlignItems::Center,
+        Some(sym) if sym == layout_keyword::ALIGN_BASELINE => AlignItems::Baseline,
+        Some(sym) if sym == layout_keyword::ALIGN_LAST_BASELINE => AlignItems::LastBaseline,
         Some(sym) if sym == layout_keyword::ALIGN_END => AlignItems::FlexEnd,
         _ => AlignItems::Stretch,
     }
 }
 
-#[doc = include_str!("layout_style_mapping.doc/justify_items_of.md")]
+#[doc = include_str!("../../docs/api/orchestration/layout_style_mapping.doc/justify_items_of.md")]
 fn justify_items_of(computed: &ComputedStyle) -> AlignItems {
     match keyword_sym(computed, PropertyId::JustifyItems) {
         Some(sym) if sym == layout_keyword::ALIGN_START => AlignItems::Start,
         Some(sym) if sym == layout_keyword::ALIGN_CENTER => AlignItems::Center,
+        Some(sym) if sym == layout_keyword::ALIGN_BASELINE => AlignItems::Baseline,
+        Some(sym) if sym == layout_keyword::ALIGN_LAST_BASELINE => AlignItems::LastBaseline,
         Some(sym) if sym == layout_keyword::ALIGN_END => AlignItems::End,
         _ => AlignItems::Stretch,
     }
 }
 
-#[doc = include_str!("layout_style_mapping.doc/align_self_of.md")]
+#[doc = include_str!("../../docs/api/orchestration/layout_style_mapping.doc/align_self_of.md")]
 fn align_self_of(computed: &ComputedStyle, property: PropertyId) -> AlignSelf {
     match keyword_sym(computed, property) {
         Some(sym) if sym == layout_keyword::ALIGN_START => AlignSelf::Start,
         Some(sym) if sym == layout_keyword::ALIGN_CENTER => AlignSelf::Center,
+        Some(sym) if sym == layout_keyword::ALIGN_BASELINE => AlignSelf::Baseline,
+        Some(sym) if sym == layout_keyword::ALIGN_LAST_BASELINE => AlignSelf::LastBaseline,
         Some(sym) if sym == layout_keyword::ALIGN_END => AlignSelf::End,
-        Some(sym) if sym == layout_keyword::ALIGN_STRETCH => AlignSelf::Stretch,
+        Some(sym)
+            if matches!(
+                sym,
+                layout_keyword::ALIGN_STRETCH | layout_keyword::ALIGN_NORMAL
+            ) =>
+        {
+            AlignSelf::Stretch
+        }
         _ => AlignSelf::Auto,
     }
 }

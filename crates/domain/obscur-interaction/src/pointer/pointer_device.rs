@@ -1,39 +1,43 @@
-#![doc = include_str!("pointer_device.doc/_module.md")]
+//! The [`PointerDevice`] kinds that can produce pointer input (spec §4.7).
 
-#[doc = include_str!("pointer_device.doc/PointerDevice.md")]
+#[doc = include_str!("../../docs/api/pointer/pointer_device.doc/PointerDevice.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum PointerDevice {
-    #[doc = include_str!("pointer_device.doc/Mouse.md")]
+    /// An indirect pointing device that drives an on-screen cursor.
     #[default]
     Mouse,
-    #[doc = include_str!("pointer_device.doc/Touch.md")]
+    /// A direct touchscreen contact.
     Touch,
-    #[doc = include_str!("pointer_device.doc/Pen.md")]
+    /// A stylus or digital pen.
     Pen,
-    #[doc = include_str!("pointer_device.doc/Trackpad.md")]
+    /// An indirect trackpad surface driving an on-screen cursor.
     Trackpad,
 }
 
 impl PointerDevice {
-    #[doc = include_str!("pointer_device.doc/supports_pressure.md")]
+    /// Returns whether this device reports a meaningful contact pressure
+    /// ([`Pen`](Self::Pen) or [`Touch`](Self::Touch)).
     #[must_use]
     pub const fn supports_pressure(self) -> bool {
         matches!(self, Self::Pen | Self::Touch)
     }
 
-    #[doc = include_str!("pointer_device.doc/is_direct.md")]
+    /// Returns whether this device is a *direct* manipulation device — the user
+    /// touches the target itself ([`Touch`](Self::Touch), [`Pen`](Self::Pen)) —
+    /// rather than an indirect device that moves a cursor
+    /// ([`Mouse`](Self::Mouse), [`Trackpad`](Self::Trackpad)).
     #[must_use]
     pub const fn is_direct(self) -> bool {
         matches!(self, Self::Touch | Self::Pen)
     }
 
-    #[doc = include_str!("pointer_device.doc/is_touchscreen.md")]
+    #[doc = include_str!("../../docs/api/pointer/pointer_device.doc/is_touchscreen.md")]
     #[must_use]
     pub const fn is_touchscreen(self) -> bool {
         matches!(self, Self::Touch)
     }
 
-    #[doc = include_str!("pointer_device.doc/hovers_by_default.md")]
+    #[doc = include_str!("../../docs/api/pointer/pointer_device.doc/hovers_by_default.md")]
     #[must_use]
     pub const fn hovers_by_default(self) -> bool {
         matches!(self, Self::Mouse | Self::Trackpad)

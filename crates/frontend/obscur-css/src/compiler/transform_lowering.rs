@@ -1,4 +1,4 @@
-#![doc = include_str!("transform_lowering.doc/_module.md")]
+#![doc = include_str!("../../docs/api/compiler/transform_lowering.doc/_module.md")]
 
 use super::calc_lowering::lower_math_function;
 use super::property_compiler::narrow_f32;
@@ -9,7 +9,7 @@ use obscur_style::property::{
     Length, LengthExpr, PropertyValue, Transform, TransformFunction, TransformOrigin,
 };
 
-#[doc = include_str!("transform_lowering.doc/lower_transform.md")]
+#[doc = include_str!("../../docs/api/compiler/transform_lowering.doc/lower_transform.md")]
 pub(super) fn lower_transform(values: &[ParsedValue]) -> Option<PropertyValue> {
     if let [ParsedValue::Keyword(keyword)] = values
         && keyword.eq_ignore_ascii_case("none")
@@ -29,7 +29,7 @@ pub(super) fn lower_transform(values: &[ParsedValue]) -> Option<PropertyValue> {
     Some(flatten_or_defer(functions))
 }
 
-#[doc = include_str!("transform_lowering.doc/flatten_or_defer.md")]
+#[doc = include_str!("../../docs/api/compiler/transform_lowering.doc/flatten_or_defer.md")]
 fn flatten_or_defer(functions: Vec<TransformFunction>) -> PropertyValue {
     let mut acc = AffineTransform::IDENTITY;
     for function in &functions {
@@ -41,7 +41,7 @@ fn flatten_or_defer(functions: Vec<TransformFunction>) -> PropertyValue {
     PropertyValue::Transform(Transform::new(acc.coeffs))
 }
 
-#[doc = include_str!("transform_lowering.doc/lower_transform_function.md")]
+#[doc = include_str!("../../docs/api/compiler/transform_lowering.doc/lower_transform_function.md")]
 fn lower_transform_function(name: &str, args: &[ParsedValue]) -> Option<TransformFunction> {
     let argument_groups: Vec<&[ParsedValue]> =
         args.split(|v| matches!(v, ParsedValue::Comma)).collect();
@@ -66,7 +66,9 @@ fn lower_transform_function(name: &str, args: &[ParsedValue]) -> Option<Transfor
     Some(TransformFunction::Matrix(affine.coeffs))
 }
 
-#[doc = include_str!("transform_lowering.doc/lower_affine_function.md")]
+/// Lowers one `<transform-function>` whose arguments are numbers or angles —
+/// `scale`, `rotate`, `skew`, `matrix` and their axis forms — into an
+/// [`AffineTransform`]; [`None`] for an unknown name or malformed arguments.
 // The `matrix(a, b, c, d, e, f)` arm binds the six canonical CSS coefficients.
 #[allow(clippy::many_single_char_names)]
 fn lower_affine_function(
@@ -132,7 +134,9 @@ fn lower_affine_function(
     }
 }
 
-#[doc = include_str!("transform_lowering.doc/single_arg.md")]
+/// Returns the single component value when `groups` is exactly one one-component
+/// argument group (e.g. `translateX(10px)`); [`None`] for zero, multiple, or
+/// multi-component groups.
 fn single_arg<'a>(groups: &[&'a [ParsedValue]]) -> Option<&'a ParsedValue> {
     match groups {
         [[v]] => Some(v),
@@ -140,12 +144,13 @@ fn single_arg<'a>(groups: &[&'a [ParsedValue]]) -> Option<&'a ParsedValue> {
     }
 }
 
-#[doc = include_str!("transform_lowering.doc/zero.md")]
+/// The zero distance an omitted `translate` axis takes.
 fn zero() -> LengthExpr {
     LengthExpr::leaf(Length::px(0.0))
 }
 
-#[doc = include_str!("transform_lowering.doc/translate.md")]
+/// Builds the `translate` function from its two distances, collapsing a pure-pixel
+/// pair straight into its matrix.
 fn translate(x: LengthExpr, y: LengthExpr) -> TransformFunction {
     // A pair of plain pixels is already a matrix; collapsing it here keeps the
     // ordinary `translate(10px, 20px)` byte-identical to what it lowered to
@@ -156,31 +161,25 @@ fn translate(x: LengthExpr, y: LengthExpr) -> TransformFunction {
     TransformFunction::Translate(x, y)
 }
 
-#[doc = include_str!("transform_lowering.doc/translate_offset.md")]
-// The percentage arm answers `None` like the wildcard does, and is spelled out
-// anyway: it is the one rejection here that is a POLICY (see its comment), not
-// a token this grammar never had a meaning for.
-#[allow(clippy::match_same_arms)]
+/// Reads a translation distance as a length-percentage expression. It accepts
+/// unitless zero, lengths, percentages, and math functions over them. The
+/// compiler retains percentages for resolution against the arranged border box.
 fn translate_offset(value: &ParsedValue) -> Option<LengthExpr> {
     match value {
         ParsedValue::Number(n) if *n == 0.0 => Some(zero()),
-        // A percentage of the element's OWN border box, which is a used value:
-        // no length context carries it, so it is refused here (the declaration
-        // becomes an `UnsupportedCssFeature`) rather than silently taken as `0`.
-        ParsedValue::Percentage(_) => None,
-        ParsedValue::Dimension { value, unit } => match dimension_length(*value, unit)? {
-            Length::Percent(_) => None,
-            length => Some(LengthExpr::leaf(length)),
-        },
-        ParsedValue::Function { name, args } => {
-            let expr = lower_math_function(name, args)?;
-            (!expr.uses_percent()).then_some(expr)
+        ParsedValue::Percentage(value) => {
+            Some(LengthExpr::leaf(Length::Percent(narrow_f32(*value))))
         }
+        ParsedValue::Dimension { value, unit } => {
+            Some(LengthExpr::leaf(dimension_length(*value, unit)?))
+        }
+        ParsedValue::Function { name, args } => lower_math_function(name, args),
         _ => None,
     }
 }
 
-#[doc = include_str!("transform_lowering.doc/arg_number.md")]
+/// Reads a bare number argument (`scale` factors, `matrix` coefficients); [`None`]
+/// for anything that is not a unitless number.
 fn arg_number(value: &ParsedValue) -> Option<f32> {
     match value {
         ParsedValue::Number(n) => Some(narrow_f32(*n)),
@@ -188,7 +187,8 @@ fn arg_number(value: &ParsedValue) -> Option<f32> {
     }
 }
 
-#[doc = include_str!("transform_lowering.doc/arg_angle_rad.md")]
+/// Reads an `<angle>` argument (`rotate` / `skew`) as radians, accepting the four
+/// angle units (`deg`/`grad`/`rad`/`turn`) and a unitless `0`; [`None`] otherwise.
 fn arg_angle_rad(value: &ParsedValue) -> Option<f32> {
     match value {
         ParsedValue::Number(n) if *n == 0.0 => Some(0.0),
@@ -199,7 +199,7 @@ fn arg_angle_rad(value: &ParsedValue) -> Option<f32> {
     }
 }
 
-#[doc = include_str!("transform_lowering.doc/lower_transform_origin.md")]
+#[doc = include_str!("../../docs/api/compiler/transform_lowering.doc/lower_transform_origin.md")]
 pub(super) fn lower_transform_origin(values: &[ParsedValue]) -> Option<PropertyValue> {
     let center = Length::Percent(50.0);
     let origin = match values {
@@ -226,18 +226,19 @@ pub(super) fn lower_transform_origin(values: &[ParsedValue]) -> Option<PropertyV
     Some(PropertyValue::TransformOrigin(origin))
 }
 
-#[doc = include_str!("transform_lowering.doc/OriginAxis.md")]
+/// Which axis a `transform-origin` component is constrained to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum OriginAxis {
-    #[doc = include_str!("transform_lowering.doc/X.md")]
+    /// A horizontal keyword (`left` / `right`).
     X,
-    #[doc = include_str!("transform_lowering.doc/Y.md")]
+    /// A vertical keyword (`top` / `bottom`).
     Y,
-    #[doc = include_str!("transform_lowering.doc/Either.md")]
+    /// A length/percentage or `center` — usable on either axis.
     Either,
 }
 
-#[doc = include_str!("transform_lowering.doc/origin_component.md")]
+/// Lowers one `transform-origin` component into its [`Length`] and the axis it is
+/// constrained to; [`None`] for anything that is not a length/percentage/keyword.
 pub(super) fn origin_component(value: &ParsedValue) -> Option<(Length, OriginAxis)> {
     match value {
         ParsedValue::Number(n) if *n == 0.0 => Some((Length::px(0.0), OriginAxis::Either)),
@@ -259,9 +260,8 @@ pub(super) fn origin_component(value: &ParsedValue) -> Option<(Length, OriginAxi
 
 #[cfg(test)]
 mod tests {
-    use super::super::property_compiler::tests::{compile, value_of};
+    use super::super::property_compiler::tests::value_of;
 
-    use crate::compiler::CompiledDeclaration;
     use obscur_style::property::{Length, LengthExpr, PropertyValue, TransformFunction};
 
     /// Extracts the lowered resolved affine `[a,b,c,d,e,f]` from a `transform`.
@@ -276,6 +276,32 @@ mod tests {
         for (x, y) in a.iter().zip(b) {
             assert!((x - y).abs() < 1e-4, "matrix mismatch: {a:?} vs {b:?}");
         }
+    }
+
+    /// Verifies finite CSS lengths and affine coefficients after narrowing and composition.
+    #[test]
+    fn oversized_css_transforms_keep_finite_coefficients() {
+        let translation = transform_of("transform: translate(1e39px)");
+        assert_eq!(translation, [1.0, 0.0, 0.0, 1.0, f32::MAX, 0.0]);
+        assert_eq!(
+            transform_of("transform: scale(1e39) scale(2)"),
+            [f32::MAX, 0.0, 0.0, f32::MAX, 0.0, 0.0],
+        );
+        for declaration in [
+            "transform: rotate(1e39deg)",
+            "transform: rotate(1e39turn)",
+            "transform: translate(1e39in)",
+        ] {
+            assert!(
+                transform_of(declaration)
+                    .iter()
+                    .all(|value| value.is_finite())
+            );
+        }
+        assert_eq!(
+            value_of("width: 1e39px"),
+            PropertyValue::Length(Length::px(f32::MAX))
+        );
     }
 
     #[test]
@@ -348,23 +374,18 @@ mod tests {
         );
     }
 
-    /// A percentage translate resolves against the element's OWN border box —
-    /// a used value nothing here can reach. It used to be silently taken as `0`,
-    /// which made the standard centring idiom do nothing with no error to grep
-    /// for. It now reports itself as an unsupported feature.
     #[test]
-    fn transform_percent_translate_is_reported_not_zeroed() {
-        for text in [
+    fn percentage_translation_survives_lowering() {
+        for declaration in [
             "transform: translate(-50%, -50%)",
             "transform: translateX(100%)",
             "transform: translateY(50%)",
-            // Hidden inside a math function, it is the same unknown.
             "transform: translateX(calc(100% - 10px))",
         ] {
-            assert!(
-                matches!(compile(text).0, CompiledDeclaration::Unsupported(_)),
-                "{text} must be reported, never silently zeroed"
-            );
+            assert!(matches!(
+                value_of(declaration),
+                PropertyValue::TransformFunctions(_)
+            ));
         }
     }
 

@@ -1,1 +1,0 @@
-Whether nothing is bound.

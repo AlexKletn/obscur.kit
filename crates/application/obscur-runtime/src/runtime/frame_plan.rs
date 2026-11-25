@@ -1,4 +1,4 @@
-#![doc = include_str!("frame_plan.doc/_module.md")]
+#![doc = include_str!("../../docs/api/runtime/frame_plan.doc/_module.md")]
 
 use obscur_layout::invalidation::LayoutInvalidation;
 use obscur_style::invalidation::StyleInvalidation;
@@ -7,21 +7,21 @@ use crate::frame::FrameReason;
 use crate::invalidation::{Invalidation, InvalidationReason, InvalidationRouter};
 use crate::transaction::{TransactionCommit, UiOperation};
 
-#[doc = include_str!("frame_plan.doc/FramePlan.md")]
+#[doc = include_str!("../../docs/api/runtime/frame_plan.doc/FramePlan.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct FramePlan {
-    #[doc = include_str!("frame_plan.doc/reconcile.md")]
+    /// The desired view must be reconciled into the retained tree.
     reconcile: bool,
-    #[doc = include_str!("frame_plan.doc/style.md")]
+    /// Styles must be re-matched and re-resolved.
     style: bool,
-    #[doc = include_str!("frame_plan.doc/layout.md")]
+    /// Layout must be re-run.
     layout: bool,
-    #[doc = include_str!("frame_plan.doc/compose.md")]
+    /// The scene must be re-composed.
     compose: bool,
 }
 
 impl FramePlan {
-    #[doc = include_str!("frame_plan.doc/for_frame.md")]
+    #[doc = include_str!("../../docs/api/runtime/frame_plan.doc/for_frame.md")]
     #[must_use]
     pub(crate) fn for_frame(reason: FrameReason, first_frame: bool) -> Self {
         if first_frame {
@@ -54,7 +54,7 @@ impl FramePlan {
         }
     }
 
-    #[doc = include_str!("frame_plan.doc/for_transaction.md")]
+    #[doc = include_str!("../../docs/api/runtime/frame_plan.doc/for_transaction.md")]
     #[must_use]
     pub(crate) fn for_transaction(commit: &TransactionCommit) -> Self {
         let mut router = InvalidationRouter::new();
@@ -73,7 +73,7 @@ impl FramePlan {
         }
     }
 
-    #[doc = include_str!("frame_plan.doc/merged_with.md")]
+    #[doc = include_str!("../../docs/api/runtime/frame_plan.doc/merged_with.md")]
     #[must_use]
     pub(crate) const fn merged_with(self, other: Self) -> Self {
         Self {
@@ -84,7 +84,7 @@ impl FramePlan {
         }
     }
 
-    #[doc = include_str!("frame_plan.doc/full.md")]
+    /// The full plan: every phase runs (first frame / structural rebuild).
     #[must_use]
     pub(crate) const fn full() -> Self {
         Self {
@@ -95,7 +95,11 @@ impl FramePlan {
         }
     }
 
-    #[doc = include_str!("frame_plan.doc/compose_only.md")]
+    /// The compose-only plan: only the scene is re-composed; reconcile, style and
+    /// layout are all skipped and reuse the previous frame's retained tree,
+    /// computed styles and boxes. Used for a same-size text edit
+    /// ([`FrameReason::TextEdit`]) — the field re-shapes and repaints from the
+    /// live editing session while every box is provably unchanged.
     #[must_use]
     pub(crate) const fn compose_only() -> Self {
         Self {
@@ -106,7 +110,7 @@ impl FramePlan {
         }
     }
 
-    #[doc = include_str!("frame_plan.doc/invalidation_for.md")]
+    #[doc = include_str!("../../docs/api/runtime/frame_plan.doc/invalidation_for.md")]
     const fn invalidation_for(reason: FrameReason) -> Option<InvalidationReason> {
         match reason {
             FrameReason::UiCommit
@@ -121,7 +125,7 @@ impl FramePlan {
         }
     }
 
-    #[doc = include_str!("frame_plan.doc/reason_is_structural.md")]
+    #[doc = include_str!("../../docs/api/runtime/frame_plan.doc/reason_is_structural.md")]
     const fn reason_is_structural(reason: FrameReason) -> bool {
         matches!(
             reason,
@@ -129,31 +133,32 @@ impl FramePlan {
         )
     }
 
-    #[doc = include_str!("frame_plan.doc/reconcile_2.md")]
+    /// Whether the reconcile phase must run this frame.
     #[must_use]
     pub(crate) const fn reconcile(self) -> bool {
         self.reconcile
     }
 
-    #[doc = include_str!("frame_plan.doc/style_2.md")]
+    /// Whether the match + style phase must run this frame.
     #[must_use]
     pub(crate) const fn style(self) -> bool {
         self.style
     }
 
-    #[doc = include_str!("frame_plan.doc/layout_2.md")]
+    /// Whether the layout phase must run this frame.
     #[must_use]
     pub(crate) const fn layout(self) -> bool {
         self.layout
     }
 
-    #[doc = include_str!("frame_plan.doc/compose_2.md")]
+    /// Whether the scene must be re-composed this frame.
     #[must_use]
     pub(crate) const fn compose(self) -> bool {
         self.compose
     }
 
-    #[doc = include_str!("frame_plan.doc/is_idle.md")]
+    /// Whether the frame recalculates nothing: no phase runs and the previous
+    /// frame's retained scene is simply re-presented.
     #[must_use]
     pub(crate) const fn is_idle(self) -> bool {
         !(self.reconcile || self.style || self.layout || self.compose)

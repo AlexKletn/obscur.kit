@@ -1,5 +1,6 @@
-#![doc = include_str!("instance_state.doc/_module.md")]
+//! `InstanceState` (skeleton stub for the spec-defined entity; not yet implemented).
 
-#[doc = include_str!("instance_state.doc/InstanceState.md")]
+/// Placeholder for the `InstanceState` entity. See the Obscur Kit 2 specs for its
+/// contract; this stub exists to materialise the target source layout.
 #[derive(Debug)]
 pub struct InstanceState;

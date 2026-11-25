@@ -1,4 +1,4 @@
-#![doc = include_str!("checkbox_factory.doc/_module.md")]
+//! The registry entry that mints `checkbox` components (spec §2.2).
 
 use obscur_identity::ComponentId;
 use obscur_view::component::{
@@ -7,27 +7,28 @@ use obscur_view::component::{
 
 use super::{Checkbox, CheckboxComponent, CheckboxProps};
 
-#[doc = include_str!("checkbox_factory.doc/CheckboxFactory.md")]
+#[doc = include_str!("../../docs/api/checkbox/checkbox_factory.doc/CheckboxFactory.md")]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct CheckboxFactory;
 
 impl ComponentFactory for CheckboxFactory {
-    #[doc = include_str!("checkbox_factory.doc/component_id.md")]
+    #[doc = include_str!("../../docs/api/checkbox/checkbox_factory.doc/component_id.md")]
     fn component_id(&self) -> ComponentId {
         Checkbox::COMPONENT_ID
     }
 
-    #[doc = include_str!("checkbox_factory.doc/contract.md")]
+    #[doc = include_str!("../../docs/api/checkbox/checkbox_factory.doc/contract.md")]
     fn contract(&self) -> ComponentContract {
         CheckboxProps::contract()
     }
 
-    #[doc = include_str!("checkbox_factory.doc/create_instance.md")]
+    /// A fresh instance handle for one mounted `<checkbox>`.
     fn create_instance(&self, instance: InstanceId) -> ComponentInstance {
         ComponentInstance::new(instance, Checkbox::COMPONENT_ID)
     }
 
-    #[doc = include_str!("checkbox_factory.doc/create_component.md")]
+    /// A fresh [`CheckboxComponent`](super::CheckboxComponent) behind the erased
+    /// handle the registry stores.
     fn create_component(&self) -> Box<dyn ErasedComponent> {
         Box::new(CheckboxComponent)
     }

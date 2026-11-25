@@ -1,0 +1,6 @@
+Reads the full byte contents of the document behind `handle`
+(spec §6.10).
+
+# Errors
+
+Returns [`DocumentError::NotFound`](super::DocumentError::NotFound) when the token resolves to nothing.

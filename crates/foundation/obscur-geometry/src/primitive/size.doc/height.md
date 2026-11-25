@@ -1,1 +1,0 @@
-Height in logical pixels.

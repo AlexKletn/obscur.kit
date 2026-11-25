@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Quality module.
 mod adaptive_quality;
 pub use adaptive_quality::AdaptiveQuality;
 mod quality_level;

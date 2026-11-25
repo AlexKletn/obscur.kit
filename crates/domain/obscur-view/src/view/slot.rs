@@ -1,22 +1,23 @@
-#![doc = include_str!("slot.doc/_module.md")]
+#![doc = include_str!("../../docs/api/view/slot.doc/_module.md")]
 
 use obscur_identity::{ComponentId, InternedSymbol};
 
 use super::{View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-#[doc = include_str!("slot.doc/SLOT.md")]
+#[doc = include_str!("../../docs/api/view/slot.doc/SLOT.md")]
 pub const SLOT: InternedSymbol = InternedSymbol::from_raw(0x0000_0301);
 
-#[doc = include_str!("slot.doc/SLOT_OUTLET.md")]
+#[doc = include_str!("../../docs/api/view/slot.doc/SLOT_OUTLET.md")]
 pub const SLOT_OUTLET: ComponentId = ComponentId::from_raw(0x00B0_0001);
 
-#[doc = include_str!("slot.doc/DEFAULT_SLOT.md")]
+#[doc = include_str!("../../docs/api/view/slot.doc/DEFAULT_SLOT.md")]
 pub const DEFAULT_SLOT: InternedSymbol = InternedSymbol::from_raw(0x0000_0302);
 
-#[doc = include_str!("slot.doc/FIRST_MOUNTABLE_COMPONENT.md")]
+#[doc = include_str!("../../docs/api/view/slot.doc/FIRST_MOUNTABLE_COMPONENT.md")]
 const FIRST_MOUNTABLE_COMPONENT: u64 = 0x00D0_0000;
 
-#[doc = include_str!("slot.doc/slot_assignment.md")]
+/// The slot a node's props assign it to — the value of its `slot="…"` — or
+/// [`None`] when it carries no assignment (or one that is not text).
 #[must_use]
 pub fn slot_assignment(props: &[ViewProperty]) -> Option<&str> {
     props
@@ -28,7 +29,7 @@ pub fn slot_assignment(props: &[ViewProperty]) -> Option<&str> {
         })
 }
 
-#[doc = include_str!("slot.doc/assigns_slots.md")]
+#[doc = include_str!("../../docs/api/view/slot.doc/assigns_slots.md")]
 #[must_use]
 pub fn assigns_slots(nodes: &[ViewNode]) -> bool {
     nodes.iter().any(|node| match node {
@@ -37,13 +38,13 @@ pub fn assigns_slots(nodes: &[ViewNode]) -> bool {
     })
 }
 
-#[doc = include_str!("slot.doc/may_project_content.md")]
+#[doc = include_str!("../../docs/api/view/slot.doc/may_project_content.md")]
 #[must_use]
 pub fn may_project_content(component: ComponentId) -> bool {
     component.raw() >= FIRST_MOUNTABLE_COMPONENT
 }
 
-#[doc = include_str!("slot.doc/outlet_name.md")]
+#[doc = include_str!("../../docs/api/view/slot.doc/outlet_name.md")]
 fn outlet_name(node: &ViewNode) -> &str {
     match node {
         ViewNode::Element {
@@ -53,22 +54,19 @@ fn outlet_name(node: &ViewNode) -> &str {
     }
 }
 
-#[doc = include_str!("slot.doc/is_outlet.md")]
+#[doc = include_str!("../../docs/api/view/slot.doc/is_outlet.md")]
 #[must_use]
 pub fn is_outlet(node: &ViewNode) -> bool {
     matches!(node, ViewNode::Element { component, .. } if *component == SLOT_OUTLET)
 }
 
-#[doc = include_str!("slot.doc/has_outlet.md")]
+#[doc = include_str!("../../docs/api/view/slot.doc/has_outlet.md")]
 #[must_use]
 pub fn has_outlet(nodes: &[ViewNode]) -> bool {
-    nodes.iter().any(|node| match node {
-        ViewNode::Element { children, .. } => is_outlet(node) || has_outlet(children.nodes()),
-        ViewNode::Text { .. } => false,
-    })
+    super::view_fragment::any_node(nodes, is_outlet)
 }
 
-#[doc = include_str!("slot.doc/project_slots.md")]
+#[doc = include_str!("../../docs/api/view/slot.doc/project_slots.md")]
 #[must_use]
 pub fn project_slots(output: View, content: &ViewFragment) -> View {
     if !has_outlet(output.root().nodes()) {
@@ -77,7 +75,7 @@ pub fn project_slots(output: View, content: &ViewFragment) -> View {
     View::from_fragment(project_fragment(output.into_fragment(), content))
 }
 
-#[doc = include_str!("slot.doc/project_fragment.md")]
+#[doc = include_str!("../../docs/api/view/slot.doc/project_fragment.md")]
 fn project_fragment(fragment: ViewFragment, content: &ViewFragment) -> ViewFragment {
     let mut projected: Vec<ViewNode> = Vec::with_capacity(fragment.len());
     for node in fragment.into_nodes() {
@@ -107,7 +105,7 @@ fn project_fragment(fragment: ViewFragment, content: &ViewFragment) -> ViewFragm
     ViewFragment::from_nodes(projected)
 }
 
-#[doc = include_str!("slot.doc/project_node.md")]
+/// [`project_slots`] into one node's children. Text has none.
 fn project_node(node: ViewNode, content: &ViewFragment) -> ViewNode {
     match node {
         ViewNode::Element {
@@ -127,7 +125,7 @@ fn project_node(node: ViewNode, content: &ViewFragment) -> ViewNode {
     }
 }
 
-#[doc = include_str!("slot.doc/assigned_to.md")]
+#[doc = include_str!("../../docs/api/view/slot.doc/assigned_to.md")]
 fn assigned_to(node: &ViewNode, name: &str) -> bool {
     match node {
         ViewNode::Element { props, .. } => match slot_assignment(props) {

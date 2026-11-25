@@ -1,10 +1,12 @@
-#![doc = include_str!("convert.doc/_module.md")]
+#![doc = include_str!("../../docs/api/color/convert.doc/_module.md")]
 // Color math uses the canonical single-letter component names from the spec
 // (L/a/b, R/G/B, L/M/S, h/s/l); renaming them would obscure the 1:1 mapping to
 // the CSS Color 4 formulas.
 #![allow(clippy::many_single_char_names)]
 
-#[doc = include_str!("convert.doc/srgb_encode.md")]
+/// sRGB electro-optical transfer: encode a linear-light channel to gamma-encoded
+/// sRGB (CSS Color 4 §10.2, "gam_sRGB"). Input and output are nominally
+/// `0.0..=1.0`; the sign is preserved for out-of-range inputs.
 #[must_use]
 pub fn srgb_encode(c: f64) -> f64 {
     let sign = if c < 0.0 { -1.0 } else { 1.0 };
@@ -16,7 +18,9 @@ pub fn srgb_encode(c: f64) -> f64 {
     }
 }
 
-#[doc = include_str!("convert.doc/srgb_decode.md")]
+/// Inverse sRGB transfer: decode a gamma-encoded sRGB channel to linear light
+/// (CSS Color 4 §10.2, "lin_sRGB"). Input and output are nominally `0.0..=1.0`;
+/// the sign is preserved for out-of-range inputs.
 #[must_use]
 pub fn srgb_decode(c: f64) -> f64 {
     let sign = if c < 0.0 { -1.0 } else { 1.0 };
@@ -28,19 +32,20 @@ pub fn srgb_decode(c: f64) -> f64 {
     }
 }
 
-#[doc = include_str!("convert.doc/clamp_channel.md")]
+/// Clamps one channel into `[0.0, 1.0]`.
 #[must_use]
 fn clamp_channel(c: f64) -> f64 {
     c.clamp(0.0, 1.0)
 }
 
-#[doc = include_str!("convert.doc/clamp_srgb.md")]
+/// Clamps an sRGB triple into the `[0, 1]` gamut, per channel. This is the
+/// documented simple gamut treatment (see module docs).
 #[must_use]
 pub fn clamp_srgb([r, g, b]: [f64; 3]) -> [f64; 3] {
     [clamp_channel(r), clamp_channel(g), clamp_channel(b)]
 }
 
-#[doc = include_str!("convert.doc/hsl_to_srgb.md")]
+#[doc = include_str!("../../docs/api/color/convert.doc/hsl_to_srgb.md")]
 #[must_use]
 pub fn hsl_to_srgb(hue: f64, sat: f64, light: f64) -> [f64; 3] {
     // Normalize hue into [0, 360).
@@ -60,7 +65,9 @@ pub fn hsl_to_srgb(hue: f64, sat: f64, light: f64) -> [f64; 3] {
     clamp_srgb([f(0.0), f(8.0), f(4.0)])
 }
 
-#[doc = include_str!("convert.doc/oklab_to_linear_srgb.md")]
+/// Linear-light sRGB triple from Oklab (Björn Ottosson's Oklab, adopted by CSS
+/// Color 4 §9). `l` is `0.0..=1.0`; `a` and `b` are signed. Returns **linear**
+/// sRGB (no transfer function applied), unclamped.
 #[must_use]
 fn oklab_to_linear_srgb(l: f64, a: f64, b: f64) -> [f64; 3] {
     // Oklab -> LMS' (inverse of the second Oklab matrix).
@@ -80,7 +87,11 @@ fn oklab_to_linear_srgb(l: f64, a: f64, b: f64) -> [f64; 3] {
     [r, g, bl]
 }
 
-#[doc = include_str!("convert.doc/linear_srgb_to_oklab.md")]
+/// Oklab triple from **linear-light** sRGB (Björn Ottosson's Oklab, adopted by
+/// CSS Color 4 §9). Inputs are linear sRGB (no transfer function applied);
+/// returns `[L, a, b]` with `L` nominally `0.0..=1.0` and `a`/`b` signed. This is
+/// the exact inverse of `oklab_to_linear_srgb` and shares its canonical
+/// matrices; densifying a gradient's stops in Oklab needs this forward direction.
 #[must_use]
 pub fn linear_srgb_to_oklab(r: f64, g: f64, b: f64) -> [f64; 3] {
     // Linear sRGB -> LMS (first Oklab matrix, folded to sRGB).
@@ -100,14 +111,17 @@ pub fn linear_srgb_to_oklab(r: f64, g: f64, b: f64) -> [f64; 3] {
     [big_l, a, b_]
 }
 
-#[doc = include_str!("convert.doc/oklab_to_srgb.md")]
+/// Converts `oklab()` to gamma-encoded sRGB (CSS Color 4 §9.2). `l` is
+/// `0.0..=1.0`; `a`/`b` are signed. Result is encoded and clamped to `[0, 1]`.
 #[must_use]
 pub fn oklab_to_srgb(l: f64, a: f64, b: f64) -> [f64; 3] {
     let [lr, lg, lb] = oklab_to_linear_srgb(l, a, b);
     clamp_srgb([srgb_encode(lr), srgb_encode(lg), srgb_encode(lb)])
 }
 
-#[doc = include_str!("convert.doc/oklch_to_srgb.md")]
+/// Converts `oklch()` to gamma-encoded sRGB (CSS Color 4 §9.3). `l` is
+/// `0.0..=1.0`, `chroma` is `>= 0`, `hue` in degrees. Polar -> rectangular then
+/// the Oklab path.
 #[must_use]
 pub fn oklch_to_srgb(l: f64, chroma: f64, hue_deg: f64) -> [f64; 3] {
     let h = hue_deg.to_radians();
@@ -116,7 +130,7 @@ pub fn oklch_to_srgb(l: f64, chroma: f64, hue_deg: f64) -> [f64; 3] {
     oklab_to_srgb(l, a, b)
 }
 
-#[doc = include_str!("convert.doc/lab_to_srgb.md")]
+#[doc = include_str!("../../docs/api/color/convert.doc/lab_to_srgb.md")]
 #[must_use]
 pub fn lab_to_srgb(l: f64, a: f64, b: f64) -> [f64; 3] {
     // CSS Color 4 §8.1 constants.
@@ -166,13 +180,43 @@ pub fn lab_to_srgb(l: f64, a: f64, b: f64) -> [f64; 3] {
     clamp_srgb([srgb_encode(lr), srgb_encode(lg), srgb_encode(lb)])
 }
 
-#[doc = include_str!("convert.doc/lch_to_srgb.md")]
+/// Converts CIE LCH (D50) to gamma-encoded sRGB (CSS Color 4 §8.3 + §10.4). `l`
+/// is `0.0..=100.0`, `chroma >= 0`, `hue` in degrees. Polar -> rectangular then
+/// the Lab path.
 #[must_use]
 pub fn lch_to_srgb(l: f64, chroma: f64, hue_deg: f64) -> [f64; 3] {
     let h = hue_deg.to_radians();
     let a = chroma * h.cos();
     let b = chroma * h.sin();
     lab_to_srgb(l, a, b)
+}
+
+#[doc = include_str!("../../docs/api/color/convert.doc/premul_oklab.md")]
+pub fn premul_oklab(color: super::Color) -> [f64; 4] {
+    let alpha = f64::from(color.a).clamp(0.0, 1.0);
+    let lin = |channel: f32| srgb_decode(f64::from(channel).clamp(0.0, 1.0));
+    let [l, a, b] = linear_srgb_to_oklab(lin(color.r), lin(color.g), lin(color.b));
+    [l * alpha, a * alpha, b * alpha, alpha]
+}
+
+#[doc = include_str!("../../docs/api/color/convert.doc/oklab_lerp.md")]
+// The Oklab component names (L/a/b) are the canonical single-letter names from
+// CSS Color 4 §9; renaming them would obscure the 1:1 mapping to the spec.
+#[allow(clippy::many_single_char_names)]
+pub fn oklab_lerp(pa: [f64; 4], pb: [f64; 4], t: f64) -> super::Color {
+    let lerp = |x: f64, y: f64| x + (y - x) * t;
+    let l = lerp(pa[0], pb[0]);
+    let aa = lerp(pa[1], pb[1]);
+    let bb = lerp(pa[2], pb[2]);
+    let alpha = lerp(pa[3], pb[3]);
+
+    let [r, g, blue] = if alpha > 0.0 {
+        oklab_to_srgb(l / alpha, aa / alpha, bb / alpha)
+    } else {
+        [0.0, 0.0, 0.0]
+    };
+    #[allow(clippy::cast_possible_truncation)]
+    super::Color::rgba(r as f32, g as f32, blue as f32, alpha as f32)
 }
 
 #[cfg(test)]

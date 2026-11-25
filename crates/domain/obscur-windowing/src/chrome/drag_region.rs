@@ -1,36 +1,20 @@
-#![doc = include_str!("drag_region.doc/_module.md")]
+//! A semantic window-drag area and its double-click action (spec §6.4).
 
 use obscur_geometry::{Point, Rect};
 
-#[doc = include_str!("drag_region.doc/DoubleClickAction.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum DoubleClickAction {
-    #[doc = include_str!("drag_region.doc/None.md")]
-    None,
-    #[doc = include_str!("drag_region.doc/Maximize.md")]
-    Maximize,
-    #[doc = include_str!("drag_region.doc/Minimize.md")]
-    Minimize,
-}
+use super::DoubleClickAction;
 
-impl Default for DoubleClickAction {
-    #[doc = include_str!("drag_region.doc/default.md")]
-    fn default() -> Self {
-        Self::None
-    }
-}
-
-#[doc = include_str!("drag_region.doc/DragRegion.md")]
+#[doc = include_str!("../../docs/api/chrome/drag_region.doc/DragRegion.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DragRegion {
-    #[doc = include_str!("drag_region.doc/bounds.md")]
+    /// The window-local area treated as draggable.
     pub bounds: Rect,
-    #[doc = include_str!("drag_region.doc/double_click_action.md")]
+    /// The action taken on a double-click within the region.
     pub double_click_action: DoubleClickAction,
 }
 
 impl DragRegion {
-    #[doc = include_str!("drag_region.doc/new.md")]
+    /// Creates a drag region over `bounds` with no double-click action.
     #[must_use]
     pub const fn new(bounds: Rect) -> Self {
         Self {
@@ -39,26 +23,26 @@ impl DragRegion {
         }
     }
 
-    #[doc = include_str!("drag_region.doc/with_double_click_action.md")]
+    /// Sets the double-click action, returning the updated region.
     #[must_use]
     pub const fn with_double_click_action(mut self, action: DoubleClickAction) -> Self {
         self.double_click_action = action;
         self
     }
 
-    #[doc = include_str!("drag_region.doc/bounds_2.md")]
+    /// Returns the window-local draggable area.
     #[must_use]
     pub const fn bounds(&self) -> Rect {
         self.bounds
     }
 
-    #[doc = include_str!("drag_region.doc/double_click_action_2.md")]
+    /// Returns the action taken on a double-click within the region.
     #[must_use]
     pub const fn double_click_action(&self) -> DoubleClickAction {
         self.double_click_action
     }
 
-    #[doc = include_str!("drag_region.doc/contains.md")]
+    /// Returns whether the window-local point lies within the drag region.
     #[must_use]
     pub fn contains(&self, point: Point) -> bool {
         self.bounds.contains(point)

@@ -1,4 +1,4 @@
-#![doc = include_str!("hover_update.doc/_module.md")]
+//! What one pointer event does to the hover chain: [`HoverUpdate`].
 
 use obscur_identity::NodeId;
 use obscur_interaction::hover::{HoverChain, HoverTransition};
@@ -7,17 +7,19 @@ use obscur_tree::tree::RetainedTree;
 
 use super::AncestorChain;
 
-#[doc = include_str!("hover_update.doc/HoverUpdate.md")]
+#[doc = include_str!("../../docs/api/runtime/hover_update.doc/HoverUpdate.md")]
 #[derive(Debug, Clone)]
 pub(crate) struct HoverUpdate {
-    #[doc = include_str!("hover_update.doc/chain.md")]
+    /// The chain the event leaves hovered: the hover target followed by its
+    /// element (and root) ancestors, topmost-first toward the root. Empty when
+    /// nothing is hovered.
     chain: HoverChain,
-    #[doc = include_str!("hover_update.doc/crossed.md")]
+    #[doc = include_str!("../../docs/api/runtime/hover_update.doc/crossed.md")]
     crossed: HoverTransition,
 }
 
 impl HoverUpdate {
-    #[doc = include_str!("hover_update.doc/for_event.md")]
+    #[doc = include_str!("../../docs/api/runtime/hover_update.doc/for_event.md")]
     pub(crate) fn for_event(
         tree: &RetainedTree,
         current: &HoverChain,
@@ -51,12 +53,16 @@ impl HoverUpdate {
         Self { chain, crossed }
     }
 
-    #[doc = include_str!("hover_update.doc/changed_2.md")]
+    /// Whether the chain differs from the one it replaces, i.e. whether `:hover`
+    /// now matches differently and a restyle is owed.
     pub(crate) fn changed(&self) -> bool {
         self.crossed.has_changes()
     }
 
-    #[doc = include_str!("hover_update.doc/into_parts.md")]
+    /// Takes the new chain, to be seated in place of the old one, and the crossings
+    /// that got it there — in that order, because the chain must be seated before the
+    /// crossings are dispatched: a handler asked what it just entered reads the hover
+    /// state, and it must not read the state from before its own event.
     pub(crate) fn into_parts(self) -> (HoverChain, HoverTransition) {
         (self.chain, self.crossed)
     }

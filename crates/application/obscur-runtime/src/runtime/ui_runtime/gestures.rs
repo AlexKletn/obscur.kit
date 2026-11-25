@@ -1,4 +1,4 @@
-#![doc = include_str!("gestures.doc/_module.md")]
+#![doc = include_str!("../../../docs/api/runtime/ui_runtime/gestures.doc/_module.md")]
 
 use obscur_geometry::Point;
 use obscur_identity::NodeId;
@@ -12,7 +12,7 @@ use crate::runtime::{ActivePan, CommandDispatch, GestureArming};
 use super::UiRuntime;
 
 impl UiRuntime {
-    #[doc = include_str!("gestures.doc/arm_gestures.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/gestures.doc/arm_gestures.md")]
     pub(super) fn arm_gestures(
         &mut self,
         event: &PointerEvent,
@@ -31,13 +31,13 @@ impl UiRuntime {
                 &self.virtual_lists,
             );
             (
-                arming.pan_container(event, screen_point),
+                arming.pan_containers(event, screen_point),
                 target.and_then(|node| arming.hold(event, screen_point, node)),
             )
         };
-        if let Some(container) = pan {
+        if pan.iter().any(Option::is_some) {
             self.pointers
-                .arm_pan(event.pointer(), screen_point, event.timestamp(), container);
+                .arm_pan(event.pointer(), screen_point, event.timestamp(), pan);
         }
         if let Some(hold) = hold {
             self.pointers.arm_hold(event.pointer(), hold);
@@ -46,7 +46,7 @@ impl UiRuntime {
         }
     }
 
-    #[doc = include_str!("gestures.doc/update_pan.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/gestures.doc/update_pan.md")]
     pub(super) fn update_pan(
         &mut self,
         event: &PointerEvent,
@@ -65,14 +65,16 @@ impl UiRuntime {
         if step.press_discarded {
             *press_changed = true;
         }
-        self.scroll_by(step.container, step.scroll_delta);
+        self.default_won_touch_gesture(event.pointer());
+        self.scroll_chain_from(step.container, step.scroll_delta);
         self.request_frame(FrameReason::Input);
         true
     }
 
-    #[doc = include_str!("gestures.doc/advance_holds.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/gestures.doc/advance_holds.md")]
     pub(super) fn advance_holds(&mut self, delta: f32) {
-        for hold in self.pointers.advance_holds(delta) {
+        for (pointer, hold) in self.pointers.advance_holds(delta) {
+            self.default_won_touch_gesture(pointer);
             // §2.3 step 4: the default action runs only for a platform-vouched
             // gesture. An untrusted contact still had its hold counted and
             // observed; it just does not run the handler.
@@ -93,7 +95,7 @@ impl UiRuntime {
         }
     }
 
-    #[doc = include_str!("gestures.doc/fire_long_press.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/gestures.doc/fire_long_press.md")]
     fn fire_long_press(&mut self, node: NodeId, trusted: bool) -> bool {
         let envelope = {
             let envelope = UiEvent::detached(EventOrigin::Gesture);
@@ -109,25 +111,28 @@ impl UiRuntime {
         }
     }
 
-    #[doc = include_str!("gestures.doc/launch_fling.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/gestures.doc/launch_fling.md")]
     pub(super) fn launch_fling(&mut self, active: &ActivePan, micros: u64) {
         if self.pointers.launch_fling(active, micros) {
-            self.request_frame(FrameReason::Animation);
+            self.request_timeline_frame();
         }
     }
 
-    #[doc = include_str!("gestures.doc/advance_flings.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/gestures.doc/advance_flings.md")]
     pub(super) fn advance_flings(&mut self, delta: f32) {
         let steps = self.pointers.advance_flings(delta);
         if steps.is_empty() {
             return;
         }
         let mut stalled = Vec::new();
-        for (node, distance) in steps {
-            let before = self.scroll_top(node);
-            let after = self.scroll_by(node, distance);
-            if distance != 0.0 && (after - before).abs() < f32::EPSILON {
-                stalled.push(node);
+        for ((node, axis), distance) in steps {
+            let offset = if axis == 0 {
+                Point::new(distance, 0.0)
+            } else {
+                Point::new(0.0, distance)
+            };
+            if distance != 0.0 && !self.scroll_chain_from(node, offset) {
+                stalled.push((node, axis));
             }
         }
         self.pointers.settle_flings(&stalled);
@@ -135,6 +140,6 @@ impl UiRuntime {
         // fling still moved the list, and skipping its frame would leave the last
         // few pixels of travel unpainted until something unrelated asked for a
         // frame.
-        self.request_frame(FrameReason::Animation);
+        self.request_timeline_frame();
     }
 }

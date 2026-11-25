@@ -1,4 +1,4 @@
-#![doc = include_str!("checkbox.doc/_module.md")]
+//! `Checkbox`: a headless tri-state checkbox control (spec §2.6).
 
 use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
@@ -10,7 +10,7 @@ use obscur_view::view::{
 
 use super::CheckboxProps;
 
-#[doc = include_str!("checkbox.doc/Checkbox.md")]
+#[doc = include_str!("../../docs/api/checkbox/checkbox.doc/Checkbox.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Checkbox {
     label: Box<str>,
@@ -20,22 +20,27 @@ pub struct Checkbox {
 }
 
 impl Checkbox {
-    #[doc = include_str!("checkbox.doc/COMPONENT_ID.md")]
+    #[doc = include_str!("../../docs/api/checkbox/checkbox.doc/COMPONENT_ID.md")]
     pub const COMPONENT_ID: ComponentId = ComponentId::from_raw(0x00D0_0003);
 
-    #[doc = include_str!("checkbox.doc/BOX_ID.md")]
+    /// Component id of the boxed indicator sub-part (the 20×20 `.checkbox-box`).
+    /// Shares the widget id space with the high nibble of the suffix flipped
+    /// (`..13`), mirroring the menu/table sub-part scheme.
     const BOX_ID: ComponentId = ComponentId::from_raw(0x00D0_0013);
-    #[doc = include_str!("checkbox.doc/BAR_ID.md")]
+    /// Component id of the indeterminate bar sub-part (`.checkbox-bar`).
     const BAR_ID: ComponentId = ComponentId::from_raw(0x00D0_0023);
 
-    #[doc = include_str!("checkbox.doc/PROP_ROLE.md")]
+    /// Interned name of the semantic-role property (`role`); shares the
+    /// `0x00D1_NNXX` scheme with `NN = 03` (checkbox): role=`00`, disabled=`01`,
+    /// checked=`02`.
     const PROP_ROLE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0300);
-    #[doc = include_str!("checkbox.doc/PROP_DISABLED.md")]
+    /// Interned name of the `disabled` state property.
     const PROP_DISABLED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0301);
-    #[doc = include_str!("checkbox.doc/PROP_CHECKED.md")]
+    /// Interned name of the tri-state `checked` property (see [`view`](Self::view)).
     pub(crate) const PROP_CHECKED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0302);
 
-    #[doc = include_str!("checkbox.doc/new.md")]
+    /// Creates an enabled, *unchecked* (`Some(false)`) checkbox showing `label`
+    /// that fires `command` on change.
     #[must_use]
     pub fn new(label: impl Into<Box<str>>, command: InternedSymbol) -> Self {
         Self {
@@ -46,7 +51,8 @@ impl Checkbox {
         }
     }
 
-    #[doc = include_str!("checkbox.doc/indeterminate.md")]
+    /// Creates an enabled *indeterminate* (`None`, mixed) checkbox showing
+    /// `label` that fires `command` on change.
     #[must_use]
     pub fn indeterminate(label: impl Into<Box<str>>, command: InternedSymbol) -> Self {
         Self {
@@ -57,21 +63,22 @@ impl Checkbox {
         }
     }
 
-    #[doc = include_str!("checkbox.doc/checked.md")]
+    /// Sets the definite checked state, returning the updated checkbox (fluent).
     #[must_use]
     pub fn checked(mut self, checked: bool) -> Self {
         self.checked = Some(checked);
         self
     }
 
-    #[doc = include_str!("checkbox.doc/disabled.md")]
+    /// Sets the disabled state, returning the updated checkbox (fluent).
     #[must_use]
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
 
-    #[doc = include_str!("checkbox.doc/toggle.md")]
+    /// Advances the tri-state: a no-op while disabled; `None` (mixed) resolves
+    /// to `Some(true)`; a definite value flips.
     pub fn toggle(&mut self) {
         if self.disabled {
             return;
@@ -82,59 +89,59 @@ impl Checkbox {
         };
     }
 
-    #[doc = include_str!("checkbox.doc/is_checked.md")]
+    /// Returns whether the checkbox is definitely checked (`Some(true)`).
     #[must_use]
     pub const fn is_checked(&self) -> bool {
         matches!(self.checked, Some(true))
     }
 
-    #[doc = include_str!("checkbox.doc/is_indeterminate.md")]
+    /// Returns whether the checkbox is in the mixed / indeterminate state.
     #[must_use]
     pub const fn is_indeterminate(&self) -> bool {
         self.checked.is_none()
     }
 
-    #[doc = include_str!("checkbox.doc/checked_state.md")]
+    /// Returns the raw tri-state checked value.
     #[must_use]
     pub const fn checked_state(&self) -> Option<bool> {
         self.checked
     }
 
-    #[doc = include_str!("checkbox.doc/set_checked.md")]
+    /// Sets the definite checked state in place.
     pub fn set_checked(&mut self, checked: bool) {
         self.checked = Some(checked);
     }
 
-    #[doc = include_str!("checkbox.doc/command.md")]
+    /// Returns the command fired when the checkbox changes.
     #[must_use]
     pub const fn command(&self) -> InternedSymbol {
         self.command
     }
 
-    #[doc = include_str!("checkbox.doc/label.md")]
+    /// Returns the checkbox label.
     #[must_use]
     pub fn label(&self) -> &str {
         &self.label
     }
 
-    #[doc = include_str!("checkbox.doc/is_disabled.md")]
+    /// Returns whether the checkbox is disabled.
     #[must_use]
     pub const fn is_disabled(&self) -> bool {
         self.disabled
     }
 
-    #[doc = include_str!("checkbox.doc/set_disabled.md")]
+    /// Sets the disabled state in place.
     pub fn set_disabled(&mut self, disabled: bool) {
         self.disabled = disabled;
     }
 
-    #[doc = include_str!("checkbox.doc/semantic_role.md")]
+    /// Returns the accessible role of this control.
     #[must_use]
     pub const fn semantic_role(&self) -> SemanticRole {
         SemanticRole::Checkbox
     }
 
-    #[doc = include_str!("checkbox.doc/view.md")]
+    #[doc = include_str!("../../docs/api/checkbox/checkbox.doc/view.md")]
     #[must_use]
     pub fn view(&self) -> View {
         let checked = match self.checked {
@@ -183,7 +190,7 @@ impl Checkbox {
         View::single(node)
     }
 
-    #[doc = include_str!("checkbox.doc/contents.md")]
+    #[doc = include_str!("../../docs/api/checkbox/checkbox.doc/contents.md")]
     #[must_use]
     pub(crate) fn contents(checked: Option<bool>, label: &str) -> ViewFragment {
         // The boxed indicator sub-part: a `.checkbox-box` element carrying a

@@ -137,7 +137,7 @@ fn every_reserved_event_has_an_authored_spelling_that_reaches_it() {
     // useless if no `on:` name lowers to it. Every reserved event must be
     // reachable from markup, and `is_reserved_event` must agree — that pair is
     // what lets a front end call `on:pointerdwon` a typo.
-    for (spelling, symbol) in [
+    let spellings = [
         ("click", view::EVENT_CLICK),
         ("input", view::EVENT_INPUT),
         ("change", view::EVENT_CHANGE),
@@ -150,11 +150,17 @@ fn every_reserved_event_has_an_authored_spelling_that_reaches_it() {
         ("pointercancel", view::EVENT_POINTER_CANCEL),
         ("pointerenter", view::EVENT_POINTER_ENTER),
         ("pointerleave", view::EVENT_POINTER_LEAVE),
+        ("gamepad", view::EVENT_GAMEPAD),
+        ("scrollgesture", view::EVENT_SCROLL_GESTURE),
+        ("systemback", view::EVENT_SYSTEM_BACK),
+        ("touchgesture", view::EVENT_TOUCH_GESTURE),
+        ("touchpadgesture", view::EVENT_TOUCHPAD_GESTURE),
         ("wheel", view::EVENT_WHEEL),
         ("focus", view::EVENT_FOCUS),
         ("blur", view::EVENT_BLUR),
         ("contextmenu", view::EVENT_CONTEXT_MENU),
-    ] {
+    ];
+    for (spelling, symbol) in spellings {
         assert_eq!(name_binding::event_symbol(spelling), symbol, "{spelling}");
         assert!(name_binding::is_reserved_event(spelling), "{spelling}");
     }
@@ -180,15 +186,7 @@ fn every_reserved_event_has_an_authored_spelling_that_reaches_it() {
     // menu of its own, so a name meaning "a menu opened" would name an event
     // nothing emits — the exact defect this campaign exists to stop creating.
     assert!(!name_binding::is_reserved_event("menu"));
-    // And the set is exactly that large — a reserved symbol with no spelling
-    // would slip through the loop above unnoticed.
-    //
-    // 2026-08-03. This asserted 12, before `wheel` was reserved, then 13, before
-    // `focus` / `blur` were, and then 15, before `contextmenu` was. The rule is
-    // unchanged — the count must equal the number of spellings pinned above —
-    // and the loop is what pins the pairing; this line only stops a symbol being
-    // added with no spelling at all.
-    assert_eq!(view::RESERVED_EVENTS.len(), 16);
+    assert_eq!(view::RESERVED_EVENTS.len(), spellings.len());
 }
 
 #[test]
@@ -655,5 +653,16 @@ fn a_wrongly_typed_prop_is_an_error_not_a_silent_default() {
     assert_eq!(
         error,
         PropsError::wrong_type(view::DISABLED, "disabled", "bool")
+    );
+}
+
+#[test]
+fn portal_target_markup_uses_the_primitive_contract() {
+    let target = obscur_kit::primitives::Portal::PROP_TARGET;
+    assert_eq!(name_binding::attr_symbol_on("Portal", "target"), target);
+    assert_eq!(name_binding::attr_symbol_on("portal", "target"), target);
+    assert_eq!(
+        name_binding::attr_symbol_on("a", "target"),
+        name_binding::attr_symbol("target")
     );
 }

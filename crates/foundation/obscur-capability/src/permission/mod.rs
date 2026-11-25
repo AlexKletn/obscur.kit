@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Permission module.
 mod permission_duration;
 mod permission_state;
 

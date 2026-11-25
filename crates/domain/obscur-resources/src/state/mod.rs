@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! State module.
 mod resource_error;
 pub use resource_error::ResourceError;
 mod resource_metadata;

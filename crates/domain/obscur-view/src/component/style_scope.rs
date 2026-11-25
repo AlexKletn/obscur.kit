@@ -1,17 +1,21 @@
-#![doc = include_str!("style_scope.doc/_module.md")]
+//! Whether a component's rendered output is scoped away from the document's
+//! stylesheets or open to them: [`StyleScope`] (spec §4.15).
 
-#[doc = include_str!("style_scope.doc/StyleScope.md")]
+#[doc = include_str!("../../docs/api/component/style_scope.doc/StyleScope.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum StyleScope {
-    #[doc = include_str!("style_scope.doc/Scoped.md")]
+    /// The default: ordinary selectors from outside do not reach the
+    /// component's rendered elements; only exported style parts cross.
     #[default]
     Scoped,
-    #[doc = include_str!("style_scope.doc/Open.md")]
+    /// The component's rendered elements are styled by the document's sheets
+    /// exactly as authored elements are.
     Open,
 }
 
 impl StyleScope {
-    #[doc = include_str!("style_scope.doc/is_open.md")]
+    /// Returns `true` when the document's ordinary selectors reach this
+    /// component's rendered elements.
     #[must_use]
     pub const fn is_open(self) -> bool {
         matches!(self, Self::Open)

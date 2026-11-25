@@ -1,4 +1,4 @@
-#![doc = include_str!("focus_tree.doc/_module.md")]
+//! The [`FocusTree`] holding the live focus state (spec §7.1 focus).
 
 use std::collections::BTreeMap;
 
@@ -6,7 +6,7 @@ use obscur_identity::NodeId;
 
 use super::{FocusNode, FocusRequest, FocusResult, TabOrder};
 
-#[doc = include_str!("focus_tree.doc/FocusTree.md")]
+#[doc = include_str!("../../docs/api/focus/focus_tree.doc/FocusTree.md")]
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct FocusTree {
     nodes: BTreeMap<NodeId, FocusNode>,
@@ -14,7 +14,7 @@ pub struct FocusTree {
 }
 
 impl FocusTree {
-    #[doc = include_str!("focus_tree.doc/new.md")]
+    /// Creates an empty focus tree with nothing focused.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -23,12 +23,13 @@ impl FocusTree {
         }
     }
 
-    #[doc = include_str!("focus_tree.doc/register.md")]
+    /// Registers `node`'s focus properties, replacing any existing entry keyed by
+    /// the same [`NodeId`].
     pub fn register(&mut self, node: FocusNode) {
         self.nodes.insert(node.node(), node);
     }
 
-    #[doc = include_str!("focus_tree.doc/unregister.md")]
+    /// Unregisters `node`. If it was focused, focus is cleared.
     pub fn unregister(&mut self, node: NodeId) {
         self.nodes.remove(&node);
         if self.focused == Some(node) {
@@ -36,43 +37,43 @@ impl FocusTree {
         }
     }
 
-    #[doc = include_str!("focus_tree.doc/focused.md")]
+    /// Returns the currently focused node, if any.
     #[must_use]
     pub fn focused(&self) -> Option<NodeId> {
         self.focused
     }
 
-    #[doc = include_str!("focus_tree.doc/get.md")]
+    /// Returns the registered focus properties for `node`, if any.
     #[must_use]
     pub fn get(&self, node: NodeId) -> Option<&FocusNode> {
         self.nodes.get(&node)
     }
 
-    #[doc = include_str!("focus_tree.doc/contains.md")]
+    /// Returns whether `node` is registered.
     #[must_use]
     pub fn contains(&self, node: NodeId) -> bool {
         self.nodes.contains_key(&node)
     }
 
-    #[doc = include_str!("focus_tree.doc/len.md")]
+    /// Returns the number of registered nodes.
     #[must_use]
     pub fn len(&self) -> usize {
         self.nodes.len()
     }
 
-    #[doc = include_str!("focus_tree.doc/is_empty.md")]
+    /// Returns whether no nodes are registered.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
     }
 
-    #[doc = include_str!("focus_tree.doc/clear.md")]
+    /// Removes all registered nodes and clears focus.
     pub fn clear(&mut self) {
         self.nodes.clear();
         self.focused = None;
     }
 
-    #[doc = include_str!("focus_tree.doc/apply.md")]
+    #[doc = include_str!("../../docs/api/focus/focus_tree.doc/apply.md")]
     pub fn apply(&mut self, request: FocusRequest) -> FocusResult {
         match request {
             FocusRequest::Node(node) => self.focus_node(node),

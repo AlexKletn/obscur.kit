@@ -1,15 +1,15 @@
-#![doc = include_str!("vello_surface.doc/_module.md")]
+//! An on-screen wgpu surface wrapper for windowed presentation (spec §5.2).
 
 use crate::error::VelloRenderError;
 
-#[doc = include_str!("vello_surface.doc/VelloSurface.md")]
+#[doc = include_str!("../../docs/api/renderer/vello_surface.doc/VelloSurface.md")]
 pub struct VelloSurface {
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
 }
 
 impl VelloSurface {
-    #[doc = include_str!("vello_surface.doc/new.md")]
+    /// Wraps a host-created `surface` and its `config`.
     #[must_use]
     pub fn new(surface: wgpu::Surface<'static>, mut config: wgpu::SurfaceConfiguration) -> Self {
         // A surface's default format is usually an `*UnormSrgb` one, and writing
@@ -30,31 +30,31 @@ impl VelloSurface {
         Self { surface, config }
     }
 
-    #[doc = include_str!("vello_surface.doc/blit_format.md")]
+    #[doc = include_str!("../../docs/api/renderer/vello_surface.doc/blit_format.md")]
     #[must_use]
     pub fn blit_format(&self) -> wgpu::TextureFormat {
         self.config.format.remove_srgb_suffix()
     }
 
-    #[doc = include_str!("vello_surface.doc/config.md")]
+    /// The current surface configuration.
     #[must_use]
     pub const fn config(&self) -> &wgpu::SurfaceConfiguration {
         &self.config
     }
 
-    #[doc = include_str!("vello_surface.doc/configure.md")]
+    #[doc = include_str!("../../docs/api/renderer/vello_surface.doc/configure.md")]
     pub fn configure(&self, device: &wgpu::Device) {
         self.surface.configure(device, &self.config);
     }
 
-    #[doc = include_str!("vello_surface.doc/resize.md")]
+    #[doc = include_str!("../../docs/api/renderer/vello_surface.doc/resize.md")]
     pub fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {
         self.config.width = width.max(1);
         self.config.height = height.max(1);
         self.configure(device);
     }
 
-    #[doc = include_str!("vello_surface.doc/current_texture.md")]
+    #[doc = include_str!("../../docs/api/renderer/vello_surface.doc/current_texture.md")]
     pub fn current_texture(&self) -> Result<wgpu::SurfaceTexture, VelloRenderError> {
         match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(texture)

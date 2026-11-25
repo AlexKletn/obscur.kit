@@ -1,10 +1,11 @@
-#![doc = include_str!("selection_policy.doc/_module.md")]
+//! The [`SelectionPolicy`] rules that govern how input mutates a
+//! [`Selection`](super::Selection) (item-selection model).
 
 use obscur_identity::NodeId;
 
 use super::{Selection, SelectionMode};
 
-#[doc = include_str!("selection_policy.doc/SelectionPolicy.md")]
+#[doc = include_str!("../../docs/api/selection/selection_policy.doc/SelectionPolicy.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SelectionPolicy {
     mode: SelectionMode,
@@ -13,7 +14,8 @@ pub struct SelectionPolicy {
 }
 
 impl SelectionPolicy {
-    #[doc = include_str!("selection_policy.doc/new.md")]
+    /// Creates a policy for `mode` with `allow_empty` on and `toggle_on_click`
+    /// off.
     #[must_use]
     pub const fn new(mode: SelectionMode) -> Self {
         Self {
@@ -23,39 +25,39 @@ impl SelectionPolicy {
         }
     }
 
-    #[doc = include_str!("selection_policy.doc/allow_empty.md")]
+    /// Returns this policy with `allow_empty` set (fluent).
     #[must_use]
     pub const fn allow_empty(mut self, allow_empty: bool) -> Self {
         self.allow_empty = allow_empty;
         self
     }
 
-    #[doc = include_str!("selection_policy.doc/toggle_on_click.md")]
+    /// Returns this policy with `toggle_on_click` set (fluent).
     #[must_use]
     pub const fn toggle_on_click(mut self, toggle_on_click: bool) -> Self {
         self.toggle_on_click = toggle_on_click;
         self
     }
 
-    #[doc = include_str!("selection_policy.doc/mode.md")]
+    /// Returns the selection mode.
     #[must_use]
     pub const fn mode(&self) -> SelectionMode {
         self.mode
     }
 
-    #[doc = include_str!("selection_policy.doc/allows_empty.md")]
+    /// Returns whether an empty selection is permitted.
     #[must_use]
     pub const fn allows_empty(&self) -> bool {
         self.allow_empty
     }
 
-    #[doc = include_str!("selection_policy.doc/toggles_on_click.md")]
+    /// Returns whether a plain click toggles rather than replaces.
     #[must_use]
     pub const fn toggles_on_click(&self) -> bool {
         self.toggle_on_click
     }
 
-    #[doc = include_str!("selection_policy.doc/apply_click.md")]
+    #[doc = include_str!("../../docs/api/selection/selection_policy.doc/apply_click.md")]
     pub fn apply_click(&self, selection: &mut Selection, node: NodeId, toggle_modifier: bool) {
         match self.mode {
             SelectionMode::None => {}
@@ -74,7 +76,7 @@ impl SelectionPolicy {
         }
     }
 
-    #[doc = include_str!("selection_policy.doc/apply_range.md")]
+    #[doc = include_str!("../../docs/api/selection/selection_policy.doc/apply_range.md")]
     pub fn apply_range(&self, selection: &mut Selection, range: &[NodeId]) {
         if self.mode.allows_multiple() {
             selection.set_range(range);
@@ -87,7 +89,8 @@ impl SelectionPolicy {
 }
 
 impl Default for SelectionPolicy {
-    #[doc = include_str!("selection_policy.doc/default.md")]
+    /// Defaults to [`Single`](SelectionMode::Single) with `allow_empty` on and
+    /// `toggle_on_click` off.
     fn default() -> Self {
         Self::new(SelectionMode::Single)
     }

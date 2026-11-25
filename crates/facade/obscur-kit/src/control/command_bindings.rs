@@ -1,5 +1,8 @@
-#![doc = include_str!("command_bindings.doc/_module.md")]
+//! [`CommandBindings`] — per-node command registrations that follow their nodes.
 
+mod command_binding;
+
+use command_binding::CommandBinding;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -9,38 +12,24 @@ use crate::interaction::event::{ListenerPhase, UiEvent};
 use crate::runtime::{CommandHandler, UiRuntime};
 use crate::view::view::{AUTOMATION_ID, TEST_ID, ViewValue};
 
-#[doc = include_str!("command_bindings.doc/SharedHandler.md")]
+#[doc = include_str!("../../docs/api/control/command_bindings.doc/SharedHandler.md")]
 pub(crate) type SharedHandler = Rc<RefCell<CommandHandler>>;
 
-#[doc = include_str!("command_bindings.doc/Binding.md")]
-struct Binding {
-    #[doc = include_str!("command_bindings.doc/target.md")]
-    target: SelectorTarget,
-    #[doc = include_str!("command_bindings.doc/command.md")]
-    command: InternedSymbol,
-    #[doc = include_str!("command_bindings.doc/phase.md")]
-    phase: Option<ListenerPhase>,
-    #[doc = include_str!("command_bindings.doc/handler.md")]
-    handler: SharedHandler,
-    #[doc = include_str!("command_bindings.doc/bound.md")]
-    bound: Option<NodeId>,
-}
-
-#[doc = include_str!("command_bindings.doc/CommandBindings.md")]
+#[doc = include_str!("../../docs/api/control/command_bindings.doc/CommandBindings.md")]
 #[derive(Default)]
 pub(crate) struct CommandBindings {
-    entries: Vec<Binding>,
+    entries: Vec<CommandBinding>,
 }
 
 impl CommandBindings {
-    #[doc = include_str!("command_bindings.doc/push_handler.md")]
+    /// Adds a §2.6 per-node handler for `command` at `target`.
     pub(crate) fn push_handler(
         &mut self,
         target: SelectorTarget,
         command: InternedSymbol,
         handler: SharedHandler,
     ) {
-        self.entries.push(Binding {
+        self.entries.push(CommandBinding {
             target,
             command,
             phase: None,
@@ -49,7 +38,7 @@ impl CommandBindings {
         });
     }
 
-    #[doc = include_str!("command_bindings.doc/push_listener.md")]
+    /// Adds a §2.3 listener for `command` at `target`, running in `phase`.
     pub(crate) fn push_listener(
         &mut self,
         target: SelectorTarget,
@@ -57,7 +46,7 @@ impl CommandBindings {
         phase: ListenerPhase,
         handler: SharedHandler,
     ) {
-        self.entries.push(Binding {
+        self.entries.push(CommandBinding {
             target,
             command,
             phase: Some(phase),
@@ -66,7 +55,7 @@ impl CommandBindings {
         });
     }
 
-    #[doc = include_str!("command_bindings.doc/apply.md")]
+    #[doc = include_str!("../../docs/api/control/command_bindings.doc/apply.md")]
     pub(crate) fn apply(&mut self, runtime: &mut UiRuntime) -> usize {
         let mut newly_bound = 0;
         for entry in &mut self.entries {
@@ -97,7 +86,9 @@ impl CommandBindings {
         newly_bound
     }
 
-    #[doc = include_str!("command_bindings.doc/bound_node.md")]
+    /// The node `target`'s registrations are currently attached to, if it has
+    /// resolved. The first matching registration answers, which is enough: every
+    /// registration for one target resolves to the same node.
     pub(crate) fn bound_node(&self, target: &SelectorTarget) -> Option<NodeId> {
         self.entries
             .iter()
@@ -105,7 +96,7 @@ impl CommandBindings {
             .and_then(|entry| entry.bound)
     }
 
-    #[doc = include_str!("command_bindings.doc/pending.md")]
+    /// How many registrations are waiting for their name to resolve.
     pub(crate) fn pending(&self) -> usize {
         self.entries
             .iter()
@@ -113,13 +104,13 @@ impl CommandBindings {
             .count()
     }
 
-    #[doc = include_str!("command_bindings.doc/len.md")]
+    /// How many registrations the table holds in total.
     pub(crate) fn len(&self) -> usize {
         self.entries.len()
     }
 }
 
-#[doc = include_str!("command_bindings.doc/answers_to.md")]
+#[doc = include_str!("../../docs/api/control/command_bindings.doc/answers_to.md")]
 fn answers_to(runtime: &UiRuntime, node: NodeId, target: &SelectorTarget) -> bool {
     let Some(retained) = runtime.tree().get(node) else {
         return false;
@@ -134,6 +125,9 @@ fn answers_to(runtime: &UiRuntime, node: NodeId, target: &SelectorTarget) -> boo
         SelectorTarget::Node(id) => *id == node,
         SelectorTarget::TestId(id) => carries(TEST_ID, id),
         SelectorTarget::AutomationId(id) => carries(AUTOMATION_ID, id),
+        SelectorTarget::Semantic { .. } | SelectorTarget::Component(_) => {
+            SelectorResolver::new().resolve(runtime, target) == Some(node)
+        }
         SelectorTarget::Coordinate(_) => false,
     }
 }

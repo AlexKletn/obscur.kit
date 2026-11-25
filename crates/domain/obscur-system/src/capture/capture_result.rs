@@ -1,60 +1,29 @@
-#![doc = include_str!("capture_result.doc/_module.md")]
+//! The outcome of a capture request (spec §6.17 — capture and privacy).
 
-use obscur_geometry::Size;
+use super::CapturedImage;
 
-#[doc = include_str!("capture_result.doc/CapturedImage.md")]
-#[derive(Debug, Clone, PartialEq)]
-pub struct CapturedImage {
-    #[doc = include_str!("capture_result.doc/size.md")]
-    size: Size,
-    #[doc = include_str!("capture_result.doc/format.md")]
-    format: Box<str>,
-}
-
-impl CapturedImage {
-    #[doc = include_str!("capture_result.doc/new.md")]
-    #[must_use]
-    pub fn new(size: Size, format: impl Into<Box<str>>) -> Self {
-        Self {
-            size,
-            format: format.into(),
-        }
-    }
-
-    #[doc = include_str!("capture_result.doc/size_2.md")]
-    #[must_use]
-    pub const fn size(&self) -> Size {
-        self.size
-    }
-
-    #[doc = include_str!("capture_result.doc/format_2.md")]
-    #[must_use]
-    pub fn format(&self) -> &str {
-        &self.format
-    }
-}
-
-#[doc = include_str!("capture_result.doc/CaptureResult.md")]
+#[doc = include_str!("../../docs/api/capture/capture_result.doc/CaptureResult.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum CaptureResult {
-    #[doc = include_str!("capture_result.doc/Captured.md")]
+    /// The capture succeeded, yielding an image descriptor.
     Captured(CapturedImage),
-    #[doc = include_str!("capture_result.doc/Denied.md")]
+    /// The capture was denied by permission policy.
     Denied,
-    #[doc = include_str!("capture_result.doc/Unsupported.md")]
+    /// The host does not support capturing this source.
     Unsupported,
-    #[doc = include_str!("capture_result.doc/Failed.md")]
+    /// The capture was attempted but failed, carrying a human-readable reason.
     Failed(Box<str>),
 }
 
 impl CaptureResult {
-    #[doc = include_str!("capture_result.doc/is_captured.md")]
+    /// Returns whether the capture succeeded (spec §6.17).
     #[must_use]
     pub const fn is_captured(&self) -> bool {
         matches!(self, Self::Captured(_))
     }
 
-    #[doc = include_str!("capture_result.doc/image.md")]
+    /// Returns the captured image when the outcome is [`Captured`](Self::Captured),
+    /// else `None` (spec §6.17).
     #[must_use]
     pub const fn image(&self) -> Option<&CapturedImage> {
         match self {
@@ -63,7 +32,8 @@ impl CaptureResult {
         }
     }
 
-    #[doc = include_str!("capture_result.doc/failure_reason.md")]
+    /// Returns the failure reason when the outcome is [`Failed`](Self::Failed),
+    /// else `None` (spec §6.17).
     #[must_use]
     pub fn failure_reason(&self) -> Option<&str> {
         match self {
@@ -76,13 +46,7 @@ impl CaptureResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn captured_image_stores_size_and_format() {
-        let image = CapturedImage::new(Size::new(2.0, 3.0), "rgba8");
-        assert_eq!(image.size(), Size::new(2.0, 3.0));
-        assert_eq!(image.format(), "rgba8");
-    }
+    use obscur_geometry::Size;
 
     #[test]
     fn is_captured_only_for_captured() {

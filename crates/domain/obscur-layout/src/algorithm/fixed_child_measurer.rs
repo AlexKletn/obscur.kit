@@ -1,23 +1,23 @@
-#![doc = include_str!("fixed_child_measurer.doc/_module.md")]
+//! `FixedChildMeasurer`: a deterministic [`ChildMeasurer`] for tests.
 
 use obscur_geometry::{BoxConstraints, Size};
 
 use super::ChildMeasurer;
 
-#[doc = include_str!("fixed_child_measurer.doc/FixedChildMeasurer.md")]
+#[doc = include_str!("../../docs/api/algorithm/fixed_child_measurer.doc/FixedChildMeasurer.md")]
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct FixedChildMeasurer {
     sizes: Vec<Size>,
 }
 
 impl FixedChildMeasurer {
-    #[doc = include_str!("fixed_child_measurer.doc/new.md")]
+    #[doc = include_str!("../../docs/api/algorithm/fixed_child_measurer.doc/new.md")]
     #[must_use]
     pub fn new(sizes: Vec<Size>) -> Self {
         Self { sizes }
     }
 
-    #[doc = include_str!("fixed_child_measurer.doc/natural.md")]
+    /// The natural size registered for `index`, or [`Size::ZERO`] if out of range.
     #[must_use]
     pub fn natural(&self, index: usize) -> Size {
         self.sizes.get(index).copied().unwrap_or(Size::ZERO)
@@ -25,7 +25,7 @@ impl FixedChildMeasurer {
 }
 
 impl ChildMeasurer for FixedChildMeasurer {
-    #[doc = include_str!("fixed_child_measurer.doc/measure_child.md")]
+    #[doc = include_str!("../../docs/api/algorithm/fixed_child_measurer.doc/measure_child.md")]
     fn measure_child(&mut self, index: usize, constraints: BoxConstraints) -> Size {
         constraints.constrain(self.natural(index))
     }

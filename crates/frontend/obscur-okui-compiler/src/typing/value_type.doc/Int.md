@@ -1,1 +1,0 @@
-A signed integer.

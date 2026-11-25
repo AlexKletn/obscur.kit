@@ -1,1 +1,0 @@
-The lone `.img` element.

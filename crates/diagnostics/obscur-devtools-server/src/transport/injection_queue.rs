@@ -1,122 +1,71 @@
-#![doc = include_str!("injection_queue.doc/_module.md")]
+//! `InjectionQueue`/`InjectionSink`: what a host hands the endpoint so an
+//! authorized `Inject` reaches a runtime instead of a field nobody can read.
 
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Mutex};
 
-use obscur_devtools_protocol::message::{InjectedEvent, MESSAGE_LIMIT};
+use obscur_devtools_protocol::message::InjectedEvent;
 
-#[doc = include_str!("injection_queue.doc/InjectionQueue.md")]
+use super::{InjectionSink, injection_queue_state::InjectionQueueState};
+
+#[doc = include_str!("../../docs/api/transport/injection_queue.doc/InjectionQueue.md")]
 #[derive(Debug, Clone, Default)]
 pub struct InjectionQueue {
-    inner: Arc<Mutex<Inner>>,
-}
-
-#[doc = include_str!("injection_queue.doc/Inner.md")]
-#[derive(Debug, Default)]
-struct Inner {
-    #[doc = include_str!("injection_queue.doc/pending.md")]
-    pending: VecDeque<InjectedEvent>,
-    #[doc = include_str!("injection_queue.doc/dropped.md")]
-    dropped: u64,
+    inner: Arc<Mutex<InjectionQueueState>>,
 }
 
 impl InjectionQueue {
-    #[doc = include_str!("injection_queue.doc/new.md")]
+    /// Creates an empty queue.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    #[doc = include_str!("injection_queue.doc/sink.md")]
+    #[doc = include_str!("../../docs/api/transport/injection_queue.doc/sink.md")]
     #[must_use]
     pub fn sink(&self) -> InjectionSink {
-        InjectionSink {
-            inner: Arc::downgrade(&self.inner),
-        }
+        InjectionSink::new(Arc::downgrade(&self.inner))
     }
 
-    #[doc = include_str!("injection_queue.doc/drain.md")]
+    #[doc = include_str!("../../docs/api/transport/injection_queue.doc/drain.md")]
     #[must_use]
     pub fn drain(&self) -> Vec<InjectedEvent> {
         let mut inner = self.lock();
         inner.pending.drain(..).collect()
     }
 
-    #[doc = include_str!("injection_queue.doc/len.md")]
+    /// How many events are waiting.
     #[must_use]
     pub fn len(&self) -> usize {
         self.lock().pending.len()
     }
 
-    #[doc = include_str!("injection_queue.doc/is_empty.md")]
+    /// Whether nothing is waiting.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.lock().pending.is_empty()
     }
 
-    #[doc = include_str!("injection_queue.doc/dropped_2.md")]
+    /// How many events have been dropped for backpressure since creation.
     #[must_use]
     pub fn dropped(&self) -> u64 {
         self.lock().dropped
     }
 
-    #[doc = include_str!("injection_queue.doc/lock.md")]
-    fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
+    /// Locks the shared state, recovering from a poisoned lock rather than
+    /// propagating it: a panicked serving thread must not take the host down with
+    /// it — see [`EventQueue`](crate::transport::EventQueue)'s identical note.
+    fn lock(&self) -> std::sync::MutexGuard<'_, InjectionQueueState> {
         self.inner
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 }
 
-#[doc = include_str!("injection_queue.doc/InjectionSink.md")]
-#[derive(Debug, Clone, Default)]
-pub struct InjectionSink {
-    inner: Weak<Mutex<Inner>>,
-}
-
-impl InjectionSink {
-    #[doc = include_str!("injection_queue.doc/disconnected.md")]
-    #[must_use]
-    pub fn disconnected() -> Self {
-        Self::default()
-    }
-
-    #[doc = include_str!("injection_queue.doc/is_live.md")]
-    #[must_use]
-    pub fn is_live(&self) -> bool {
-        self.inner.strong_count() > 0
-    }
-
-    #[doc = include_str!("injection_queue.doc/deliver.md")]
-    pub fn deliver(&self, event: InjectedEvent) -> bool {
-        let Some(inner) = self.inner.upgrade() else {
-            return false;
-        };
-        let mut guard = inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if guard.pending.len() >= MESSAGE_LIMIT {
-            guard.pending.pop_front();
-            guard.dropped += 1;
-        }
-        guard.pending.push_back(event);
-        true
-    }
-}
-
-#[doc = include_str!("injection_queue.doc/PartialEq.md")]
-impl PartialEq for InjectionSink {
-    fn eq(&self, other: &Self) -> bool {
-        Weak::ptr_eq(&self.inner, &other.inner)
-    }
-}
-
-impl Eq for InjectionSink {}
-
 #[cfg(test)]
 mod tests {
     use super::{InjectionQueue, InjectionSink};
-    use obscur_devtools_protocol::message::{InjectedEvent, MESSAGE_LIMIT};
+    use obscur_devtools_protocol::message::InjectedEvent;
+    use obscur_devtools_protocol::message::MESSAGE_LIMIT;
 
     fn click(x: i32) -> InjectedEvent {
         InjectedEvent::PointerDown { x, y: 0 }

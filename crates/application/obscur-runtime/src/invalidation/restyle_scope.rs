@@ -1,4 +1,4 @@
-#![doc = include_str!("restyle_scope.doc/_module.md")]
+#![doc = include_str!("../../docs/api/invalidation/restyle_scope.doc/_module.md")]
 
 use obscur_identity::NodeId;
 use obscur_style::invalidation::{StyleInvalidation, StyleInvalidationReason};
@@ -6,12 +6,12 @@ use obscur_tree::tree::RetainedTree;
 
 use crate::orchestration::PseudoStates;
 
-#[doc = include_str!("restyle_scope.doc/RestyleScope.md")]
+#[doc = include_str!("../../docs/api/invalidation/restyle_scope.doc/RestyleScope.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct RestyleScope;
 
 impl RestyleScope {
-    #[doc = include_str!("restyle_scope.doc/changed_states.md")]
+    #[doc = include_str!("../../docs/api/invalidation/restyle_scope.doc/changed_states.md")]
     #[must_use]
     pub fn changed_states(before: &PseudoStates, after: &PseudoStates) -> Vec<NodeId> {
         let mut changed = Vec::new();
@@ -31,7 +31,7 @@ impl RestyleScope {
         changed
     }
 
-    #[doc = include_str!("restyle_scope.doc/expand.md")]
+    #[doc = include_str!("../../docs/api/invalidation/restyle_scope.doc/expand.md")]
     pub fn expand(tree: &RetainedTree, root: NodeId, out: &mut StyleInvalidation) -> bool {
         let Some(node) = tree.get(root) else {
             return true;
@@ -57,8 +57,8 @@ impl RestyleScope {
         true
     }
 
-    #[doc = include_str!("restyle_scope.doc/mark_subtree.md")]
-    fn mark_subtree(tree: &RetainedTree, root: NodeId, out: &mut StyleInvalidation) {
+    #[doc = include_str!("../../docs/api/invalidation/restyle_scope.doc/mark_subtree.md")]
+    pub(crate) fn mark_subtree(tree: &RetainedTree, root: NodeId, out: &mut StyleInvalidation) {
         let mut stack = vec![root];
         while let Some(id) = stack.pop() {
             if out.is_invalidated(id) {

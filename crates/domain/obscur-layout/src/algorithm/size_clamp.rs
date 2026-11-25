@@ -1,8 +1,8 @@
-#![doc = include_str!("size_clamp.doc/_module.md")]
+#![doc = include_str!("../../docs/api/algorithm/size_clamp.doc/_module.md")]
 
 use crate::model::{BoxSizing, Dimension};
 
-#[doc = include_str!("size_clamp.doc/clamp_content.md")]
+#[doc = include_str!("../../docs/api/algorithm/size_clamp.doc/clamp_content.md")]
 #[must_use]
 pub(crate) fn clamp_content(
     extent: f32,
@@ -15,7 +15,7 @@ pub(crate) fn clamp_content(
     clamp_content_measured(extent, (min, None), (max, None), available, bp, box_sizing)
 }
 
-#[doc = include_str!("size_clamp.doc/clamp_content_measured.md")]
+#[doc = include_str!("../../docs/api/algorithm/size_clamp.doc/clamp_content_measured.md")]
 #[must_use]
 pub(crate) fn clamp_content_measured(
     extent: f32,
@@ -35,7 +35,7 @@ pub(crate) fn clamp_content_measured(
     value.max(0.0)
 }
 
-#[doc = include_str!("size_clamp.doc/bound_content.md")]
+#[doc = include_str!("../../docs/api/algorithm/size_clamp.doc/bound_content.md")]
 fn bound_content(
     (bound, measured): (Dimension, Option<f32>),
     available: f32,

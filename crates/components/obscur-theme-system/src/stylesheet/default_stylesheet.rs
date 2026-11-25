@@ -1,12 +1,12 @@
-#![doc = include_str!("default_stylesheet.doc/_module.md")]
+#![doc = include_str!("../../docs/api/stylesheet/default_stylesheet.doc/_module.md")]
 
-#[doc = include_str!("default_stylesheet.doc/ua_css.md")]
+#[doc = include_str!("../../docs/api/stylesheet/default_stylesheet.doc/ua_css.md")]
 #[must_use]
 pub const fn ua_css() -> &'static str {
     UA_CSS
 }
 
-#[doc = include_str!("default_stylesheet.doc/UA_CSS.md")]
+#[doc = include_str!("../../docs/api/stylesheet/default_stylesheet.doc/UA_CSS.md")]
 const UA_CSS: &str = "\
 button {\
   padding: 11px 20px;\

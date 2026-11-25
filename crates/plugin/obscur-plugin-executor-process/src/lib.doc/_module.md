@@ -1,1 +1,0 @@
-Process/IPC `PluginExecutor` adapter.

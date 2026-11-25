@@ -1,54 +1,57 @@
-#![doc = include_str!("value_type.doc/_module.md")]
+//! `ValueType`: the .okui DSL value-type vocabulary (spec §2.9).
 
-#[doc = include_str!("value_type.doc/ValueType.md")]
+#[doc = include_str!("../../docs/api/typing/value_type.doc/ValueType.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ValueType {
-    #[doc = include_str!("value_type.doc/Bool.md")]
+    /// A boolean (`true`/`false`).
     Bool,
-    #[doc = include_str!("value_type.doc/Int.md")]
+    /// A signed integer.
     Int,
-    #[doc = include_str!("value_type.doc/Float.md")]
+    /// A floating-point number.
     Float,
-    #[doc = include_str!("value_type.doc/Text.md")]
+    /// A UTF-8 text string.
     Text,
-    #[doc = include_str!("value_type.doc/List.md")]
+    /// A homogeneous list whose elements all share the boxed element type.
     List(Box<ValueType>),
-    #[doc = include_str!("value_type.doc/Optional.md")]
+    /// An optional value that may be absent (`null`/`none`, spec §2.10); the box
+    /// holds the wrapped (present) type.
     Optional(Box<ValueType>),
-    #[doc = include_str!("value_type.doc/Component.md")]
+    /// A component value (spec §2.9).
     Component,
-    #[doc = include_str!("value_type.doc/Unknown.md")]
+    /// A type that has not been inferred yet (a deferred placeholder).
     Unknown,
-    #[doc = include_str!("value_type.doc/Any.md")]
+    /// The escape-hatch type that is assignable to and from every other type.
     Any,
 }
 
 impl ValueType {
-    #[doc = include_str!("value_type.doc/list.md")]
+    /// Builds a [`List`](ValueType::List) of `element`.
     #[must_use]
     pub fn list(element: ValueType) -> Self {
         Self::List(Box::new(element))
     }
 
-    #[doc = include_str!("value_type.doc/optional.md")]
+    /// Builds an [`Optional`](ValueType::Optional) of `inner`.
     #[must_use]
     pub fn optional(inner: ValueType) -> Self {
         Self::Optional(Box::new(inner))
     }
 
-    #[doc = include_str!("value_type.doc/is_numeric.md")]
+    /// Returns whether this is a numeric type ([`Int`](ValueType::Int) or
+    /// [`Float`](ValueType::Float)).
     #[must_use]
     pub const fn is_numeric(&self) -> bool {
         matches!(self, Self::Int | Self::Float)
     }
 
-    #[doc = include_str!("value_type.doc/is_optional.md")]
+    /// Returns whether this is an [`Optional`](ValueType::Optional) type.
     #[must_use]
     pub const fn is_optional(&self) -> bool {
         matches!(self, Self::Optional(_))
     }
 
-    #[doc = include_str!("value_type.doc/inner.md")]
+    /// Returns the element type of a [`List`](ValueType::List) or the wrapped
+    /// type of an [`Optional`](ValueType::Optional); `None` for any other type.
     #[must_use]
     pub const fn inner(&self) -> Option<&ValueType> {
         match self {
@@ -57,7 +60,7 @@ impl ValueType {
         }
     }
 
-    #[doc = include_str!("value_type.doc/is_assignable_to.md")]
+    #[doc = include_str!("../../docs/api/typing/value_type.doc/is_assignable_to.md")]
     #[must_use]
     pub fn is_assignable_to(&self, target: &ValueType) -> bool {
         // `Any` matches everything, in both directions.

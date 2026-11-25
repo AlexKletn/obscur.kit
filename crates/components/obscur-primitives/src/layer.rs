@@ -1,9 +1,9 @@
-#![doc = include_str!("layer.doc/_module.md")]
+//! `Layer`: a compositing-layer primitive (spec §2.6, §5.1).
 
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_view::view::{View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-#[doc = include_str!("layer.doc/Layer.md")]
+#[doc = include_str!("../docs/api/layer.doc/Layer.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Layer {
     children: Vec<ViewNode>,
@@ -11,7 +11,7 @@ pub struct Layer {
 }
 
 impl Default for Layer {
-    #[doc = include_str!("layer.doc/default.md")]
+    /// A fully opaque layer with no children.
     fn default() -> Self {
         Self {
             children: Vec::new(),
@@ -21,33 +21,35 @@ impl Default for Layer {
 }
 
 impl Layer {
-    #[doc = include_str!("layer.doc/COMPONENT_ID.md")]
+    #[doc = include_str!("../docs/api/layer.doc/COMPONENT_ID.md")]
     pub const COMPONENT_ID: ComponentId = ComponentId::from_raw(0x00C0_0007);
 
-    #[doc = include_str!("layer.doc/PROP_OPACITY.md")]
+    #[doc = include_str!("../docs/api/layer.doc/PROP_OPACITY.md")]
     pub const PROP_OPACITY: InternedSymbol = InternedSymbol::from_raw(0x00C1_0701);
 
-    #[doc = include_str!("layer.doc/new.md")]
+    /// Creates a default, fully opaque layer with no children.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    #[doc = include_str!("layer.doc/child.md")]
+    /// Appends a child node, returning the updated layer.
     #[must_use]
     pub fn child(mut self, node: ViewNode) -> Self {
         self.children.push(node);
         self
     }
 
-    #[doc = include_str!("layer.doc/with_opacity.md")]
+    /// Sets the layer opacity, clamped to `0.0..=1.0`, returning the updated
+    /// layer.
     #[must_use]
     pub fn with_opacity(mut self, opacity: f32) -> Self {
         self.opacity = opacity.clamp(0.0, 1.0);
         self
     }
 
-    #[doc = include_str!("layer.doc/into_view_node.md")]
+    /// Lowers this layer into its [`ViewNode::Element`], emitting the opacity
+    /// property and its children as the fragment.
     #[must_use]
     pub fn into_view_node(self) -> ViewNode {
         ViewNode::element(Self::COMPONENT_ID)
@@ -58,7 +60,7 @@ impl Layer {
             .with_children(ViewFragment::from_nodes(self.children))
     }
 
-    #[doc = include_str!("layer.doc/view.md")]
+    /// Lowers this layer into a single-node [`View`].
     #[must_use]
     pub fn view(self) -> View {
         View::single(self.into_view_node())

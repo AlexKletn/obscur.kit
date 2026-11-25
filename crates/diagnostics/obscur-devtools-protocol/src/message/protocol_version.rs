@@ -1,82 +1,34 @@
-#![doc = include_str!("protocol_version.doc/_module.md")]
+//! Protocol version and version-range negotiation (spec §7.6).
 
-#[doc = include_str!("protocol_version.doc/ProtocolVersion.md")]
+#[doc = include_str!("../../docs/api/message/protocol_version.doc/ProtocolVersion.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ProtocolVersion {
-    #[doc = include_str!("protocol_version.doc/major.md")]
+    /// Major version; a change here is a breaking wire change.
     pub major: u16,
-    #[doc = include_str!("protocol_version.doc/minor.md")]
+    /// Minor version; a higher value is additive and backward compatible.
     pub minor: u16,
 }
 
 impl ProtocolVersion {
-    #[doc = include_str!("protocol_version.doc/CURRENT.md")]
+    /// The protocol version implemented by this crate.
     pub const CURRENT: Self = Self { major: 1, minor: 0 };
 
-    #[doc = include_str!("protocol_version.doc/new.md")]
+    /// Creates a protocol version.
     #[must_use]
     pub const fn new(major: u16, minor: u16) -> Self {
         Self { major, minor }
     }
 
-    #[doc = include_str!("protocol_version.doc/is_compatible_with.md")]
+    #[doc = include_str!("../../docs/api/message/protocol_version.doc/is_compatible_with.md")]
     #[must_use]
     pub const fn is_compatible_with(self, other: Self) -> bool {
         self.major == other.major && self.minor >= other.minor
     }
 }
 
-#[doc = include_str!("protocol_version.doc/VersionRange.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct VersionRange {
-    #[doc = include_str!("protocol_version.doc/min.md")]
-    pub min: ProtocolVersion,
-    #[doc = include_str!("protocol_version.doc/max.md")]
-    pub max: ProtocolVersion,
-}
-
-impl VersionRange {
-    #[doc = include_str!("protocol_version.doc/new_2.md")]
-    #[must_use]
-    pub const fn new(min: ProtocolVersion, max: ProtocolVersion) -> Self {
-        Self { min, max }
-    }
-
-    #[doc = include_str!("protocol_version.doc/exact.md")]
-    #[must_use]
-    pub const fn exact(version: ProtocolVersion) -> Self {
-        Self {
-            min: version,
-            max: version,
-        }
-    }
-
-    #[doc = include_str!("protocol_version.doc/contains.md")]
-    #[must_use]
-    pub fn contains(self, version: ProtocolVersion) -> bool {
-        self.min <= version && version <= self.max
-    }
-
-    #[doc = include_str!("protocol_version.doc/negotiate.md")]
-    #[must_use]
-    pub fn negotiate(self, client: Self) -> Option<ProtocolVersion> {
-        // The highest candidate both sides could speak is the lower of the two
-        // maxima; it is valid only when it is at least both minima.
-        let candidate = if self.max <= client.max {
-            self.max
-        } else {
-            client.max
-        };
-        if self.min <= candidate && client.min <= candidate {
-            Some(candidate)
-        } else {
-            None
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use super::super::VersionRange;
     use super::*;
 
     #[test]

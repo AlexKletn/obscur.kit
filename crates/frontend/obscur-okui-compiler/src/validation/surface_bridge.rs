@@ -1,4 +1,4 @@
-#![doc = include_str!("surface_bridge.doc/_module.md")]
+#![doc = include_str!("../../docs/api/validation/surface_bridge.doc/_module.md")]
 
 use obscur_view::contract::{ChildrenSurface, ComponentSurface, SlotSurface};
 

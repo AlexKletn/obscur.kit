@@ -1,4 +1,5 @@
-#![doc = include_str!("component_registry.doc/_module.md")]
+//! `ComponentRegistry`: the static-default store of component registrations
+//! (spec §2.14).
 
 use std::collections::{HashMap, HashSet};
 
@@ -11,7 +12,7 @@ use crate::component::{
 };
 use crate::contract::CapabilityRequirement;
 
-#[doc = include_str!("component_registry.doc/ComponentRegistry.md")]
+#[doc = include_str!("../../docs/api/component/component_registry.doc/ComponentRegistry.md")]
 #[derive(Debug, Default)]
 pub struct ComponentRegistry {
     entries: HashMap<ComponentId, ComponentRegistration>,
@@ -19,7 +20,7 @@ pub struct ComponentRegistry {
 }
 
 impl ComponentRegistry {
-    #[doc = include_str!("component_registry.doc/new.md")]
+    /// Creates an empty registry with **no capabilities granted**.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -28,18 +29,20 @@ impl ComponentRegistry {
         }
     }
 
-    #[doc = include_str!("component_registry.doc/grant.md")]
+    #[doc = include_str!("../../docs/api/component/component_registry.doc/grant.md")]
     pub fn grant(&mut self, capability: CapabilityId) {
         self.granted.insert(capability);
     }
 
-    #[doc = include_str!("component_registry.doc/is_granted.md")]
+    /// Returns whether `capability` has been granted on this registry.
     #[must_use]
     pub fn is_granted(&self, capability: &CapabilityId) -> bool {
         self.granted.contains(capability)
     }
 
-    #[doc = include_str!("component_registry.doc/required_capabilities_satisfied.md")]
+    /// Returns whether every [`CapabilityRequirement::Required`] capability in
+    /// `contract` has been granted — the gate [`create_instance`](Self::create_instance)
+    /// applies before minting an instance.
     #[must_use]
     fn required_capabilities_satisfied(&self, contract: &ComponentContract) -> bool {
         contract
@@ -49,7 +52,7 @@ impl ComponentRegistry {
             .all(|c| self.granted.contains(&c.capability))
     }
 
-    #[doc = include_str!("component_registry.doc/register.md")]
+    #[doc = include_str!("../../docs/api/component/component_registry.doc/register.md")]
     pub fn register(&mut self, registration: ComponentRegistration) -> Result<(), RegistryError> {
         let id = registration.id();
         if self.entries.contains_key(&id) {
@@ -59,19 +62,19 @@ impl ComponentRegistry {
         Ok(())
     }
 
-    #[doc = include_str!("component_registry.doc/get.md")]
+    /// Returns the registration for `id`, if any.
     #[must_use]
     pub fn get(&self, id: ComponentId) -> Option<&ComponentRegistration> {
         self.entries.get(&id)
     }
 
-    #[doc = include_str!("component_registry.doc/contract.md")]
+    /// Returns the contract for the component registered under `id`, if any.
     #[must_use]
     pub fn contract(&self, id: ComponentId) -> Option<&ComponentContract> {
         self.entries.get(&id).map(ComponentRegistration::contract)
     }
 
-    #[doc = include_str!("component_registry.doc/create_instance.md")]
+    #[doc = include_str!("../../docs/api/component/component_registry.doc/create_instance.md")]
     #[must_use]
     pub fn create_instance(
         &self,
@@ -85,7 +88,7 @@ impl ComponentRegistry {
         Some(registration.create_instance(instance))
     }
 
-    #[doc = include_str!("component_registry.doc/create_component.md")]
+    #[doc = include_str!("../../docs/api/component/component_registry.doc/create_component.md")]
     #[must_use]
     pub fn create_component(&self, id: ComponentId) -> Option<Box<dyn ErasedComponent>> {
         self.entries
@@ -93,19 +96,19 @@ impl ComponentRegistry {
             .map(ComponentRegistration::create_component)
     }
 
-    #[doc = include_str!("component_registry.doc/contains.md")]
+    /// Returns whether a component is registered under `id`.
     #[must_use]
     pub fn contains(&self, id: ComponentId) -> bool {
         self.entries.contains_key(&id)
     }
 
-    #[doc = include_str!("component_registry.doc/len.md")]
+    /// The number of registered component kinds.
     #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
-    #[doc = include_str!("component_registry.doc/is_empty.md")]
+    /// Returns whether the registry holds no registrations.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()

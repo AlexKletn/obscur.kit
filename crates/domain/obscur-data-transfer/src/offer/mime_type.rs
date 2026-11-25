@@ -1,13 +1,15 @@
-#![doc = include_str!("mime_type.doc/_module.md")]
+//! A MIME descriptor for an offered data representation (spec §6.20 MIME
+//! descriptors).
 
-#[doc = include_str!("mime_type.doc/MimeType.md")]
+#[doc = include_str!("../../docs/api/offer/mime_type.doc/MimeType.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MimeType {
     essence: Box<str>,
 }
 
 impl MimeType {
-    #[doc = include_str!("mime_type.doc/new.md")]
+    /// Creates a MIME descriptor from an `essence` string, normalizing it to
+    /// lowercase (spec §6.20).
     #[must_use]
     pub fn new(essence: impl Into<Box<str>>) -> Self {
         let essence = essence.into();
@@ -16,55 +18,59 @@ impl MimeType {
         }
     }
 
-    #[doc = include_str!("mime_type.doc/text_plain.md")]
+    /// The `text/plain` descriptor: plain text (spec §6.20).
     #[must_use]
     pub fn text_plain() -> Self {
         Self::new("text/plain")
     }
 
-    #[doc = include_str!("mime_type.doc/text_html.md")]
+    /// The `text/html` descriptor: rich text (spec §6.20).
     #[must_use]
     pub fn text_html() -> Self {
         Self::new("text/html")
     }
 
-    #[doc = include_str!("mime_type.doc/text_uri_list.md")]
+    /// The `text/uri-list` descriptor: URIs / file references (spec §6.20).
     #[must_use]
     pub fn text_uri_list() -> Self {
         Self::new("text/uri-list")
     }
 
-    #[doc = include_str!("mime_type.doc/image_png.md")]
+    /// The `image/png` descriptor: image data (spec §6.20).
     #[must_use]
     pub fn image_png() -> Self {
         Self::new("image/png")
     }
 
-    #[doc = include_str!("mime_type.doc/application_octet_stream.md")]
+    /// The `application/octet-stream` descriptor: opaque bytes for files and
+    /// custom formats (spec §6.20).
     #[must_use]
     pub fn application_octet_stream() -> Self {
         Self::new("application/octet-stream")
     }
 
-    #[doc = include_str!("mime_type.doc/essence.md")]
+    /// Returns the normalized `type/subtype` essence string (spec §6.20).
     #[must_use]
     pub fn essence(&self) -> &str {
         &self.essence
     }
 
-    #[doc = include_str!("mime_type.doc/is_text.md")]
+    /// Returns whether this is a textual format (essence starts with `text/`)
+    /// (spec §6.20).
     #[must_use]
     pub fn is_text(&self) -> bool {
         self.essence.starts_with("text/")
     }
 
-    #[doc = include_str!("mime_type.doc/is_image.md")]
+    /// Returns whether this is an image format (essence starts with `image/`)
+    /// (spec §6.20).
     #[must_use]
     pub fn is_image(&self) -> bool {
         self.essence.starts_with("image/")
     }
 
-    #[doc = include_str!("mime_type.doc/matches.md")]
+    /// Returns whether this descriptor names the same format as `other`, by
+    /// essence equality (spec §6.20).
     #[must_use]
     pub fn matches(&self, other: &MimeType) -> bool {
         self.essence == other.essence

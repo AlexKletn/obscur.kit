@@ -1,1 +1,0 @@
-Which target was inspected.

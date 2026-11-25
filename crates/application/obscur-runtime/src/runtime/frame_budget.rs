@@ -1,24 +1,24 @@
-#![doc = include_str!("frame_budget.doc/_module.md")]
+#![doc = include_str!("../../docs/api/runtime/frame_budget.doc/_module.md")]
 
 use std::time::Duration;
 
 use obscur_diagnostics::{BudgetViolation, DiagnosticSubsystem, PerformanceBudget};
 
-#[doc = include_str!("frame_budget.doc/FrameBudget.md")]
+#[doc = include_str!("../../docs/api/runtime/frame_budget.doc/FrameBudget.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct FrameBudget {
-    #[doc = include_str!("frame_budget.doc/reconcile_nodes.md")]
+    /// Maximum retained-tree node count after reconcile, if bounded.
     reconcile_nodes: Option<u64>,
-    #[doc = include_str!("frame_budget.doc/style_nodes.md")]
+    /// Maximum resolved computed-style count, if bounded.
     style_nodes: Option<u64>,
-    #[doc = include_str!("frame_budget.doc/layout_boxes.md")]
+    /// Maximum arranged layout-box count, if bounded.
     layout_boxes: Option<u64>,
-    #[doc = include_str!("frame_budget.doc/compose_commands.md")]
+    /// Maximum composed paint-command count, if bounded.
     compose_commands: Option<u64>,
 }
 
 impl FrameBudget {
-    #[doc = include_str!("frame_budget.doc/unbounded.md")]
+    /// A budget that bounds nothing: every phase is unbounded (the default).
     #[must_use]
     pub const fn unbounded() -> Self {
         Self {
@@ -29,59 +29,62 @@ impl FrameBudget {
         }
     }
 
-    #[doc = include_str!("frame_budget.doc/with_reconcile_nodes.md")]
+    /// Bounds the reconcile phase to at most `max` retained-tree nodes.
     #[must_use]
     pub const fn with_reconcile_nodes(mut self, max: u64) -> Self {
         self.reconcile_nodes = Some(max);
         self
     }
 
-    #[doc = include_str!("frame_budget.doc/with_style_nodes.md")]
+    /// Bounds the style phase to at most `max` resolved computed styles.
     #[must_use]
     pub const fn with_style_nodes(mut self, max: u64) -> Self {
         self.style_nodes = Some(max);
         self
     }
 
-    #[doc = include_str!("frame_budget.doc/with_layout_boxes.md")]
+    /// Bounds the layout phase to at most `max` arranged boxes.
     #[must_use]
     pub const fn with_layout_boxes(mut self, max: u64) -> Self {
         self.layout_boxes = Some(max);
         self
     }
 
-    #[doc = include_str!("frame_budget.doc/with_compose_commands.md")]
+    /// Bounds the compose phase to at most `max` paint commands.
     #[must_use]
     pub const fn with_compose_commands(mut self, max: u64) -> Self {
         self.compose_commands = Some(max);
         self
     }
 
-    #[doc = include_str!("frame_budget.doc/check_reconcile.md")]
+    /// Checks the reconcile phase's `nodes` count, yielding a violation when it
+    /// exceeds the configured bound.
     #[must_use]
     pub(crate) fn check_reconcile(self, nodes: u64) -> Option<BudgetViolation> {
         Self::check(self.reconcile_nodes, DiagnosticSubsystem::Tree, nodes)
     }
 
-    #[doc = include_str!("frame_budget.doc/check_style.md")]
+    /// Checks the style phase's resolved-style `count`.
     #[must_use]
     pub(crate) fn check_style(self, count: u64) -> Option<BudgetViolation> {
         Self::check(self.style_nodes, DiagnosticSubsystem::Style, count)
     }
 
-    #[doc = include_str!("frame_budget.doc/check_layout.md")]
+    /// Checks the layout phase's arranged-box `count`.
     #[must_use]
     pub(crate) fn check_layout(self, count: u64) -> Option<BudgetViolation> {
         Self::check(self.layout_boxes, DiagnosticSubsystem::Layout, count)
     }
 
-    #[doc = include_str!("frame_budget.doc/check_compose.md")]
+    /// Checks the compose phase's paint-command `count`.
     #[must_use]
     pub(crate) fn check_compose(self, count: u64) -> Option<BudgetViolation> {
         Self::check(self.compose_commands, DiagnosticSubsystem::Render, count)
     }
 
-    #[doc = include_str!("frame_budget.doc/check.md")]
+    /// Checks `measured` (a cost count) against an optional `limit` for
+    /// `subsystem`, encoding both as nanosecond-durations so the tested
+    /// [`PerformanceBudget`] machinery applies.
     #[must_use]
     fn check(
         limit: Option<u64>,

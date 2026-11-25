@@ -1,28 +1,28 @@
-#![doc = include_str!("scene_generation.doc/_module.md")]
+//! A monotonic generation stamping a scene's content.
 
 use obscur_identity::VersionStamp;
 
-#[doc = include_str!("scene_generation.doc/SceneGeneration.md")]
+#[doc = include_str!("../../docs/api/scene/scene_generation.doc/SceneGeneration.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct SceneGeneration(VersionStamp);
 
 impl SceneGeneration {
-    #[doc = include_str!("scene_generation.doc/FIRST.md")]
+    #[doc = include_str!("../../docs/api/scene/scene_generation.doc/FIRST.md")]
     pub const FIRST: Self = Self(VersionStamp::from_raw(0));
 
-    #[doc = include_str!("scene_generation.doc/from_raw.md")]
+    /// Wraps a raw generation value.
     #[must_use]
     pub const fn from_raw(raw: u64) -> Self {
         Self(VersionStamp::from_raw(raw))
     }
 
-    #[doc = include_str!("scene_generation.doc/raw.md")]
+    /// Returns the raw generation value.
     #[must_use]
     pub const fn raw(self) -> u64 {
         self.0.raw()
     }
 
-    #[doc = include_str!("scene_generation.doc/next.md")]
+    #[doc = include_str!("../../docs/api/scene/scene_generation.doc/next.md")]
     #[must_use]
     pub const fn next(self) -> Self {
         Self(self.0.bump())

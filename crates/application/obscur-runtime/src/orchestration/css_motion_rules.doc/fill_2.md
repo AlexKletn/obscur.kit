@@ -1,1 +1,0 @@
-Returns `animation-fill-mode`.

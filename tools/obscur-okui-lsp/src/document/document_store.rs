@@ -1,30 +1,32 @@
-#![doc = include_str!("document_store.doc/_module.md")]
+//! `DocumentStore`: the set of documents currently open in the language server.
 
 use std::collections::HashMap;
 
 use crate::document::TextDocument;
 
-#[doc = include_str!("document_store.doc/DocumentStore.md")]
+#[doc = include_str!("../../docs/api/document/document_store.doc/DocumentStore.md")]
 #[derive(Debug, Clone, Default)]
 pub struct DocumentStore {
     documents: HashMap<Box<str>, TextDocument>,
 }
 
 impl DocumentStore {
-    #[doc = include_str!("document_store.doc/new.md")]
+    /// Creates an empty store.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    #[doc = include_str!("document_store.doc/open.md")]
+    /// Opens (or replaces) the document at `uri` with `version` and `text`,
+    /// returning a reference to the stored document.
     pub fn open(&mut self, uri: impl Into<Box<str>>, version: i32, text: impl Into<String>) {
         let uri: Box<str> = uri.into();
         self.documents
             .insert(uri.clone(), TextDocument::new(uri, version, text));
     }
 
-    #[doc = include_str!("document_store.doc/change.md")]
+    /// Applies a full-text change to an already-open document: bumps its version
+    /// and replaces its text. Returns `true` if the document existed.
     pub fn change(&mut self, uri: &str, version: i32, new_text: impl Into<String>) -> bool {
         if let Some(document) = self.documents.get_mut(uri) {
             document.version = version;
@@ -35,24 +37,24 @@ impl DocumentStore {
         }
     }
 
-    #[doc = include_str!("document_store.doc/close.md")]
+    /// Closes the document at `uri`, returning it if it was open.
     pub fn close(&mut self, uri: &str) -> Option<TextDocument> {
         self.documents.remove(uri)
     }
 
-    #[doc = include_str!("document_store.doc/get.md")]
+    /// Returns the open document at `uri`, if any.
     #[must_use]
     pub fn get(&self, uri: &str) -> Option<&TextDocument> {
         self.documents.get(uri)
     }
 
-    #[doc = include_str!("document_store.doc/len.md")]
+    /// Returns the number of open documents.
     #[must_use]
     pub fn len(&self) -> usize {
         self.documents.len()
     }
 
-    #[doc = include_str!("document_store.doc/is_empty.md")]
+    /// Returns whether the store holds no documents.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.documents.is_empty()

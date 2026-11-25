@@ -1,9 +1,15 @@
-#![doc = include_str!("vello_renderer.doc/_module.md")]
+//! The Vello/wgpu implementation of the [`Renderer`] port (spec §5.2, §2.7).
+
+mod frame_output;
+mod shared_face;
+
+use frame_output::FrameOutput;
+use shared_face::SharedFace;
 
 use std::sync::Arc;
 
 use obscur_capability::SupportLevel;
-use obscur_diagnostics::{DiagnosticSink, NullDiagnosticSink};
+use obscur_diagnostics::DiagnosticSink;
 use obscur_render::frame::{FrameSubmission, PresentResult};
 use obscur_render::renderer::{
     EffectFallback, EffectFallbackReporter, Renderer, RendererCapabilities, RendererError,
@@ -15,39 +21,49 @@ use obscur_scene::command::{DisplayList, PaintCommand};
 
 use vello::peniko::{Blob, FontData};
 
-use crate::conversion::SceneConverter;
+use crate::conversion::{SceneConverter, SceneSegment};
 use crate::effects::{ColorMatrix, GaussianBlur};
 use crate::error::VelloRenderError;
-use crate::renderer::filter_layer_pass::PreparedFilterLayers;
+use crate::renderer::damage_stats::DamageStats;
 use crate::renderer::premultiply_blit::PremultiplyBlitter;
 use crate::renderer::segmented_compositor::SegmentedCompositor;
 use crate::renderer::{AcquiredImage, VelloDevice, VelloFrame, VelloSurface};
 
-#[doc = include_str!("vello_renderer.doc/VelloRenderer.md")]
+#[doc = include_str!("../../docs/api/renderer/vello_renderer.doc/VelloRenderer.md")]
 pub struct VelloRenderer {
     id: RendererId,
     capabilities: RendererCapabilities,
     device: Option<VelloDevice>,
     scene_converter: SceneConverter,
-    #[doc = include_str!("vello_renderer.doc/scene.md")]
+    #[doc = include_str!("../../docs/api/renderer/vello_renderer.doc/scene.md")]
     scene: vello::Scene,
     frames_rendered: u64,
-    #[doc = include_str!("vello_renderer.doc/blitter.md")]
-    blitter: Option<(wgpu::TextureFormat, PremultiplyBlitter)>,
-    #[doc = include_str!("vello_renderer.doc/frame_cache.md")]
+    damage_stats: DamageStats,
+    /// Caches the surface blitters for each alpha conversion. Each entry is keyed by
+    /// the target format, so consecutive Lyon and fallback Vello frames can reuse
+    /// their respective pipelines.
+    blitters: [Option<(wgpu::TextureFormat, PremultiplyBlitter)>; 2],
+    #[doc = include_str!("../../docs/api/renderer/vello_renderer.doc/frame_cache.md")]
     frame_cache: Option<VelloFrame>,
-    #[doc = include_str!("vello_renderer.doc/blur.md")]
+    /// Cached owned wgpu gaussian-blur pipeline set for `filter: blur()` (spec
+    /// §5.2). Built lazily on the first blurred frame (it needs the device) and
+    /// reused across frames; a scene with no blur layer never constructs it, so
+    /// the non-blur path is byte-identical to before.
     blur: Option<GaussianBlur>,
-    #[doc = include_str!("vello_renderer.doc/color_matrix.md")]
+    /// Cached owned wgpu color-matrix pipeline for the CSS color-matrix `filter`
+    /// functions (grayscale/brightness/contrast/saturate/sepia/invert/hue-rotate/
+    /// opacity). Built lazily on the first color-filtered frame and reused; a scene
+    /// with no color-matrix layer never constructs it (byte-identical to before).
     color_matrix: Option<ColorMatrix>,
-    #[doc = include_str!("vello_renderer.doc/diagnostics.md")]
-    diagnostics: Arc<dyn DiagnosticSink>,
-    #[doc = include_str!("vello_renderer.doc/fallbacks.md")]
+    #[doc = include_str!("../../docs/api/renderer/vello_renderer.doc/diagnostics.md")]
+    diagnostics: Option<Arc<dyn DiagnosticSink>>,
+    /// Which unsupported effects have already been reported, so a standing mask
+    /// clip does not re-raise its diagnostic every frame.
     fallbacks: EffectFallbackReporter,
 }
 
 impl VelloRenderer {
-    #[doc = include_str!("vello_renderer.doc/new.md")]
+    #[doc = include_str!("../../docs/api/renderer/vello_renderer.doc/new.md")]
     #[must_use]
     pub fn new(id: RendererId) -> Self {
         Self {
@@ -61,44 +77,93 @@ impl VelloRenderer {
             scene_converter: SceneConverter::new(),
             scene: vello::Scene::new(),
             frames_rendered: 0,
-            blitter: None,
+            damage_stats: DamageStats::default(),
+            blitters: [None, None],
             frame_cache: None,
             blur: None,
             color_matrix: None,
-            diagnostics: Arc::new(NullDiagnosticSink),
+            diagnostics: None,
             fallbacks: EffectFallbackReporter::new(),
         }
     }
 
-    #[doc = include_str!("vello_renderer.doc/set_diagnostic_sink.md")]
+    #[doc = include_str!("../../docs/api/renderer/vello_renderer.doc/set_diagnostic_sink.md")]
     pub fn set_diagnostic_sink(&mut self, sink: Arc<dyn DiagnosticSink>) {
-        self.diagnostics = sink;
+        self.diagnostics = Some(sink);
     }
 
-    #[doc = include_str!("vello_renderer.doc/with_device.md")]
+    /// Attaches a host-provided [`VelloDevice`], returning the updated renderer.
     #[must_use]
     pub fn with_device(mut self, device: VelloDevice) -> Self {
-        self.device = Some(device);
+        self.set_device(device);
         self
     }
 
-    #[doc = include_str!("vello_renderer.doc/set_device.md")]
+    #[cfg(feature = "hybrid")]
+    #[doc = include_str!("../../docs/api/renderer/vello_renderer.doc/with_hybrid_device.md")]
+    #[must_use]
+    pub fn with_hybrid_device(mut self, device: wgpu::Device, queue: wgpu::Queue) -> Self {
+        self.set_device(VelloDevice::hybrid(device, queue));
+        self
+    }
+
+    #[cfg(feature = "lyon")]
+    /// Attaches Lyon to the supplied wgpu device. Frames that require unsupported commands use the classic Vello renderer on the same device.
+    #[must_use]
+    pub fn with_lyon_device(mut self, device: wgpu::Device, queue: wgpu::Queue) -> Self {
+        self.set_device(VelloDevice::lyon(device, queue));
+        self
+    }
+
+    fn is_hybrid(&self) -> bool {
+        #[cfg(feature = "hybrid")]
+        if self
+            .device
+            .as_ref()
+            .is_some_and(|device| device.hybrid.is_some())
+        {
+            return true;
+        }
+        false
+    }
+
+    /// The GPU bindings and backend currently installed in the renderer.
+    #[must_use]
+    pub const fn gpu_device(&self) -> Option<&VelloDevice> {
+        self.device.as_ref()
+    }
+
+    /// Attaches (or replaces) the host-provided [`VelloDevice`].
     pub fn set_device(&mut self, device: VelloDevice) {
+        self.damage_stats = DamageStats::default();
         self.device = Some(device);
+        let classic = !self.is_hybrid();
+        self.capabilities = self.capabilities.msaa(classic).custom_shaders(classic);
+        self.frame_cache = None;
+        self.blitters = [None, None];
+        self.blur = None;
+        self.color_matrix = None;
+        self.fallbacks = EffectFallbackReporter::new();
     }
 
-    #[doc = include_str!("vello_renderer.doc/register_font.md")]
-    pub fn register_font(&mut self, id: u32, font_bytes: Vec<u8>) {
-        let font = FontData::new(Blob::from(font_bytes), 0);
+    #[doc = include_str!("../../docs/api/renderer/vello_renderer.doc/register_font.md")]
+    pub fn register_font(&mut self, id: u32, font_bytes: impl Into<Arc<[u8]>>) {
+        let font = FontData::new(Blob::new(Arc::new(SharedFace(font_bytes.into()))), 0);
         self.scene_converter.register_font(id, font);
+        #[cfg(feature = "lyon")]
+        self.damage_stats.invalidate_scene();
+        #[cfg(feature = "lyon")]
+        if let Some(lyon) = self.device.as_mut().and_then(|device| device.lyon.as_mut()) {
+            lyon.invalidate_fonts();
+        }
     }
 
-    #[doc = include_str!("vello_renderer.doc/set_font.md")]
-    pub fn set_font(&mut self, font_bytes: Vec<u8>) {
+    #[doc = include_str!("../../docs/api/renderer/vello_renderer.doc/set_font.md")]
+    pub fn set_font(&mut self, font_bytes: impl Into<Arc<[u8]>>) {
         self.register_font(0, font_bytes);
     }
 
-    #[doc = include_str!("vello_renderer.doc/text_fallbacks.md")]
+    #[doc = include_str!("../../docs/api/renderer/vello_renderer.doc/text_fallbacks.md")]
     fn text_fallbacks(&self, list: &DisplayList) -> Vec<EffectFallback> {
         text_run_font_handles(list)
             .into_iter()
@@ -116,19 +181,92 @@ impl VelloRenderer {
             .collect()
     }
 
-    #[doc = include_str!("vello_renderer.doc/has_device.md")]
+    fn report_classic_filter_fallbacks(list: &DisplayList, fallbacks: &mut Vec<EffectFallback>) {
+        let mut depth = 0usize;
+        let mut backdrop_layers = Vec::new();
+        let mut backdrop_omitted = false;
+        let mut blur_omitted = false;
+        let mut matrix_omitted = false;
+        for command in list.commands() {
+            match command {
+                PaintCommand::PushClip(_) => depth += 1,
+                PaintCommand::PushLayer(layer) => {
+                    if depth != 0 || !SceneConverter::can_extract_filter(layer) {
+                        blur_omitted |= crate::conversion::layer_blur_radius(layer).is_some();
+                        matrix_omitted |= layer
+                            .effects()
+                            .iter()
+                            .any(|effect| effect.as_color_matrix().is_some());
+                    }
+                    depth += 1;
+                    backdrop_layers.push(SceneConverter::can_split_backdrop_layer(layer));
+                }
+                PaintCommand::PopLayer => {
+                    backdrop_layers.pop();
+                    depth = depth.saturating_sub(1);
+                }
+                PaintCommand::PopClip => {
+                    depth = depth.saturating_sub(1);
+                }
+                PaintCommand::BackdropFilter { .. } => {
+                    backdrop_omitted |= backdrop_layers.contains(&false);
+                }
+                _ => {}
+            }
+        }
+        if backdrop_omitted {
+            fallbacks.push(EffectFallback::new(
+                SceneEffect::BackdropFilter,
+                "classic Vello omits backdrop filters inside compositing layers",
+            ));
+        }
+        for (omitted, effect) in [
+            (blur_omitted, SceneEffect::Blur),
+            (matrix_omitted, SceneEffect::ColorMatrix),
+        ] {
+            if omitted {
+                fallbacks.push(EffectFallback::new(
+                    effect,
+                    "classic Vello omits filter layers that require clipping or compositing the filtered output inside the scene",
+                ));
+            }
+        }
+    }
+
+    /// Reports restrictions on shadow and blur effects already classified as limited by the experimental renderer.
+    fn report_hybrid_fallbacks(&self, list: &DisplayList, fallbacks: &mut Vec<EffectFallback>) {
+        if list
+            .commands()
+            .iter()
+            .any(|command| matches!(command, PaintCommand::DrawShadow { inset: true, .. }))
+        {
+            fallbacks.push(EffectFallback::new(
+                SceneEffect::Shadow,
+                "inset shadows are omitted by Vello Hybrid",
+            ));
+        }
+
+        if list.commands().iter().any(|command| {
+            matches!(command, PaintCommand::PushLayer(layer) if crate::conversion::layer_blur_radius(layer).is_some())
+        }) {
+            fallbacks.push(EffectFallback::new(SceneEffect::Blur, "layer blur is omitted by Vello Hybrid"));
+        }
+    }
+
+    /// Whether a GPU device is attached and rendering can submit work.
     #[must_use]
     pub const fn has_device(&self) -> bool {
         self.device.is_some()
     }
 
-    #[doc = include_str!("vello_renderer.doc/frames_rendered.md")]
+    /// The number of frames this renderer has successfully rendered.
     #[must_use]
     pub const fn frames_rendered(&self) -> u64 {
         self.frames_rendered
     }
 
-    #[doc = include_str!("vello_renderer.doc/cached_offscreen.md")]
+    /// The offscreen target for `width` x `height`, allocated once and reused until
+    /// the extent changes (a resize).
     fn cached_offscreen(&mut self, device: &wgpu::Device, width: u32, height: u32) -> VelloFrame {
         if let Some(frame) = self.frame_cache.as_ref() {
             if frame.width() == width && frame.height() == height {
@@ -140,36 +278,122 @@ impl VelloRenderer {
         frame
     }
 
-    #[doc = include_str!("vello_renderer.doc/render_to_frame.md")]
+    /// Renders one submission and returns the frame with its output format.
+    /// Classic Vello's direct texture output is straight
+    /// RGBA. The segmented compositor, including filter layers and backdrop effects,
+    /// returns premultiplied RGBA. Lyon and hybrid also return premultiplied RGBA.
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     fn render_to_frame(
         &mut self,
         submission: &FrameSubmission,
         width: u32,
         height: u32,
-    ) -> Result<VelloFrame, RendererError> {
+        #[cfg(feature = "lyon")] target: Option<&VelloFrame>,
+    ) -> Result<(VelloFrame, FrameOutput), RendererError> {
         let display_list = submission.frame().scene().display_list();
+
+        let hybrid = self.is_hybrid();
+        #[cfg(feature = "hybrid")]
+        let classic_mask_fallback = hybrid
+            && display_list.commands().iter().any(|command| {
+                use obscur_scene::clip::Clip;
+                match command {
+                    PaintCommand::PushClip(clip) => matches!(clip, Clip::ImageMask { .. }),
+                    PaintCommand::PushLayer(layer) => {
+                        matches!(layer.clip(), Some(Clip::ImageMask { .. }))
+                    }
+                    _ => false,
+                }
+            });
+        #[cfg(not(feature = "hybrid"))]
+        let classic_mask_fallback = false;
 
         // Spec §5.2: "Unsupported effects and fallbacks are explicit diagnostics."
         // Every entry point to this backend funnels through here, so this is where a
         // host is told which of the effects its scene asked for will not survive the
         // conversion below.
-        let unsupported = unsupported_effects(&*self, display_list);
-        let sink = Arc::clone(&self.diagnostics);
-        self.fallbacks.report(&unsupported, sink.as_ref());
-        // The other half of that sentence: an effect this backend *does* draw, but
-        // whose documented restriction bites on THIS scene. It cannot be read off
-        // `supports_effect` — `Text` is `Limited` whether or not the host registered
-        // the font a given run needs — and this is the fallback that costs a host
-        // the most to discover by looking: an unregistered run is dropped in
-        // silence, so the text is simply absent with nothing to see.
-        let degraded = self.text_fallbacks(display_list);
-        self.fallbacks.report_fallbacks(&degraded, sink.as_ref());
+        //
+        // Both scans are two more full walks of the display list, per frame, for the
+        // life of the process — and until a host calls `set_diagnostic_sink` there is
+        // nowhere for their product to go. Nothing else observes them:
+        // `EffectFallbackReporter`'s state is read only by `CpuRenderer`'s `Debug`
+        // (this crate exposes no reader at all). So when no one is listening they are
+        // skipped outright rather than computed and discarded. With a sink installed
+        // this path is byte-identical to what it was; without one the frame is the
+        // same frame, two walks cheaper.
+        if let Some(sink) = self.diagnostics.clone() {
+            let unsupported = if classic_mask_fallback {
+                obscur_render::renderer::scene_effects(display_list)
+                    .into_iter()
+                    .filter(|&effect| classic_effect_support(effect) == SupportLevel::Unavailable)
+                    .collect()
+            } else {
+                unsupported_effects(&*self, display_list)
+            };
+            self.fallbacks.report(&unsupported, sink.as_ref());
+            // The other half of that sentence: an effect this backend *does* draw,
+            // but whose documented restriction bites on THIS scene. It cannot be read
+            // off `supports_effect` — `Text` is `Limited` whether or not the host
+            // registered the font a given run needs — and this is the fallback that
+            // costs a host the most to discover by looking: an unregistered run is
+            // dropped in silence, so the text is simply absent with nothing to see.
+            let mut degraded = self.text_fallbacks(display_list);
+            if classic_mask_fallback {
+                degraded.push(EffectFallback::new(
+                    SceneEffect::ImageMask,
+                    "Vello Hybrid renders image-mask frames with classic Vello",
+                ));
+            }
+            if hybrid && !classic_mask_fallback {
+                self.report_hybrid_fallbacks(display_list, &mut degraded);
+            }
+            self.fallbacks.report_fallbacks(&degraded, sink.as_ref());
+        }
+
+        #[cfg(feature = "hybrid")]
+        if hybrid && !classic_mask_fallback {
+            let gpu = self
+                .device
+                .as_ref()
+                .expect("attached hybrid device")
+                .device()
+                .clone();
+            let frame = self.cached_offscreen(&gpu, width, height);
+            let device = self.device.as_mut().expect("attached hybrid device");
+            let queue = device.queue().clone();
+            device.hybrid.as_mut().expect("hybrid renderer").render(
+                &gpu,
+                &queue,
+                &frame,
+                display_list,
+                &self.scene_converter,
+            )?;
+            return Ok((frame, FrameOutput::Premultiplied));
+        }
+
+        #[cfg(feature = "hybrid")]
+        if classic_mask_fallback {
+            self.device
+                .as_mut()
+                .expect("attached hybrid device")
+                .ensure_classic()
+                .map_err(VelloRenderError::into_renderer_error)?;
+        }
+
+        #[cfg(feature = "lyon")]
+        if let Some(result) = self.render_lyon(submission, width, height, target)? {
+            return Ok((result, FrameOutput::Lyon));
+        }
+
+        if let Some(sink) = self.diagnostics.clone() {
+            let mut degraded = Vec::new();
+            Self::report_classic_filter_fallbacks(display_list, &mut degraded);
+            self.fallbacks.report_fallbacks(&degraded, sink.as_ref());
+        }
 
         // `backdrop-filter` frosts the frame accumulated so far, so it cannot be
         // rendered in a single Vello pass: fall to the segmented compositing path.
-        // A list with no backdrop-filter keeps the byte-identical single-render fast
-        // path below (main scene + any `filter: blur` sub-scenes composited on top).
+        // Lists with only ordinary draws keep the single-render fast path below.
         if display_list
             .commands()
             .iter()
@@ -183,15 +407,31 @@ impl VelloRenderer {
                 );
             };
             return SegmentedCompositor::new(device, &mut self.blur, &mut self.color_matrix)
-                .composite(segments, width, height);
+                .composite(segments, width, height)
+                .map(|frame| (frame, FrameOutput::Premultiplied));
         }
 
-        // Convert first (device-free): the main scene plus any blur sub-scenes.
-        // Into the renderer's own scene, whose buffers outlive the frame.
+        // Reuse the renderer's scene buffers when no filter splits the draw order.
         let mut main_scene = std::mem::take(&mut self.scene);
-        let blurs = self
+        let mut segments = self
             .scene_converter
-            .convert_with_blurs_into(&mut main_scene, display_list);
+            .convert_ordered_into(&mut main_scene, display_list);
+
+        if !segments.is_empty() {
+            let Some(device) = self.device.as_mut() else {
+                self.scene = main_scene;
+                return Err(
+                    VelloRenderError::DeviceCreation("no gpu device".into()).into_renderer_error()
+                );
+            };
+            segments.push(SceneSegment::Content {
+                scene: main_scene,
+                blurs: Vec::new(),
+            });
+            return SegmentedCompositor::new(device, &mut self.blur, &mut self.color_matrix)
+                .composite(segments, width, height)
+                .map(|frame| (frame, FrameOutput::Premultiplied));
+        }
 
         let Some(device) = self.device.as_ref() else {
             return Err(
@@ -234,51 +474,62 @@ impl VelloRenderer {
             VelloRenderError::RenderFailed(error.to_string().into()).into_renderer_error()
         })?;
 
-        if !blurs.is_empty() {
-            // Render each blur sub-scene into its own margin-padded offscreen: the
-            // margin (~3σ) keeps the gaussian tail from being clipped at the edge.
-            let prepared = PreparedFilterLayers::render(
-                &gpu_device,
-                &gpu_queue,
-                device.renderer_mut(),
-                blurs,
-            )?;
-
-            // The `device` borrow ends here; build/reuse the owned filter pipelines
-            // and post-process + composite each filter sub-scene onto the frame in
-            // one encoder. The Vello render-to-texture passes above already
-            // submitted, so this trailing submit runs after them on the same queue
-            // (correct ordering).
-            let needs_color = prepared.needs_color_matrix();
-            let gaussian = self
-                .blur
-                .get_or_insert_with(|| GaussianBlur::new(&gpu_device));
-            // Disjoint field borrow: the color-matrix pipeline is built only when a
-            // color op is present (byte-identical no-color path otherwise).
-            let color_matrix = needs_color.then(|| {
-                self.color_matrix
-                    .get_or_insert_with(|| ColorMatrix::new(&gpu_device))
-            });
-            let mut encoder = gpu_device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("obscur-vello-filter"),
-            });
-            // Keep any color-matrix scratch textures alive until the encoder submits.
-            let scratch = prepared.composite(
-                &gpu_device,
-                &mut encoder,
-                gaussian,
-                color_matrix.as_deref(),
-                frame.view(),
-                (width, height),
-            );
-            gpu_queue.submit(std::iter::once(encoder.finish()));
-            drop(scratch);
-        }
-
-        Ok(frame)
+        Ok((frame, FrameOutput::Straight))
     }
 
-    #[doc = include_str!("vello_renderer.doc/present_to_surface.md")]
+    #[cfg(feature = "lyon")]
+    /// Tries the Lyon backend and initializes classic Vello lazily when a display command requires it.
+    fn render_lyon(
+        &mut self,
+        submission: &FrameSubmission,
+        width: u32,
+        height: u32,
+        target: Option<&VelloFrame>,
+    ) -> Result<Option<VelloFrame>, RendererError> {
+        use obscur_diagnostics::{
+            Diagnostic, DiagnosticCode, DiagnosticSeverity, DiagnosticSubsystem,
+        };
+
+        let Some(device) = self.device.as_ref().filter(|device| device.lyon.is_some()) else {
+            return Ok(None);
+        };
+        let gpu = device.device().clone();
+        let queue = device.queue().clone();
+        let frame = target
+            .cloned()
+            .unwrap_or_else(|| self.cached_offscreen(&gpu, width, height));
+        let Some(device) = self.device.as_mut() else {
+            return Ok(None);
+        };
+        let Some(lyon) = device.lyon.as_mut() else {
+            return Ok(None);
+        };
+        let list = submission.frame().scene().shared_display_list();
+        match lyon.render(&gpu, &queue, &frame, list, &self.scene_converter) {
+            Ok(()) => Ok(Some(frame)),
+            Err(reason) => {
+                if !device.lyon_fallback {
+                    return Err(RendererError::Backend(format!("Lyon: {reason}").into()));
+                }
+                if let Some(sink) = self.diagnostics.as_ref()
+                    && lyon.note_fallback(reason)
+                {
+                    sink.emit(&Diagnostic::new(
+                        DiagnosticCode::new("render.lyon.fallback"),
+                        DiagnosticSeverity::Warning,
+                        DiagnosticSubsystem::Render,
+                        format!("Lyon uses Vello for this frame: {reason}"),
+                    ));
+                }
+                device
+                    .ensure_classic()
+                    .map_err(VelloRenderError::into_renderer_error)?;
+                Ok(None)
+            }
+        }
+    }
+
+    #[doc = include_str!("../../docs/api/renderer/vello_renderer.doc/present_to_surface.md")]
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     pub fn present_to_surface(
         &mut self,
@@ -302,13 +553,49 @@ impl VelloRenderer {
         self.present_to_texture(submission, image)
     }
 
-    #[doc = include_str!("vello_renderer.doc/present_to_texture.md")]
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    #[doc = include_str!("../../docs/api/renderer/vello_renderer.doc/present_to_texture.md")]
     pub fn present_to_texture(
         &mut self,
         submission: &FrameSubmission,
         image: AcquiredImage,
     ) -> Result<PresentResult, RendererError> {
+        self.present_to_texture_with(submission, image, || {})
+    }
+
+    #[doc = include_str!("../../docs/api/renderer/vello_renderer.doc/present_to_texture_with.md")]
+    pub fn present_to_texture_with<F: FnOnce()>(
+        &mut self,
+        submission: &FrameSubmission,
+        image: AcquiredImage,
+        before_commit: F,
+    ) -> Result<PresentResult, RendererError> {
+        self.present_to_texture_using(submission, image, before_commit, |texture| {
+            texture.present();
+            true
+        })?;
+        Ok(PresentResult::Presented {
+            generation: submission.generation(),
+        })
+    }
+
+    /// Draw the frame and pass the rendered surface texture to the supplied presenter.
+    /// The pre-commit callback runs after rendering succeeds, immediately before the
+    /// texture is handed off.
+    /// The presenter reports whether it completed the operation inline so diagnostic
+    /// timing can distinguish completion from a handoff.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    pub fn present_to_texture_using(
+        &mut self,
+        submission: &FrameSubmission,
+        image: AcquiredImage,
+        before_commit: impl FnOnce(),
+        present: impl FnOnce(wgpu::SurfaceTexture) -> bool,
+    ) -> Result<(), RendererError> {
+        static TRACE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        let detailed = *TRACE.get_or_init(|| {
+            std::env::var_os("OBSCUR_FRAME_STATS").is_some_and(|mode| mode == "each")
+        });
+        let started = detailed.then(std::time::Instant::now);
         let AcquiredImage {
             texture: surface_texture,
             width,
@@ -320,50 +607,105 @@ impl VelloRenderer {
                 VelloRenderError::RenderFailed("empty surface extent".into()).into_renderer_error(),
             );
         }
-        // `format` came with the image, and it is the surface's format with any
-        // sRGB suffix stripped: the blit must not re-encode what Vello already
-        // encoded. See `VelloSurface::blit_format`.
-        let frame = self.render_to_frame(submission, width, height)?;
-
-        let Some(device) = self.device.as_mut() else {
-            return Err(
-                VelloRenderError::DeviceCreation("no gpu device".into()).into_renderer_error()
-            );
-        };
-        let gpu_device = device.device().clone();
-        let gpu_queue = device.queue().clone();
-
-        if self
-            .blitter
-            .as_ref()
-            .is_some_and(|(cached, _)| *cached != format)
-        {
-            self.blitter = None;
+        // Use the configured unorm view so encoded premultiplied colors stay encoded.
+        let surface_frame = VelloFrame::from_texture(surface_texture.texture.clone(), format);
+        let measure_damage = DamageStats::enabled();
+        #[cfg(feature = "lyon")]
+        let direct = matches!(
+            format,
+            wgpu::TextureFormat::Rgba8Unorm | wgpu::TextureFormat::Bgra8Unorm
+        ) && !force_surface_blit()
+            && !measure_damage;
+        let (frame, output) = self.render_to_frame(
+            submission,
+            width,
+            height,
+            #[cfg(feature = "lyon")]
+            direct.then_some(&surface_frame),
+        )?;
+        let premultiply = matches!(output, FrameOutput::Straight);
+        let raster_done = detailed.then(std::time::Instant::now);
+        #[cfg(feature = "lyon")]
+        if DamageStats::scene_enabled() {
+            let region_id = self.frames_rendered + 1;
+            if matches!(output, FrameOutput::Lyon)
+                && let Some(lyon) = self.device.as_ref().and_then(|device| device.lyon.as_ref())
+            {
+                self.damage_stats.record_scene(
+                    submission.frame().scene(),
+                    (width, height),
+                    format,
+                    region_id,
+                    lyon.text_bounds((width, height)),
+                );
+            } else {
+                self.damage_stats.invalidate_scene();
+            }
         }
-        let (_, blitter) = self
-            .blitter
-            .get_or_insert_with(|| (format, PremultiplyBlitter::new(&gpu_device, format)));
+        if measure_damage && let Some(device) = &self.device {
+            self.damage_stats
+                .capture(device, &frame, self.frames_rendered + 1);
+        }
+        if frame.texture() != surface_frame.texture() {
+            self.blit_to_surface(&frame, &surface_frame, format, premultiply);
+        }
+        // Everything that could have failed has succeeded, and the very next
+        // thing this function does is commit the surface. Anything that has to
+        // be bound to *that* commit — a presentation feedback, a frame callback —
+        // belongs here and nowhere else. Asked earlier, it would bind to this
+        // commit only when the render happened to succeed, and to some later,
+        // unrelated commit when it did not, silently shifting every subsequent
+        // reading by one.
+        let blit_done = detailed.then(std::time::Instant::now);
+        before_commit();
+        let presented_inline = present(surface_texture);
 
-        let surface_view = surface_texture
-            .texture
-            .create_view(&wgpu::TextureViewDescriptor {
-                format: Some(format),
-                ..wgpu::TextureViewDescriptor::default()
-            });
-        let mut encoder = gpu_device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("obscur-vello-present"),
-        });
-        blitter.copy(&gpu_device, &mut encoder, frame.view(), &surface_view);
-        gpu_queue.submit(std::iter::once(encoder.finish()));
-        surface_texture.present();
-
+        if let (Some(started), Some(raster_done), Some(blit_done)) =
+            (started, raster_done, blit_done)
+        {
+            let step = if presented_inline {
+                "commit"
+            } else {
+                "handoff"
+            };
+            println!(
+                "[present-steps] raster_submit_ms={:.3} blit_submit_ms={:.3} {step}_ms={:.3}",
+                (raster_done - started).as_secs_f64() * 1000.0,
+                (blit_done - raster_done).as_secs_f64() * 1000.0,
+                blit_done.elapsed().as_secs_f64() * 1000.0,
+            );
+        }
         self.frames_rendered += 1;
-        Ok(PresentResult::Presented {
-            generation: submission.generation(),
-        })
+        Ok(())
     }
 
-    #[doc = include_str!("vello_renderer.doc/render_to_image.md")]
+    fn blit_to_surface(
+        &mut self,
+        frame: &VelloFrame,
+        target: &VelloFrame,
+        format: wgpu::TextureFormat,
+        premultiply: bool,
+    ) {
+        let device = self.device.as_ref().expect("a rendered frame has a GPU");
+        let gpu = device.device();
+        let slot = &mut self.blitters[usize::from(premultiply)];
+        if slot.as_ref().is_some_and(|(cached, _)| *cached != format) {
+            *slot = None;
+        }
+        let (_, blitter) = slot.get_or_insert_with(|| {
+            (
+                format,
+                PremultiplyBlitter::with_alpha_conversion(gpu, format, premultiply),
+            )
+        });
+        let mut encoder = gpu.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("obscur-vello-present"),
+        });
+        blitter.copy(gpu, &mut encoder, frame.view(), target.view());
+        device.queue().submit([encoder.finish()]);
+    }
+
+    #[doc = include_str!("../../docs/api/renderer/vello_renderer.doc/render_to_image.md")]
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     pub fn render_to_image(
         &mut self,
@@ -377,7 +719,13 @@ impl VelloRenderer {
 
         // Rasterize the display list (main scene + owned blur passes) into the
         // offscreen frame — the same shared path the on-screen present uses.
-        let frame = self.render_to_frame(submission, width, height)?;
+        let (frame, output) = self.render_to_frame(
+            submission,
+            width,
+            height,
+            #[cfg(feature = "lyon")]
+            None,
+        )?;
         // `new_offscreen` clamps to >= 1 per axis; read the effective extent back so
         // the buffer stride and un-padding below match the texture exactly.
         let (width, height) = frame.size();
@@ -394,10 +742,38 @@ impl VelloRenderer {
         // Copy the offscreen texture into a mappable buffer. `copy_texture_to_buffer`
         // requires each row to begin on a 256-byte boundary, so the destination is
         // padded to `padded_bytes_per_row` and the padding is dropped after mapping.
-        let unpadded_bytes_per_row = width * 4;
-        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-        let padded_bytes_per_row = unpadded_bytes_per_row.div_ceil(align) * align;
+        let Some((unpadded_bytes_per_row, padded_bytes_per_row)) =
+            super::readback_layout::readback_row_bytes(width)
+        else {
+            return Err(
+                VelloRenderError::RenderFailed("readback row size overflow".into())
+                    .into_renderer_error(),
+            );
+        };
         let buffer_size = u64::from(padded_bytes_per_row) * u64::from(height);
+        if buffer_size > gpu_device.limits().max_buffer_size {
+            return Err(VelloRenderError::RenderFailed(
+                "readback exceeds the GPU buffer limit".into(),
+            )
+            .into_renderer_error());
+        }
+        if usize::try_from(buffer_size).is_err() {
+            return Err(VelloRenderError::RenderFailed(
+                "readback exceeds the host address space".into(),
+            )
+            .into_renderer_error());
+        }
+        // Each row is no wider than the corresponding row of the checked buffer.
+        let row = unpadded_bytes_per_row as usize;
+        let stride = padded_bytes_per_row as usize;
+        let mut pixels = Vec::new();
+        pixels
+            .try_reserve_exact(row * height as usize)
+            .map_err(|error| {
+                VelloRenderError::RenderFailed(format!("allocate readback pixels: {error}").into())
+                    .into_renderer_error()
+            })?;
+
         let readback = gpu_device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("obscur-vello-readback"),
             size: buffer_size,
@@ -451,9 +827,6 @@ impl VelloRenderer {
         }
 
         // Copy out, dropping the per-row padding so the result is tight RGBA8.
-        let row = unpadded_bytes_per_row as usize;
-        let stride = padded_bytes_per_row as usize;
-        let mut pixels = Vec::with_capacity(row * height as usize);
         {
             let view = readback.get_mapped_range(..);
             for chunk in view.chunks_exact(stride) {
@@ -461,6 +834,17 @@ impl VelloRenderer {
             }
         }
         readback.unmap();
+
+        // Vello stores straight alpha. The readback API exposes premultiplied
+        // RGBA8, matching the CPU pixmap and its PNG encoder.
+        if matches!(output, FrameOutput::Straight) {
+            for pixel in pixels.chunks_exact_mut(4) {
+                let alpha = u16::from(pixel[3]);
+                for channel in &mut pixel[..3] {
+                    *channel = ((u16::from(*channel) * alpha + 127) / 255) as u8;
+                }
+            }
+        }
 
         self.frames_rendered += 1;
         Ok((width, height, pixels))
@@ -500,25 +884,55 @@ impl Renderer for VelloRenderer {
         // Rasterize into an offscreen frame via the shared path (main scene + owned
         // blur passes); the port `render` leaves the result on the GPU. A missing
         // device yields an honest error rather than a fabricated one.
-        let _frame = self.render_to_frame(submission, width, height)?;
+        let (frame, _) = self.render_to_frame(
+            submission,
+            width,
+            height,
+            #[cfg(feature = "lyon")]
+            None,
+        )?;
 
+        if DamageStats::enabled()
+            && let Some(device) = &self.device
+        {
+            self.damage_stats
+                .capture(device, &frame, self.frames_rendered + 1);
+        }
         self.frames_rendered += 1;
         Ok(PresentResult::Presented {
             generation: submission.generation(),
         })
     }
 
-    #[doc = include_str!("vello_renderer.doc/supports_effect.md")]
+    #[doc = include_str!("../../docs/api/renderer/vello_renderer.doc/supports_effect.md")]
     fn supports_effect(&self, effect: SceneEffect) -> SupportLevel {
-        match effect {
-            SceneEffect::Gradient | SceneEffect::Clip | SceneEffect::Image => SupportLevel::Native,
-            SceneEffect::Shadow | SceneEffect::BackdropFilter => SupportLevel::Emulated,
-            SceneEffect::Blur
-            | SceneEffect::ColorMatrix
-            | SceneEffect::Text
-            | SceneEffect::BlendMode => SupportLevel::Limited,
-            SceneEffect::Mask => SupportLevel::Unavailable,
+        if self.is_hybrid() {
+            return match effect {
+                SceneEffect::Gradient | SceneEffect::Clip => SupportLevel::Native,
+                SceneEffect::Text
+                | SceneEffect::Shadow
+                | SceneEffect::Blur
+                | SceneEffect::ImageMask
+                | SceneEffect::BlendMode => SupportLevel::Limited,
+                SceneEffect::Mask
+                | SceneEffect::Image
+                | SceneEffect::BackdropFilter
+                | SceneEffect::ColorMatrix => SupportLevel::Unavailable,
+            };
         }
+        classic_effect_support(effect)
+    }
+}
+
+fn classic_effect_support(effect: SceneEffect) -> SupportLevel {
+    match effect {
+        SceneEffect::Gradient | SceneEffect::Clip | SceneEffect::Image | SceneEffect::BlendMode => {
+            SupportLevel::Native
+        }
+        SceneEffect::Shadow | SceneEffect::BackdropFilter => SupportLevel::Emulated,
+        SceneEffect::Blur | SceneEffect::ColorMatrix | SceneEffect::Text => SupportLevel::Limited,
+        SceneEffect::ImageMask => SupportLevel::Limited,
+        SceneEffect::Mask => SupportLevel::Unavailable,
     }
 }
 
@@ -599,6 +1013,34 @@ mod tests {
     }
 
     #[test]
+    fn rendering_a_clipped_filter_reports_the_omitted_effect() {
+        use obscur_geometry::{Point, Rect};
+        use obscur_scene::clip::Clip;
+        use obscur_scene::layer::{LayerEffect, SceneLayer};
+
+        let size = Size::new(64.0, 48.0);
+        let clip = Clip::rect(Rect::new(Point::ORIGIN, size));
+        let mut layer = SceneLayer::new().with_clip(clip.clone());
+        layer.add_effect(LayerEffect::blur(2.0));
+        let list = DisplayList::from_commands(vec![
+            PaintCommand::PushClip(clip),
+            PaintCommand::PushLayer(layer),
+            PaintCommand::PopLayer,
+            PaintCommand::PopClip,
+        ]);
+        let submission = FrameSubmission::new(RenderFrame::new(
+            SceneSnapshot::new(list, SceneGeneration::from_raw(1)),
+            size,
+        ));
+        let sink = Arc::new(RecordingSink::default());
+        let mut renderer = VelloRenderer::new(RendererId::from_raw(11));
+        renderer.set_diagnostic_sink(sink.clone());
+        let _ = renderer.render(&submission, &a_target());
+        assert_eq!(sink.messages().len(), 1);
+        assert!(sink.messages()[0].contains("classic Vello omits filter layers"));
+    }
+
+    #[test]
     fn a_scene_within_the_backends_means_raises_nothing() {
         let sink = Arc::new(RecordingSink::default());
         let mut renderer = VelloRenderer::new(RendererId::from_raw(12));
@@ -662,6 +1104,44 @@ mod tests {
         renderer.set_diagnostic_sink(sink.clone());
         let _ = renderer.render(&submission(1), &a_target());
         assert!(sink.messages().is_empty());
+    }
+
+    /// The scans that raise these diagnostics are skipped while no sink is
+    /// installed — two full display-list walks a frame that nothing could observe.
+    /// The risk that buys is *silence*: a scan that recorded into
+    /// `EffectFallbackReporter` while no one was listening would mark the effect
+    /// "already raised", and the host that installs a sink one frame later would
+    /// never hear about it. Skipping means not recording either, so the first
+    /// frame after a sink arrives raises everything the scene still earns.
+    #[test]
+    fn a_sink_installed_after_the_frames_began_still_hears_the_scene() {
+        use obscur_scene::clip::{Clip, Mask};
+        let list = DisplayList::from_commands(vec![
+            PaintCommand::PushClip(Clip::mask(Mask::alpha())),
+            PaintCommand::PopClip,
+        ]);
+        let a_frame = || {
+            FrameSubmission::new(RenderFrame::new(
+                SceneSnapshot::new(list.clone(), SceneGeneration::from_raw(1)),
+                Size::new(64.0, 48.0),
+            ))
+        };
+        let mut renderer = VelloRenderer::new(RendererId::from_raw(15));
+        // Three frames with nobody listening.
+        for _ in 0..3 {
+            let _ = renderer.render(&a_frame(), &a_target());
+        }
+        let sink = Arc::new(RecordingSink::default());
+        renderer.set_diagnostic_sink(sink.clone());
+        let _ = renderer.render(&a_frame(), &a_target());
+        assert_eq!(
+            sink.messages(),
+            vec!["unsupported effect: mask".to_string()],
+            "the mask was never raised while no sink was installed, so it is still owed"
+        );
+        // And still raised once, not once per frame, after that.
+        let _ = renderer.render(&a_frame(), &a_target());
+        assert_eq!(sink.messages().len(), 1);
     }
 
     #[test]
@@ -735,13 +1215,9 @@ mod tests {
         for effect in [SceneEffect::Clip, SceneEffect::Gradient, SceneEffect::Image] {
             assert_eq!(renderer.supports_effect(effect), SupportLevel::Native);
         }
-        // Not Native: the variant names two inputs and `push_layer` honours one.
-        // The layer's `blend_mode()` field becomes a peniko `Mix`; a
-        // `LayerEffect::Blend` in the effects list is dropped, because that list is
-        // scanned only for `Blur` and `ColorMatrix`.
         assert_eq!(
             renderer.supports_effect(SceneEffect::BlendMode),
-            SupportLevel::Limited
+            SupportLevel::Native
         );
         // Real gaussians, assembled from primitives rather than a native op: a
         // `box-shadow` / `filter: drop-shadow(...)` through
@@ -783,4 +1259,67 @@ mod tests {
     fn renderer_is_object_safe() {
         let _: Box<dyn Renderer> = Box::new(VelloRenderer::new(RendererId::from_raw(9)));
     }
+
+    #[doc = include_str!("../../docs/api/renderer/vello_renderer.doc/a_registered_face_is_the_hosts_allocation_not_a_copy_of_it.md")]
+    #[test]
+    fn a_registered_face_is_the_hosts_allocation_not_a_copy_of_it() {
+        // What the kit's font registry holds, and what it hands over.
+        let host: Arc<[u8]> = Arc::from(vec![0x00, 0x01, 0x00, 0x00, 0x42, 0x43]);
+        let host_addr = host.as_ptr();
+
+        let mut renderer = VelloRenderer::new(RendererId::from_raw(21));
+        renderer.register_font(7, Arc::clone(&host));
+
+        let registered = renderer
+            .scene_converter
+            .face_bytes(7)
+            .expect("the face registered under handle 7");
+        assert!(
+            std::ptr::eq(registered.as_ptr(), host_addr),
+            "the registered face must BE the host's allocation, not a copy of \
+             it: the registry keeps every face for the life of the process, so \
+             a copy here is a second permanent copy — 26 MB apiece for the CJK \
+             faces on this desktop"
+        );
+        assert_eq!(registered.len(), host.len());
+
+        // And the sharing is the only thing that changed: a caller with a
+        // `Vec` still works, and still gets its own bytes.
+        renderer.register_font(8, vec![0x00, 0x01, 0x00, 0x00, 0x44]);
+        assert_eq!(
+            renderer.scene_converter.face_bytes(8),
+            Some([0x00, 0x01, 0x00, 0x00, 0x44].as_slice())
+        );
+    }
+
+    #[test]
+    fn re_registering_the_very_same_allocation_is_a_no_op() {
+        // The guard in `SceneConverter::register_font` exists so that replacing
+        // a face with itself does not orphan every glyph outline Vello cached
+        // under the old `Blob` id. Sharing makes the common case an address
+        // comparison; this checks that it still ANSWERS the same.
+        let host: Arc<[u8]> = Arc::from(vec![1u8, 2, 3, 4]);
+        let mut renderer = VelloRenderer::new(RendererId::from_raw(22));
+        renderer.register_font(0, Arc::clone(&host));
+        let first = renderer
+            .scene_converter
+            .face_bytes(0)
+            .expect("registered")
+            .as_ptr();
+        renderer.register_font(0, Arc::clone(&host));
+        let second = renderer
+            .scene_converter
+            .face_bytes(0)
+            .expect("still registered")
+            .as_ptr();
+        assert!(std::ptr::eq(first, second), "the face was not replaced");
+    }
+}
+
+#[cfg(feature = "lyon")]
+fn force_surface_blit() -> bool {
+    static FORCE_BLIT: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *FORCE_BLIT.get_or_init(|| {
+        std::env::var_os("OBSCUR_LYON_SURFACE_BLIT").is_some_and(|value| value == "1")
+    })
 }

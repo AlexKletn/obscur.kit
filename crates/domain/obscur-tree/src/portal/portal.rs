@@ -1,62 +1,49 @@
-#![doc = include_str!("portal.doc/_module.md")]
+//! A single portal: content whose logical position stays put but paints elsewhere.
 
 use obscur_identity::NodeId;
 
-use crate::node::{NodeFlags, VisualParent};
 use crate::tree::RetainedTree;
 
 use super::PortalTarget;
 
-#[doc = include_str!("portal.doc/Portal.md")]
+#[doc = include_str!("../../docs/api/portal/portal.doc/Portal.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Portal {
-    #[doc = include_str!("portal.doc/source.md")]
+    /// The source node whose logical position stays put.
     source: NodeId,
-    #[doc = include_str!("portal.doc/target.md")]
+    /// The visual destination the source is painted into.
     target: PortalTarget,
 }
 
 impl Portal {
-    #[doc = include_str!("portal.doc/new.md")]
+    /// Creates a portal from `source` to the visual destination `target`.
     #[must_use]
     pub const fn new(source: NodeId, target: PortalTarget) -> Self {
         Self { source, target }
     }
 
-    #[doc = include_str!("portal.doc/source_2.md")]
+    /// Returns the source node whose logical position is preserved.
     #[must_use]
     pub const fn source(self) -> NodeId {
         self.source
     }
 
-    #[doc = include_str!("portal.doc/target_2.md")]
+    /// Returns the visual destination this portal renders into.
     #[must_use]
     pub const fn target(self) -> PortalTarget {
         self.target
     }
 
-    #[doc = include_str!("portal.doc/apply.md")]
+    #[doc = include_str!("../../docs/api/portal/portal.doc/apply.md")]
     pub fn apply(self, tree: &mut RetainedTree) -> bool {
-        let host = self.target.host_node();
-        if !tree.contains(self.source) || !tree.contains(host) {
-            return false;
-        }
-        let Some(source) = tree.get_mut(self.source) else {
-            return false;
-        };
-        source.set_visual_parent(VisualParent::of(host));
-        let Some(host_node) = tree.get_mut(host) else {
-            return false;
-        };
-        host_node.insert_flags(NodeFlags::PORTAL_HOST);
-        true
+        tree.project_portal(self.source, self.target.host_node())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::node::{LogicalParent, NodeKind};
+    use crate::node::{LogicalParent, NodeFlags, NodeKind, VisualParent};
 
     /// Builds `logical_parent -> source` and a separate `host`, then portals
     /// `source` into `host`. Returns `(source, host, logical_parent)`.

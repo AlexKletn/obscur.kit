@@ -1,54 +1,57 @@
-#![doc = include_str!("caret.doc/_module.md")]
+//! A text insertion point: a byte offset plus wrap-boundary affinity (spec §5.11).
 
 use super::CaretAffinity;
 
-#[doc = include_str!("caret.doc/Caret.md")]
+#[doc = include_str!("../../docs/api/selection/caret.doc/Caret.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Caret {
-    #[doc = include_str!("caret.doc/offset.md")]
+    /// The byte offset of the insertion point into the buffer.
     offset: usize,
-    #[doc = include_str!("caret.doc/affinity.md")]
+    /// The wrap-boundary affinity of the offset.
     affinity: CaretAffinity,
 }
 
 impl Caret {
-    #[doc = include_str!("caret.doc/new.md")]
+    /// Creates a caret at `offset` with the given `affinity`.
     #[must_use]
     pub const fn new(offset: usize, affinity: CaretAffinity) -> Self {
         Self { offset, affinity }
     }
 
-    #[doc = include_str!("caret.doc/at.md")]
+    /// Creates a caret at `offset` with the default
+    /// [`Downstream`](CaretAffinity::Downstream) affinity.
     #[must_use]
     pub const fn at(offset: usize) -> Self {
         Self::new(offset, CaretAffinity::Downstream)
     }
 
-    #[doc = include_str!("caret.doc/offset_2.md")]
+    /// Returns the byte offset of the insertion point.
     #[must_use]
     pub const fn offset(&self) -> usize {
         self.offset
     }
 
-    #[doc = include_str!("caret.doc/affinity_2.md")]
+    /// Returns the wrap-boundary affinity of the offset.
     #[must_use]
     pub const fn affinity(&self) -> CaretAffinity {
         self.affinity
     }
 
-    #[doc = include_str!("caret.doc/with_affinity.md")]
+    /// Returns a copy of this caret with `affinity` replaced, keeping the offset.
     #[must_use]
     pub const fn with_affinity(&self, affinity: CaretAffinity) -> Self {
         Self::new(self.offset, affinity)
     }
 
-    #[doc = include_str!("caret.doc/with_offset.md")]
+    /// Returns a copy of this caret with `offset` replaced, keeping the affinity.
     #[must_use]
     pub const fn with_offset(&self, offset: usize) -> Self {
         Self::new(offset, self.affinity)
     }
 
-    #[doc = include_str!("caret.doc/shifted.md")]
+    /// Returns this caret moved by `delta` bytes, saturating at the bounds of
+    /// `usize` so the offset never overflows or underflows. The affinity is
+    /// preserved.
     #[must_use]
     pub const fn shifted(&self, delta: isize) -> Self {
         Self::new(self.offset.saturating_add_signed(delta), self.affinity)

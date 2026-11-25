@@ -1,50 +1,12 @@
-#![doc = include_str!("parse_error.doc/_module.md")]
+//! `ParseError`: a single diagnostic emitted by the [`Parser`](crate::parser::Parser),
+//! plus the colocated [`ParseErrorKind`] classification.
 
 use std::error::Error;
 use std::fmt;
 
-#[doc = include_str!("parse_error.doc/ParseErrorKind.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ParseErrorKind {
-    #[doc = include_str!("parse_error.doc/UnexpectedToken.md")]
-    UnexpectedToken,
-    #[doc = include_str!("parse_error.doc/UnexpectedEof.md")]
-    UnexpectedEof,
-    #[doc = include_str!("parse_error.doc/ExpectedTagName.md")]
-    ExpectedTagName,
-    #[doc = include_str!("parse_error.doc/ExpectedClose.md")]
-    ExpectedClose,
-    #[doc = include_str!("parse_error.doc/MismatchedCloseTag.md")]
-    MismatchedCloseTag,
-    #[doc = include_str!("parse_error.doc/ExpectedAttributeValue.md")]
-    ExpectedAttributeValue,
-    #[doc = include_str!("parse_error.doc/UnterminatedExpression.md")]
-    UnterminatedExpression,
-}
+use super::ParseErrorKind;
 
-impl ParseErrorKind {
-    #[doc = include_str!("parse_error.doc/label.md")]
-    #[must_use]
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::UnexpectedToken => "unexpected token",
-            Self::UnexpectedEof => "unexpected end of input",
-            Self::ExpectedTagName => "expected tag name",
-            Self::ExpectedClose => "expected closing `>` or `/>`",
-            Self::MismatchedCloseTag => "mismatched close tag",
-            Self::ExpectedAttributeValue => "expected attribute value",
-            Self::UnterminatedExpression => "unterminated expression",
-        }
-    }
-}
-
-impl fmt::Display for ParseErrorKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.label())
-    }
-}
-
-#[doc = include_str!("parse_error.doc/ParseError.md")]
+#[doc = include_str!("../../docs/api/parser/parse_error.doc/ParseError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParseError {
     kind: ParseErrorKind,
@@ -53,7 +15,8 @@ pub struct ParseError {
 }
 
 impl ParseError {
-    #[doc = include_str!("parse_error.doc/new.md")]
+    /// Creates a diagnostic of `kind` with `message`, detected at byte
+    /// `offset`.
     #[must_use]
     pub fn new(kind: ParseErrorKind, message: impl Into<Box<str>>, offset: u32) -> Self {
         Self {
@@ -63,19 +26,19 @@ impl ParseError {
         }
     }
 
-    #[doc = include_str!("parse_error.doc/kind.md")]
+    /// Returns the error's classification.
     #[must_use]
     pub const fn kind(&self) -> ParseErrorKind {
         self.kind
     }
 
-    #[doc = include_str!("parse_error.doc/message.md")]
+    /// Returns the human-readable message.
     #[must_use]
     pub fn message(&self) -> &str {
         &self.message
     }
 
-    #[doc = include_str!("parse_error.doc/offset.md")]
+    /// Returns the byte offset in the source where the problem was detected.
     #[must_use]
     pub const fn offset(&self) -> u32 {
         self.offset

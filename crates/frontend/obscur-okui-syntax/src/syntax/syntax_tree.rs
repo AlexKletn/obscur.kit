@@ -1,27 +1,27 @@
-#![doc = include_str!("syntax_tree.doc/_module.md")]
+//! `SyntaxTree`: the whole parsed lossless tree.
 
 use crate::syntax::SyntaxNode;
 
-#[doc = include_str!("syntax_tree.doc/SyntaxTree.md")]
+#[doc = include_str!("../../docs/api/syntax/syntax_tree.doc/SyntaxTree.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct SyntaxTree {
     root: SyntaxNode,
 }
 
 impl SyntaxTree {
-    #[doc = include_str!("syntax_tree.doc/new.md")]
+    /// Creates a tree from its root node.
     #[must_use]
     pub const fn new(root: SyntaxNode) -> Self {
         Self { root }
     }
 
-    #[doc = include_str!("syntax_tree.doc/root.md")]
+    /// Returns the tree's root node.
     #[must_use]
     pub const fn root(&self) -> &SyntaxNode {
         &self.root
     }
 
-    #[doc = include_str!("syntax_tree.doc/text.md")]
+    /// Reconstructs the full source the tree was built from.
     #[must_use]
     pub fn text(&self) -> String {
         self.root.text()

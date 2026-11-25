@@ -1,105 +1,129 @@
-#![doc = include_str!("crate_node.doc/_module.md")]
+//! A single workspace crate node: its name, layer, manifest and the `obscur-*`
+//! crates it depends on.
 
-use std::fs;
 use std::path::PathBuf;
 
-use super::layer::Layer;
+use toml_edit::{Item, Table, TableLike};
 
-#[doc = include_str!("crate_node.doc/CrateNode.md")]
+use super::layer::Layer;
+use crate::violation::Violation;
+use crate::workspace_manifests::read_manifest;
+
+const MANIFEST_RULE: &str = "dependency-manifest";
+
+/// One node in the workspace dependency graph.
 pub(crate) struct CrateNode {
-    #[doc = include_str!("crate_node.doc/name.md")]
+    /// Package name (`[package] name = "…"`).
     pub(crate) name: String,
-    #[doc = include_str!("crate_node.doc/layer.md")]
+    /// Architectural layer inferred from the crate's path.
     pub(crate) layer: Layer,
-    #[doc = include_str!("crate_node.doc/manifest.md")]
+    /// Path to the crate's `Cargo.toml` (used to anchor violations).
     pub(crate) manifest: PathBuf,
-    #[doc = include_str!("crate_node.doc/deps.md")]
+    /// Names of the packages this crate depends on (normal and build
+    /// dependencies; dev-dependencies are excluded because they are test-only
+    /// and may legitimately point up the graph).
     pub(crate) deps: Vec<String>,
+    /// Test-only packages, checked for platform dependencies but excluded from graph edges.
+    pub(crate) dev_deps: Vec<String>,
 }
 
 impl CrateNode {
-    #[doc = include_str!("crate_node.doc/parse.md")]
-    pub(crate) fn parse(manifest: PathBuf, layer: Layer) -> Option<Self> {
-        let text = fs::read_to_string(&manifest).ok()?;
-        let name = package_name(&text)?;
-        let deps = obscur_deps(&text);
-        Some(Self {
+    /// Parses a crate node or reports why its manifest cannot be used.
+    pub(crate) fn parse(
+        manifest: PathBuf,
+        layer: Layer,
+        workspace_deps: Option<&dyn TableLike>,
+    ) -> Result<Self, Violation> {
+        let document = read_manifest(MANIFEST_RULE, &manifest)?;
+        let name = package_name(document.as_table()).ok_or_else(|| {
+            Violation::new(MANIFEST_RULE, &manifest, "manifest has no package name")
+        })?;
+        let invalid_dependency = |detail| Violation::new(MANIFEST_RULE, &manifest, detail);
+        let deps = dependency_names(
+            document.as_table(),
+            workspace_deps,
+            &["dependencies", "build-dependencies"],
+        )
+        .map_err(invalid_dependency)?;
+        let dev_deps = dependency_names(document.as_table(), workspace_deps, &["dev-dependencies"])
+            .map_err(invalid_dependency)?;
+        Ok(Self {
             name,
             layer,
             manifest,
             deps,
+            dev_deps,
         })
     }
 }
 
-#[doc = include_str!("crate_node.doc/package_name.md")]
-fn package_name(text: &str) -> Option<String> {
-    let mut in_package = false;
-    for raw in text.lines() {
-        let line = raw.trim();
-        if line.starts_with('[') {
-            in_package = line == "[package]";
-            continue;
-        }
-        if in_package
-            && line.starts_with("name")
-            && let Some((_, rhs)) = line.split_once('=')
-        {
-            let value = rhs.trim().trim_matches('"');
-            if !value.is_empty() {
-                return Some(value.to_owned());
+fn package_name(manifest: &Table) -> Option<String> {
+    let name = manifest.get("package")?.get("name")?.as_str()?;
+    (!name.is_empty()).then(|| name.to_owned())
+}
+
+/// Collects resolved package names from the unconditional and target-specific tables.
+fn dependency_names(
+    manifest: &Table,
+    workspace_deps: Option<&dyn TableLike>,
+    tables: &[&str],
+) -> Result<Vec<String>, String> {
+    let mut deps = Vec::new();
+    collect_deps(manifest, workspace_deps, tables, &mut deps)?;
+    if let Some(targets) = manifest.get("target").and_then(Item::as_table_like) {
+        for (_, target) in targets.iter() {
+            if let Some(target) = target.as_table_like() {
+                collect_deps(target, workspace_deps, tables, &mut deps)?;
             }
         }
     }
-    None
+    Ok(deps)
 }
 
-#[doc = include_str!("crate_node.doc/obscur_deps.md")]
-fn obscur_deps(text: &str) -> Vec<String> {
-    let mut deps = Vec::new();
-    let mut in_deps = false;
-    for raw in text.lines() {
-        let line = raw.trim();
-        if line.starts_with('[') {
-            in_deps = line.ends_with("dependencies]") && !line.contains("dev-dependencies");
+fn collect_deps(
+    scope: &dyn TableLike,
+    workspace_deps: Option<&dyn TableLike>,
+    tables: &[&str],
+    deps: &mut Vec<String>,
+) -> Result<(), String> {
+    for table in tables {
+        let Some(entries) = scope.get(table).and_then(Item::as_table_like) else {
             continue;
-        }
-        if !in_deps {
-            continue;
-        }
-        if let Some(name) = obscur_dep_key(line)
-            && !deps.contains(&name)
-        {
-            deps.push(name);
+        };
+        for (key, dependency) in entries.iter() {
+            let dependency = if dependency.get("workspace").and_then(Item::as_bool) == Some(true) {
+                workspace_deps
+                    .and_then(|table| table.get(key))
+                    .ok_or_else(|| {
+                        format!("dependency '{key}' is missing from [workspace.dependencies]")
+                    })?
+            } else {
+                dependency
+            };
+            let package = dependency
+                .get("package")
+                .and_then(Item::as_str)
+                .unwrap_or(key);
+            if !deps.iter().any(|known| known == package) {
+                deps.push(package.to_owned());
+            }
         }
     }
-    deps
-}
-
-#[doc = include_str!("crate_node.doc/obscur_dep_key.md")]
-fn obscur_dep_key(line: &str) -> Option<String> {
-    if !line.starts_with("obscur-") {
-        return None;
-    }
-    let end = line
-        .find(|c: char| c == '=' || c == '.' || c.is_whitespace())
-        .unwrap_or(line.len());
-    let key = line[..end].trim();
-    if key.len() > "obscur-".len() {
-        Some(key.to_owned())
-    } else {
-        None
-    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{obscur_deps, package_name};
+    use super::{dependency_names, package_name};
+    use toml_edit::Document;
 
     #[test]
     fn reads_package_name() {
-        let toml = "[package]\nname = \"obscur-demo\"\nversion = \"0.1.0\"\n";
-        assert_eq!(package_name(toml).as_deref(), Some("obscur-demo"));
+        let toml = "[package]\nname = \"obscur-demo\" # comment\nversion = \"0.1.0\"\n";
+        assert_eq!(
+            package_name(toml.parse::<Document<String>>().unwrap().as_table()).as_deref(),
+            Some("obscur-demo")
+        );
     }
 
     #[test]
@@ -109,22 +133,38 @@ mod tests {
 name = \"obscur-demo\"
 
 [dependencies]
-obscur-geometry = { workspace = true }
-obscur-identity.workspace = true
+geometry = { package = 'obscur-geometry', path = '../obscur-geometry' }
+obscur-identity = '1'
 serde = \"1\"
 
 [build-dependencies]
-obscur-buildhelper = { workspace = true }
+obscur-buildhelper = '1'
 
 [dev-dependencies]
-obscur-headless = { workspace = true }
+obscur-headless = '1'
 ";
-        let deps = obscur_deps(toml);
+        let deps = dependency_names(
+            toml.parse::<Document<String>>().unwrap().as_table(),
+            None,
+            &["dependencies", "build-dependencies"],
+        )
+        .unwrap();
         assert!(deps.contains(&"obscur-geometry".to_owned()));
         assert!(deps.contains(&"obscur-identity".to_owned()));
         assert!(deps.contains(&"obscur-buildhelper".to_owned()));
         assert!(!deps.contains(&"obscur-headless".to_owned()));
-        assert!(!deps.iter().any(|d| d == "serde"));
+        assert!(deps.iter().any(|d| d == "serde"));
+    }
+
+    #[test]
+    fn reports_missing_workspace_dependency() {
+        let member = "[dependencies]\nmissing.workspace = true"
+            .parse::<Document<String>>()
+            .unwrap();
+        assert_eq!(
+            dependency_names(member.as_table(), None, &["dependencies"]),
+            Err("dependency 'missing' is missing from [workspace.dependencies]".into())
+        );
     }
 
     #[test]
@@ -134,8 +174,16 @@ obscur-headless = { workspace = true }
 name = \"obscur-demo\"
 
 [target.'cfg(unix)'.dependencies]
-obscur-system = { workspace = true }
+obscur-system = '1'
 ";
-        assert_eq!(obscur_deps(toml), vec!["obscur-system".to_owned()]);
+        assert_eq!(
+            dependency_names(
+                toml.parse::<Document<String>>().unwrap().as_table(),
+                None,
+                &["dependencies", "build-dependencies"]
+            )
+            .unwrap(),
+            vec!["obscur-system".to_owned()]
+        );
     }
 }

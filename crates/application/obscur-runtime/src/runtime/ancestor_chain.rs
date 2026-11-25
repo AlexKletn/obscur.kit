@@ -1,13 +1,13 @@
-#![doc = include_str!("ancestor_chain.doc/_module.md")]
+//! The logical ancestor chain of a node: [`AncestorChain`].
 
 use obscur_identity::NodeId;
 use obscur_tree::tree::RetainedTree;
 
-#[doc = include_str!("ancestor_chain.doc/AncestorChain.md")]
+#[doc = include_str!("../../docs/api/runtime/ancestor_chain.doc/AncestorChain.md")]
 pub(crate) struct AncestorChain(Vec<NodeId>);
 
 impl AncestorChain {
-    #[doc = include_str!("ancestor_chain.doc/of.md")]
+    #[doc = include_str!("../../docs/api/runtime/ancestor_chain.doc/of.md")]
     pub(crate) fn of(tree: &RetainedTree, target: Option<NodeId>) -> Self {
         let Some(target) = target else {
             return Self(Vec::new());
@@ -27,7 +27,7 @@ impl AncestorChain {
         Self(chain)
     }
 
-    #[doc = include_str!("ancestor_chain.doc/into_vec.md")]
+    /// The chain as an owned vector, node first.
     pub(crate) fn into_vec(self) -> Vec<NodeId> {
         self.0
     }

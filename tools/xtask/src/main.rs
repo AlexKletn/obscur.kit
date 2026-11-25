@@ -1,16 +1,17 @@
-#![doc = include_str!("main.doc/_module.md")]
+#![doc = include_str!("../docs/api/main.doc/_module.md")]
 #![forbid(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
 mod consumer;
 mod rule;
 mod violation;
+mod workspace_manifests;
 
 use std::path::Path;
 use std::process::ExitCode;
 
 use rule::{
-    dependency_direction, dependency_graph, file_size, forbidden_file_name, main_entity,
+    dependency_graph, documentation_layout, file_size, forbidden_file_name, main_entity,
     module_layout, unsafe_boundary,
 };
 use violation::Violation;
@@ -36,17 +37,17 @@ fn main() -> ExitCode {
         return report(&violations);
     }
     violations.extend(module_layout::check(&root));
+    violations.extend(documentation_layout::check(&root));
     violations.extend(forbidden_file_name::check(&root));
     violations.extend(file_size::check(&root));
     violations.extend(main_entity::check(&root));
     violations.extend(unsafe_boundary::check(&root));
-    violations.extend(dependency_direction::check(&root));
     violations.extend(dependency_graph::check(&root));
 
     report(&violations)
 }
 
-#[doc = include_str!("main.doc/report.md")]
+/// Prints `violations` and turns them into the process's exit status.
 fn report(violations: &[Violation]) -> ExitCode {
     if violations.is_empty() {
         println!("architecture checks passed");

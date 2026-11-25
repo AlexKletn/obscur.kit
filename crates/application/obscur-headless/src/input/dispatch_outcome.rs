@@ -1,36 +1,42 @@
-#![doc = include_str!("dispatch_outcome.doc/_module.md")]
+//! `DispatchOutcome`: the typed result of dispatching one synthetic input.
 
 use obscur_identity::{InternedSymbol, NodeId};
 
-#[doc = include_str!("dispatch_outcome.doc/DispatchOutcome.md")]
+#[doc = include_str!("../../docs/api/input/dispatch_outcome.doc/DispatchOutcome.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct DispatchOutcome {
-    #[doc = include_str!("dispatch_outcome.doc/target.md")]
+    /// The node the input landed on, or [`None`] when it resolved to nothing
+    /// (an unknown `test-id`, a coordinate over no box, a key with no focus).
     pub target: Option<NodeId>,
-    #[doc = include_str!("dispatch_outcome.doc/propagation_path.md")]
+    /// The chain from [`target`](Self::target) to the root, inclusive — the path
+    /// an event's default action is resolved along. Empty when there is no target.
     pub propagation_path: Vec<NodeId>,
-    #[doc = include_str!("dispatch_outcome.doc/command.md")]
+    /// The command the input dispatched, if it triggered one: a completed click
+    /// on a node with a binding in its propagation path, or a bound shortcut.
+    /// This is the event's *default action*.
     pub command: Option<InternedSymbol>,
-    #[doc = include_str!("dispatch_outcome.doc/hover_changed.md")]
+    /// Whether the hover chain changed.
     pub hover_changed: bool,
-    #[doc = include_str!("dispatch_outcome.doc/focus_changed.md")]
+    /// Whether the focus target changed.
     pub focus_changed: bool,
+    /// Whether a raw keyboard, pointer, or context-menu handler called `prevent_default`.
+    pub default_prevented: bool,
 }
 
 impl DispatchOutcome {
-    #[doc = include_str!("dispatch_outcome.doc/unresolved.md")]
+    /// An outcome for an input that resolved to nothing and did nothing.
     #[must_use]
     pub fn unresolved() -> Self {
         Self::default()
     }
 
-    #[doc = include_str!("dispatch_outcome.doc/resolved.md")]
+    /// Whether the input found a node to act on.
     #[must_use]
     pub const fn resolved(&self) -> bool {
         self.target.is_some()
     }
 
-    #[doc = include_str!("dispatch_outcome.doc/propagates_through.md")]
+    /// Whether `node` is on the propagation path.
     #[must_use]
     pub fn propagates_through(&self, node: NodeId) -> bool {
         self.propagation_path.contains(&node)

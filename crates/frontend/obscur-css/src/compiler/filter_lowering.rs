@@ -1,4 +1,4 @@
-#![doc = include_str!("filter_lowering.doc/_module.md")]
+#![doc = include_str!("../../docs/api/compiler/filter_lowering.doc/_module.md")]
 
 use super::calc_lowering::lower_math_function;
 use super::color_lowering::parse_stop_color;
@@ -9,7 +9,7 @@ use obscur_style::property::{
     BoxShadow, FilterFunction, FilterOp, Length, LengthExpr, PropertyValue, StyleColor,
 };
 
-#[doc = include_str!("filter_lowering.doc/lower_filter.md")]
+#[doc = include_str!("../../docs/api/compiler/filter_lowering.doc/lower_filter.md")]
 pub(super) fn lower_filter(values: &[ParsedValue]) -> Option<PropertyValue> {
     // `none` → an empty op list.
     if let [ParsedValue::Keyword(keyword)] = values
@@ -42,7 +42,7 @@ pub(super) fn lower_filter(values: &[ParsedValue]) -> Option<PropertyValue> {
     Some(flatten_or_defer(functions))
 }
 
-#[doc = include_str!("filter_lowering.doc/flatten_or_defer.md")]
+#[doc = include_str!("../../docs/api/compiler/filter_lowering.doc/flatten_or_defer.md")]
 fn flatten_or_defer(functions: Vec<FilterFunction>) -> PropertyValue {
     let mut ops: Vec<FilterOp> = Vec::with_capacity(functions.len());
     for function in &functions {
@@ -54,21 +54,21 @@ fn flatten_or_defer(functions: Vec<FilterFunction>) -> PropertyValue {
     PropertyValue::Filter(ops.into_boxed_slice())
 }
 
-#[doc = include_str!("filter_lowering.doc/push_blur.md")]
+/// Appends a `blur()` to the list: folded into a [`FilterOp::Blur`] when its radius
+/// is already in pixels, dropped entirely when that radius is `0`, and kept as a
+/// pending [`FilterFunction::Blur`] when it is not yet resolvable.
 fn push_blur(functions: &mut Vec<FilterFunction>, radius: LengthExpr) {
-    // A radius already in pixels folds here, and a zero one carries no op at all
-    // (`blur(0)` / `blur()` stays byte-identical to no filter). A relative one
-    // rides on as a pending blur for computed value to resolve.
+    // Keep even a zero-radius operation: it still creates a stacking context.
     if let LengthExpr::Leaf(Length::Px(px)) = radius {
-        if px.0 > 0.0 {
-            functions.push(FilterFunction::Op(FilterOp::Blur(px.0)));
-        }
+        functions.push(FilterFunction::Op(FilterOp::Blur(px.0.max(0.0))));
         return;
     }
     functions.push(FilterFunction::Blur(radius));
 }
 
-#[doc = include_str!("filter_lowering.doc/is_color_filter_name.md")]
+/// Whether `name` is one of the CSS color-matrix `filter` functions this compiler
+/// lowers (`brightness`, `contrast`, `saturate`, `grayscale`, `sepia`, `invert`,
+/// `hue-rotate`, `opacity`).
 fn is_color_filter_name(name: &str) -> bool {
     [
         "brightness",
@@ -84,7 +84,7 @@ fn is_color_filter_name(name: &str) -> bool {
     .any(|known| name.eq_ignore_ascii_case(known))
 }
 
-#[doc = include_str!("filter_lowering.doc/lower_one_color_filter.md")]
+#[doc = include_str!("../../docs/api/compiler/filter_lowering.doc/lower_one_color_filter.md")]
 fn lower_one_color_filter(name: &str, args: &[ParsedValue]) -> Option<FilterOp> {
     let clamp_to_unit_range = |amount: f32| amount.clamp(0.0, 1.0);
     let clamp_to_non_negative = |amount: f32| amount.max(0.0);
@@ -109,7 +109,7 @@ fn lower_one_color_filter(name: &str, args: &[ParsedValue]) -> Option<FilterOp> 
     })
 }
 
-#[doc = include_str!("filter_lowering.doc/filter_amount.md")]
+#[doc = include_str!("../../docs/api/compiler/filter_lowering.doc/filter_amount.md")]
 fn filter_amount(args: &[ParsedValue], default: f32) -> Option<f32> {
     if args.is_empty() {
         return Some(default);
@@ -124,7 +124,7 @@ fn filter_amount(args: &[ParsedValue], default: f32) -> Option<f32> {
     }
 }
 
-#[doc = include_str!("filter_lowering.doc/filter_angle_radians.md")]
+#[doc = include_str!("../../docs/api/compiler/filter_lowering.doc/filter_angle_radians.md")]
 fn filter_angle_radians(args: &[ParsedValue]) -> Option<f32> {
     use core::f32::consts::PI;
     if args.is_empty() {
@@ -154,7 +154,7 @@ fn filter_angle_radians(args: &[ParsedValue]) -> Option<f32> {
     }
 }
 
-#[doc = include_str!("filter_lowering.doc/lower_backdrop_filter.md")]
+#[doc = include_str!("../../docs/api/compiler/filter_lowering.doc/lower_backdrop_filter.md")]
 pub(super) fn lower_backdrop_filter(values: &[ParsedValue]) -> Option<PropertyValue> {
     // `none` → an empty op list.
     if let [ParsedValue::Keyword(keyword)] = values
@@ -177,7 +177,7 @@ pub(super) fn lower_backdrop_filter(values: &[ParsedValue]) -> Option<PropertyVa
     Some(flatten_or_defer(functions))
 }
 
-#[doc = include_str!("filter_lowering.doc/lower_one_blur.md")]
+#[doc = include_str!("../../docs/api/compiler/filter_lowering.doc/lower_one_blur.md")]
 fn lower_one_blur(args: &[ParsedValue]) -> Option<LengthExpr> {
     // `blur()` → 0 (the CSS initial): a no-op.
     if args.is_empty() {
@@ -200,7 +200,7 @@ fn lower_one_blur(args: &[ParsedValue]) -> Option<LengthExpr> {
     }
 }
 
-#[doc = include_str!("filter_lowering.doc/lower_one_drop_shadow.md")]
+#[doc = include_str!("../../docs/api/compiler/filter_lowering.doc/lower_one_drop_shadow.md")]
 fn lower_one_drop_shadow(args: &[ParsedValue]) -> Option<BoxShadow> {
     let mut lengths: Vec<Length> = Vec::new();
     let mut color: Option<StyleColor> = None;
@@ -322,10 +322,15 @@ mod tests {
     }
 
     #[test]
-    fn filter_zero_blur_is_a_no_op() {
-        // `blur(0)` / `blur()` carries no op, keeping the byte-identical no-blur path.
-        assert!(filter_ops_of("filter: blur(0)").is_empty());
-        assert!(filter_ops_of("filter: blur()").is_empty());
+    fn filter_zero_blur_retains_the_operation() {
+        assert_eq!(
+            filter_ops_of("filter: blur(0)").as_ref(),
+            [FilterOp::Blur(0.0)]
+        );
+        assert_eq!(
+            filter_ops_of("filter: blur()").as_ref(),
+            [FilterOp::Blur(0.0)]
+        );
     }
 
     #[test]
@@ -435,10 +440,15 @@ mod tests {
     }
 
     #[test]
-    fn backdrop_filter_zero_blur_and_none_are_empty() {
-        // `blur(0)` / `blur()` / `none` all carry no op (byte-identical no-effect).
-        assert!(filter_ops_of("backdrop-filter: blur(0)").is_empty());
-        assert!(filter_ops_of("backdrop-filter: blur()").is_empty());
+    fn backdrop_filter_distinguishes_zero_blur_from_none() {
+        assert_eq!(
+            filter_ops_of("backdrop-filter: blur(0)").as_ref(),
+            [FilterOp::Blur(0.0)]
+        );
+        assert_eq!(
+            filter_ops_of("backdrop-filter: blur()").as_ref(),
+            [FilterOp::Blur(0.0)]
+        );
         assert!(filter_ops_of("backdrop-filter: none").is_empty());
     }
 

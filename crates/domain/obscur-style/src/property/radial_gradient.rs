@@ -1,24 +1,27 @@
-#![doc = include_str!("radial_gradient.doc/_module.md")]
+//! A style-local `radial-gradient(...)` value (spec §5.2).
 
 use crate::property::{GradientStop, Length, RadialShape, RadialSize};
 
-#[doc = include_str!("radial_gradient.doc/RadialGradient.md")]
+#[doc = include_str!("../../docs/api/property/radial_gradient.doc/RadialGradient.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct RadialGradient {
-    #[doc = include_str!("radial_gradient.doc/shape.md")]
+    /// The ending shape (circle or ellipse).
     pub shape: RadialShape,
-    #[doc = include_str!("radial_gradient.doc/size.md")]
+    /// The ending size (an extent keyword or an explicit radius).
     pub size: RadialSize,
-    #[doc = include_str!("radial_gradient.doc/center_x.md")]
+    /// The center's horizontal position, box-relative (default `50%`).
     pub center_x: Length,
-    #[doc = include_str!("radial_gradient.doc/center_y.md")]
+    /// The center's vertical position, box-relative (default `50%`).
     pub center_y: Length,
-    #[doc = include_str!("radial_gradient.doc/stops.md")]
+    /// The gradient's color stops, in authored order outward from the center.
     pub stops: Box<[GradientStop]>,
+    /// Length and percentage stop positions retained until the gradient radius is known.
+    repeat_positions: Option<Box<[Option<Length>]>>,
 }
 
 impl RadialGradient {
-    #[doc = include_str!("radial_gradient.doc/new.md")]
+    /// Creates a radial gradient with the given ending shape/size, center
+    /// position, and stops.
     #[must_use]
     pub fn new(
         shape: RadialShape,
@@ -33,45 +36,67 @@ impl RadialGradient {
             center_x,
             center_y,
             stops: stops.into_boxed_slice(),
+            repeat_positions: None,
         }
     }
 
-    #[doc = include_str!("radial_gradient.doc/shape_2.md")]
+    /// Associates repeat positions with the gradient stops when there is one position per stop.
+    #[must_use]
+    pub fn with_repeat_positions(mut self, positions: Box<[Option<Length>]>) -> Self {
+        if positions.len() == self.stops.len() && positions.len() >= 2 {
+            self.repeat_positions = Some(positions);
+        }
+        self
+    }
+
+    /// Returns the authored positions when the gradient repeats.
+    #[must_use]
+    pub fn repeat_positions(&self) -> Option<&[Option<Length>]> {
+        self.repeat_positions
+            .as_deref()
+            .filter(|positions| positions.len() == self.stops.len())
+    }
+
+    /// Returns the ending shape.
     #[must_use]
     pub const fn shape(&self) -> RadialShape {
         self.shape
     }
 
-    #[doc = include_str!("radial_gradient.doc/size_2.md")]
+    /// Returns the ending size.
     #[must_use]
     pub const fn size(&self) -> RadialSize {
         self.size
     }
 
-    #[doc = include_str!("radial_gradient.doc/center_x_2.md")]
+    /// Returns the center's horizontal position (box-relative).
     #[must_use]
     pub const fn center_x(&self) -> Length {
         self.center_x
     }
 
-    #[doc = include_str!("radial_gradient.doc/center_y_2.md")]
+    /// Returns the center's vertical position (box-relative).
     #[must_use]
     pub const fn center_y(&self) -> Length {
         self.center_y
     }
 
-    #[doc = include_str!("radial_gradient.doc/uses_ch.md")]
+    #[doc = include_str!("../../docs/api/property/radial_gradient.doc/uses_ch.md")]
     #[must_use]
-    pub const fn uses_ch(&self) -> bool {
+    pub fn uses_ch(&self) -> bool {
         self.center_x().is_ch()
             || self.center_y().is_ch()
+            || self
+                .repeat_positions()
+                .is_some_and(|positions| positions.iter().flatten().any(|length| length.is_ch()))
             || match self.size() {
                 RadialSize::Length(length) => length.is_ch(),
+                RadialSize::Ellipse(x, y) => x.is_ch() || y.is_ch(),
                 _ => false,
             }
     }
 
-    #[doc = include_str!("radial_gradient.doc/stops_2.md")]
+    /// Returns the gradient's color stops.
     #[must_use]
     pub const fn stops(&self) -> &[GradientStop] {
         &self.stops

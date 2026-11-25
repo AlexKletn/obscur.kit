@@ -1,16 +1,16 @@
-#![doc = include_str!("text_range.doc/_module.md")]
+//! A half-open byte range into a UTF-8 text buffer (spec §5.10).
 
-#[doc = include_str!("text_range.doc/TextRange.md")]
+#[doc = include_str!("../../docs/api/span/text_range.doc/TextRange.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TextRange {
-    #[doc = include_str!("text_range.doc/start.md")]
+    /// The inclusive start byte offset.
     pub start: usize,
-    #[doc = include_str!("text_range.doc/end.md")]
+    /// The exclusive end byte offset; always `>= start`.
     pub end: usize,
 }
 
 impl TextRange {
-    #[doc = include_str!("text_range.doc/new.md")]
+    #[doc = include_str!("../../docs/api/span/text_range.doc/new.md")]
     #[must_use]
     pub const fn new(start: usize, end: usize) -> Self {
         debug_assert!(start <= end, "TextRange::new called with end < start");
@@ -20,37 +20,38 @@ impl TextRange {
         }
     }
 
-    #[doc = include_str!("text_range.doc/empty.md")]
+    /// Creates an empty (collapsed) range positioned at `at`, where
+    /// `start == end == at`.
     #[must_use]
     pub const fn empty(at: usize) -> Self {
         Self { start: at, end: at }
     }
 
-    #[doc = include_str!("text_range.doc/len.md")]
+    /// Returns the length of the range in bytes (`end - start`).
     #[must_use]
     pub const fn len(&self) -> usize {
         self.end - self.start
     }
 
-    #[doc = include_str!("text_range.doc/is_empty.md")]
+    /// Returns whether the range is empty (`start == end`).
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.start == self.end
     }
 
-    #[doc = include_str!("text_range.doc/contains.md")]
+    #[doc = include_str!("../../docs/api/span/text_range.doc/contains.md")]
     #[must_use]
     pub const fn contains(&self, offset: usize) -> bool {
         self.start <= offset && offset < self.end
     }
 
-    #[doc = include_str!("text_range.doc/contains_range.md")]
+    #[doc = include_str!("../../docs/api/span/text_range.doc/contains_range.md")]
     #[must_use]
     pub const fn contains_range(&self, other: TextRange) -> bool {
         self.start <= other.start && other.end <= self.end
     }
 
-    #[doc = include_str!("text_range.doc/intersects.md")]
+    #[doc = include_str!("../../docs/api/span/text_range.doc/intersects.md")]
     #[must_use]
     pub const fn intersects(&self, other: TextRange) -> bool {
         let start = if self.start > other.start {
@@ -66,7 +67,8 @@ impl TextRange {
         start < end
     }
 
-    #[doc = include_str!("text_range.doc/intersection.md")]
+    /// Returns the overlapping range shared with `other`, or `None` when they do
+    /// not intersect (spec §5.10).
     #[must_use]
     pub const fn intersection(&self, other: TextRange) -> Option<TextRange> {
         let start = if self.start > other.start {
@@ -86,7 +88,8 @@ impl TextRange {
         }
     }
 
-    #[doc = include_str!("text_range.doc/union.md")]
+    /// Returns the smallest range covering both this range and `other`: the
+    /// minimum start and maximum end (spec §5.10).
     #[must_use]
     pub const fn union(&self, other: TextRange) -> TextRange {
         let start = if self.start < other.start {
@@ -102,7 +105,8 @@ impl TextRange {
         TextRange { start, end }
     }
 
-    #[doc = include_str!("text_range.doc/shifted.md")]
+    /// Returns this range translated by `delta` bytes, saturating at the bounds
+    /// of `usize` so neither endpoint overflows or underflows.
     #[must_use]
     pub const fn shifted(&self, delta: isize) -> TextRange {
         TextRange {

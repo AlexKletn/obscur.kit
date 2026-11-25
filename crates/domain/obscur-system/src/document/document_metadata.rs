@@ -1,6 +1,6 @@
-#![doc = include_str!("document_metadata.doc/_module.md")]
+//! Descriptive metadata for a document or directory (spec §6.10 metadata).
 
-#[doc = include_str!("document_metadata.doc/DocumentMetadata.md")]
+#[doc = include_str!("../../docs/api/document/document_metadata.doc/DocumentMetadata.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocumentMetadata {
     name: Box<str>,
@@ -11,7 +11,7 @@ pub struct DocumentMetadata {
 }
 
 impl DocumentMetadata {
-    #[doc = include_str!("document_metadata.doc/new.md")]
+    #[doc = include_str!("../../docs/api/document/document_metadata.doc/new.md")]
     #[must_use]
     pub fn new(name: impl Into<Box<str>>) -> Self {
         Self {
@@ -23,59 +23,60 @@ impl DocumentMetadata {
         }
     }
 
-    #[doc = include_str!("document_metadata.doc/with_mime_type.md")]
+    /// Returns this metadata with its MIME type set (spec §6.10).
     #[must_use]
     pub fn with_mime_type(mut self, mime_type: impl Into<Box<str>>) -> Self {
         self.mime_type = Some(mime_type.into());
         self
     }
 
-    #[doc = include_str!("document_metadata.doc/with_byte_size.md")]
+    /// Returns this metadata with its byte size set (spec §6.10).
     #[must_use]
     pub const fn with_byte_size(mut self, byte_size: u64) -> Self {
         self.byte_size = Some(byte_size);
         self
     }
 
-    #[doc = include_str!("document_metadata.doc/with_modified.md")]
+    #[doc = include_str!("../../docs/api/document/document_metadata.doc/with_modified.md")]
     #[must_use]
     pub const fn with_modified(mut self, modified_unix_secs: i64) -> Self {
         self.modified_unix_secs = Some(modified_unix_secs);
         self
     }
 
-    #[doc = include_str!("document_metadata.doc/directory.md")]
+    /// Returns this metadata with its directory flag set (spec §6.10).
     #[must_use]
     pub const fn directory(mut self, is_directory: bool) -> Self {
         self.is_directory = is_directory;
         self
     }
 
-    #[doc = include_str!("document_metadata.doc/name.md")]
+    /// Returns the display name (spec §6.10 — not a filesystem path).
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    #[doc = include_str!("document_metadata.doc/mime_type.md")]
+    /// Returns the MIME type, if known (spec §6.10).
     #[must_use]
     pub fn mime_type(&self) -> Option<&str> {
         self.mime_type.as_deref()
     }
 
-    #[doc = include_str!("document_metadata.doc/byte_size.md")]
+    /// Returns the byte size, if known (spec §6.10).
     #[must_use]
     pub const fn byte_size(&self) -> Option<u64> {
         self.byte_size
     }
 
-    #[doc = include_str!("document_metadata.doc/modified_unix_secs.md")]
+    /// Returns the last-modified Unix timestamp in seconds, if known
+    /// (spec §6.10).
     #[must_use]
     pub const fn modified_unix_secs(&self) -> Option<i64> {
         self.modified_unix_secs
     }
 
-    #[doc = include_str!("document_metadata.doc/is_directory.md")]
+    /// Returns whether the handle refers to a directory (spec §6.10).
     #[must_use]
     pub const fn is_directory(&self) -> bool {
         self.is_directory

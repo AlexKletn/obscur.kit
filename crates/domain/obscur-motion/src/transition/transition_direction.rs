@@ -1,29 +1,30 @@
-#![doc = include_str!("transition_direction.doc/_module.md")]
+//! The [`TransitionDirection`] play direction for a transition (spec §4.17
+//! "reversal").
 
-#[doc = include_str!("transition_direction.doc/TransitionDirection.md")]
+#[doc = include_str!("../../docs/api/transition/transition_direction.doc/TransitionDirection.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum TransitionDirection {
-    #[doc = include_str!("transition_direction.doc/Forward.md")]
+    /// Play from origin toward target — the *enter* direction.
     #[default]
     Forward,
-    #[doc = include_str!("transition_direction.doc/Reverse.md")]
+    /// Play from target back toward origin — the *exit* / *undo* direction.
     Reverse,
 }
 
 impl TransitionDirection {
-    #[doc = include_str!("transition_direction.doc/is_forward.md")]
+    /// Returns `true` if this is [`Forward`](Self::Forward) (spec §4.17).
     #[must_use]
     pub const fn is_forward(self) -> bool {
         matches!(self, Self::Forward)
     }
 
-    #[doc = include_str!("transition_direction.doc/is_reverse.md")]
+    /// Returns `true` if this is [`Reverse`](Self::Reverse) (spec §4.17).
     #[must_use]
     pub const fn is_reverse(self) -> bool {
         matches!(self, Self::Reverse)
     }
 
-    #[doc = include_str!("transition_direction.doc/flipped.md")]
+    #[doc = include_str!("../../docs/api/transition/transition_direction.doc/flipped.md")]
     #[must_use]
     pub const fn flipped(self) -> Self {
         match self {
@@ -32,7 +33,7 @@ impl TransitionDirection {
         }
     }
 
-    #[doc = include_str!("transition_direction.doc/orient.md")]
+    #[doc = include_str!("../../docs/api/transition/transition_direction.doc/orient.md")]
     #[must_use]
     pub fn orient(self, t: f32) -> f32 {
         let t = t.clamp(0.0, 1.0);

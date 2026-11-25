@@ -1,42 +1,44 @@
-#![doc = include_str!("staged_ref.doc/_module.md")]
+//! `StagedRef`: a transaction-local reference to a node.
 
 use obscur_identity::NodeId;
 
-#[doc = include_str!("staged_ref.doc/StagedRef.md")]
+#[doc = include_str!("../../docs/api/transaction/staged_ref.doc/StagedRef.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StagedRef {
-    #[doc = include_str!("staged_ref.doc/Existing.md")]
+    /// A node that already exists in the live tree, addressed by its `NodeId`.
     Existing(NodeId),
-    #[doc = include_str!("staged_ref.doc/New.md")]
+    /// The *i*-th node staged for creation in this transaction (0-based, in
+    /// stage order). Resolves to a concrete `NodeId` only at commit.
     New(u32),
 }
 
 impl StagedRef {
-    #[doc = include_str!("staged_ref.doc/existing.md")]
+    /// Creates a reference to an already-live node.
     #[must_use]
     pub const fn existing(id: NodeId) -> Self {
         Self::Existing(id)
     }
 
-    #[doc = include_str!("staged_ref.doc/new.md")]
+    /// Creates a placeholder for the `index`-th node staged for creation.
     #[must_use]
     pub const fn new(index: u32) -> Self {
         Self::New(index)
     }
 
-    #[doc = include_str!("staged_ref.doc/is_existing.md")]
+    /// Returns `true` if this refers to an already-live node.
     #[must_use]
     pub const fn is_existing(self) -> bool {
         matches!(self, Self::Existing(_))
     }
 
-    #[doc = include_str!("staged_ref.doc/is_new.md")]
+    /// Returns `true` if this is a placeholder for a not-yet-created node.
     #[must_use]
     pub const fn is_new(self) -> bool {
         matches!(self, Self::New(_))
     }
 
-    #[doc = include_str!("staged_ref.doc/existing_id.md")]
+    /// Returns the underlying live `NodeId` if this is an
+    /// [`Existing`](Self::Existing) reference.
     #[must_use]
     pub const fn existing_id(self) -> Option<NodeId> {
         match self {
@@ -45,7 +47,7 @@ impl StagedRef {
         }
     }
 
-    #[doc = include_str!("staged_ref.doc/new_index.md")]
+    /// Returns the creation index if this is a [`New`](Self::New) placeholder.
     #[must_use]
     pub const fn new_index(self) -> Option<u32> {
         match self {

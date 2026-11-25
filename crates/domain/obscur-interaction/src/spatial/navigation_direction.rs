@@ -1,32 +1,35 @@
-#![doc = include_str!("navigation_direction.doc/_module.md")]
+//! The [`NavigationDirection`] for directional (spatial) focus movement
+//! (spec §4.7).
 
-#[doc = include_str!("navigation_direction.doc/NavigationDirection.md")]
+#[doc = include_str!("../../docs/api/spatial/navigation_direction.doc/NavigationDirection.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NavigationDirection {
-    #[doc = include_str!("navigation_direction.doc/Up.md")]
+    /// Toward smaller `y` (upward).
     Up,
-    #[doc = include_str!("navigation_direction.doc/Down.md")]
+    /// Toward larger `y` (downward).
     Down,
-    #[doc = include_str!("navigation_direction.doc/Left.md")]
+    /// Toward smaller `x` (leftward).
     Left,
-    #[doc = include_str!("navigation_direction.doc/Right.md")]
+    /// Toward larger `x` (rightward).
     Right,
 }
 
 impl NavigationDirection {
-    #[doc = include_str!("navigation_direction.doc/is_horizontal.md")]
+    /// Returns whether this direction moves along the horizontal axis
+    /// ([`Left`](Self::Left) or [`Right`](Self::Right)).
     #[must_use]
     pub const fn is_horizontal(self) -> bool {
         matches!(self, Self::Left | Self::Right)
     }
 
-    #[doc = include_str!("navigation_direction.doc/is_vertical.md")]
+    /// Returns whether this direction moves along the vertical axis
+    /// ([`Up`](Self::Up) or [`Down`](Self::Down)).
     #[must_use]
     pub const fn is_vertical(self) -> bool {
         matches!(self, Self::Up | Self::Down)
     }
 
-    #[doc = include_str!("navigation_direction.doc/opposite.md")]
+    /// Returns the direction pointing the opposite way.
     #[must_use]
     pub const fn opposite(self) -> Self {
         match self {

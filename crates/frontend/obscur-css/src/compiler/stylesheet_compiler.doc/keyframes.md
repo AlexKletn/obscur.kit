@@ -1,1 +1,0 @@
-Compiled `@keyframes` rules.

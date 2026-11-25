@@ -1,140 +1,25 @@
-#![doc = include_str!("stylesheet_compiler.doc/_module.md")]
+#![doc = include_str!("../../docs/api/compiler/stylesheet_compiler.doc/_module.md")]
 
-use std::collections::HashMap;
+use crate::parser::{ParsedRule, ParsedStyleRule, ParsedStylesheet};
 
-use crate::error::{CssParseError, UnsupportedCssFeature};
-use crate::parser::{
-    ParsedContainerQuery, ParsedMediaQueryList, ParsedRule, ParsedStyleRule, ParsedStylesheet,
-};
-
-use obscur_identity::InternedSymbol;
-use obscur_style::cascade::{CascadeOrigin, Declaration};
+use obscur_style::cascade::CascadeOrigin;
 use obscur_style::matching::{BlockDeclaration, RuleCondition, StyleRule, Stylesheet};
-use obscur_style::property::CustomProperty;
-use obscur_style::selector::{SelectorList, SelectorSpecificity};
+use obscur_style::selector::SelectorSpecificity;
 
-use super::animation_compiler::{AnimationCompiler, AnimationRef};
+use super::animation_compiler::AnimationCompiler;
 use super::condition_lowering::lower_condition;
-use super::keyframe_compiler::{CompiledKeyframes, KeyframeCompiler};
 use super::longhand_catalog::{keyword_value_is_foreign, property_id_from_name};
-use super::motion_rule::{CompiledAnimation, CompiledMotionRule};
-use super::property_compiler::{CompiledDeclaration, PropertyCompiler};
+use super::pending_motion_rule::PendingMotionRule;
 use super::selector_compiler::SelectorCompiler;
-use super::transition_compiler::{CompiledTransition, TransitionCompiler};
+use super::stylesheet_accumulator::StylesheetAccumulator;
+use super::{
+    CompiledAnimation, CompiledCondition, CompiledConditionalGroup, CompiledKeyframes,
+    CompiledMotionRule, CompiledStylesheet, CssSymbolInterner, KeyframeCompiler,
+    TransitionCompiler,
+};
+use super::{CompiledDeclaration, PropertyCompiler};
 
-#[doc = include_str!("stylesheet_compiler.doc/CssSymbolInterner.md")]
-#[derive(Debug, Clone, Default)]
-pub struct CssSymbolInterner {
-    lookup: HashMap<Box<str>, InternedSymbol>,
-    reverse: Vec<Box<str>>,
-}
-
-impl CssSymbolInterner {
-    #[doc = include_str!("stylesheet_compiler.doc/new.md")]
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    #[doc = include_str!("stylesheet_compiler.doc/intern.md")]
-    pub fn intern(&mut self, text: &str) -> InternedSymbol {
-        if let Some(&symbol) = self.lookup.get(text) {
-            return symbol;
-        }
-        // `from_index`, never `from_raw`: this table numbers from ZERO, and a
-        // raw zero-based index is squarely inside the range the reserved
-        // symbols occupy — `layout_keyword::OVERFLOW_HIDDEN` is `0x0000_1E02`,
-        // so the 7682nd word a sheet interned used to come out EQUAL to it,
-        // and `overflow-x: sideways` was then read as `hidden` and clipped.
-        // `from_index` lifts the index into the high namespace the way `named`
-        // does, which makes the two ranges disjoint by construction.
-        let index = u32::try_from(self.reverse.len()).unwrap_or(u32::MAX);
-        let symbol = InternedSymbol::from_index(index);
-        let boxed: Box<str> = text.into();
-        self.reverse.push(boxed.clone());
-        self.lookup.insert(boxed, symbol);
-        symbol
-    }
-
-    #[doc = include_str!("stylesheet_compiler.doc/resolve.md")]
-    #[must_use]
-    pub fn resolve(&self, symbol: InternedSymbol) -> Option<&str> {
-        symbol
-            .index()
-            .and_then(|index| usize::try_from(index).ok())
-            .and_then(|index| self.reverse.get(index))
-            .map(|boxed| &**boxed)
-    }
-}
-
-#[doc = include_str!("stylesheet_compiler.doc/CompiledCondition.md")]
-#[derive(Debug, Clone, PartialEq)]
-pub enum CompiledCondition {
-    #[doc = include_str!("stylesheet_compiler.doc/Media.md")]
-    Media(ParsedMediaQueryList),
-    #[doc = include_str!("stylesheet_compiler.doc/Container.md")]
-    Container(ParsedContainerQuery),
-}
-
-#[doc = include_str!("stylesheet_compiler.doc/CompiledConditionalGroup.md")]
-#[derive(Debug, Clone, PartialEq)]
-pub struct CompiledConditionalGroup {
-    #[doc = include_str!("stylesheet_compiler.doc/condition.md")]
-    pub condition: CompiledCondition,
-    #[doc = include_str!("stylesheet_compiler.doc/declarations.md")]
-    pub declarations: Vec<Declaration>,
-    #[doc = include_str!("stylesheet_compiler.doc/custom_properties.md")]
-    pub custom_properties: Vec<CustomProperty>,
-    #[doc = include_str!("stylesheet_compiler.doc/transitions.md")]
-    pub transitions: Vec<CompiledTransition>,
-}
-
-#[doc = include_str!("stylesheet_compiler.doc/CompiledStylesheet.md")]
-#[derive(Debug, Clone)]
-pub struct CompiledStylesheet {
-    #[doc = include_str!("stylesheet_compiler.doc/declarations_2.md")]
-    pub declarations: Vec<Declaration>,
-    #[doc = include_str!("stylesheet_compiler.doc/custom_properties_2.md")]
-    pub custom_properties: Vec<CustomProperty>,
-    #[doc = include_str!("stylesheet_compiler.doc/conditional_groups.md")]
-    pub conditional_groups: Vec<CompiledConditionalGroup>,
-    #[doc = include_str!("stylesheet_compiler.doc/keyframes.md")]
-    pub keyframes: Vec<CompiledKeyframes>,
-    #[doc = include_str!("stylesheet_compiler.doc/transitions_2.md")]
-    pub transitions: Vec<CompiledTransition>,
-    #[doc = include_str!("stylesheet_compiler.doc/motion_rules.md")]
-    pub motion_rules: Vec<CompiledMotionRule>,
-    #[doc = include_str!("stylesheet_compiler.doc/symbols.md")]
-    pub symbols: CssSymbolInterner,
-    #[doc = include_str!("stylesheet_compiler.doc/matchable.md")]
-    pub matchable: Stylesheet,
-    #[doc = include_str!("stylesheet_compiler.doc/unsupported.md")]
-    pub unsupported: Vec<UnsupportedCssFeature>,
-    #[doc = include_str!("stylesheet_compiler.doc/errors.md")]
-    pub errors: Vec<CssParseError>,
-}
-
-#[doc = include_str!("stylesheet_compiler.doc/Accumulator.md")]
-#[derive(Default)]
-struct Accumulator {
-    declarations: Vec<Declaration>,
-    custom_properties: Vec<CustomProperty>,
-    conditional_groups: Vec<CompiledConditionalGroup>,
-    keyframes: Vec<CompiledKeyframes>,
-    transitions: Vec<CompiledTransition>,
-    matchable_rules: Vec<StyleRule>,
-    motion_rules: Vec<PendingMotionRule>,
-    unsupported: Vec<UnsupportedCssFeature>,
-}
-
-#[doc = include_str!("stylesheet_compiler.doc/PendingMotionRule.md")]
-struct PendingMotionRule {
-    selectors: SelectorList,
-    transitions: Vec<CompiledTransition>,
-    animations: Vec<AnimationRef>,
-}
-
-#[doc = include_str!("stylesheet_compiler.doc/StylesheetCompiler.md")]
+#[doc = include_str!("../../docs/api/compiler/stylesheet_compiler.doc/StylesheetCompiler.md")]
 #[derive(Debug)]
 pub struct StylesheetCompiler {
     interner: CssSymbolInterner,
@@ -148,7 +33,7 @@ pub struct StylesheetCompiler {
 }
 
 impl StylesheetCompiler {
-    #[doc = include_str!("stylesheet_compiler.doc/new_2.md")]
+    /// Creates a compiler that assigns declarations the `GlobalApp` origin.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -163,17 +48,18 @@ impl StylesheetCompiler {
         }
     }
 
-    #[doc = include_str!("stylesheet_compiler.doc/with_origin.md")]
+    /// Sets the [`CascadeOrigin`] every compiled declaration is tagged with.
     #[must_use]
     pub const fn with_origin(mut self, origin: CascadeOrigin) -> Self {
         self.origin = origin;
         self
     }
 
-    #[doc = include_str!("stylesheet_compiler.doc/compile.md")]
+    /// Compiles `sheet` into a [`CompiledStylesheet`], consuming this compiler's
+    /// interner into the result.
     #[must_use]
     pub fn compile(mut self, sheet: &ParsedStylesheet) -> CompiledStylesheet {
-        let mut acc = Accumulator::default();
+        let mut acc = StylesheetAccumulator::default();
         self.compile_rules(&sheet.rules, &mut acc);
 
         let mut unsupported = sheet.unsupported.clone();
@@ -204,18 +90,18 @@ impl StylesheetCompiler {
         }
     }
 
-    #[doc = include_str!("stylesheet_compiler.doc/compile_rules.md")]
-    fn compile_rules(&mut self, rules: &[ParsedRule], acc: &mut Accumulator) {
+    /// Compiles a list of rules into `acc`, recursing into conditional groups.
+    fn compile_rules(&mut self, rules: &[ParsedRule], acc: &mut StylesheetAccumulator) {
         for rule in rules {
             match rule {
                 ParsedRule::Style(style) => self.compile_style_rule(style, acc),
                 ParsedRule::Media(media) => {
-                    let mut inner = Accumulator::default();
+                    let mut inner = StylesheetAccumulator::default();
                     self.compile_rules(&media.rules, &mut inner);
                     lift_group(CompiledCondition::Media(media.query.clone()), inner, acc);
                 }
                 ParsedRule::Container(container) => {
-                    let mut inner = Accumulator::default();
+                    let mut inner = StylesheetAccumulator::default();
                     self.compile_rules(&container.rules, &mut inner);
                     lift_group(
                         CompiledCondition::Container(container.query.clone()),
@@ -231,8 +117,9 @@ impl StylesheetCompiler {
         }
     }
 
-    #[doc = include_str!("stylesheet_compiler.doc/compile_style_rule.md")]
-    fn compile_style_rule(&mut self, style: &ParsedStyleRule, acc: &mut Accumulator) {
+    /// Compiles a style rule: one declaration set per matched selector, plus the
+    /// rule's `transition` templates (compiled once, being selector-independent).
+    fn compile_style_rule(&mut self, style: &ParsedStyleRule, acc: &mut StylesheetAccumulator) {
         let selectors = self
             .selectors
             .compile_list(&style.selectors, &mut acc.unsupported);
@@ -268,20 +155,36 @@ impl StylesheetCompiler {
         // the flat top-level outputs (backward-compatible) and the
         // selector-associated `PendingMotionRule` the runtime drives.
         let mut rule_transitions = Vec::new();
+        let mut transition_reset = false;
+        let mut transition_important = false;
         for decl in &style.declarations {
-            if is_transition_shorthand(&decl.name) {
-                let mut compiled = self.transitions.compile(decl, &mut acc.unsupported);
-                rule_transitions.append(&mut compiled);
+            if !is_transition_shorthand(&decl.name) || (transition_important && !decl.important) {
+                continue;
+            }
+            let reset = matches!(decl.value.as_slice(), [crate::parser::ParsedValue::Keyword(name)]
+                if name.eq_ignore_ascii_case("none"));
+            let compiled = if reset {
+                Vec::new()
+            } else {
+                self.transitions.compile(decl, &mut acc.unsupported)
+            };
+            if reset || !compiled.is_empty() {
+                rule_transitions = compiled;
+                transition_reset = reset;
+                transition_important = decl.important;
             }
         }
         acc.transitions.extend(rule_transitions.iter().copied());
         let animations = self
             .animations
             .compile(&style.declarations, &mut self.interner);
-        if !rule_transitions.is_empty() || !animations.is_empty() {
+        if transition_reset || !rule_transitions.is_empty() || !animations.is_empty() {
             acc.motion_rules.push(PendingMotionRule {
+                condition: None,
                 selectors: SelectorCompiler::lower_list(&style.selectors),
                 transitions: rule_transitions,
+                transition_reset,
+                transition_important,
                 animations,
             });
         }
@@ -290,7 +193,7 @@ impl StylesheetCompiler {
         acc.matchable_rules.push(rule);
     }
 
-    #[doc = include_str!("stylesheet_compiler.doc/lower_matchable_rule.md")]
+    #[doc = include_str!("../../docs/api/compiler/stylesheet_compiler.doc/lower_matchable_rule.md")]
     fn lower_matchable_rule(&mut self, style: &ParsedStyleRule) -> StyleRule {
         let mut block = Vec::new();
         // The longhands this rule authored whose value could not be parsed: they
@@ -332,12 +235,8 @@ impl StylesheetCompiler {
                     CompiledDeclaration::Unsupported(_) => {}
                 }
             }
-            // A recognised longhand handed a bare keyword it cannot use had an
-            // unparseable value: the lenient keyword path lowered it to an inert
-            // interned keyword the property ignores, so it is dropped in effect —
-            // an "invalid value" fault (§4.13) recorded per rule. Unknown property
-            // names and custom properties are a different class (and both fail
-            // `property_id_from_name`, so they are excluded here).
+            // Keep the per-rule diagnostic for a bare keyword the property
+            // cannot interpret.
             if let Some(property) = property_id_from_name(&decl.name)
                 && keyword_value_is_foreign(property, &decl.value)
             {
@@ -356,22 +255,29 @@ impl Default for StylesheetCompiler {
     }
 }
 
-#[doc = include_str!("stylesheet_compiler.doc/lift_group.md")]
-fn lift_group(condition: CompiledCondition, mut inner: Accumulator, acc: &mut Accumulator) {
-    acc.keyframes.append(&mut inner.keyframes);
+#[doc = include_str!("../../docs/api/compiler/stylesheet_compiler.doc/lift_group.md")]
+fn lift_group(
+    condition: CompiledCondition,
+    mut inner: StylesheetAccumulator,
+    acc: &mut StylesheetAccumulator,
+) {
     acc.conditional_groups.append(&mut inner.conditional_groups);
-    // Motion rules nested inside a conditional group rise into the enclosing
-    // scope. Their group condition is not yet propagated to the runtime motion
-    // driver (a documented limitation): a transition/animation authored inside
-    // `@media`/`@container` currently drives regardless of the environment.
-    acc.motion_rules.append(&mut inner.motion_rules);
     acc.unsupported.append(&mut inner.unsupported);
     let lowered = lower_condition(&condition, &mut acc.unsupported);
+    let combine = |existing| match existing {
+        Some(existing) => RuleCondition::All(vec![lowered.clone(), existing]),
+        None => lowered.clone(),
+    };
+    for mut definition in inner.keyframes {
+        definition.condition = Some(combine(definition.condition.take()));
+        acc.keyframes.push(definition);
+    }
+    for mut rule in inner.motion_rules {
+        rule.condition = Some(combine(rule.condition.take()));
+        acc.motion_rules.push(rule);
+    }
     for rule in inner.matchable_rules {
-        let combined = match rule.condition() {
-            Some(existing) => RuleCondition::All(vec![lowered.clone(), existing.clone()]),
-            None => lowered.clone(),
-        };
+        let combined = combine(rule.condition().cloned());
         acc.matchable_rules.push(rule.with_condition(combined));
     }
     acc.conditional_groups.push(CompiledConditionalGroup {
@@ -382,7 +288,7 @@ fn lift_group(condition: CompiledCondition, mut inner: Accumulator, acc: &mut Ac
     });
 }
 
-#[doc = include_str!("stylesheet_compiler.doc/resolve_motion_rule.md")]
+#[doc = include_str!("../../docs/api/compiler/stylesheet_compiler.doc/resolve_motion_rule.md")]
 fn resolve_motion_rule(
     pending: PendingMotionRule,
     keyframes: &[CompiledKeyframes],
@@ -390,11 +296,14 @@ fn resolve_motion_rule(
     let animations: Vec<CompiledAnimation> = pending
         .animations
         .iter()
-        .filter_map(|reference| {
+        .enumerate()
+        .flat_map(|(reference_index, reference)| {
             keyframes
                 .iter()
-                .find(|compiled| compiled.name == reference.name)
-                .map(|compiled| CompiledAnimation {
+                .filter(move |compiled| compiled.name == reference.name)
+                .map(move |compiled| CompiledAnimation {
+                    reference_index,
+                    condition: compiled.condition.clone(),
                     tracks: compiled.tracks.clone(),
                     duration_secs: reference.duration_secs,
                     delay_secs: reference.delay_secs,
@@ -405,23 +314,27 @@ fn resolve_motion_rule(
                 })
         })
         .collect();
-    if pending.transitions.is_empty() && animations.is_empty() {
+    if !pending.transition_reset && pending.transitions.is_empty() && animations.is_empty() {
         return None;
     }
     Some(CompiledMotionRule {
+        condition: pending.condition,
         selectors: pending.selectors,
         transitions: pending.transitions,
+        transition_reset: pending.transition_reset,
+        transition_important: pending.transition_important,
         animations,
     })
 }
 
-#[doc = include_str!("stylesheet_compiler.doc/is_motion_decl.md")]
+/// Returns whether a declaration name is any `transition-*`/`animation-*`
+/// property (routed away from ordinary property compilation).
 fn is_motion_decl(name: &str) -> bool {
     let lower = name.to_ascii_lowercase();
     lower.starts_with("transition") || lower.starts_with("animation")
 }
 
-#[doc = include_str!("stylesheet_compiler.doc/is_transition_shorthand.md")]
+/// Returns whether a declaration is exactly the `transition` shorthand.
 fn is_transition_shorthand(name: &str) -> bool {
     name.eq_ignore_ascii_case("transition")
 }
@@ -429,8 +342,9 @@ fn is_transition_shorthand(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::error::UnsupportedFeatureKind;
+    use crate::error::{UnsupportedCssFeature, UnsupportedFeatureKind};
     use crate::source::CssSource;
+    use obscur_identity::InternedSymbol;
     use obscur_style::property::{Length, PropertyId, PropertyValue, StyleColor, layout_keyword};
     use obscur_style::selector::SelectorSpecificity;
 
@@ -441,73 +355,21 @@ mod tests {
     }
 
     #[test]
-    fn interner_dedups_and_round_trips() {
-        let mut interner = CssSymbolInterner::new();
-        let a = interner.intern("flex");
-        let b = interner.intern("flex");
-        let c = interner.intern("block");
-        assert_eq!(a, b);
-        assert_ne!(a, c);
-        assert_eq!(interner.resolve(a), Some("flex"));
-        assert_eq!(interner.resolve(c), Some("block"));
-        assert_eq!(interner.resolve(InternedSymbol::from_raw(99)), None);
-    }
-
-    #[test]
-    fn no_sheet_local_symbol_can_alias_a_reserved_layout_keyword() {
-        // The two producers of `InternedSymbol` values that meet in a
-        // `PropertyValue::Keyword` are this interner and `layout_keyword`'s
-        // hand-assigned constants. Reserved layout keywords run from
-        // `DISPLAY_BLOCK` (0x1001) to `POINTER_EVENTS_NONE` (0x2702), so a
-        // sweep past 0x2702 walks every id that could ever collide — and
-        // `name_of` is the reserved table itself, so this fails if EITHER side
-        // moves: if the interner goes back to raw indices, or if a reserved
-        // keyword is renumbered into the high namespace.
-        let mut interner = CssSymbolInterner::new();
-        for index in 0..0x3000u32 {
-            let symbol = interner.intern(&format!("kw{index}"));
-            assert_eq!(
-                layout_keyword::name_of(symbol),
-                None,
-                "sheet-local symbol {index} aliased a reserved layout keyword"
-            );
-            assert_ne!(
-                symbol.raw() & 0x8000_0000,
-                0,
-                "sheet-local symbol {index} landed in the reserved (top-bit-clear) range"
-            );
-        }
-    }
-
-    #[test]
     fn an_unknown_keyword_at_a_reserved_ordinal_is_not_read_as_that_keyword() {
-        // The defect end to end. `width` accepts the intrinsic sizing keywords,
-        // which are reserved symbols (`SIZING_FIT_CONTENT` is 0x2403), and any
-        // other word falls through to the interner. When the interner numbered
-        // from zero, the 0x2403rd word it minted came out EQUAL to
-        // `SIZING_FIT_CONTENT`, and `length_resolution` sizes that box to its
-        // content instead of leaving the invalid declaration inert.
         use std::fmt::Write;
 
         let ordinal = layout_keyword::SIZING_FIT_CONTENT.raw();
-        let mut css = String::from("a {");
+        let mut css = String::from("a { width: 60px;");
         for i in 0..ordinal {
             let _ = write!(css, " width: kw{i};");
         }
         css.push_str(" width: sideways; }");
         let sheet = compile(&css);
-        let last = sheet
-            .declarations
-            .last()
-            .expect("the trailing `width` declaration compiled");
-        assert_ne!(
-            last.value(),
-            &PropertyValue::Keyword(layout_keyword::SIZING_FIT_CONTENT)
+        assert_eq!(sheet.declarations.len(), 1);
+        assert_eq!(
+            sheet.declarations[0].value(),
+            &PropertyValue::Length(obscur_style::property::Length::px(60.0)),
         );
-        let PropertyValue::Keyword(symbol) = last.value() else {
-            panic!("expected a keyword, got {:?}", last.value());
-        };
-        assert_eq!(sheet.symbols.resolve(*symbol), Some("sideways"));
     }
 
     #[test]
@@ -576,17 +438,14 @@ mod tests {
 
     #[test]
     fn pseudo_element_rule_is_reported_as_unsupported() {
-        // The whole point of the diagnostic: `.badge::before` compiles to a rule
-        // that styles nothing (no generated box exists), so the host is told
-        // rather than left to wonder why the declaration had no effect.
-        let sheet = compile(".badge::before { color: red }");
+        let sheet = compile(".badge::before { content: \"!\" } li::marker { color: red }");
         let reported: Vec<&str> = sheet
             .unsupported
             .iter()
             .filter(|f| f.kind() == UnsupportedFeatureKind::PseudoElement)
             .map(UnsupportedCssFeature::name)
             .collect();
-        assert_eq!(reported, ["::before"]);
+        assert_eq!(reported, ["::marker"]);
     }
 
     #[test]
@@ -827,7 +686,7 @@ mod tests {
     #[test]
     fn a_media_feature_we_cannot_evaluate_reaches_the_sheets_reports() {
         use obscur_style::matching::MediaEnvironment;
-        let sheet = compile("@media (prefers-color-scheme: dark) { a { color: black } }");
+        let sheet = compile("@media (update: fast) { a { color: black } }");
         // The rule survives compilation but is gated off, so a dark theme does
         // not paint over a light app…
         let condition = sheet.matchable.rules()[0]
@@ -840,7 +699,7 @@ mod tests {
             .iter()
             .map(UnsupportedCssFeature::name)
             .collect();
-        assert_eq!(reported, ["@media (prefers-color-scheme)"]);
+        assert_eq!(reported, ["@media (update)"]);
     }
 
     #[test]
@@ -883,8 +742,15 @@ mod tests {
             ".row { display: flex; flex-direction: column; margin: 8px; gap: 4px; font-size: 14px }",
         );
         let block = sheet.matchable.rules()[0].block();
-        // display + flex-direction + 4 margin longhands + gap + font-size = 8.
-        assert_eq!(block.len(), 8);
+        // display + flex-direction + 4 margins + 2 gaps + font-size.
+        assert_eq!(block.len(), 9);
+        for axis in [PropertyId::RowGap, PropertyId::ColumnGap] {
+            let declaration = block.iter().find(|value| value.property() == axis).unwrap();
+            assert_eq!(
+                *declaration.value(),
+                PropertyValue::Length(obscur_style::property::Length::px(4.0))
+            );
+        }
         // `display: flex` lowers to the reserved cross-crate keyword symbol.
         let display = block
             .iter()

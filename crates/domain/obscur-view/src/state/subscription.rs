@@ -1,27 +1,11 @@
-#![doc = include_str!("subscription.doc/_module.md")]
+//! `Subscription`: an owned token representing one registered subscription.
 
 use crate::state::StateGeneration;
 use obscur_identity::SignalId;
 
-#[doc = include_str!("subscription.doc/SubscriptionId.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct SubscriptionId(u64);
+use super::SubscriptionId;
 
-impl SubscriptionId {
-    #[doc = include_str!("subscription.doc/from_raw.md")]
-    #[must_use]
-    pub const fn from_raw(raw: u64) -> Self {
-        Self(raw)
-    }
-
-    #[doc = include_str!("subscription.doc/raw.md")]
-    #[must_use]
-    pub const fn raw(self) -> u64 {
-        self.0
-    }
-}
-
-#[doc = include_str!("subscription.doc/Subscription.md")]
+#[doc = include_str!("../../docs/api/state/subscription.doc/Subscription.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Subscription {
     id: SubscriptionId,
@@ -30,7 +14,8 @@ pub struct Subscription {
 }
 
 impl Subscription {
-    #[doc = include_str!("subscription.doc/new.md")]
+    /// Creates a subscription token bound to `id`, recording a dependency on
+    /// `source` while it was at generation `observed`.
     #[must_use]
     pub const fn new(id: SubscriptionId, source: SignalId, observed: StateGeneration) -> Self {
         Self {
@@ -40,25 +25,25 @@ impl Subscription {
         }
     }
 
-    #[doc = include_str!("subscription.doc/id.md")]
+    /// Returns this subscription's id.
     #[must_use]
     pub const fn id(&self) -> SubscriptionId {
         self.id
     }
 
-    #[doc = include_str!("subscription.doc/source.md")]
+    /// The observable source this subscription depends on.
     #[must_use]
     pub const fn source(&self) -> SignalId {
         self.source
     }
 
-    #[doc = include_str!("subscription.doc/observed_generation.md")]
+    /// Returns the source generation observed when the subscription was opened.
     #[must_use]
     pub const fn observed_generation(&self) -> StateGeneration {
         self.observed
     }
 
-    #[doc = include_str!("subscription.doc/is_stale_against.md")]
+    #[doc = include_str!("../../docs/api/state/subscription.doc/is_stale_against.md")]
     #[must_use]
     pub fn is_stale_against(&self, current: StateGeneration) -> bool {
         current.is_newer_than(self.observed)

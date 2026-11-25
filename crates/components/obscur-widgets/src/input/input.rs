@@ -1,4 +1,4 @@
-#![doc = include_str!("input.doc/_module.md")]
+//! `Input`: a headless single-line text-input control (spec §2.6, §5.11).
 
 use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
@@ -9,35 +9,38 @@ use obscur_view::view::{
     ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue,
 };
 
-#[doc = include_str!("input.doc/Input.md")]
+#[doc = include_str!("../../docs/api/input/input.doc/Input.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Input {
     buffer: TextBuffer,
     placeholder: Box<str>,
     command: InternedSymbol,
     disabled: bool,
-    #[doc = include_str!("input.doc/readonly.md")]
+    #[doc = include_str!("../../docs/api/input/input.doc/readonly.md")]
     readonly: bool,
-    #[doc = include_str!("input.doc/multiline.md")]
+    #[doc = include_str!("../../docs/api/input/input.doc/multiline.md")]
     multiline: bool,
 }
 
 impl Input {
-    #[doc = include_str!("input.doc/COMPONENT_ID.md")]
+    #[doc = include_str!("../../docs/api/input/input.doc/COMPONENT_ID.md")]
     pub const COMPONENT_ID: ComponentId = ComponentId::from_raw(0x00D0_0002);
 
-    #[doc = include_str!("input.doc/PROP_ROLE.md")]
+    /// Interned name of the semantic-role property (`role`); shares the
+    /// `0x00D1_NNXX` scheme with `NN = 02` (input): role=`00`, disabled=`01`,
+    /// value=`02`, placeholder=`03`.
     const PROP_ROLE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0200);
-    #[doc = include_str!("input.doc/PROP_DISABLED.md")]
+    /// Interned name of the `disabled` state property.
     const PROP_DISABLED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0201);
-    #[doc = include_str!("input.doc/PROP_VALUE.md")]
+    /// Interned name of the current `value` property.
     pub(crate) const PROP_VALUE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0202);
-    #[doc = include_str!("input.doc/PROP_PLACEHOLDER.md")]
+    /// Interned name of the `placeholder` property.
     const PROP_PLACEHOLDER: InternedSymbol = InternedSymbol::from_raw(0x00D1_0203);
-    #[doc = include_str!("input.doc/PROP_READONLY.md")]
+    /// Interned name of the `readonly` state property (`NN = 02`, suffix `04`).
     const PROP_READONLY: InternedSymbol = InternedSymbol::from_raw(0x00D1_0204);
 
-    #[doc = include_str!("input.doc/new.md")]
+    /// Creates an empty, enabled input with no placeholder that fires `command`
+    /// on change.
     #[must_use]
     pub fn new(command: InternedSymbol) -> Self {
         Self {
@@ -50,7 +53,7 @@ impl Input {
         }
     }
 
-    #[doc = include_str!("input.doc/with_value.md")]
+    /// Creates an input seeded with `value` that fires `command` on change.
     #[must_use]
     pub fn with_value(command: InternedSymbol, value: impl Into<String>) -> Self {
         Self {
@@ -63,53 +66,57 @@ impl Input {
         }
     }
 
-    #[doc = include_str!("input.doc/multiline_2.md")]
+    /// Makes this field **multi-line** (a `<textarea>`), returning the updated
+    /// input (fluent builder). A multi-line field emits the reserved CSS type
+    /// `textarea` and marks its editable MULTILINE (see [`multiline`](Self::multiline)
+    /// field): `Enter` inserts a newline and `ArrowUp`/`ArrowDown` move between
+    /// wrapped lines. The default is a single-line `input`.
     #[must_use]
     pub const fn multiline(mut self, multiline: bool) -> Self {
         self.multiline = multiline;
         self
     }
 
-    #[doc = include_str!("input.doc/is_multiline.md")]
+    /// Returns whether this is a multi-line (`<textarea>`) field.
     #[must_use]
     pub const fn is_multiline(&self) -> bool {
         self.multiline
     }
 
-    #[doc = include_str!("input.doc/placeholder.md")]
+    /// Sets the placeholder text, returning the updated input (fluent builder).
     #[must_use]
     pub fn placeholder(mut self, placeholder: impl Into<Box<str>>) -> Self {
         self.placeholder = placeholder.into();
         self
     }
 
-    #[doc = include_str!("input.doc/disabled.md")]
+    /// Sets the disabled state, returning the updated input (fluent builder).
     #[must_use]
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
 
-    #[doc = include_str!("input.doc/readonly_2.md")]
+    #[doc = include_str!("../../docs/api/input/input.doc/readonly_2.md")]
     #[must_use]
     pub const fn readonly(mut self, readonly: bool) -> Self {
         self.readonly = readonly;
         self
     }
 
-    #[doc = include_str!("input.doc/value.md")]
+    /// Returns the current text value.
     #[must_use]
     pub fn value(&self) -> &str {
         self.buffer.text()
     }
 
-    #[doc = include_str!("input.doc/placeholder_text.md")]
+    /// Returns the placeholder text.
     #[must_use]
     pub fn placeholder_text(&self) -> &str {
         &self.placeholder
     }
 
-    #[doc = include_str!("input.doc/apply.md")]
+    #[doc = include_str!("../../docs/api/input/input.doc/apply.md")]
     pub fn apply(&mut self, command: EditCommand) {
         if self.disabled {
             return;
@@ -120,47 +127,47 @@ impl Input {
         self.buffer.apply(command);
     }
 
-    #[doc = include_str!("input.doc/buffer.md")]
+    /// Returns a shared reference to the underlying editing buffer.
     #[must_use]
     pub const fn buffer(&self) -> &TextBuffer {
         &self.buffer
     }
 
-    #[doc = include_str!("input.doc/command.md")]
+    /// Returns the command fired when the value changes.
     #[must_use]
     pub const fn command(&self) -> InternedSymbol {
         self.command
     }
 
-    #[doc = include_str!("input.doc/is_disabled.md")]
+    /// Returns whether the input is disabled.
     #[must_use]
     pub const fn is_disabled(&self) -> bool {
         self.disabled
     }
 
-    #[doc = include_str!("input.doc/set_disabled.md")]
+    /// Sets the disabled state in place.
     pub fn set_disabled(&mut self, disabled: bool) {
         self.disabled = disabled;
     }
 
-    #[doc = include_str!("input.doc/is_readonly.md")]
+    /// Returns whether the input is readonly (HTML `readonly`).
     #[must_use]
     pub const fn is_readonly(&self) -> bool {
         self.readonly
     }
 
-    #[doc = include_str!("input.doc/set_readonly.md")]
+    /// Sets the readonly state in place.
     pub const fn set_readonly(&mut self, readonly: bool) {
         self.readonly = readonly;
     }
 
-    #[doc = include_str!("input.doc/semantic_role.md")]
+    /// Returns the accessible role of this control.
     #[must_use]
     pub const fn semantic_role(&self) -> SemanticRole {
         SemanticRole::TextInput
     }
 
-    #[doc = include_str!("input.doc/view.md")]
+    #[doc = include_str!("../../docs/api/input/input.doc/view.md")]
     #[must_use]
     pub fn view(&self) -> View {
         let value = self.buffer.text();
@@ -228,7 +235,7 @@ impl Input {
         View::single(node)
     }
 
-    #[doc = include_str!("input.doc/contents.md")]
+    #[doc = include_str!("../../docs/api/input/input.doc/contents.md")]
     #[must_use]
     pub(crate) fn contents(value: &str) -> ViewFragment {
         // The field's editable text is always a single `Text` child carrying the

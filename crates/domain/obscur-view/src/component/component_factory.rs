@@ -1,21 +1,22 @@
-#![doc = include_str!("component_factory.doc/_module.md")]
+//! `ComponentFactory`: the object-safe type-erasure seam for instantiating one
+//! component kind (spec §2.14).
 
 use obscur_identity::ComponentId;
 
 use crate::component::{ComponentContract, ComponentInstance, ErasedComponent, InstanceId};
 
-#[doc = include_str!("component_factory.doc/ComponentFactory.md")]
+#[doc = include_str!("../../docs/api/component/component_factory.doc/ComponentFactory.md")]
 pub trait ComponentFactory: core::fmt::Debug {
-    #[doc = include_str!("component_factory.doc/component_id.md")]
+    #[doc = include_str!("../../docs/api/component/component_factory.doc/component_id.md")]
     fn component_id(&self) -> ComponentId;
 
-    #[doc = include_str!("component_factory.doc/contract.md")]
+    #[doc = include_str!("../../docs/api/component/component_factory.doc/contract.md")]
     fn contract(&self) -> ComponentContract;
 
-    #[doc = include_str!("component_factory.doc/create_instance.md")]
+    #[doc = include_str!("../../docs/api/component/component_factory.doc/create_instance.md")]
     fn create_instance(&self, instance: InstanceId) -> ComponentInstance;
 
-    #[doc = include_str!("component_factory.doc/create_component.md")]
+    #[doc = include_str!("../../docs/api/component/component_factory.doc/create_component.md")]
     fn create_component(&self) -> Box<dyn ErasedComponent>;
 }
 

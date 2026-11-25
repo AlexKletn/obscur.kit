@@ -1,4 +1,4 @@
-#![doc = include_str!("linux_appearance_provider.doc/_module.md")]
+//! One provider over the platform's three appearance sources.
 
 use std::sync::Arc;
 
@@ -12,7 +12,7 @@ use super::gtk_appearance_provider::GtkAppearanceProvider;
 use super::portal_appearance_provider::PortalAppearanceProvider;
 use super::qt_appearance_provider::QtAppearanceProvider;
 
-#[doc = include_str!("linux_appearance_provider.doc/LinuxAppearanceProvider.md")]
+#[doc = include_str!("../../docs/api/provider/linux_appearance_provider.doc/LinuxAppearanceProvider.md")]
 #[derive(Debug, Clone, Default)]
 pub struct LinuxAppearanceProvider {
     source: AppearanceSource,
@@ -22,13 +22,13 @@ pub struct LinuxAppearanceProvider {
 }
 
 impl LinuxAppearanceProvider {
-    #[doc = include_str!("linux_appearance_provider.doc/new.md")]
+    /// Ask every source, in `Auto` order.
     #[must_use]
     pub fn new() -> Self {
         Self::from_source(AppearanceSource::Auto)
     }
 
-    #[doc = include_str!("linux_appearance_provider.doc/from_source.md")]
+    /// Ask the nominated source, and only it.
     #[must_use]
     pub fn from_source(source: AppearanceSource) -> Self {
         Self {
@@ -39,34 +39,34 @@ impl LinuxAppearanceProvider {
         }
     }
 
-    #[doc = include_str!("linux_appearance_provider.doc/source.md")]
+    /// Which source this provider was told to use.
     #[must_use]
     pub const fn source(&self) -> AppearanceSource {
         self.source
     }
 
-    #[doc = include_str!("linux_appearance_provider.doc/with_portal.md")]
+    /// Substitute the portal reader — for a renamed tool, and for tests.
     #[must_use]
     pub fn with_portal(mut self, portal: PortalAppearanceProvider) -> Self {
         self.portal = portal;
         self
     }
 
-    #[doc = include_str!("linux_appearance_provider.doc/with_gtk.md")]
+    /// Substitute the GNOME reader.
     #[must_use]
     pub fn with_gtk(mut self, gtk: GtkAppearanceProvider) -> Self {
         self.gtk = gtk;
         self
     }
 
-    #[doc = include_str!("linux_appearance_provider.doc/with_qt.md")]
+    /// Substitute the KDE reader, most usefully by pointing it at another file.
     #[must_use]
     pub fn with_qt(mut self, qt: QtAppearanceProvider) -> Self {
         self.qt = qt;
         self
     }
 
-    #[doc = include_str!("linux_appearance_provider.doc/provider_for.md")]
+    #[doc = include_str!("../../docs/api/provider/linux_appearance_provider.doc/provider_for.md")]
     fn provider_for(&self, source: AppearanceSource) -> Option<&dyn AppearanceProvider> {
         match source {
             AppearanceSource::Portal => Some(&self.portal),
@@ -83,13 +83,27 @@ impl AppearanceProvider for LinuxAppearanceProvider {
         // the scheme twice and the palette once, and stopping at the first
         // source that said anything would drop every colour on the machine.
         // Earlier sources outrank later ones field by field.
+        let kde_desktop = self.source.is_auto()
+            && std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|desktop| {
+                desktop
+                    .split(':')
+                    .any(|name| name.eq_ignore_ascii_case("KDE"))
+            });
         self.source
             .order()
             .iter()
-            .filter_map(|source| self.provider_for(*source))
-            .filter(|provider| provider.answers())
-            .map(AppearanceProvider::appearance)
-            .fold(SystemAppearance::default(), |merged, next| {
+            .filter_map(|source| {
+                self.provider_for(*source)
+                    .map(|provider| (source, provider))
+            })
+            .filter(|(_, provider)| provider.answers())
+            .fold(SystemAppearance::default(), |merged, (source, provider)| {
+                let mut next = provider.appearance();
+                // GSettings can return GNOME defaults inside Plasma. KWin owns
+                // the title bar preferences there.
+                if kde_desktop && *source == AppearanceSource::Gtk {
+                    next.window_decoration = None;
+                }
                 merged.merge_under(&next)
             })
     }
@@ -117,7 +131,7 @@ impl AppearanceProvider for LinuxAppearanceProvider {
         }
     }
 
-    #[doc = include_str!("linux_appearance_provider.doc/watch_support.md")]
+    #[doc = include_str!("../../docs/api/provider/linux_appearance_provider.doc/watch_support.md")]
     fn watch_support(&self) -> SupportLevel {
         let asked: Vec<&dyn AppearanceProvider> = self
             .source
@@ -141,7 +155,7 @@ impl AppearanceProvider for LinuxAppearanceProvider {
         }
     }
 
-    #[doc = include_str!("linux_appearance_provider.doc/watch.md")]
+    #[doc = include_str!("../../docs/api/provider/linux_appearance_provider.doc/watch.md")]
     fn watch(&self, on_change: AppearanceCallback) -> Option<AppearanceWatch> {
         let watches: Vec<AppearanceWatch> = self
             .source

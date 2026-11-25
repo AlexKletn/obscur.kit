@@ -1,5 +1,6 @@
-#![doc = include_str!("service_registry.doc/_module.md")]
+//! `ServiceRegistry` (skeleton stub for the spec-defined entity; not yet implemented).
 
-#[doc = include_str!("service_registry.doc/ServiceRegistry.md")]
+/// Placeholder for the `ServiceRegistry` entity. See the Obscur Kit 2 specs for its
+/// contract; this stub exists to materialise the target source layout.
 #[derive(Debug)]
 pub struct ServiceRegistry;

@@ -1,22 +1,22 @@
-#![doc = include_str!("color_scheme.doc/_module.md")]
+//! Light or dark, as the desktop states it.
 
-#[doc = include_str!("color_scheme.doc/ColorScheme.md")]
+#[doc = include_str!("../../docs/api/appearance/color_scheme.doc/ColorScheme.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ColorScheme {
-    #[doc = include_str!("color_scheme.doc/Light.md")]
+    /// Dark text on a light surface.
     Light,
-    #[doc = include_str!("color_scheme.doc/Dark.md")]
+    /// Light text on a dark surface.
     Dark,
 }
 
 impl ColorScheme {
-    #[doc = include_str!("color_scheme.doc/is_dark.md")]
+    /// Whether this is the dark scheme.
     #[must_use]
     pub const fn is_dark(self) -> bool {
         matches!(self, Self::Dark)
     }
 
-    #[doc = include_str!("color_scheme.doc/css_keyword.md")]
+    #[doc = include_str!("../../docs/api/appearance/color_scheme.doc/css_keyword.md")]
     #[must_use]
     pub const fn css_keyword(self) -> &'static str {
         match self {

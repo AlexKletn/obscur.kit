@@ -1,4 +1,4 @@
-#![doc = include_str!("button_props.doc/_module.md")]
+#![doc = include_str!("../../docs/api/button/button_props.doc/_module.md")]
 
 use obscur_identity::InternedSymbol;
 use obscur_view::component::{ComponentContract, FromProps, PropsError, decode_optional};
@@ -7,23 +7,30 @@ use obscur_view::view::{DEFAULT_SLOT, ViewProperty};
 
 use super::Button;
 
-#[doc = include_str!("button_props.doc/ButtonProps.md")]
+#[doc = include_str!("../../docs/api/button/button_props.doc/ButtonProps.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ButtonProps {
-    #[doc = include_str!("button_props.doc/label.md")]
+    /// The button's text, when the author states it as a property rather than as
+    /// content. Empty when there is none — including on every node
+    /// [`Button::view`](super::Button::view) builds, which states the label as a
+    /// child.
     pub label: String,
 }
 
 impl ButtonProps {
-    #[doc = include_str!("button_props.doc/LABEL.md")]
+    #[doc = include_str!("../../docs/api/button/button_props.doc/LABEL.md")]
     pub const LABEL: InternedSymbol = InternedSymbol::from_raw(0xF697_17FD);
 
-    #[doc = include_str!("button_props.doc/NAME.md")]
+    /// Symbol of the component's name, `"Button"` — the FNV-1a-32 hash
+    /// `#[derive(Contract)]` puts on `ComponentContract::with_name`.
     const NAME: InternedSymbol = InternedSymbol::from_raw(0x3388_1A91);
-    #[doc = include_str!("button_props.doc/LABEL_TYPE.md")]
+    /// Opaque type identity of the `label` prop: the FNV-1a-32 hash of the Rust type
+    /// spelling `String`, which is what `#[derive(Contract)]` records as a
+    /// `PropContract`'s `value_type`. It names no view property and is compared,
+    /// never interpreted.
     const LABEL_TYPE: InternedSymbol = InternedSymbol::from_raw(0x604F_4858);
 
-    #[doc = include_str!("button_props.doc/contract.md")]
+    #[doc = include_str!("../../docs/api/button/button_props.doc/contract.md")]
     #[must_use]
     pub fn contract() -> ComponentContract {
         ComponentContract::new(Button::COMPONENT_ID)
@@ -39,7 +46,7 @@ impl ButtonProps {
 }
 
 impl FromProps for ButtonProps {
-    #[doc = include_str!("button_props.doc/from_props.md")]
+    #[doc = include_str!("../../docs/api/button/button_props.doc/from_props.md")]
     fn from_props(props: &[ViewProperty]) -> Result<Self, PropsError> {
         let label: Option<String> = decode_optional(props, Self::LABEL, "label")?;
         Ok(Self {

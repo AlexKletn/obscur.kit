@@ -1,24 +1,27 @@
-#![doc = include_str!("selection_mode.doc/_module.md")]
+//! The [`SelectionMode`] cardinality governing how many items may be selected
+//! (item-selection model).
 
-#[doc = include_str!("selection_mode.doc/SelectionMode.md")]
+#[doc = include_str!("../../docs/api/selection/selection_mode.doc/SelectionMode.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SelectionMode {
-    #[doc = include_str!("selection_mode.doc/None.md")]
+    /// Selection is disabled: no item can be selected.
     None,
-    #[doc = include_str!("selection_mode.doc/Single.md")]
+    /// At most one item may be selected at a time.
     Single,
-    #[doc = include_str!("selection_mode.doc/Multiple.md")]
+    /// Many items may be selected, including contiguous ranges.
     Multiple,
 }
 
 impl SelectionMode {
-    #[doc = include_str!("selection_mode.doc/allows_multiple.md")]
+    /// Returns whether this mode allows more than one item to be selected
+    /// (only [`Multiple`](Self::Multiple)).
     #[must_use]
     pub const fn allows_multiple(&self) -> bool {
         matches!(self, Self::Multiple)
     }
 
-    #[doc = include_str!("selection_mode.doc/is_enabled.md")]
+    /// Returns whether selection is enabled at all
+    /// ([`Single`](Self::Single) or [`Multiple`](Self::Multiple)).
     #[must_use]
     pub const fn is_enabled(&self) -> bool {
         matches!(self, Self::Single | Self::Multiple)
@@ -26,7 +29,7 @@ impl SelectionMode {
 }
 
 impl Default for SelectionMode {
-    #[doc = include_str!("selection_mode.doc/default.md")]
+    /// Defaults to [`Single`](Self::Single).
     fn default() -> Self {
         Self::Single
     }

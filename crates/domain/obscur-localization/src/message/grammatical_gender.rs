@@ -1,67 +1,67 @@
-#![doc = include_str!("grammatical_gender.doc/_module.md")]
+//! `GrammaticalGender`: a CLDR grammatical-gender value (spec §7.2 gender).
 
 use std::fmt;
 
-#[doc = include_str!("grammatical_gender.doc/GrammaticalGender.md")]
+#[doc = include_str!("../../docs/api/message/grammatical_gender.doc/GrammaticalGender.md")]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct GrammaticalGender(Box<str>);
 
 impl GrammaticalGender {
-    #[doc = include_str!("grammatical_gender.doc/new.md")]
+    /// Creates a gender from a CLDR value name.
     #[must_use]
     pub fn new(value: impl Into<Box<str>>) -> Self {
         Self(value.into())
     }
 
-    #[doc = include_str!("grammatical_gender.doc/as_str.md")]
+    /// Returns the value name, as a message arm is spelled.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
-    #[doc = include_str!("grammatical_gender.doc/masculine.md")]
+    /// `masculine` — CLDR value; used by e.g. `ru`, `de`, `es`.
     #[must_use]
     pub fn masculine() -> Self {
         Self::new("masculine")
     }
 
-    #[doc = include_str!("grammatical_gender.doc/feminine.md")]
+    /// `feminine` — CLDR value; used by e.g. `ru`, `pl`, `fr`.
     #[must_use]
     pub fn feminine() -> Self {
         Self::new("feminine")
     }
 
-    #[doc = include_str!("grammatical_gender.doc/neuter.md")]
+    /// `neuter` — CLDR value; used by e.g. `ru`, `pl`, `de`.
     #[must_use]
     pub fn neuter() -> Self {
         Self::new("neuter")
     }
 
-    #[doc = include_str!("grammatical_gender.doc/common.md")]
+    /// `common` — CLDR value; used by e.g. `da`, `sv`, `nl`.
     #[must_use]
     pub fn common() -> Self {
         Self::new("common")
     }
 
-    #[doc = include_str!("grammatical_gender.doc/animate.md")]
+    /// `animate` — CLDR value; used by e.g. `pl`.
     #[must_use]
     pub fn animate() -> Self {
         Self::new("animate")
     }
 
-    #[doc = include_str!("grammatical_gender.doc/inanimate.md")]
+    /// `inanimate` — CLDR value; used by e.g. `pl`.
     #[must_use]
     pub fn inanimate() -> Self {
         Self::new("inanimate")
     }
 
-    #[doc = include_str!("grammatical_gender.doc/personal.md")]
+    /// `personal` — CLDR value; used by e.g. `pl`.
     #[must_use]
     pub fn personal() -> Self {
         Self::new("personal")
     }
 
-    #[doc = include_str!("grammatical_gender.doc/cldr_values.md")]
+    #[doc = include_str!("../../docs/api/message/grammatical_gender.doc/cldr_values.md")]
     #[must_use]
     pub fn cldr_values() -> [Self; 7] {
         [

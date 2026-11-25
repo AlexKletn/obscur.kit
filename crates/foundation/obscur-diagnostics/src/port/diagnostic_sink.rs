@@ -1,24 +1,18 @@
-#![doc = include_str!("diagnostic_sink.doc/_module.md")]
+//! Diagnostic sink port.
 
 use crate::diagnostic::Diagnostic;
 
-#[doc = include_str!("diagnostic_sink.doc/DiagnosticSink.md")]
+/// A destination for structured diagnostics. Adapters may mirror these into
+/// `tracing`, `DevTools` or test buffers (spec §7.8).
 pub trait DiagnosticSink {
-    #[doc = include_str!("diagnostic_sink.doc/emit.md")]
+    /// Records a diagnostic.
     fn emit(&self, diagnostic: &Diagnostic);
-}
-
-#[doc = include_str!("diagnostic_sink.doc/NullDiagnosticSink.md")]
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct NullDiagnosticSink;
-
-impl DiagnosticSink for NullDiagnosticSink {
-    fn emit(&self, _diagnostic: &Diagnostic) {}
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{DiagnosticSink, NullDiagnosticSink};
+    use super::super::NullDiagnosticSink;
+    use super::DiagnosticSink;
     use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity, DiagnosticSubsystem};
 
     #[test]

@@ -1,46 +1,46 @@
-#![doc = include_str!("token_kind.doc/_module.md")]
+//! The lexer's alphabet: the kind of a single lexed token.
 
-#[doc = include_str!("token_kind.doc/TokenKind.md")]
+#[doc = include_str!("../../docs/api/lexer/token_kind.doc/TokenKind.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TokenKind {
-    #[doc = include_str!("token_kind.doc/LAngle.md")]
+    /// `<` — opens a tag.
     LAngle,
-    #[doc = include_str!("token_kind.doc/RAngle.md")]
+    /// `>` — closes a tag.
     RAngle,
-    #[doc = include_str!("token_kind.doc/Slash.md")]
+    /// `/` — self-closing/closing-tag marker.
     Slash,
-    #[doc = include_str!("token_kind.doc/Equals.md")]
+    /// `=` — attribute assignment.
     Equals,
-    #[doc = include_str!("token_kind.doc/LBrace.md")]
+    /// `{` — opens an expression interpolation.
     LBrace,
-    #[doc = include_str!("token_kind.doc/RBrace.md")]
+    /// `}` — closes an expression interpolation.
     RBrace,
-    #[doc = include_str!("token_kind.doc/Colon.md")]
+    /// `:` — namespace separator (e.g. `on:click`).
     Colon,
-    #[doc = include_str!("token_kind.doc/Ident.md")]
+    /// An identifier or keyword: `[A-Za-z_][A-Za-z0-9_.-]*`.
     Ident,
-    #[doc = include_str!("token_kind.doc/String.md")]
+    /// A double-quoted string literal, including the surrounding quotes.
     String,
-    #[doc = include_str!("token_kind.doc/Number.md")]
+    /// A numeric literal: `[0-9]+(\.[0-9]+)?`.
     Number,
-    #[doc = include_str!("token_kind.doc/Text.md")]
+    /// A run of raw text between markup constructs.
     Text,
-    #[doc = include_str!("token_kind.doc/Whitespace.md")]
+    /// A run of insignificant whitespace (trivia).
     Whitespace,
-    #[doc = include_str!("token_kind.doc/Error.md")]
+    /// A single unrecognized character.
     Error,
-    #[doc = include_str!("token_kind.doc/Eof.md")]
+    /// The synthetic end-of-input marker (empty text).
     Eof,
 }
 
 impl TokenKind {
-    #[doc = include_str!("token_kind.doc/is_trivia.md")]
+    #[doc = include_str!("../../docs/api/lexer/token_kind.doc/is_trivia.md")]
     #[must_use]
     pub const fn is_trivia(&self) -> bool {
         matches!(self, Self::Whitespace)
     }
 
-    #[doc = include_str!("token_kind.doc/is_eof.md")]
+    /// Returns `true` if this kind is the end-of-input marker.
     #[must_use]
     pub const fn is_eof(&self) -> bool {
         matches!(self, Self::Eof)

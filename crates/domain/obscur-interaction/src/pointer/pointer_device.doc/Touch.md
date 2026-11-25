@@ -1,1 +1,0 @@
-A direct touchscreen contact.

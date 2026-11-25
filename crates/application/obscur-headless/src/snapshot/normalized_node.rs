@@ -1,21 +1,22 @@
-#![doc = include_str!("normalized_node.doc/_module.md")]
+//! One node's normalized pipeline data: [`NormalizedNode`].
 
 use obscur_geometry::Rect;
 use obscur_identity::NodeId;
 
-#[doc = include_str!("normalized_node.doc/NormalizedNode.md")]
+#[doc = include_str!("../../docs/api/snapshot/normalized_node.doc/NormalizedNode.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct NormalizedNode {
-    #[doc = include_str!("normalized_node.doc/node.md")]
+    /// The stable identity this row describes.
     node: NodeId,
-    #[doc = include_str!("normalized_node.doc/opacity.md")]
+    /// The node's computed `opacity`, if its computed style carries one.
     opacity: Option<f32>,
-    #[doc = include_str!("normalized_node.doc/layout_bounds.md")]
+    /// The node's absolute layout bounds, if it was arranged.
     layout_bounds: Option<Rect>,
 }
 
 impl NormalizedNode {
-    #[doc = include_str!("normalized_node.doc/new.md")]
+    /// Builds a normalized row for `node` from its (optional) computed opacity
+    /// and (optional) layout bounds.
     #[must_use]
     pub fn new(node: NodeId, opacity: Option<f32>, layout_bounds: Option<Rect>) -> Self {
         Self {
@@ -25,19 +26,19 @@ impl NormalizedNode {
         }
     }
 
-    #[doc = include_str!("normalized_node.doc/node_2.md")]
+    /// Returns the identity this row describes.
     #[must_use]
     pub fn node(&self) -> NodeId {
         self.node
     }
 
-    #[doc = include_str!("normalized_node.doc/opacity_2.md")]
+    /// Returns the node's computed `opacity`, if present.
     #[must_use]
     pub fn opacity(&self) -> Option<f32> {
         self.opacity
     }
 
-    #[doc = include_str!("normalized_node.doc/layout_bounds_2.md")]
+    /// Returns the node's absolute layout bounds, if it was arranged.
     #[must_use]
     pub fn layout_bounds(&self) -> Option<Rect> {
         self.layout_bounds

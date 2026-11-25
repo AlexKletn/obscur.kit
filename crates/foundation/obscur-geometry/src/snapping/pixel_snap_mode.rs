@@ -1,13 +1,14 @@
-#![doc = include_str!("pixel_snap_mode.doc/_module.md")]
+//! Pixel-snapping policy selector.
 
-#[doc = include_str!("pixel_snap_mode.doc/PixelSnapMode.md")]
+/// Controls how a subtree's geometry is snapped to the physical pixel grid at
+/// paint time (spec §4.6). Layout itself never rounds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PixelSnapMode {
-    #[doc = include_str!("pixel_snap_mode.doc/Auto.md")]
+    /// Let the renderer choose an appropriate snapping strategy.
     #[default]
     Auto,
-    #[doc = include_str!("pixel_snap_mode.doc/None.md")]
+    /// Do not snap; preserve exact fractional geometry.
     None,
-    #[doc = include_str!("pixel_snap_mode.doc/Edges.md")]
+    /// Snap outer edges only.
     Edges,
 }

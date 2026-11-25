@@ -1,39 +1,78 @@
-#![doc = include_str!("snapshot_inspect_source.doc/_module.md")]
+#![doc = include_str!("../../docs/api/bridge/snapshot_inspect_source.doc/_module.md")]
+
+mod inspectable_key;
+
+use inspectable_key::InspectableKey;
 
 use std::collections::BTreeMap;
 
-use obscur_devtools_protocol::message::{Inspectable, SnapshotPayload};
+use obscur_devtools_protocol::message::{Inspectable, SnapshotPayload, StableSelector};
 
 use crate::bridge::InspectSource;
 
-#[doc = include_str!("snapshot_inspect_source.doc/SnapshotInspectSource.md")]
+type SemanticIdentity = (u64, Box<str>, Option<Box<str>>);
+
+/// An [`InspectSource`] serving host-registered snapshots per target.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SnapshotInspectSource {
     snapshots: BTreeMap<InspectableKey, SnapshotPayload>,
+    semantic: Option<Vec<SemanticIdentity>>,
+    stable: Option<BTreeMap<StableSelector, Vec<u64>>>,
 }
 
 impl SnapshotInspectSource {
-    #[doc = include_str!("snapshot_inspect_source.doc/new.md")]
+    #[doc = include_str!("../../docs/api/bridge/snapshot_inspect_source.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
             snapshots: BTreeMap::new(),
+            semantic: None,
+            stable: None,
         }
     }
 
-    #[doc = include_str!("snapshot_inspect_source.doc/with_snapshot.md")]
+    /// Publishes the stable identifiers of the current retained tree.
+    #[must_use]
+    pub fn with_stable_nodes(
+        mut self,
+        nodes: impl IntoIterator<Item = (StableSelector, u64)>,
+    ) -> Self {
+        let mut index = BTreeMap::<_, Vec<_>>::new();
+        for (selector, node) in nodes {
+            index.entry(selector).or_default().push(node);
+        }
+        for nodes in index.values_mut() {
+            nodes.sort_unstable();
+            nodes.dedup();
+        }
+        self.stable = Some(index);
+        self
+    }
+
+    /// Publishes visible semantic IDs, role labels, and accessible names.
+    #[must_use]
+    pub fn with_semantic_nodes(
+        mut self,
+        nodes: impl IntoIterator<Item = SemanticIdentity>,
+    ) -> Self {
+        self.semantic = Some(nodes.into_iter().collect());
+        self
+    }
+
+    /// Registers `payload` for `target`, returning the updated source (builder
+    /// form).
     #[must_use]
     pub fn with_snapshot(mut self, target: Inspectable, payload: SnapshotPayload) -> Self {
         self.set_snapshot(target, payload);
         self
     }
 
-    #[doc = include_str!("snapshot_inspect_source.doc/set_snapshot.md")]
+    /// Registers or replaces the payload the host reports for `target`.
     pub fn set_snapshot(&mut self, target: Inspectable, payload: SnapshotPayload) {
         self.snapshots.insert(InspectableKey::from(target), payload);
     }
 
-    #[doc = include_str!("snapshot_inspect_source.doc/registered.md")]
+    /// Returns the registered payload for `target`, if the host described it.
     #[must_use]
     pub fn registered(&self, target: Inspectable) -> Option<&SnapshotPayload> {
         self.snapshots.get(&InspectableKey::from(target))
@@ -41,6 +80,27 @@ impl SnapshotInspectSource {
 }
 
 impl InspectSource for SnapshotInspectSource {
+    fn select_stable(&self, selector: &StableSelector) -> SnapshotPayload {
+        let Some(index) = &self.stable else {
+            return SnapshotPayload::summary("no stable selector source");
+        };
+        let nodes = index.get(selector).cloned().unwrap_or_default();
+        SnapshotPayload::new("stable selector matches", nodes.len() as u64, nodes)
+    }
+    fn select_semantic(&self, role: &str, name: Option<&str>) -> SnapshotPayload {
+        let Some(nodes) = &self.semantic else {
+            return SnapshotPayload::summary("no semantic selector source");
+        };
+        let ids: Vec<_> = nodes
+            .iter()
+            .filter(|(_, node_role, node_name)| {
+                node_role.as_ref() == role
+                    && name.is_none_or(|name| node_name.as_deref() == Some(name))
+            })
+            .map(|(id, _, _)| *id)
+            .collect();
+        SnapshotPayload::new("semantic selector matches", ids.len() as u64, ids)
+    }
     fn snapshot(&self, target: Inspectable) -> SnapshotPayload {
         self.registered(target)
             .cloned()
@@ -48,33 +108,10 @@ impl InspectSource for SnapshotInspectSource {
     }
 }
 
-#[doc = include_str!("snapshot_inspect_source.doc/default_payload.md")]
+#[doc = include_str!("../../docs/api/bridge/snapshot_inspect_source.doc/default_payload.md")]
 #[must_use]
 pub fn default_payload(target: Inspectable) -> SnapshotPayload {
     SnapshotPayload::summary(format!("no snapshot registered for {target:?}"))
-}
-
-#[doc = include_str!("snapshot_inspect_source.doc/InspectableKey.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-struct InspectableKey(u8);
-
-impl From<Inspectable> for InspectableKey {
-    fn from(target: Inspectable) -> Self {
-        Self(match target {
-            Inspectable::Tree => 0,
-            Inspectable::Styles => 1,
-            Inspectable::Layout => 2,
-            Inspectable::EventFlow => 3,
-            Inspectable::Focus => 4,
-            Inspectable::Animations => 5,
-            Inspectable::Resources => 6,
-            Inspectable::Accessibility => 7,
-            Inspectable::Scene => 8,
-            Inspectable::Rendering => 9,
-            Inspectable::Caches => 10,
-            Inspectable::PluginState => 11,
-        })
-    }
 }
 
 #[cfg(test)]

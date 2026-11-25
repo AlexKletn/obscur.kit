@@ -9,3 +9,4 @@ Cargo.lock.orig
 
 # Machine-local cargo settings (job caps etc.), never the project's.
 /.cargo/
+/NOTES.local.md

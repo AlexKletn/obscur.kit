@@ -1,26 +1,39 @@
-#![doc = include_str!("track_size.doc/_module.md")]
+//! `TrackSize`: the size of a single CSS-grid row or column track.
 
-#[doc = include_str!("track_size.doc/TrackSize.md")]
+use crate::model::Dimension;
+
+use super::TrackLimit;
+
+#[doc = include_str!("../../../docs/api/algorithm/grid/track_size.doc/TrackSize.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum TrackSize {
-    #[doc = include_str!("track_size.doc/Fixed.md")]
+    /// A resolved pixel length (already unit-resolved by the CSS layer).
     Fixed(f32),
-    #[doc = include_str!("track_size.doc/Percent.md")]
+    /// A fraction of the container's content extent along this axis, stored as a
+    /// `0..=1` fraction (`30%` → `0.30`). Resolved to `fraction * axis_size`
+    /// inside the algorithm — where the axis extent is known — and, like
+    /// [`Fixed`](TrackSize::Fixed), consumes its space before `fr` distribution.
     Percent(f32),
-    #[doc = include_str!("track_size.doc/Fr.md")]
+    /// A flexible fraction (`fr`); shares leftover space proportionally.
     Fr(f32),
-    #[doc = include_str!("track_size.doc/Auto.md")]
+    /// Content-sized: as large as the biggest item placed in the track.
     Auto,
-    #[doc = include_str!("track_size.doc/MinContent.md")]
+    /// `min-content`: the largest **min-content** contribution among the items
+    /// placed in the track — each measured under an offer of no space.
     MinContent,
-    #[doc = include_str!("track_size.doc/MaxContent.md")]
+    /// `max-content`: the largest **max-content** contribution among the items
+    /// placed in the track — each measured under an unbounded offer.
     MaxContent,
-    #[doc = include_str!("track_size.doc/MinMax.md")]
+    /// A max-content growth limit capped by a dimension, with an intrinsic minimum.
+    FitContent(Dimension),
+    /// An intrinsic track whose growth cap is evaluated against the grid axis.
+    FitContentMath(Box<TrackLimit>),
+    #[doc = include_str!("../../../docs/api/algorithm/grid/track_size.doc/MinMax.md")]
     MinMax(Box<TrackSize>, Box<TrackSize>),
 }
 
 impl TrackSize {
-    #[doc = include_str!("track_size.doc/minmax.md")]
+    #[doc = include_str!("../../../docs/api/algorithm/grid/track_size.doc/minmax.md")]
     #[must_use]
     pub fn minmax(min: TrackSize, max: TrackSize) -> Self {
         TrackSize::MinMax(Box::new(min), Box::new(max))

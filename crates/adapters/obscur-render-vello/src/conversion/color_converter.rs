@@ -1,20 +1,20 @@
-#![doc = include_str!("color_converter.doc/_module.md")]
+#![doc = include_str!("../../docs/api/conversion/color_converter.doc/_module.md")]
 
 use obscur_scene::color::Color;
 use vello::peniko;
 
-#[doc = include_str!("color_converter.doc/ColorConverter.md")]
+#[doc = include_str!("../../docs/api/conversion/color_converter.doc/ColorConverter.md")]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ColorConverter;
 
 impl ColorConverter {
-    #[doc = include_str!("color_converter.doc/new.md")]
+    /// Creates a color converter.
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    #[doc = include_str!("color_converter.doc/convert.md")]
+    #[doc = include_str!("../../docs/api/conversion/color_converter.doc/convert.md")]
     #[must_use]
     pub fn convert(&self, color: Color) -> peniko::Color {
         peniko::Color::new([

@@ -1,21 +1,21 @@
-#![doc = include_str!("component_recovery.doc/_module.md")]
+//! `ComponentRecovery`: applies the §1.7 component error-boundary policy.
 
 use obscur_view::boundary::{ComponentFailure, ErrorBoundary};
 
 use crate::recovery::RecoveryResult;
 
-#[doc = include_str!("component_recovery.doc/ComponentRecovery.md")]
+#[doc = include_str!("../../docs/api/recovery/component_recovery.doc/ComponentRecovery.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ComponentRecovery;
 
 impl ComponentRecovery {
-    #[doc = include_str!("component_recovery.doc/new.md")]
+    /// Creates a component-recovery coordinator.
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    #[doc = include_str!("component_recovery.doc/recover.md")]
+    #[doc = include_str!("../../docs/api/recovery/component_recovery.doc/recover.md")]
     #[must_use]
     pub fn recover(
         &self,

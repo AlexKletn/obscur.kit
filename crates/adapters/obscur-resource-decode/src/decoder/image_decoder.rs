@@ -1,24 +1,28 @@
-#![doc = include_str!("image_decoder.doc/_module.md")]
+#![doc = include_str!("../../docs/api/decoder/image_decoder.doc/_module.md")]
 
-use std::sync::Arc;
+use std::{io::Cursor, sync::Arc};
 
 use obscur_geometry::Size;
 use obscur_resources::handle::ResourceKind;
 use obscur_resources::port::{DecodedResource, ResourceDecoder};
 use obscur_resources::state::{ResourceError, ResourceMetadata};
+use obscur_scene::paint::SceneImage;
 
-#[doc = include_str!("image_decoder.doc/DEFAULT_MAX_DIMENSION.md")]
+/// The default maximum per-side pixel dimension a decoded image may have (spec
+/// §5.16 safety limits).
 const DEFAULT_MAX_DIMENSION: u32 = 16_384;
 
-#[doc = include_str!("image_decoder.doc/ImageDecoder.md")]
+#[doc = include_str!("../../docs/api/decoder/image_decoder.doc/ImageDecoder.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ImageDecoder {
-    #[doc = include_str!("image_decoder.doc/max_dimension.md")]
+    /// The maximum allowed width or height, in pixels, before a decode is
+    /// rejected as [`ResourceError::LimitExceeded`] (spec §5.16).
     max_dimension: u32,
 }
 
 impl ImageDecoder {
-    #[doc = include_str!("image_decoder.doc/new.md")]
+    /// Creates an image decoder with the default per-side dimension limit
+    /// ([`DEFAULT_MAX_DIMENSION`]).
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -26,13 +30,14 @@ impl ImageDecoder {
         }
     }
 
-    #[doc = include_str!("image_decoder.doc/with_max_dimension.md")]
+    /// Creates an image decoder that rejects any image wider or taller than
+    /// `max_dimension` pixels (spec §5.16 safety limits).
     #[must_use]
     pub const fn with_max_dimension(max_dimension: u32) -> Self {
         Self { max_dimension }
     }
 
-    #[doc = include_str!("image_decoder.doc/max_dimension_2.md")]
+    /// Returns the current per-side dimension limit in pixels.
     #[must_use]
     pub const fn max_dimension(&self) -> u32 {
         self.max_dimension
@@ -40,7 +45,7 @@ impl ImageDecoder {
 }
 
 impl Default for ImageDecoder {
-    #[doc = include_str!("image_decoder.doc/default.md")]
+    /// The default image decoder uses [`ImageDecoder::new`].
     fn default() -> Self {
         Self::new()
     }
@@ -58,24 +63,28 @@ impl ResourceDecoder for ImageDecoder {
             ));
         }
 
-        let image = image::load_from_memory(bytes)
-            .map_err(|err| ResourceError::DecodeFailed(err.to_string().into()))?;
-
+        let mut reader = image::ImageReader::new(Cursor::new(bytes))
+            .with_guessed_format()
+            .map_err(|error| ResourceError::DecodeFailed(error.to_string().into()))?;
+        let mut limits = image::Limits::default();
+        limits.max_image_width = Some(self.max_dimension);
+        limits.max_image_height = Some(self.max_dimension);
+        reader.limits(limits);
+        let image = reader.decode().map_err(|error| match error {
+            image::ImageError::Limits(_) => ResourceError::LimitExceeded(error.to_string().into()),
+            _ => ResourceError::DecodeFailed(error.to_string().into()),
+        })?;
         let width = image.width();
         let height = image.height();
-        if width > self.max_dimension || height > self.max_dimension {
-            return Err(ResourceError::LimitExceeded(
-                format!(
-                    "image {width}x{height} exceeds max dimension {}",
-                    self.max_dimension
-                )
-                .into(),
-            ));
-        }
 
-        let rgba = image.to_rgba8().into_raw();
+        let rgba_bytes = SceneImage::rgba8_byte_size(width, height).ok_or_else(|| {
+            ResourceError::LimitExceeded(
+                format!("RGBA buffer for image {width}x{height} exceeds addressable size").into(),
+            )
+        })?;
+        let rgba = image.into_rgba8().into_raw();
         let metadata = ResourceMetadata::new()
-            .with_byte_size(u64::try_from(rgba.len()).unwrap_or(u64::MAX))
+            .with_byte_size(rgba_bytes)
             .with_mime_type("image/rgba8")
             .with_intrinsic_size(Size::new(width as f32, height as f32));
 
@@ -123,6 +132,7 @@ mod tests {
 
         // 3x2 pixels * 4 bytes each.
         assert_eq!(decoded.data().len(), 3 * 2 * 4);
+        assert_eq!(decoded.metadata().byte_size(), Some(24));
         assert_eq!(
             decoded.metadata().intrinsic_size(),
             Some(Size::new(3.0, 2.0))
@@ -158,6 +168,21 @@ mod tests {
         let decoder = ImageDecoder::with_max_dimension(2);
         let result = decoder.decode(ResourceKind::Image, &png);
         assert!(matches!(result, Err(ResourceError::LimitExceeded(_))));
+    }
+
+    #[test]
+    fn rejects_oversized_header_before_reading_invalid_pixel_data() {
+        let mut png = encode(3, 2, image::ImageFormat::Png);
+        let idat = png.windows(4).position(|tag| tag == b"IDAT").unwrap();
+        png[idat + 4] ^= 0xff;
+        assert!(matches!(
+            ImageDecoder::with_max_dimension(2).decode(ResourceKind::Image, &png),
+            Err(ResourceError::LimitExceeded(_))
+        ));
+        assert!(matches!(
+            ImageDecoder::with_max_dimension(3).decode(ResourceKind::Image, &png),
+            Err(ResourceError::DecodeFailed(_))
+        ));
     }
 
     #[test]

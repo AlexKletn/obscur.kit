@@ -1,19 +1,77 @@
-#![doc = include_str!("focus.doc/_module.md")]
+#![doc = include_str!("../../../docs/api/runtime/ui_runtime/focus.doc/_module.md")]
 
 use obscur_identity::{InternedSymbol, NodeId};
 use obscur_interaction::event::{EventOrigin, UiEvent};
 use obscur_interaction::focus::{FOCUS_TRAP, FocusScope, FocusScopeId};
 use obscur_tree::tree::Subtree;
-use obscur_view::view::{EVENT_BLUR, EVENT_FOCUS, ViewValue};
+use obscur_view::view::{AUTOMATION_ID, EVENT_BLUR, EVENT_FOCUS, ViewValue};
 
-use crate::runtime::{AncestorChain, CommandDispatch, EditableField, FocusOrder};
+use crate::runtime::{AncestorChain, CommandDispatch, EditableField, FocusOrder, FocusState};
 
 use super::UiRuntime;
 
 impl UiRuntime {
-    #[doc = include_str!("focus.doc/move_focus_to.md")]
+    /// Captures the focused control's unique automation ID when its layout and focus
+    /// eligibility allow restoration.
+    #[must_use]
+    pub fn capture_focus_state(&self) -> Option<FocusState> {
+        let focused = self.focused?;
+        let node = self.tree.get(focused)?;
+        let id = node
+            .props()
+            .iter()
+            .find_map(|prop| match (prop.name(), prop.value()) {
+                (AUTOMATION_ID, ViewValue::Text(id)) if !id.trim().is_empty() => Some(id.as_ref()),
+                _ => None,
+            })?;
+        (self.unique_focus_target(id) == Some(focused)).then(|| FocusState::capture(id))
+    }
+
+    /// Restores focus after layout when exactly one eligible node matches the saved
+    /// automation ID. Returns false when the target is absent, ambiguous, disabled,
+    /// outside the active focus trap, or described by an unsupported version.
+    pub fn restore_focus_state(&mut self, state: &FocusState) -> bool {
+        let Some(target) = state
+            .automation_id()
+            .and_then(|id| self.unique_focus_target(id))
+        else {
+            return false;
+        };
+        if self.focused == Some(target) {
+            return true;
+        }
+        if self.focus_node(Some(target)) {
+            self.request_frame(crate::frame::FrameReason::Input);
+            return true;
+        }
+        false
+    }
+
+    /// Resolves an unambiguous automation ID to an eligible, laid-out tab stop.
+    fn unique_focus_target(&self, id: &str) -> Option<NodeId> {
+        let mut matches = self.tree.iter().filter(|(_, node)| {
+            node.props().iter().any(|prop| {
+                prop.name() == AUTOMATION_ID
+                    && matches!(prop.value(), ViewValue::Text(value) if value.as_ref() == id)
+            })
+        });
+        let (target, _) = matches.next()?;
+        if matches.next().is_some()
+            || !self.boxes.get(&target).is_some_and(|layout| {
+                let size = layout.size();
+                size.width > 0.0 && size.height > 0.0
+            })
+        {
+            return None;
+        }
+        FocusOrder::of(&self.tree, &self.computed, self.focus_trap())
+            .nodes()
+            .contains(&target)
+            .then_some(target)
+    }
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/focus.doc/move_focus_to.md")]
     pub(super) fn move_focus_to(&mut self, next: Option<NodeId>, cause: UiEvent) -> bool {
-        if self.focused == next {
+        if self.focused == next || next.is_some_and(|node| self.is_css_hidden(node)) {
             return false;
         }
         let blurred = self.focused;
@@ -22,7 +80,8 @@ impl UiRuntime {
         // caused the move: a keyboard move shows the ring, a press does not.
         // Reading it off the cause rather than taking a parameter is what stops
         // the two ever disagreeing.
-        self.focus_visible = next.is_some() && cause.origin() == EventOrigin::Keyboard;
+        self.focus_visible = next.is_some()
+            && matches!(cause.origin(), EventOrigin::Keyboard | EventOrigin::Gamepad);
         // Focus moved: begin/clear the runtime-owned editing session so the
         // focused editable's text/caret/selection is live for keys (and step-2
         // rendering). This is also what commits the outgoing field's `change`,
@@ -51,7 +110,28 @@ impl UiRuntime {
         true
     }
 
-    #[doc = include_str!("focus.doc/focus_node.md")]
+    /// Clear interaction focus when the native surface loses keyboard focus.
+    pub fn blur_window_focus(&mut self) {
+        self.set_modifiers(obscur_interaction::command::Modifiers::new());
+        self.cancel_indirect_gestures();
+        if self.move_focus_to(None, UiEvent::detached(EventOrigin::Synthetic)) {
+            self.request_frame(crate::frame::FrameReason::Input);
+        }
+    }
+
+    /// Move keyboard focus to the first tab stop when a newly focused surface has no focused node.
+    pub fn focus_first_window_tab_stop(&mut self) -> bool {
+        if self.focused.is_some() {
+            return false;
+        }
+        if !self.move_focus_by_tab(false, UiEvent::detached(EventOrigin::Keyboard)) {
+            return false;
+        }
+        self.request_frame(crate::frame::FrameReason::Input);
+        true
+    }
+
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/focus.doc/focus_node.md")]
     pub fn focus_node(&mut self, node: Option<NodeId>) -> bool {
         if node.is_some_and(|id| self.tree.get(id).is_none()) {
             return false;
@@ -66,17 +146,17 @@ impl UiRuntime {
         self.move_focus_to(node, UiEvent::detached(EventOrigin::Synthetic))
     }
 
-    #[doc = include_str!("focus.doc/is_focus_visible.md")]
+    /// Whether `:focus-visible` currently matches the focused node.
     #[must_use]
     pub const fn is_focus_visible(&self) -> bool {
         self.focus_visible
     }
 
-    #[doc = include_str!("focus.doc/move_focus_by_tab.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/focus.doc/move_focus_by_tab.md")]
     pub(super) fn move_focus_by_tab(&mut self, backwards: bool, cause: UiEvent) -> bool {
         // The innermost open scope that traps, if any: a modal is exactly the
         // thing that must not let Tab wander back to the page behind it.
-        let order = FocusOrder::of(&self.tree, self.focus_trap());
+        let order = FocusOrder::of(&self.tree, &self.computed, self.focus_trap());
         // An empty ring must not blur what is focused. `step` answering `None`
         // means "there is nowhere to go", and a Tab that unfocused the field the
         // user was typing in because the screen holds one control would be worse
@@ -87,20 +167,20 @@ impl UiRuntime {
         self.move_focus_to(Some(next), cause)
     }
 
-    #[doc = include_str!("focus.doc/focus_trap.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/focus.doc/focus_trap.md")]
     pub(super) fn focus_trap(&self) -> Option<&FocusScope> {
         // A non-trapping scope groups commands without owning the ring, so
         // `traps()` is the whole test.
         self.routing.scopes().iter().rev().find(|s| s.traps())
     }
 
-    #[doc = include_str!("focus.doc/focus_trap_admits.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/focus.doc/focus_trap_admits.md")]
     pub(super) fn focus_trap_admits(&self, node: Option<NodeId>) -> bool {
         self.focus_trap()
             .is_none_or(|scope| node.is_some_and(|node| scope.contains(node)))
     }
 
-    #[doc = include_str!("focus.doc/trap_declaring_nodes.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/focus.doc/trap_declaring_nodes.md")]
     fn trap_declaring_nodes(&self) -> Vec<NodeId> {
         // Flat, not a pre-order walk. This runs on every reconciled frame beside
         // the pointer-binding rescan, and the tree it runs over is the one a
@@ -133,7 +213,7 @@ impl UiRuntime {
         nodes
     }
 
-    #[doc = include_str!("focus.doc/declared_focus_traps.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/focus.doc/declared_focus_traps.md")]
     fn declared_focus_traps(&self, declaring: Vec<NodeId>) -> Vec<FocusScope> {
         declaring
             .into_iter()
@@ -147,7 +227,7 @@ impl UiRuntime {
             .collect()
     }
 
-    #[doc = include_str!("focus.doc/reconcile_focus_traps.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/focus.doc/reconcile_focus_traps.md")]
     pub(super) fn reconcile_focus_traps(&mut self) {
         let known = self.routing.declared_traps().to_vec();
         let declaring = self.trap_declaring_nodes();
@@ -179,19 +259,20 @@ impl UiRuntime {
             .set_declared_traps(declared.iter().map(FocusScope::id).collect());
     }
 
-    #[doc = include_str!("focus.doc/enter_focus_trap.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/focus.doc/enter_focus_trap.md")]
     fn enter_focus_trap(&mut self, scope: &FocusScope) {
         self.routing.save_focus_for_scope(self.focused);
         if self.focused.is_some_and(|node| scope.contains(node)) {
             return;
         }
-        let Some(first) = FocusOrder::of(&self.tree, Some(scope)).step(None, false) else {
+        let Some(first) = FocusOrder::of(&self.tree, &self.computed, Some(scope)).step(None, false)
+        else {
             return;
         };
         self.move_focus_to(Some(first), UiEvent::detached(EventOrigin::Synthetic));
     }
 
-    #[doc = include_str!("focus.doc/leave_focus_trap.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/focus.doc/leave_focus_trap.md")]
     fn leave_focus_trap(&mut self, id: FocusScopeId) {
         let closing = self.routing.scope(id).cloned();
         self.routing.close_scope(id);
@@ -207,7 +288,13 @@ impl UiRuntime {
         self.move_focus_to(target, UiEvent::detached(EventOrigin::Synthetic));
     }
 
-    #[doc = include_str!("focus.doc/drop_focus_if_removed.md")]
+    /// Checks the computed visibility of an individual node.
+    pub(super) fn is_css_hidden(&self, node: NodeId) -> bool {
+        self.computed_style(node)
+            .is_some_and(|style| style.is_visibility_hidden())
+    }
+
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/focus.doc/drop_focus_if_removed.md")]
     pub(super) fn drop_focus_if_removed(&mut self) {
         // Before the orphan check, not after: a trap that closed this frame took
         // the focused node with it, and the restore below is the answer to where
@@ -228,7 +315,7 @@ impl UiRuntime {
         self.move_focus_to(None, UiEvent::detached(EventOrigin::Synthetic));
     }
 
-    #[doc = include_str!("focus.doc/dispatch_focus_change.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/focus.doc/dispatch_focus_change.md")]
     fn dispatch_focus_change(
         &mut self,
         blurred: Option<NodeId>,
@@ -246,7 +333,7 @@ impl UiRuntime {
         }
     }
 
-    #[doc = include_str!("focus.doc/dispatch_focus_notification.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/focus.doc/dispatch_focus_notification.md")]
     fn dispatch_focus_notification(&mut self, node: NodeId, name: InternedSymbol, cause: UiEvent) {
         // Resolved through the ancestor chain, the same way `dispatch_raw_key`
         // resolves `keydown` on the same focused node — and NOT the way

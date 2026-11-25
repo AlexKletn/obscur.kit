@@ -1,5 +1,7 @@
 mod dependency_manifest;
 pub use dependency_manifest::DependencyManifest;
+mod dependency_kind;
+pub use dependency_kind::DependencyKind;
 mod entrypoint;
 pub use entrypoint::Entrypoint;
 mod host_compatibility;
@@ -8,3 +10,11 @@ mod plugin_kind;
 pub use plugin_kind::PluginKind;
 mod plugin_manifest;
 pub use plugin_manifest::PluginManifest;
+mod plugin_platform;
+pub use plugin_platform::PluginPlatform;
+mod manifest_file;
+pub use manifest_file::ManifestFile;
+mod contribution_declarations;
+pub use contribution_declarations::ContributionDeclarations;
+
+pub use semver::{Version, VersionReq};

@@ -1,24 +1,35 @@
-#![doc = include_str!("event_payload.doc/_module.md")]
+//! The typed payload a [`UiEvent`](super::UiEvent) carries to a handler
+//! (spec §2.3, §2.4).
 
 use crate::command::KeyEvent;
+use crate::gamepad::GamepadEvent;
+use crate::gesture::{SystemBackEvent, TouchpadGestureEvent};
 use crate::pointer::{PointerEvent, WheelEvent};
 
-#[doc = include_str!("event_payload.doc/EventPayload.md")]
+#[doc = include_str!("../../docs/api/event/event_payload.doc/EventPayload.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum EventPayload {
-    #[doc = include_str!("event_payload.doc/Empty.md")]
+    /// No device payload: the event was produced by something other than an
+    /// input device (a menu, assistive technology, a programmatic dispatch).
     #[default]
     Empty,
-    #[doc = include_str!("event_payload.doc/Pointer.md")]
+    /// A pointer event's §2.4 payload.
     Pointer(PointerEvent),
-    #[doc = include_str!("event_payload.doc/Key.md")]
+    /// A keyboard key transition's payload (spec §2.6 physical key / logical
+    /// key).
     Key(KeyEvent),
-    #[doc = include_str!("event_payload.doc/Wheel.md")]
+    /// Native touchpad gesture sample.
+    TouchpadGesture(TouchpadGestureEvent),
+    #[doc = include_str!("../../docs/api/event/event_payload.doc/Wheel.md")]
     Wheel(WheelEvent),
+    /// Predictive Back data supplied by the window host.
+    SystemBack(SystemBackEvent),
+    /// Input from a gamepad adapter.
+    Gamepad(GamepadEvent),
 }
 
 impl EventPayload {
-    #[doc = include_str!("event_payload.doc/pointer.md")]
+    /// Returns the pointer payload, or `None` for any other kind of event.
     #[must_use]
     pub const fn pointer(&self) -> Option<PointerEvent> {
         match self {
@@ -27,7 +38,7 @@ impl EventPayload {
         }
     }
 
-    #[doc = include_str!("event_payload.doc/key.md")]
+    /// Returns the keyboard payload, or `None` for any other kind of event.
     #[must_use]
     pub const fn key(&self) -> Option<KeyEvent> {
         match self {
@@ -36,7 +47,7 @@ impl EventPayload {
         }
     }
 
-    #[doc = include_str!("event_payload.doc/wheel.md")]
+    /// Returns the wheel payload, or `None` for any other kind of event.
     #[must_use]
     pub const fn wheel(&self) -> Option<WheelEvent> {
         match self {
@@ -45,7 +56,7 @@ impl EventPayload {
         }
     }
 
-    #[doc = include_str!("event_payload.doc/is_empty.md")]
+    /// Returns whether this event carries no device payload.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         matches!(self, Self::Empty)

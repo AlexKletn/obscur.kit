@@ -1,4 +1,4 @@
-#![doc = include_str!("tree_element.doc/_module.md")]
+//! The selector-matcher's view of a retained-tree node: [`TreeElement`].
 
 use obscur_identity::NodeId;
 use obscur_style::selector::{MatchElement, PseudoState};
@@ -7,19 +7,20 @@ use obscur_tree::tree::RetainedTree;
 
 use super::PseudoStates;
 
-#[doc = include_str!("tree_element.doc/TreeElement.md")]
+#[doc = include_str!("../../docs/api/orchestration/tree_element.doc/TreeElement.md")]
 #[derive(Debug, Clone, Copy)]
 pub struct TreeElement<'a> {
-    #[doc = include_str!("tree_element.doc/tree.md")]
+    /// The tree the cursor navigates; shared and borrowed for `'a`.
     tree: &'a RetainedTree,
-    #[doc = include_str!("tree_element.doc/id.md")]
+    /// The node this cursor currently points at.
     id: NodeId,
-    #[doc = include_str!("tree_element.doc/pseudo.md")]
+    /// The interaction-state source, or `None` for stateless matching (every
+    /// node then reports [`PseudoState::empty`]).
     pseudo: Option<&'a PseudoStates>,
 }
 
 impl<'a> TreeElement<'a> {
-    #[doc = include_str!("tree_element.doc/new.md")]
+    #[doc = include_str!("../../docs/api/orchestration/tree_element.doc/new.md")]
     #[must_use]
     pub const fn new(tree: &'a RetainedTree, id: NodeId) -> Self {
         Self {
@@ -29,7 +30,7 @@ impl<'a> TreeElement<'a> {
         }
     }
 
-    #[doc = include_str!("tree_element.doc/with_pseudo.md")]
+    #[doc = include_str!("../../docs/api/orchestration/tree_element.doc/with_pseudo.md")]
     #[must_use]
     pub const fn with_pseudo(tree: &'a RetainedTree, id: NodeId, pseudo: &'a PseudoStates) -> Self {
         Self {
@@ -39,7 +40,8 @@ impl<'a> TreeElement<'a> {
         }
     }
 
-    #[doc = include_str!("tree_element.doc/cursor.md")]
+    /// Mints a sibling cursor over `id` in the same tree, preserving the
+    /// interaction-state source so pseudo-class matching survives navigation.
     const fn cursor(&self, id: NodeId) -> Self {
         Self {
             tree: self.tree,
@@ -48,18 +50,18 @@ impl<'a> TreeElement<'a> {
         }
     }
 
-    #[doc = include_str!("tree_element.doc/node_id.md")]
+    #[doc = include_str!("../../docs/api/orchestration/tree_element.doc/node_id.md")]
     #[must_use]
     pub const fn node_id(&self) -> NodeId {
         self.id
     }
 
-    #[doc = include_str!("tree_element.doc/node.md")]
+    /// Resolves the backing node record, or `None` if the id is stale/absent.
     fn node(&self) -> Option<&'a RetainedNode> {
         self.tree.get(self.id)
     }
 
-    #[doc = include_str!("tree_element.doc/element_siblings.md")]
+    #[doc = include_str!("../../docs/api/orchestration/tree_element.doc/element_siblings.md")]
     fn element_siblings(&self) -> Vec<NodeId> {
         let Some(parent) = self.parent() else {
             return vec![self.id];
@@ -89,7 +91,17 @@ impl MatchElement for TreeElement<'_> {
         self.node().is_some_and(|n| n.attributes().has_class(class))
     }
 
-    #[doc = include_str!("tree_element.doc/attribute.md")]
+    #[doc = include_str!("../../docs/api/orchestration/tree_element.doc/enumerate_classes.md")]
+    fn enumerate_classes(&self, visit: &mut dyn FnMut(&str)) -> bool {
+        if let Some(node) = self.node() {
+            for class in node.attributes().classes() {
+                visit(class);
+            }
+        }
+        true
+    }
+
+    #[doc = include_str!("../../docs/api/orchestration/tree_element.doc/attribute.md")]
     fn attribute(&self, name: &str) -> Option<&str> {
         if name.eq_ignore_ascii_case("id") {
             self.id()
@@ -100,7 +112,7 @@ impl MatchElement for TreeElement<'_> {
         }
     }
 
-    #[doc = include_str!("tree_element.doc/pseudo_state.md")]
+    #[doc = include_str!("../../docs/api/orchestration/tree_element.doc/pseudo_state.md")]
     fn pseudo_state(&self) -> PseudoState {
         let interaction = self
             .pseudo
@@ -117,7 +129,9 @@ impl MatchElement for TreeElement<'_> {
         interaction.union(structural)
     }
 
-    #[doc = include_str!("tree_element.doc/parent.md")]
+    /// Returns the logical parent **only when it is an element node**. When the
+    /// parent is the synthetic root (or the node is detached), returns `None`,
+    /// so the node reads as top-level and `:root`/child combinators behave.
     fn parent(&self) -> Option<Self> {
         let parent_id = self.node()?.logical_parent().parent()?;
         let parent_node = self.tree.get(parent_id)?;
@@ -145,12 +159,14 @@ impl MatchElement for TreeElement<'_> {
         self.element_siblings().len().max(1)
     }
 
-    #[doc = include_str!("tree_element.doc/is_root.md")]
+    /// A node is the tree root (`:root`) when it has no element parent — its
+    /// logical parent is the synthetic root or it is detached.
     fn is_root(&self) -> bool {
         self.parent().is_none()
     }
 
-    #[doc = include_str!("tree_element.doc/has_children.md")]
+    /// Reports whether the node has any child node at all. Text children are
+    /// real nodes here, so an element containing only text is *not* `:empty`.
     fn has_children(&self) -> bool {
         self.node().is_some_and(|n| !n.child_nodes().is_empty())
     }

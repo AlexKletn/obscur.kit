@@ -1,36 +1,37 @@
-#![doc = include_str!("length_expr.doc/_module.md")]
+#![doc = include_str!("../../docs/api/property/length_expr.doc/_module.md")]
 
 use crate::property::{Length, LengthContext};
 
-#[doc = include_str!("length_expr.doc/LengthExpr.md")]
+#[doc = include_str!("../../docs/api/property/length_expr.doc/LengthExpr.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum LengthExpr {
-    #[doc = include_str!("length_expr.doc/Leaf.md")]
+    /// A single length term (`10px`, `50%`, `2em`, `5vw`, …).
     Leaf(Length),
-    #[doc = include_str!("length_expr.doc/Sum.md")]
+    /// The sum of two sub-expressions (`a + b`).
     Sum(Box<LengthExpr>, Box<LengthExpr>),
-    #[doc = include_str!("length_expr.doc/Diff.md")]
+    /// The difference of two sub-expressions (`a - b`).
     Diff(Box<LengthExpr>, Box<LengthExpr>),
-    #[doc = include_str!("length_expr.doc/Product.md")]
+    /// A sub-expression scaled by a plain number (`a * n`).
     Product(Box<LengthExpr>, f32),
-    #[doc = include_str!("length_expr.doc/Quotient.md")]
+    /// A sub-expression divided by a plain number (`a / n`).
     Quotient(Box<LengthExpr>, f32),
-    #[doc = include_str!("length_expr.doc/Min.md")]
+    /// `min(a, b, …)`: the smallest of its arguments.
     Min(Vec<LengthExpr>),
-    #[doc = include_str!("length_expr.doc/Max.md")]
+    /// `max(a, b, …)`: the largest of its arguments.
     Max(Vec<LengthExpr>),
-    #[doc = include_str!("length_expr.doc/Clamp.md")]
+    /// `clamp(min, val, max)`: `val` bounded to the `[min, max]` range,
+    /// evaluated as `max(min, min(val, max))`.
     Clamp(Box<LengthExpr>, Box<LengthExpr>, Box<LengthExpr>),
 }
 
 impl LengthExpr {
-    #[doc = include_str!("length_expr.doc/leaf.md")]
+    /// Wraps a single length term as a leaf expression.
     #[must_use]
     pub const fn leaf(length: Length) -> Self {
         Self::Leaf(length)
     }
 
-    #[doc = include_str!("length_expr.doc/uses_ch.md")]
+    #[doc = include_str!("../../docs/api/property/length_expr.doc/uses_ch.md")]
     #[must_use]
     pub fn uses_ch(&self) -> bool {
         match self {
@@ -42,7 +43,7 @@ impl LengthExpr {
         }
     }
 
-    #[doc = include_str!("length_expr.doc/uses_percent.md")]
+    #[doc = include_str!("../../docs/api/property/length_expr.doc/uses_percent.md")]
     #[must_use]
     pub fn uses_percent(&self) -> bool {
         match self {
@@ -54,7 +55,19 @@ impl LengthExpr {
         }
     }
 
-    #[doc = include_str!("length_expr.doc/absolutize.md")]
+    pub(crate) fn only_percentages(&self) -> bool {
+        match self {
+            Self::Leaf(length) => matches!(length, Length::Percent(_)),
+            Self::Product(inner, _) | Self::Quotient(inner, _) => inner.only_percentages(),
+            Self::Sum(a, b) | Self::Diff(a, b) => a.only_percentages() && b.only_percentages(),
+            Self::Min(terms) | Self::Max(terms) => terms.iter().all(Self::only_percentages),
+            Self::Clamp(a, b, c) => {
+                a.only_percentages() && b.only_percentages() && c.only_percentages()
+            }
+        }
+    }
+
+    #[doc = include_str!("../../docs/api/property/length_expr.doc/absolutize.md")]
     #[must_use]
     pub fn absolutize(&self, ctx: &LengthContext) -> Self {
         match self {
@@ -75,39 +88,96 @@ impl LengthExpr {
         }
     }
 
-    #[doc = include_str!("length_expr.doc/resolve.md")]
+    #[doc = include_str!("../../docs/api/property/length_expr.doc/resolve.md")]
     #[must_use]
     pub fn resolve(&self, ctx: &LengthContext) -> Option<f32> {
+        self.resolve_with(&|length| length.resolve_px(ctx))
+    }
+
+    /// Returns the pixel offset and fractional percentage coefficient of a linear length expression.
+    #[must_use]
+    pub fn affine_components(&self, ctx: &LengthContext) -> Option<(f32, f32)> {
+        let lower = |term: &Self| term.affine_components(ctx);
+        let (pixels, fraction) = match self {
+            Self::Leaf(Length::Percent(value)) => (0.0, value / 100.0),
+            Self::Leaf(length) => (length.resolve_px(ctx)?, 0.0),
+            Self::Sum(a, b) | Self::Diff(a, b) => {
+                let (a_px, a_fraction) = lower(a)?;
+                let (b_px, b_fraction) = lower(b)?;
+                let sign = if matches!(self, Self::Sum(..)) {
+                    1.0
+                } else {
+                    -1.0
+                };
+                (a_px + sign * b_px, a_fraction + sign * b_fraction)
+            }
+            Self::Product(term, scalar) | Self::Quotient(term, scalar) => {
+                let (px, fraction) = lower(term)?;
+                let factor = if matches!(self, Self::Product(..)) {
+                    *scalar
+                } else {
+                    scalar.recip()
+                };
+                (px * factor, fraction * factor)
+            }
+            expression if !expression.uses_percent() => (expression.resolve(ctx)?, 0.0),
+            _ => return None,
+        };
+        (pixels.is_finite() && fraction.is_finite()).then_some((pixels, fraction))
+    }
+
+    /// Resolves a computed expression with pixel and percentage leaves against an explicit basis.
+    #[must_use]
+    pub fn resolve_with_percentage_basis(&self, basis: f32) -> Option<f32> {
+        let value = self.resolve_with(&|length| match length {
+            Length::Px(px) => Some(px.0),
+            Length::Percent(percent) if basis.is_finite() => Some(obscur_geometry::saturating_f32(
+                f64::from(percent) * f64::from(basis) / 100.0,
+            )),
+            _ => None,
+        })?;
+        (!value.is_nan()).then(|| obscur_geometry::saturating_f32(f64::from(value)))
+    }
+
+    pub(crate) fn resolve_with(
+        &self,
+        resolve_leaf: &impl Fn(Length) -> Option<f32>,
+    ) -> Option<f32> {
         match self {
-            Self::Leaf(length) => length.resolve_px(ctx),
-            Self::Sum(a, b) => Some(a.resolve(ctx)? + b.resolve(ctx)?),
-            Self::Diff(a, b) => Some(a.resolve(ctx)? - b.resolve(ctx)?),
-            Self::Product(a, n) => Some(a.resolve(ctx)? * n),
+            Self::Leaf(length) => resolve_leaf(*length),
+            Self::Sum(a, b) => Some(a.resolve_with(resolve_leaf)? + b.resolve_with(resolve_leaf)?),
+            Self::Diff(a, b) => Some(a.resolve_with(resolve_leaf)? - b.resolve_with(resolve_leaf)?),
+            Self::Product(a, n) => Some(a.resolve_with(resolve_leaf)? * n),
             Self::Quotient(a, n) => {
                 if *n == 0.0 {
                     None
                 } else {
-                    Some(a.resolve(ctx)? / n)
+                    Some(a.resolve_with(resolve_leaf)? / n)
                 }
             }
-            Self::Min(args) => fold(args, ctx, f32::min),
-            Self::Max(args) => fold(args, ctx, f32::max),
+            Self::Min(args) => fold(args, resolve_leaf, f32::min),
+            Self::Max(args) => fold(args, resolve_leaf, f32::max),
             Self::Clamp(min, val, max) => {
-                let min = min.resolve(ctx)?;
-                let val = val.resolve(ctx)?;
-                let max = max.resolve(ctx)?;
+                let min = min.resolve_with(resolve_leaf)?;
+                let val = val.resolve_with(resolve_leaf)?;
+                let max = max.resolve_with(resolve_leaf)?;
                 Some(min.max(val.min(max)))
             }
         }
     }
 }
 
-#[doc = include_str!("length_expr.doc/fold.md")]
-fn fold(args: &[LengthExpr], ctx: &LengthContext, combine: fn(f32, f32) -> f32) -> Option<f32> {
+/// Resolves every argument and folds them with `combine`, returning [`None`] if
+/// the list is empty or any argument fails to resolve.
+fn fold(
+    args: &[LengthExpr],
+    resolve_leaf: &impl Fn(Length) -> Option<f32>,
+    combine: fn(f32, f32) -> f32,
+) -> Option<f32> {
     let mut iter = args.iter();
-    let mut acc = iter.next()?.resolve(ctx)?;
+    let mut acc = iter.next()?.resolve_with(resolve_leaf)?;
     for arg in iter {
-        acc = combine(acc, arg.resolve(ctx)?);
+        acc = combine(acc, arg.resolve_with(resolve_leaf)?);
     }
     Some(acc)
 }

@@ -1,69 +1,94 @@
-#![doc = include_str!("screen_data.doc/_module.md")]
+//! [`ScreenData`] — the named values a `.okui` screen's bindings read each frame.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::view::view::ViewValue;
 
-#[doc = include_str!("screen_data.doc/ScreenData.md")]
+use super::{ScreenRow, screen_binding::ScreenBinding};
+
+type Bindings = HashMap<Box<str>, ScreenBinding>;
+
+#[doc = include_str!("../../docs/api/screen/screen_data.doc/ScreenData.md")]
 #[derive(Clone, Default)]
 pub struct ScreenData {
-    values: Rc<RefCell<HashMap<Box<str>, ViewValue>>>,
+    // Cloned handles share the live table on the UI thread. A frame keeps its
+    // own immutable snapshot, so writes copy the table only while it is shared.
+    values: Rc<RefCell<Arc<Bindings>>>,
 }
 
 impl ScreenData {
-    #[doc = include_str!("screen_data.doc/new.md")]
+    /// An empty table.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    #[doc = include_str!("screen_data.doc/set.md")]
+    #[doc = include_str!("../../docs/api/screen/screen_data.doc/set.md")]
     pub fn set(&self, name: &str, value: impl Into<ViewValue>) {
-        self.values.borrow_mut().insert(name.into(), value.into());
+        let binding = ScreenBinding::Value(value.into());
+        Arc::make_mut(&mut self.values.borrow_mut()).insert(name.into(), binding);
     }
 
-    #[doc = include_str!("screen_data.doc/get.md")]
+    /// Binds a collection of records for runtime-loaded `For` and `VirtualFor`.
+    /// A write replaces any previous value under the same name. Each view holds a
+    /// snapshot of the records.
+    pub fn set_rows(&self, name: &str, rows: impl Into<Arc<[ScreenRow]>>) {
+        let binding = ScreenBinding::Rows(rows.into());
+        Arc::make_mut(&mut self.values.borrow_mut()).insert(name.into(), binding);
+    }
+
+    pub(super) fn snapshot(&self) -> Arc<Bindings> {
+        Arc::clone(&self.values.borrow())
+    }
+
+    /// The value bound to `name`, if any.
     #[must_use]
     pub fn get(&self, name: &str) -> Option<ViewValue> {
-        self.values.borrow().get(name).cloned()
+        self.values
+            .borrow()
+            .get(name)
+            .and_then(ScreenBinding::value)
     }
 
-    #[doc = include_str!("screen_data.doc/int.md")]
+    #[doc = include_str!("../../docs/api/screen/screen_data.doc/int.md")]
     #[must_use]
     pub fn int(&self, name: &str) -> i64 {
         match self.values.borrow().get(name) {
-            Some(ViewValue::Int(value)) => *value,
+            Some(ScreenBinding::Value(ViewValue::Int(value))) => *value,
             _ => 0,
         }
     }
 
-    #[doc = include_str!("screen_data.doc/is_bound.md")]
+    /// Whether `name` has a value bound.
     #[must_use]
     pub fn is_bound(&self, name: &str) -> bool {
         self.values.borrow().contains_key(name)
     }
 
-    #[doc = include_str!("screen_data.doc/remove.md")]
+    /// Unbinds `name`, returning whether it was bound. The screen falls back to
+    /// the binding's own path afterwards.
     #[must_use = "the return says whether the name was bound; drop it with `let _ =`"]
     pub fn remove(&self, name: &str) -> bool {
-        self.values.borrow_mut().remove(name).is_some()
+        let mut values = self.values.borrow_mut();
+        values.contains_key(name) && Arc::make_mut(&mut values).remove(name).is_some()
     }
 
-    #[doc = include_str!("screen_data.doc/len.md")]
+    /// How many names are bound.
     #[must_use]
     pub fn len(&self) -> usize {
         self.values.borrow().len()
     }
 
-    #[doc = include_str!("screen_data.doc/is_empty.md")]
+    /// Whether nothing is bound.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.values.borrow().is_empty()
     }
 
-    #[doc = include_str!("screen_data.doc/names.md")]
+    #[doc = include_str!("../../docs/api/screen/screen_data.doc/names.md")]
     #[must_use]
     pub fn names(&self) -> Vec<Box<str>> {
         let mut names: Vec<Box<str>> = self.values.borrow().keys().cloned().collect();
@@ -71,7 +96,7 @@ impl ScreenData {
         names
     }
 
-    #[doc = include_str!("screen_data.doc/render.md")]
+    #[doc = include_str!("../../docs/api/screen/screen_data.doc/render.md")]
     #[must_use]
     pub fn render(value: &ViewValue) -> Box<str> {
         match value {
@@ -85,7 +110,8 @@ impl ScreenData {
 }
 
 impl std::fmt::Debug for ScreenData {
-    #[doc = include_str!("screen_data.doc/fmt.md")]
+    /// Names the bound paths without their values, so a debug print of a screen
+    /// stays readable and never dumps application data.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let values = self.values.borrow();
         let mut names: Vec<&str> = values.keys().map(AsRef::as_ref).collect();
@@ -107,6 +133,22 @@ mod tests {
         handle.set("count", 3_i64);
         assert_eq!(data.get("count"), Some(ViewValue::Int(3)));
         assert_eq!(data.len(), 1);
+    }
+
+    #[test]
+    fn converting_a_value_can_read_an_existing_binding() {
+        struct CopyCount<'a>(&'a ScreenData);
+
+        impl From<CopyCount<'_>> for ViewValue {
+            fn from(source: CopyCount<'_>) -> Self {
+                Self::Int(source.0.int("count"))
+            }
+        }
+
+        let data = ScreenData::new();
+        data.set("count", 7_i64);
+        data.set("copied", CopyCount(&data));
+        assert_eq!(data.get("copied"), Some(ViewValue::Int(7)));
     }
 
     #[test]

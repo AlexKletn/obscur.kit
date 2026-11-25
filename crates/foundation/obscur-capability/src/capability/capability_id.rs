@@ -1,17 +1,18 @@
-#![doc = include_str!("capability_id.doc/_module.md")]
+//! Stable, name-like capability identifier.
 
-#[doc = include_str!("capability_id.doc/CapabilityId.md")]
+/// A stable identifier for a capability. Plugins query capabilities by id, not
+/// by platform name (spec §8.58).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CapabilityId(Box<str>);
 
 impl CapabilityId {
-    #[doc = include_str!("capability_id.doc/new.md")]
+    /// Creates a capability id from a stable name.
     #[must_use]
     pub fn new(name: impl Into<Box<str>>) -> Self {
         Self(name.into())
     }
 
-    #[doc = include_str!("capability_id.doc/as_str.md")]
+    /// Returns the capability name.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0

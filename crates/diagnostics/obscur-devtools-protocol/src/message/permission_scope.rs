@@ -1,21 +1,21 @@
-#![doc = include_str!("permission_scope.doc/_module.md")]
+//! Capability scopes and the granted scope set (spec §7.7).
 
-#[doc = include_str!("permission_scope.doc/PermissionScope.md")]
+#[doc = include_str!("../../docs/api/message/permission_scope.doc/PermissionScope.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PermissionScope {
-    #[doc = include_str!("permission_scope.doc/Read.md")]
+    /// Read live inspectable state (tree, styles, layout, …).
     Read,
-    #[doc = include_str!("permission_scope.doc/Subscribe.md")]
+    /// Subscribe to and unsubscribe from event streams.
     Subscribe,
-    #[doc = include_str!("permission_scope.doc/Control.md")]
+    /// Issue control actions (pause, step, inspect-mode).
     Control,
-    #[doc = include_str!("permission_scope.doc/Inject.md")]
+    /// Inject synthetic input/command events.
     Inject,
 }
 
 impl PermissionScope {
-    #[doc = include_str!("permission_scope.doc/bit.md")]
-    const fn bit(self) -> u8 {
+    /// The bit this scope occupies within a [`ScopeSet`](super::ScopeSet).
+    pub(super) const fn bit(self) -> u8 {
         match self {
             Self::Read => 1 << 0,
             Self::Subscribe => 1 << 1,
@@ -25,73 +25,9 @@ impl PermissionScope {
     }
 }
 
-#[doc = include_str!("permission_scope.doc/ScopeSet.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct ScopeSet(u8);
-
-impl ScopeSet {
-    #[doc = include_str!("permission_scope.doc/empty.md")]
-    #[must_use]
-    pub const fn empty() -> Self {
-        Self(0)
-    }
-
-    #[doc = include_str!("permission_scope.doc/single.md")]
-    #[must_use]
-    pub const fn single(scope: PermissionScope) -> Self {
-        Self(scope.bit())
-    }
-
-    #[doc = include_str!("permission_scope.doc/all_read.md")]
-    #[must_use]
-    pub const fn all_read() -> Self {
-        Self::single(PermissionScope::Read)
-    }
-
-    #[doc = include_str!("permission_scope.doc/observer.md")]
-    #[must_use]
-    pub const fn observer() -> Self {
-        Self(PermissionScope::Read.bit() | PermissionScope::Subscribe.bit())
-    }
-
-    #[doc = include_str!("permission_scope.doc/all.md")]
-    #[must_use]
-    pub const fn all() -> Self {
-        Self(
-            PermissionScope::Read.bit()
-                | PermissionScope::Subscribe.bit()
-                | PermissionScope::Control.bit()
-                | PermissionScope::Inject.bit(),
-        )
-    }
-
-    #[doc = include_str!("permission_scope.doc/contains.md")]
-    #[must_use]
-    pub const fn contains(self, scope: PermissionScope) -> bool {
-        self.0 & scope.bit() != 0
-    }
-
-    #[doc = include_str!("permission_scope.doc/with.md")]
-    #[must_use]
-    pub const fn with(self, scope: PermissionScope) -> Self {
-        Self(self.0 | scope.bit())
-    }
-
-    #[doc = include_str!("permission_scope.doc/without.md")]
-    #[must_use]
-    pub const fn without(self, scope: PermissionScope) -> Self {
-        Self(self.0 & !scope.bit())
-    }
-
-    #[doc = include_str!("permission_scope.doc/is_empty.md")]
-    #[must_use]
-    pub const fn is_empty(self) -> bool {
-        self.0 == 0
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use super::super::ScopeSet;
     use super::*;
 
     #[test]

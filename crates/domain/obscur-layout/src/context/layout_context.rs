@@ -1,23 +1,24 @@
-#![doc = include_str!("layout_context.doc/_module.md")]
+//! A layout context: an invalidation boundary anchored at a node.
 
 use crate::context::{LayoutContainment, LayoutContextId, LayoutDependency};
 use obscur_identity::NodeId;
 
-#[doc = include_str!("layout_context.doc/LayoutContext.md")]
+#[doc = include_str!("../../docs/api/context/layout_context.doc/LayoutContext.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LayoutContext {
-    #[doc = include_str!("layout_context.doc/id.md")]
+    /// Identifier of this context.
     id: LayoutContextId,
-    #[doc = include_str!("layout_context.doc/node.md")]
+    /// The node at which this boundary is anchored.
     node: NodeId,
-    #[doc = include_str!("layout_context.doc/containment.md")]
+    /// Whether layout/size effects are contained at this boundary.
     containment: LayoutContainment,
-    #[doc = include_str!("layout_context.doc/dependency.md")]
+    /// What this context's layout output depends on.
     dependency: LayoutDependency,
 }
 
 impl LayoutContext {
-    #[doc = include_str!("layout_context.doc/new.md")]
+    /// Creates a context anchored at `node` with empty containment and an empty
+    /// dependency record.
     #[must_use]
     pub fn new(id: LayoutContextId, node: NodeId) -> Self {
         Self {
@@ -28,47 +29,50 @@ impl LayoutContext {
         }
     }
 
-    #[doc = include_str!("layout_context.doc/id_2.md")]
+    /// The identifier of this context.
     #[must_use]
     pub const fn id(&self) -> LayoutContextId {
         self.id
     }
 
-    #[doc = include_str!("layout_context.doc/node_2.md")]
+    /// The node at which this boundary is anchored.
     #[must_use]
     pub const fn node(&self) -> NodeId {
         self.node
     }
 
-    #[doc = include_str!("layout_context.doc/containment_2.md")]
+    /// The containment declaration for this boundary.
     #[must_use]
     pub const fn containment(&self) -> LayoutContainment {
         self.containment
     }
 
-    #[doc = include_str!("layout_context.doc/dependency_2.md")]
+    /// The dependency record for this context.
     #[must_use]
     pub const fn dependency(&self) -> &LayoutDependency {
         &self.dependency
     }
 
-    #[doc = include_str!("layout_context.doc/dependency_mut.md")]
+    /// Mutable access to the dependency record, to register constraint/child
+    /// dependencies as the subtree is built.
     pub fn dependency_mut(&mut self) -> &mut LayoutDependency {
         &mut self.dependency
     }
 
-    #[doc = include_str!("layout_context.doc/set_containment.md")]
+    /// Replaces the containment declaration for this boundary.
     pub fn set_containment(&mut self, containment: LayoutContainment) {
         self.containment = containment;
     }
 
-    #[doc = include_str!("layout_context.doc/is_containment_boundary.md")]
+    /// Whether this context forms a containment boundary that stops upward
+    /// invalidation propagation (delegates to
+    /// [`LayoutContainment::is_boundary`]).
     #[must_use]
     pub const fn is_containment_boundary(&self) -> bool {
         self.containment.is_boundary()
     }
 
-    #[doc = include_str!("layout_context.doc/should_remeasure.md")]
+    #[doc = include_str!("../../docs/api/context/layout_context.doc/should_remeasure.md")]
     #[must_use]
     pub fn should_remeasure(
         &self,

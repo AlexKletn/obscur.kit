@@ -1,15 +1,15 @@
-#![doc = include_str!("topic.doc/_module.md")]
+//! Event-stream topic identifiers (spec §7.6).
 
-#[doc = include_str!("topic.doc/Topic.md")]
+#[doc = include_str!("../../docs/api/message/topic.doc/Topic.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Topic {
-    #[doc = include_str!("topic.doc/Diagnostics.md")]
+    /// Structured diagnostics (traces, warnings, errors).
     Diagnostics,
-    #[doc = include_str!("topic.doc/Lifecycle.md")]
+    /// Lifecycle transitions of the runtime and its components.
     Lifecycle,
-    #[doc = include_str!("topic.doc/Frames.md")]
+    /// Frame production and commit events.
     Frames,
-    #[doc = include_str!("topic.doc/Focus.md")]
+    /// Focus-change events.
     Focus,
 }
 

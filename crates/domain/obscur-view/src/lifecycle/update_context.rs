@@ -1,11 +1,11 @@
-#![doc = include_str!("update_context.doc/_module.md")]
+//! `UpdateContext`: the per-hook context handed to `on_update`.
 
 use core::ops::{Deref, DerefMut};
 
 use crate::component::ComponentContext;
 use crate::state::StateGeneration;
 
-#[doc = include_str!("update_context.doc/UpdateContext.md")]
+#[doc = include_str!("../../docs/api/lifecycle/update_context.doc/UpdateContext.md")]
 #[derive(Debug)]
 pub struct UpdateContext<'ctx, 'scope> {
     context: &'ctx mut ComponentContext<'scope>,
@@ -14,7 +14,8 @@ pub struct UpdateContext<'ctx, 'scope> {
 }
 
 impl<'ctx, 'scope> UpdateContext<'ctx, 'scope> {
-    #[doc = include_str!("update_context.doc/new.md")]
+    /// Wraps a borrowed [`ComponentContext`] together with the input generation
+    /// watermarks observed before (`previous`) and for this update (`next`).
     #[must_use]
     pub fn new(
         context: &'ctx mut ComponentContext<'scope>,
@@ -28,25 +29,25 @@ impl<'ctx, 'scope> UpdateContext<'ctx, 'scope> {
         }
     }
 
-    #[doc = include_str!("update_context.doc/context.md")]
+    /// Mutable access to the underlying [`ComponentContext`].
     #[must_use]
     pub fn context(&mut self) -> &mut ComponentContext<'scope> {
         self.context
     }
 
-    #[doc = include_str!("update_context.doc/previous_generation.md")]
+    /// The input generation the instance last observed before this update.
     #[must_use]
     pub const fn previous_generation(&self) -> StateGeneration {
         self.previous
     }
 
-    #[doc = include_str!("update_context.doc/next_generation.md")]
+    /// The input generation this update is being applied for.
     #[must_use]
     pub const fn next_generation(&self) -> StateGeneration {
         self.next
     }
 
-    #[doc = include_str!("update_context.doc/changed.md")]
+    #[doc = include_str!("../../docs/api/lifecycle/update_context.doc/changed.md")]
     #[must_use]
     pub fn changed(&self) -> bool {
         self.next.is_newer_than(self.previous)

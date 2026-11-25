@@ -1,19 +1,19 @@
-#![doc = include_str!("checkbox_component.doc/_module.md")]
+#![doc = include_str!("../../docs/api/checkbox/checkbox_component.doc/_module.md")]
 
 use obscur_view::component::{Component, ComponentContext};
 use obscur_view::view::View;
 
 use super::{Checkbox, CheckboxProps};
 
-#[doc = include_str!("checkbox_component.doc/CheckboxComponent.md")]
+#[doc = include_str!("../../docs/api/checkbox/checkbox_component.doc/CheckboxComponent.md")]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct CheckboxComponent;
 
 impl Component for CheckboxComponent {
-    #[doc = include_str!("checkbox_component.doc/Props.md")]
+    /// The authored surface: [`CheckboxProps`](super::CheckboxProps).
     type Props = CheckboxProps;
 
-    #[doc = include_str!("checkbox_component.doc/render.md")]
+    #[doc = include_str!("../../docs/api/checkbox/checkbox_component.doc/render.md")]
     fn render(&mut self, _ctx: &mut ComponentContext<'_>, props: &Self::Props) -> View {
         View::from_fragment(Checkbox::contents(props.checked, &props.label))
     }

@@ -385,3 +385,102 @@ fn virtualfor_realizes_a_count_independent_of_the_item_count() {
          rows (tens), not the item count; got {realized}"
     );
 }
+
+#[test]
+fn compiled_virtualfor_binds_items_and_retains_their_keys() {
+    fn rows(items: std::sync::Arc<[String]>) -> obscur_kit::view::view::View {
+        okui! {
+            <div class="scroller">
+                <VirtualFor each={items} as={row} key={row}>
+                    <span class="row">{row}</span>
+                    <Separator extent={4}><span class="divider"/></Separator>
+                </VirtualFor>
+            </div>
+        }
+    }
+
+    let mut rt = small_runtime();
+    let sheet = support::compile_css(
+        ".scroller { width: 200px; height: 120px; overflow: scroll }\
+         .row { display: block; height: 24px }",
+    );
+    let sheets = std::slice::from_ref(&sheet);
+    let mut items: Vec<_> = (0..10_000).map(|id| format!("item-{id}")).collect();
+    let _ = rt.render_now(&rows(items.clone().into()), sheets);
+    let second = by_key(&rt, "item-1").expect("the second item is keyed");
+    assert!(has_text(&rt, "item-1"));
+    assert!(!has_text(&rt, "item-9999"));
+    assert!(count_class(&rt, "row") < 100);
+
+    items.swap(0, 1);
+    let view = rows(items.into());
+    let _ = rt.render_now(&view, sheets);
+    assert_eq!(by_key(&rt, "item-1"), Some(second));
+
+    let scroller = root_children(&rt)[0];
+    let extent: f32 = children(&rt, scroller)
+        .iter()
+        .filter_map(|node| rt.layout_boxes().get(node))
+        .map(|layout| layout.size().height)
+        .sum();
+    assert!((extent - (10_000.0 * 24.0 + 9_999.0 * 4.0)).abs() < 1.0);
+
+    rt.scroll_by(scroller, 2_800.0);
+    let _ = rt.render_now(&view, sheets);
+    assert!(has_text(&rt, "item-100"));
+    assert!(!has_text(&rt, "item-1"));
+    assert!(count_class(&rt, "divider") > 0);
+}
+
+#[test]
+fn macro_places_authored_keys_on_desired_nodes() {
+    let identity = "bound";
+    let view = okui! { <div><span key="literal"/><span key={identity}/></div> };
+    let nodes = desired_children(&view, &[]);
+    assert_eq!(nodes[0].key(), Some(&"literal".into()));
+    assert_eq!(nodes[1].key(), Some(&"bound".into()));
+}
+
+#[test]
+fn compiled_for_exposes_the_zero_based_model_index_and_default_item() {
+    let items = ["alpha", "beta"];
+    let v = okui! {
+        <div>
+            <For each={items} key={index}>
+                <span>{index}":"{item}</span>
+            </For>
+        </div>
+    };
+    let mut rt = small_runtime();
+    commit(&mut rt, &v);
+    for expected in ["0", "1", "alpha", "beta"] {
+        assert!(has_text(&rt, expected), "{expected}");
+    }
+    let container = root_children(&rt)[0];
+    assert_eq!(children(&rt, container).len(), 2);
+}
+
+#[test]
+fn compiled_virtualfor_switches_between_loading_empty_and_rows() {
+    fn list(items: Vec<String>, loading: bool) -> obscur_kit::view::view::View {
+        okui! {
+            <div>
+                <VirtualFor each={items} as={row} key={row} loading={loading}>
+                    <span>{row}</span>
+                    <Loading>"Fetching rows"</Loading>
+                    <Empty>"No rows"</Empty>
+                </VirtualFor>
+            </div>
+        }
+    }
+    let mut rt = small_runtime();
+    commit(&mut rt, &list(vec!["First".into()], true));
+    assert!(has_text(&rt, "Fetching rows"));
+    assert!(!has_text(&rt, "First"));
+    commit(&mut rt, &list(vec![], false));
+    assert!(has_text(&rt, "No rows"));
+    assert!(!has_text(&rt, "Fetching rows"));
+    commit(&mut rt, &list(vec!["First".into()], false));
+    assert!(has_text(&rt, "First"));
+    assert!(!has_text(&rt, "No rows"));
+}

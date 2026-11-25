@@ -1,56 +1,78 @@
-#![doc = include_str!("event_name.doc/_module.md")]
+#![doc = include_str!("../../docs/api/view/event_name.doc/_module.md")]
 
 use obscur_identity::InternedSymbol;
 
-#[doc = include_str!("event_name.doc/EVENT_CLICK.md")]
+/// Reserved symbol naming the primary **click** event — a press-then-release on
+/// the same element (spec §2.3, §3.1). The deliverable event name: a
+/// [`ViewEventBinding::new(EVENT_CLICK, command)`](super::ViewEventBinding::new)
+/// on an element fires `command` when the runtime detects a click on it.
 pub const EVENT_CLICK: InternedSymbol = InternedSymbol::from_raw(0x0000_0101);
 
-#[doc = include_str!("event_name.doc/EVENT_INPUT.md")]
+/// Reserved symbol naming an **input** event — a value edit in progress (e.g. a
+/// text field changing as the user types). Reserved now for later wiring; the
+/// runtime does not yet fire it.
 pub const EVENT_INPUT: InternedSymbol = InternedSymbol::from_raw(0x0000_0102);
 
-#[doc = include_str!("event_name.doc/EVENT_CHANGE.md")]
+/// Reserved symbol naming a **change** event — a committed value change (e.g. a
+/// field losing focus after an edit, or a checkbox toggling). Reserved now for
+/// later wiring; the runtime does not yet fire it.
 pub const EVENT_CHANGE: InternedSymbol = InternedSymbol::from_raw(0x0000_0103);
 
-#[doc = include_str!("event_name.doc/EVENT_LONG_PRESS.md")]
+#[doc = include_str!("../../docs/api/view/event_name.doc/EVENT_LONG_PRESS.md")]
 pub const EVENT_LONG_PRESS: InternedSymbol = InternedSymbol::from_raw(0x0000_0104);
 
-#[doc = include_str!("event_name.doc/EVENT_KEY_DOWN.md")]
+#[doc = include_str!("../../docs/api/view/event_name.doc/EVENT_KEY_DOWN.md")]
 pub const EVENT_KEY_DOWN: InternedSymbol = InternedSymbol::from_raw(0x0000_0105);
 
-#[doc = include_str!("event_name.doc/EVENT_KEY_UP.md")]
+#[doc = include_str!("../../docs/api/view/event_name.doc/EVENT_KEY_UP.md")]
 pub const EVENT_KEY_UP: InternedSymbol = InternedSymbol::from_raw(0x0000_0106);
 
-#[doc = include_str!("event_name.doc/EVENT_POINTER_DOWN.md")]
+#[doc = include_str!("../../docs/api/view/event_name.doc/EVENT_POINTER_DOWN.md")]
 pub const EVENT_POINTER_DOWN: InternedSymbol = InternedSymbol::from_raw(0x0000_0107);
 
-#[doc = include_str!("event_name.doc/EVENT_POINTER_UP.md")]
+#[doc = include_str!("../../docs/api/view/event_name.doc/EVENT_POINTER_UP.md")]
 pub const EVENT_POINTER_UP: InternedSymbol = InternedSymbol::from_raw(0x0000_0108);
 
-#[doc = include_str!("event_name.doc/EVENT_POINTER_MOVE.md")]
+#[doc = include_str!("../../docs/api/view/event_name.doc/EVENT_POINTER_MOVE.md")]
 pub const EVENT_POINTER_MOVE: InternedSymbol = InternedSymbol::from_raw(0x0000_0109);
 
-#[doc = include_str!("event_name.doc/EVENT_POINTER_CANCEL.md")]
+#[doc = include_str!("../../docs/api/view/event_name.doc/EVENT_POINTER_CANCEL.md")]
 pub const EVENT_POINTER_CANCEL: InternedSymbol = InternedSymbol::from_raw(0x0000_010A);
 
-#[doc = include_str!("event_name.doc/EVENT_POINTER_ENTER.md")]
+#[doc = include_str!("../../docs/api/view/event_name.doc/EVENT_POINTER_ENTER.md")]
 pub const EVENT_POINTER_ENTER: InternedSymbol = InternedSymbol::from_raw(0x0000_010B);
 
-#[doc = include_str!("event_name.doc/EVENT_POINTER_LEAVE.md")]
+#[doc = include_str!("../../docs/api/view/event_name.doc/EVENT_POINTER_LEAVE.md")]
 pub const EVENT_POINTER_LEAVE: InternedSymbol = InternedSymbol::from_raw(0x0000_010C);
 
-#[doc = include_str!("event_name.doc/EVENT_WHEEL.md")]
+#[doc = include_str!("../../docs/api/view/event_name.doc/EVENT_WHEEL.md")]
 pub const EVENT_WHEEL: InternedSymbol = InternedSymbol::from_raw(0x0000_010D);
 
-#[doc = include_str!("event_name.doc/EVENT_FOCUS.md")]
+#[doc = include_str!("../../docs/api/view/event_name.doc/EVENT_FOCUS.md")]
 pub const EVENT_FOCUS: InternedSymbol = InternedSymbol::from_raw(0x0000_010E);
 
-#[doc = include_str!("event_name.doc/EVENT_BLUR.md")]
+#[doc = include_str!("../../docs/api/view/event_name.doc/EVENT_BLUR.md")]
 pub const EVENT_BLUR: InternedSymbol = InternedSymbol::from_raw(0x0000_010F);
 
-#[doc = include_str!("event_name.doc/EVENT_CONTEXT_MENU.md")]
+#[doc = include_str!("../../docs/api/view/event_name.doc/EVENT_CONTEXT_MENU.md")]
 pub const EVENT_CONTEXT_MENU: InternedSymbol = InternedSymbol::from_raw(0x0000_0110);
 
-#[doc = include_str!("event_name.doc/RESERVED_EVENTS.md")]
+/// Native touchpad input event name (`touchpadgesture`).
+pub const EVENT_TOUCHPAD_GESTURE: InternedSymbol = InternedSymbol::from_raw(0x0000_0111);
+
+/// The application touch gesture candidate stream (`touchgesture`).
+pub const EVENT_TOUCH_GESTURE: InternedSymbol = InternedSymbol::from_raw(0x0000_0112);
+
+/// Predictive Back from the host of the current window (`systemback`).
+pub const EVENT_SYSTEM_BACK: InternedSymbol = InternedSymbol::from_raw(0x0000_0113);
+
+/// Application candidate for a phased pixel-scroll sequence (`scrollgesture`).
+pub const EVENT_SCROLL_GESTURE: InternedSymbol = InternedSymbol::from_raw(0x0000_0114);
+
+/// A host gamepad input report (`gamepad`).
+pub const EVENT_GAMEPAD: InternedSymbol = InternedSymbol::from_raw(0x0000_0115);
+
+#[doc = include_str!("../../docs/api/view/event_name.doc/RESERVED_EVENTS.md")]
 pub const RESERVED_EVENTS: &[InternedSymbol] = &[
     EVENT_CLICK,
     EVENT_INPUT,
@@ -67,6 +89,11 @@ pub const RESERVED_EVENTS: &[InternedSymbol] = &[
     EVENT_WHEEL,
     EVENT_FOCUS,
     EVENT_BLUR,
+    EVENT_TOUCHPAD_GESTURE,
+    EVENT_TOUCH_GESTURE,
+    EVENT_SYSTEM_BACK,
+    EVENT_SCROLL_GESTURE,
+    EVENT_GAMEPAD,
     EVENT_CONTEXT_MENU,
 ];
 

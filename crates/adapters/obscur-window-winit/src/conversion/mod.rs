@@ -1,7 +1,12 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Pure winit→domain event converters (spec §6.1 windowing; §2.7 "преобразует
+//! native events в доменные события"). Each converter is a stateless,
+//! deterministic function of its winit input — no event-loop state — so the
+//! §5.2/§6.1 determinism boundary holds.
 
 mod display_converter;
-pub use display_converter::{DisplayConverter, MonitorSnapshot};
+pub use display_converter::DisplayConverter;
+mod monitor_snapshot;
+pub use monitor_snapshot::MonitorSnapshot;
 mod keyboard_converter;
 pub use keyboard_converter::KeyboardConverter;
 mod pointer_converter;

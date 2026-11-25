@@ -1,8 +1,9 @@
-#![doc = include_str!("drag_preview.doc/_module.md")]
+//! The visual drag-image placement descriptor (spec §6.21 drag and drop —
+//! previews).
 
 use obscur_geometry::{Point, Size};
 
-#[doc = include_str!("drag_preview.doc/DragPreview.md")]
+#[doc = include_str!("../../docs/api/drag/drag_preview.doc/DragPreview.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DragPreview {
     size: Size,
@@ -11,7 +12,8 @@ pub struct DragPreview {
 }
 
 impl DragPreview {
-    #[doc = include_str!("drag_preview.doc/new.md")]
+    /// Creates a preview of `size` with the hotspot at its origin and full
+    /// opacity (spec §6.21).
     #[must_use]
     pub const fn new(size: Size) -> Self {
         Self {
@@ -21,33 +23,34 @@ impl DragPreview {
         }
     }
 
-    #[doc = include_str!("drag_preview.doc/with_cursor_offset.md")]
+    /// Returns this preview with the pointer hotspot set to `cursor_offset`
+    /// (spec §6.21).
     #[must_use]
     pub const fn with_cursor_offset(mut self, cursor_offset: Point) -> Self {
         self.cursor_offset = cursor_offset;
         self
     }
 
-    #[doc = include_str!("drag_preview.doc/with_opacity.md")]
+    /// Returns this preview with `opacity` clamped to `[0.0, 1.0]` (spec §6.21).
     #[must_use]
     pub fn with_opacity(mut self, opacity: f32) -> Self {
         self.opacity = opacity.clamp(0.0, 1.0);
         self
     }
 
-    #[doc = include_str!("drag_preview.doc/size.md")]
+    /// Returns the preview's logical-pixel size (spec §6.21).
     #[must_use]
     pub const fn size(&self) -> Size {
         self.size
     }
 
-    #[doc = include_str!("drag_preview.doc/cursor_offset.md")]
+    /// Returns the pointer hotspot within the preview (spec §6.21).
     #[must_use]
     pub const fn cursor_offset(&self) -> Point {
         self.cursor_offset
     }
 
-    #[doc = include_str!("drag_preview.doc/opacity.md")]
+    /// Returns the preview's opacity, in `[0.0, 1.0]` (spec §6.21).
     #[must_use]
     pub const fn opacity(&self) -> f32 {
         self.opacity

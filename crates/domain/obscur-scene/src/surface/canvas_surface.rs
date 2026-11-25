@@ -1,18 +1,18 @@
-#![doc = include_str!("canvas_surface.doc/_module.md")]
+//! `CanvasSurface`: descriptor for a built-in Canvas rendering surface (§5.3).
 
 use obscur_geometry::Size;
 
-#[doc = include_str!("canvas_surface.doc/CanvasSurface.md")]
+#[doc = include_str!("../../docs/api/surface/canvas_surface.doc/CanvasSurface.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CanvasSurface {
-    #[doc = include_str!("canvas_surface.doc/size.md")]
+    /// The logical size of the Canvas surface in logical pixels.
     size: Size,
-    #[doc = include_str!("canvas_surface.doc/content_version.md")]
+    /// A monotonic content version, incremented each time the Canvas redraws.
     content_version: u64,
 }
 
 impl CanvasSurface {
-    #[doc = include_str!("canvas_surface.doc/new.md")]
+    /// Creates a Canvas surface of the given logical size with content version `0`.
     #[must_use]
     pub const fn new(size: Size) -> Self {
         Self {
@@ -21,25 +21,25 @@ impl CanvasSurface {
         }
     }
 
-    #[doc = include_str!("canvas_surface.doc/with_content_version.md")]
+    /// Returns a copy of this descriptor with the given content version.
     #[must_use]
     pub const fn with_content_version(mut self, content_version: u64) -> Self {
         self.content_version = content_version;
         self
     }
 
-    #[doc = include_str!("canvas_surface.doc/bump_version.md")]
+    #[doc = include_str!("../../docs/api/surface/canvas_surface.doc/bump_version.md")]
     pub fn bump_version(&mut self) {
         self.content_version = self.content_version.saturating_add(1);
     }
 
-    #[doc = include_str!("canvas_surface.doc/size_2.md")]
+    /// Returns the logical size of the Canvas surface.
     #[must_use]
     pub const fn size(self) -> Size {
         self.size
     }
 
-    #[doc = include_str!("canvas_surface.doc/content_version_2.md")]
+    /// Returns the current content version.
     #[must_use]
     pub const fn content_version(self) -> u64 {
         self.content_version

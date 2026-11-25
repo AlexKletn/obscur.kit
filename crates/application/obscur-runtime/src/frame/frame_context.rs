@@ -1,11 +1,11 @@
-#![doc = include_str!("frame_context.doc/_module.md")]
+//! The immutable inputs for one frame: [`FrameContext`].
 
 use obscur_geometry::Size;
 use obscur_style::property::EnvironmentValues;
 
 use super::{FrameId, FrameReason};
 
-#[doc = include_str!("frame_context.doc/FrameContext.md")]
+#[doc = include_str!("../../docs/api/frame/frame_context.doc/FrameContext.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FrameContext {
     id: FrameId,
@@ -15,7 +15,8 @@ pub struct FrameContext {
 }
 
 impl FrameContext {
-    #[doc = include_str!("frame_context.doc/new.md")]
+    /// Creates a context for the frame `id`, produced for `reason`, laid out
+    /// under `viewport`.
     #[must_use]
     pub const fn new(id: FrameId, reason: FrameReason, viewport: Size) -> Self {
         Self {
@@ -26,32 +27,32 @@ impl FrameContext {
         }
     }
 
-    #[doc = include_str!("frame_context.doc/with_environment.md")]
+    #[doc = include_str!("../../docs/api/frame/frame_context.doc/with_environment.md")]
     #[must_use]
     pub const fn with_environment(mut self, environment: EnvironmentValues) -> Self {
         self.environment = environment;
         self
     }
 
-    #[doc = include_str!("frame_context.doc/environment.md")]
+    /// The host-reported environment values in force for this frame (spec §6.15).
     #[must_use]
     pub const fn environment(self) -> EnvironmentValues {
         self.environment
     }
 
-    #[doc = include_str!("frame_context.doc/id.md")]
+    /// Returns the identity of this frame.
     #[must_use]
     pub const fn id(self) -> FrameId {
         self.id
     }
 
-    #[doc = include_str!("frame_context.doc/reason.md")]
+    /// Returns the reason this frame is being produced.
     #[must_use]
     pub const fn reason(self) -> FrameReason {
         self.reason
     }
 
-    #[doc = include_str!("frame_context.doc/viewport.md")]
+    #[doc = include_str!("../../docs/api/frame/frame_context.doc/viewport.md")]
     #[must_use]
     pub const fn viewport(self) -> Size {
         self.viewport

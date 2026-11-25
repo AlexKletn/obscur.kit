@@ -1,57 +1,49 @@
-#![doc = include_str!("scene_vector.doc/_module.md")]
+//! `SceneVector`: a parsed vector document that stays vector through the scene.
 
 use obscur_geometry::Size;
 
 use crate::color::Color;
-use crate::paint::{Paint, Stroke, VectorPaint};
+use crate::paint::{Paint, Stroke, VectorPaint, VectorShape};
 use crate::path::Path;
 
-#[doc = include_str!("scene_vector.doc/VectorShape.md")]
-#[derive(Debug, Clone, PartialEq)]
-pub struct VectorShape {
-    #[doc = include_str!("scene_vector.doc/path.md")]
-    pub path: Path,
-    #[doc = include_str!("scene_vector.doc/fill.md")]
-    pub fill: Option<VectorPaint>,
-    #[doc = include_str!("scene_vector.doc/stroke.md")]
-    pub stroke: Option<(VectorPaint, f32)>,
-}
-
-#[doc = include_str!("scene_vector.doc/SceneVector.md")]
+#[doc = include_str!("../../docs/api/paint/scene_vector.doc/SceneVector.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct SceneVector {
-    #[doc = include_str!("scene_vector.doc/size.md")]
+    /// The document's intrinsic size, from its `width`/`height`/`viewBox` —
+    /// the box `object-fit` scales from (spec §5.16).
     size: Size,
-    #[doc = include_str!("scene_vector.doc/shapes.md")]
+    /// The shapes, in paint order.
     shapes: Vec<VectorShape>,
 }
 
 impl SceneVector {
-    #[doc = include_str!("scene_vector.doc/new.md")]
+    /// Creates a vector document of intrinsic `size` holding `shapes` in paint
+    /// order.
     #[must_use]
     pub fn new(size: Size, shapes: Vec<VectorShape>) -> Self {
         Self { size, shapes }
     }
 
-    #[doc = include_str!("scene_vector.doc/size_2.md")]
+    /// The document's intrinsic size.
     #[must_use]
     pub const fn size(&self) -> Size {
         self.size
     }
 
-    #[doc = include_str!("scene_vector.doc/shapes_2.md")]
+    /// The shapes, in paint order.
     #[must_use]
     pub fn shapes(&self) -> &[VectorShape] {
         &self.shapes
     }
 
-    #[doc = include_str!("scene_vector.doc/is_empty.md")]
+    /// Whether the document draws nothing.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.shapes.is_empty()
     }
 
-    #[doc = include_str!("scene_vector.doc/uses_current_color.md")]
+    /// Whether any shape defers to the computed `color`, i.e. this document's
+    /// appearance follows the theme.
     #[must_use]
     pub fn uses_current_color(&self) -> bool {
         self.shapes.iter().any(|shape| {
@@ -62,7 +54,7 @@ impl SceneVector {
         })
     }
 
-    #[doc = include_str!("scene_vector.doc/resolved.md")]
+    #[doc = include_str!("../../docs/api/paint/scene_vector.doc/resolved.md")]
     #[must_use]
     pub fn resolved(&self, current: Color) -> Vec<(Path, Paint)> {
         let mut out = Vec::with_capacity(self.shapes.len());

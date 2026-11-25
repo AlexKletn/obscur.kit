@@ -1,85 +1,32 @@
-#![doc = include_str!("logical_key.doc/_module.md")]
+//! The [`LogicalKey`] layout-dependent produced key and its [`NamedKey`]
+//! members (spec §6.7).
 
-#[doc = include_str!("logical_key.doc/NamedKey.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum NamedKey {
-    #[doc = include_str!("logical_key.doc/Enter.md")]
-    Enter,
-    #[doc = include_str!("logical_key.doc/Escape.md")]
-    Escape,
-    #[doc = include_str!("logical_key.doc/Tab.md")]
-    Tab,
-    #[doc = include_str!("logical_key.doc/Space.md")]
-    Space,
-    #[doc = include_str!("logical_key.doc/Backspace.md")]
-    Backspace,
-    #[doc = include_str!("logical_key.doc/Delete.md")]
-    Delete,
-    #[doc = include_str!("logical_key.doc/ArrowUp.md")]
-    ArrowUp,
-    #[doc = include_str!("logical_key.doc/ArrowDown.md")]
-    ArrowDown,
-    #[doc = include_str!("logical_key.doc/ArrowLeft.md")]
-    ArrowLeft,
-    #[doc = include_str!("logical_key.doc/ArrowRight.md")]
-    ArrowRight,
-    #[doc = include_str!("logical_key.doc/Home.md")]
-    Home,
-    #[doc = include_str!("logical_key.doc/End.md")]
-    End,
-    #[doc = include_str!("logical_key.doc/PageUp.md")]
-    PageUp,
-    #[doc = include_str!("logical_key.doc/PageDown.md")]
-    PageDown,
-    #[doc = include_str!("logical_key.doc/F1.md")]
-    F1,
-    #[doc = include_str!("logical_key.doc/F2.md")]
-    F2,
-    #[doc = include_str!("logical_key.doc/F3.md")]
-    F3,
-    #[doc = include_str!("logical_key.doc/F4.md")]
-    F4,
-    #[doc = include_str!("logical_key.doc/F5.md")]
-    F5,
-    #[doc = include_str!("logical_key.doc/F6.md")]
-    F6,
-    #[doc = include_str!("logical_key.doc/F7.md")]
-    F7,
-    #[doc = include_str!("logical_key.doc/F8.md")]
-    F8,
-    #[doc = include_str!("logical_key.doc/F9.md")]
-    F9,
-    #[doc = include_str!("logical_key.doc/F10.md")]
-    F10,
-    #[doc = include_str!("logical_key.doc/F11.md")]
-    F11,
-    #[doc = include_str!("logical_key.doc/F12.md")]
-    F12,
-}
+use super::NamedKey;
 
-#[doc = include_str!("logical_key.doc/LogicalKey.md")]
+#[doc = include_str!("../../docs/api/command/logical_key.doc/LogicalKey.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LogicalKey {
-    #[doc = include_str!("logical_key.doc/Character.md")]
+    /// A character produced by the active layout (e.g. `'a'`, `'/'`, `'?'`).
     Character(char),
-    #[doc = include_str!("logical_key.doc/Named.md")]
+    /// A non-character key identified by name.
     Named(NamedKey),
 }
 
 impl LogicalKey {
-    #[doc = include_str!("logical_key.doc/character.md")]
+    /// Creates a logical key for a produced `character`.
     #[must_use]
     pub const fn character(character: char) -> Self {
         Self::Character(character)
     }
 
-    #[doc = include_str!("logical_key.doc/named.md")]
+    /// Creates a logical key for a `named` non-character key.
     #[must_use]
     pub const fn named(named: NamedKey) -> Self {
         Self::Named(named)
     }
 
-    #[doc = include_str!("logical_key.doc/as_character.md")]
+    /// Returns the produced character for a [`LogicalKey::Character`], else
+    /// `None`.
     #[must_use]
     pub const fn as_character(&self) -> Option<char> {
         match self {
@@ -88,13 +35,13 @@ impl LogicalKey {
         }
     }
 
-    #[doc = include_str!("logical_key.doc/is_named.md")]
+    /// Returns whether this is a [`LogicalKey::Named`] key.
     #[must_use]
     pub const fn is_named(&self) -> bool {
         matches!(self, Self::Named(_))
     }
 
-    #[doc = include_str!("logical_key.doc/named_key.md")]
+    /// Returns the [`NamedKey`] for a [`LogicalKey::Named`], else `None`.
     #[must_use]
     pub const fn named_key(&self) -> Option<NamedKey> {
         match self {

@@ -1,4 +1,4 @@
-#![doc = include_str!("ui_ir_document.doc/_module.md")]
+//! `UiIrDocument`: the complete compiled UI document (spec §2.5).
 
 use obscur_capability::CapabilityId;
 
@@ -6,7 +6,7 @@ use crate::document::UiIrNode;
 use crate::source::SourceMap;
 use crate::version::UiIrVersion;
 
-#[doc = include_str!("ui_ir_document.doc/UiIrDocument.md")]
+#[doc = include_str!("../../docs/api/document/ui_ir_document.doc/UiIrDocument.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct UiIrDocument {
     version: UiIrVersion,
@@ -16,7 +16,8 @@ pub struct UiIrDocument {
 }
 
 impl UiIrDocument {
-    #[doc = include_str!("ui_ir_document.doc/new.md")]
+    /// Creates a document over `root` at the current IR version, with an empty
+    /// source map and no capability requirements.
     #[must_use]
     pub fn new(root: UiIrNode) -> Self {
         Self {
@@ -27,70 +28,71 @@ impl UiIrDocument {
         }
     }
 
-    #[doc = include_str!("ui_ir_document.doc/with_version.md")]
+    /// Sets the IR format version, returning the updated document.
     #[must_use]
     pub const fn with_version(mut self, version: UiIrVersion) -> Self {
         self.version = version;
         self
     }
 
-    #[doc = include_str!("ui_ir_document.doc/with_source_map.md")]
+    /// Sets the source map, returning the updated document.
     #[must_use]
     pub fn with_source_map(mut self, source_map: SourceMap) -> Self {
         self.source_map = source_map;
         self
     }
 
-    #[doc = include_str!("ui_ir_document.doc/requiring.md")]
+    /// Adds `capability` to the document's requirements, returning the updated
+    /// document.
     #[must_use]
     pub fn requiring(mut self, capability: CapabilityId) -> Self {
         self.required_capabilities.push(capability);
         self
     }
 
-    #[doc = include_str!("ui_ir_document.doc/version.md")]
+    /// Returns the IR format version the document was written against.
     #[must_use]
     pub const fn version(&self) -> UiIrVersion {
         self.version
     }
 
-    #[doc = include_str!("ui_ir_document.doc/root.md")]
+    /// Returns the root IR node.
     #[must_use]
     pub const fn root(&self) -> &UiIrNode {
         &self.root
     }
 
-    #[doc = include_str!("ui_ir_document.doc/root_mut.md")]
+    /// Returns a mutable reference to the root IR node.
     #[must_use]
     pub fn root_mut(&mut self) -> &mut UiIrNode {
         &mut self.root
     }
 
-    #[doc = include_str!("ui_ir_document.doc/source_map.md")]
+    /// Returns the source map linking node ids back to source spans.
     #[must_use]
     pub const fn source_map(&self) -> &SourceMap {
         &self.source_map
     }
 
-    #[doc = include_str!("ui_ir_document.doc/required_capabilities.md")]
+    /// Returns the capabilities this document requires from the host.
     #[must_use]
     pub fn required_capabilities(&self) -> &[CapabilityId] {
         &self.required_capabilities
     }
 
-    #[doc = include_str!("ui_ir_document.doc/node_count.md")]
+    /// Returns the total number of nodes in the document tree.
     #[must_use]
     pub fn node_count(&self) -> usize {
         self.root.node_count()
     }
 
-    #[doc = include_str!("ui_ir_document.doc/find.md")]
+    /// Finds the node with stable `id` anywhere in the document tree.
     #[must_use]
     pub fn find(&self, id: u64) -> Option<&UiIrNode> {
         self.root.find(id)
     }
 
-    #[doc = include_str!("ui_ir_document.doc/requires.md")]
+    /// Returns whether the document requires `cap`.
     #[must_use]
     pub fn requires(&self, cap: &CapabilityId) -> bool {
         self.required_capabilities.contains(cap)

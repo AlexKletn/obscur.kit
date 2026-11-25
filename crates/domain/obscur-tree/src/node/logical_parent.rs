@@ -1,31 +1,31 @@
-#![doc = include_str!("logical_parent.doc/_module.md")]
+//! The logical parent of a retained node.
 
 use obscur_identity::NodeId;
 
-#[doc = include_str!("logical_parent.doc/LogicalParent.md")]
+#[doc = include_str!("../../docs/api/node/logical_parent.doc/LogicalParent.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LogicalParent(Option<NodeId>);
 
 impl LogicalParent {
-    #[doc = include_str!("logical_parent.doc/root.md")]
+    /// A logical parent denoting the tree root (no parent).
     #[must_use]
     pub const fn root() -> Self {
         Self(None)
     }
 
-    #[doc = include_str!("logical_parent.doc/of.md")]
+    /// A logical parent pointing at `parent`.
     #[must_use]
     pub const fn of(parent: NodeId) -> Self {
         Self(Some(parent))
     }
 
-    #[doc = include_str!("logical_parent.doc/parent.md")]
+    /// Returns the parent `NodeId`, or `None` at the root.
     #[must_use]
     pub const fn parent(self) -> Option<NodeId> {
         self.0
     }
 
-    #[doc = include_str!("logical_parent.doc/is_root.md")]
+    /// Returns `true` if this node has no logical parent (it is a root).
     #[must_use]
     pub const fn is_root(self) -> bool {
         self.0.is_none()

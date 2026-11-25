@@ -9,14 +9,12 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use obscur_kit::diagnostics::{Diagnostic, DiagnosticSink, DiagnosticSubsystem, RecoveryAction};
-use obscur_kit::render::{EffectFallbackReporter, RendererId, unsupported_effects};
+use obscur_kit::render::{EffectFallbackReporter, RendererId, SceneEffect, unsupported_effects};
 use obscur_kit::render_cpu::renderer::CpuRenderer;
-use obscur_kit::scene::clip::Clip;
-use obscur_kit::scene::command::PaintCommand;
+use obscur_kit::scene::clip::{Clip, Mask};
+use obscur_kit::scene::command::{DisplayList, PaintCommand};
 use obscur_kit::scene::paint::{BlendMode, Brush, Paint};
-use support::{
-    Raster, commands, describe, drive, el, leaves, rasterize, rgb8_of, runtime, txt, view,
-};
+use support::{Raster, commands, describe, drive, el, leaves, rasterize, rgb8_of, txt, view};
 
 #[doc = include_str!("spec_ch5_paint_order.doc/VW.md")]
 const VW: f32 = 200.0;
@@ -312,31 +310,13 @@ fn sc_10_an_unsupported_effect_emits_exactly_one_diagnostic() {
         seen: Rc::clone(&seen),
     };
 
-    let mut rt = runtime(VW, VW);
-    let sheet = support::compile(
-        ".a{position:absolute;left:0;top:0;width:100px;height:100px;\
-            background-color:rgba(0,0,255,0.5);backdrop-filter:blur(8px)}",
-    );
-    let v = view(vec![el(10, "a", vec![])]);
-    let _ = rt.render_now(&v, std::slice::from_ref(&sheet));
-
-    // The CPU backend has no backdrop pass, so the effect cannot be honoured.
-    let px = rasterize(&rt, VW, VW);
-    let (_, _, b, a) = px.at(50, 50);
-    assert!(
-        a > 0 && b > 0,
-        "the node is still painted without the blur, got a={a} b={b}"
-    );
-
-    // Ask the backend that will draw this scene what it cannot honour, and
-    // report it — the surface §5.2's sentence names.
+    let list = DisplayList::from_commands(vec![
+        PaintCommand::PushClip(Clip::mask(Mask::alpha())),
+        PaintCommand::PopClip,
+    ]);
     let renderer = CpuRenderer::new(RendererId::from_raw(11));
-    let snapshot = rt.snapshot();
-    let unsupported = unsupported_effects(&renderer, snapshot.display_list());
-    assert!(
-        !unsupported.is_empty(),
-        "the CPU backend declares the backdrop filter unsupported"
-    );
+    let unsupported = unsupported_effects(&renderer, &list);
+    assert_eq!(unsupported, [SceneEffect::Mask]);
 
     let mut reporter = EffectFallbackReporter::new();
     reporter.report(&unsupported, &recorder);
@@ -363,7 +343,7 @@ fn sc_10_an_unsupported_effect_emits_exactly_one_diagnostic() {
     assert_ne!(
         d.recovery,
         RecoveryAction::None,
-        "the diagnostic states the recovery action taken (rendered without blur)"
+        "the diagnostic states the recovery action taken"
     );
     assert!(
         !d.code.as_str().is_empty(),

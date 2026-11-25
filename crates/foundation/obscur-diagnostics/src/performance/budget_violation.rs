@@ -1,25 +1,26 @@
-#![doc = include_str!("budget_violation.doc/_module.md")]
+//! The typed diagnostic produced when a measurement exceeds a budget.
 
 use std::time::Duration;
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity, DiagnosticSubsystem};
 
-#[doc = include_str!("budget_violation.doc/BUDGET_VIOLATION_CODE.md")]
+/// The stable diagnostic code carried by a budget violation.
 const BUDGET_VIOLATION_CODE: DiagnosticCode = DiagnosticCode::new("perf.budget_exceeded");
 
-#[doc = include_str!("budget_violation.doc/BudgetViolation.md")]
+#[doc = include_str!("../../docs/api/performance/budget_violation.doc/BudgetViolation.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BudgetViolation {
-    #[doc = include_str!("budget_violation.doc/subsystem.md")]
+    /// Subsystem whose budget was exceeded.
     subsystem: DiagnosticSubsystem,
-    #[doc = include_str!("budget_violation.doc/budget.md")]
+    /// The budgeted limit.
     budget: Duration,
-    #[doc = include_str!("budget_violation.doc/measured.md")]
+    /// The measured duration that exceeded the limit.
     measured: Duration,
 }
 
 impl BudgetViolation {
-    #[doc = include_str!("budget_violation.doc/new.md")]
+    /// Creates a budget violation for `subsystem`, given the `budget` limit and
+    /// the `measured` duration that exceeded it.
     #[must_use]
     pub fn new(subsystem: DiagnosticSubsystem, budget: Duration, measured: Duration) -> Self {
         Self {
@@ -29,31 +30,32 @@ impl BudgetViolation {
         }
     }
 
-    #[doc = include_str!("budget_violation.doc/subsystem_2.md")]
+    /// Returns the subsystem whose budget was exceeded.
     #[must_use]
     pub fn subsystem(&self) -> DiagnosticSubsystem {
         self.subsystem
     }
 
-    #[doc = include_str!("budget_violation.doc/budget_2.md")]
+    /// Returns the budgeted limit.
     #[must_use]
     pub fn budget(&self) -> Duration {
         self.budget
     }
 
-    #[doc = include_str!("budget_violation.doc/measured_2.md")]
+    /// Returns the measured duration that exceeded the budget.
     #[must_use]
     pub fn measured(&self) -> Duration {
         self.measured
     }
 
-    #[doc = include_str!("budget_violation.doc/overage.md")]
+    /// Returns how far over budget the measurement ran (saturating at zero if
+    /// the measurement did not actually exceed the budget).
     #[must_use]
     pub fn overage(&self) -> Duration {
         self.measured.saturating_sub(self.budget)
     }
 
-    #[doc = include_str!("budget_violation.doc/ratio.md")]
+    #[doc = include_str!("../../docs/api/performance/budget_violation.doc/ratio.md")]
     #[must_use]
     pub fn ratio(&self) -> f64 {
         let budget = self.budget.as_secs_f64();
@@ -68,7 +70,8 @@ impl BudgetViolation {
         }
     }
 
-    #[doc = include_str!("budget_violation.doc/to_diagnostic.md")]
+    /// Converts this violation into a warning-level [`Diagnostic`] so it flows
+    /// through the normal diagnostics channel (spec §7.9).
     #[must_use]
     pub fn to_diagnostic(&self) -> Diagnostic {
         let message = format!(

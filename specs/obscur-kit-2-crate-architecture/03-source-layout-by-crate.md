@@ -713,6 +713,7 @@ src/
 ├── handle/
 │   ├── mod.rs
 │   ├── resource_handle.rs
+│   ├── resource_kind.rs
 │   ├── image_handle.rs
 │   ├── font_handle.rs
 │   ├── stylesheet_handle.rs
@@ -741,14 +742,24 @@ src/
 │   ├── cache_key.rs
 │   ├── cache_budget.rs
 │   ├── cache_entry.rs
+│   ├── visibility_priority.rs
 │   ├── eviction_policy.rs
 │   └── cache_statistics.rs
 └── port/
     ├── mod.rs
     ├── resource_loader.rs
+    ├── loaded_bytes.rs
+    ├── inline_loader.rs
     ├── resource_decoder.rs
+    ├── decoded_resource.rs
+    ├── null_decoder.rs
     ├── resource_compiler.rs
-    └── cache_store.rs
+    ├── compiled_resource.rs
+    ├── null_compiler.rs
+    ├── vector_decoder.rs
+    ├── null_vector_decoder.rs
+    ├── cache_store.rs
+    └── in_memory_cache_store.rs
 ```
 
 ### `obscur-scene`
@@ -764,7 +775,13 @@ src/
 ├── path/
 │   ├── mod.rs
 │   ├── path.rs
+│   ├── path_data.rs
+│   ├── path_data_cursor.rs
+│   ├── path_data_error.rs
+│   ├── path_data_fault.rs
 │   ├── path_segment.rs
+│   ├── path_trim.rs
+│   ├── svg_arc.rs
 │   └── fill_rule.rs
 ├── paint/
 │   ├── mod.rs
@@ -775,6 +792,9 @@ src/
 │   ├── radial_gradient.rs
 │   ├── conic_gradient.rs
 │   ├── stroke.rs
+│   ├── scene_vector.rs
+│   ├── vector_paint.rs
+│   ├── vector_shape.rs
 │   └── blend_mode.rs
 ├── clip/
 │   ├── mod.rs
@@ -812,12 +832,18 @@ src/
 ├── renderer/
 │   ├── mod.rs
 │   ├── renderer.rs
+│   ├── headless_renderer.rs
+│   ├── effect_fallback.rs
+│   ├── effect_report.rs
+│   ├── scene_effect.rs
+│   ├── scene_requirements.rs
 │   ├── renderer_id.rs
 │   ├── renderer_capabilities.rs
 │   └── renderer_error.rs
 ├── target/
 │   ├── mod.rs
 │   ├── render_target.rs
+│   ├── pixel_format.rs
 │   ├── window_target.rs
 │   ├── texture_target.rs
 │   └── bitmap_target.rs
@@ -825,12 +851,15 @@ src/
 │   ├── mod.rs
 │   ├── render_frame.rs
 │   ├── frame_submission.rs
+│   ├── present_mode.rs
 │   ├── present_result.rs
-│   └── device_loss.rs
+│   ├── device_loss.rs
+│   └── device_loss_reason.rs
 └── extension/
     ├── mod.rs
     ├── render_extension.rs
     ├── custom_pass.rs
+    ├── pass_stage.rs
     └── trusted_render_context.rs
 ```
 
@@ -1341,7 +1370,7 @@ src/
 │   ├── screen_contribution.rs
 │   ├── route_contribution.rs
 │   ├── menu_contribution.rs
-│   ├── settings_contribution.rs
+│   ├── view_contribution.rs
 │   ├── background_service_contribution.rs
 │   └── extension_point.rs
 ├── lifecycle/

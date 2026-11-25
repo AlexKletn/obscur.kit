@@ -1,30 +1,32 @@
-#![doc = include_str!("renderer_error.doc/_module.md")]
+//! The typed failure of a render operation (spec §5.2 explicit diagnostics).
 
 use crate::frame::DeviceLoss;
 
-#[doc = include_str!("renderer_error.doc/RendererError.md")]
+#[doc = include_str!("../../docs/api/renderer/renderer_error.doc/RendererError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RendererError {
-    #[doc = include_str!("renderer_error.doc/DeviceLost.md")]
+    /// The GPU device was lost; see [`DeviceLoss`] for the reason and whether
+    /// the runtime may rebuild and retry.
     DeviceLost(DeviceLoss),
-    #[doc = include_str!("renderer_error.doc/UnsupportedEffect.md")]
+    #[doc = include_str!("../../docs/api/renderer/renderer_error.doc/UnsupportedEffect.md")]
     UnsupportedEffect(Box<str>),
-    #[doc = include_str!("renderer_error.doc/InvalidTarget.md")]
+    /// The render target was invalid for this backend, with a human-readable
+    /// reason.
     InvalidTarget(Box<str>),
-    #[doc = include_str!("renderer_error.doc/OutOfMemory.md")]
+    /// The backend ran out of memory servicing the operation.
     OutOfMemory,
-    #[doc = include_str!("renderer_error.doc/Backend.md")]
+    /// A generic backend failure, carrying a human-readable reason.
     Backend(Box<str>),
 }
 
 impl RendererError {
-    #[doc = include_str!("renderer_error.doc/is_device_lost.md")]
+    /// Whether this error is a device-loss event.
     #[must_use]
     pub const fn is_device_lost(&self) -> bool {
         matches!(self, Self::DeviceLost(_))
     }
 
-    #[doc = include_str!("renderer_error.doc/is_recoverable.md")]
+    #[doc = include_str!("../../docs/api/renderer/renderer_error.doc/is_recoverable.md")]
     #[must_use]
     pub const fn is_recoverable(&self) -> bool {
         match self {

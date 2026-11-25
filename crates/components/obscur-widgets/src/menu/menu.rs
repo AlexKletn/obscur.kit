@@ -1,69 +1,16 @@
-#![doc = include_str!("menu.doc/_module.md")]
+//! `Menu`: a headless menu of activatable items (spec §2.6, §6.7).
+
+use super::MenuItem;
 
 use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
-use obscur_interaction::command::{Command, CommandRegistry, CommandState};
+use obscur_interaction::command::CommandRegistry;
 use obscur_primitives::Text;
 use obscur_view::view::{
     EVENT_CLICK, View, ViewEventBinding, ViewFragment, ViewNode, ViewProperty, ViewValue,
 };
 
-#[doc = include_str!("menu.doc/MenuItem.md")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MenuItem {
-    label: Box<str>,
-    command: InternedSymbol,
-    enabled: bool,
-}
-
-impl MenuItem {
-    #[doc = include_str!("menu.doc/new.md")]
-    #[must_use]
-    pub fn new(label: impl Into<Box<str>>, command: InternedSymbol) -> Self {
-        Self {
-            label: label.into(),
-            command,
-            enabled: true,
-        }
-    }
-
-    #[doc = include_str!("menu.doc/disabled.md")]
-    #[must_use]
-    pub fn disabled(mut self) -> Self {
-        self.enabled = false;
-        self
-    }
-
-    #[doc = include_str!("menu.doc/from_command.md")]
-    #[must_use]
-    pub fn from_command(command: &Command, state: CommandState) -> Self {
-        Self {
-            label: command.title().into(),
-            command: command.id(),
-            enabled: state.is_enabled(),
-        }
-    }
-
-    #[doc = include_str!("menu.doc/label.md")]
-    #[must_use]
-    pub fn label(&self) -> &str {
-        &self.label
-    }
-
-    #[doc = include_str!("menu.doc/command.md")]
-    #[must_use]
-    pub const fn command(&self) -> InternedSymbol {
-        self.command
-    }
-
-    #[doc = include_str!("menu.doc/is_enabled.md")]
-    #[must_use]
-    pub const fn is_enabled(&self) -> bool {
-        self.enabled
-    }
-}
-
-#[doc = include_str!("menu.doc/Menu.md")]
+#[doc = include_str!("../../docs/api/menu/menu.doc/Menu.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Menu {
     items: Vec<MenuItem>,
@@ -72,22 +19,24 @@ pub struct Menu {
 }
 
 impl Menu {
-    #[doc = include_str!("menu.doc/COMPONENT_ID.md")]
+    #[doc = include_str!("../../docs/api/menu/menu.doc/COMPONENT_ID.md")]
     pub const COMPONENT_ID: ComponentId = ComponentId::from_raw(0x00D0_0005);
 
-    #[doc = include_str!("menu.doc/MENU_ITEM_ID.md")]
+    /// Stable component id for the per-item child element.
     const MENU_ITEM_ID: ComponentId = ComponentId::from_raw(0x00D0_0015);
 
-    #[doc = include_str!("menu.doc/PROP_ROLE.md")]
+    /// Interned name of the semantic-role property (`role`); shares the
+    /// `0x00D1_NNXX` scheme with `NN = 05` (menu): role=`00`, open=`01`,
+    /// highlighted=`02`, disabled=`03` (on item children).
     const PROP_ROLE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0500);
-    #[doc = include_str!("menu.doc/PROP_OPEN.md")]
+    /// Interned name of the `open` state property.
     const PROP_OPEN: InternedSymbol = InternedSymbol::from_raw(0x00D1_0501);
-    #[doc = include_str!("menu.doc/PROP_HIGHLIGHTED.md")]
+    /// Interned name of the `highlighted` index property (`-1` = none).
     const PROP_HIGHLIGHTED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0502);
-    #[doc = include_str!("menu.doc/PROP_DISABLED.md")]
+    /// Interned name of the per-item `disabled` state property.
     const PROP_DISABLED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0503);
 
-    #[doc = include_str!("menu.doc/new_2.md")]
+    /// Creates a closed, empty menu with no highlighted item.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -97,14 +46,14 @@ impl Menu {
         }
     }
 
-    #[doc = include_str!("menu.doc/item.md")]
+    /// Appends a single item, returning the updated menu (fluent builder).
     #[must_use]
     pub fn item(mut self, item: MenuItem) -> Self {
         self.items.push(item);
         self
     }
 
-    #[doc = include_str!("menu.doc/with_items.md")]
+    /// Appends every item from `items`, returning the updated menu.
     #[must_use]
     pub fn with_items<I>(mut self, items: I) -> Self
     where
@@ -114,7 +63,7 @@ impl Menu {
         self
     }
 
-    #[doc = include_str!("menu.doc/from_registry.md")]
+    #[doc = include_str!("../../docs/api/menu/menu.doc/from_registry.md")]
     #[must_use]
     pub fn from_registry<I>(registry: &CommandRegistry, ids: I) -> Self
     where
@@ -137,18 +86,18 @@ impl Menu {
         }
     }
 
-    #[doc = include_str!("menu.doc/open.md")]
+    /// Opens the menu.
     pub fn open(&mut self) {
         self.open = true;
     }
 
-    #[doc = include_str!("menu.doc/close.md")]
+    /// Closes the menu, clearing any highlighted item.
     pub fn close(&mut self) {
         self.open = false;
         self.highlighted = None;
     }
 
-    #[doc = include_str!("menu.doc/toggle_open.md")]
+    /// Toggles the menu open/closed. Closing clears the highlight.
     pub fn toggle_open(&mut self) {
         if self.open {
             self.close();
@@ -157,7 +106,8 @@ impl Menu {
         }
     }
 
-    #[doc = include_str!("menu.doc/highlight.md")]
+    /// Highlights the item at `index`, returning `true` when `index` is in
+    /// range; otherwise leaves the highlight untouched and returns `false`.
     pub fn highlight(&mut self, index: usize) -> bool {
         if index < self.items.len() {
             self.highlighted = Some(index);
@@ -167,17 +117,24 @@ impl Menu {
         }
     }
 
-    #[doc = include_str!("menu.doc/highlight_next.md")]
+    /// Moves the highlight to the next enabled item, wrapping around. With no
+    /// current highlight this selects the first enabled item. A no-op when no
+    /// item is enabled.
     pub fn highlight_next(&mut self) {
         self.highlighted = self.scan_enabled(self.highlighted, true);
     }
 
-    #[doc = include_str!("menu.doc/highlight_prev.md")]
+    /// Moves the highlight to the previous enabled item, wrapping around. With
+    /// no current highlight this selects the last enabled item. A no-op when no
+    /// item is enabled.
     pub fn highlight_prev(&mut self) {
         self.highlighted = self.scan_enabled(self.highlighted, false);
     }
 
-    #[doc = include_str!("menu.doc/scan_enabled.md")]
+    /// Scans for the next/previous enabled item relative to `from`, wrapping.
+    /// With `from == None`, starts so the first (forward) or last (backward)
+    /// enabled item is chosen. Returns the current highlight when no item is
+    /// enabled.
     fn scan_enabled(&self, from: Option<usize>, forward: bool) -> Option<usize> {
         let len = self.items.len();
         if len == 0 {
@@ -198,7 +155,10 @@ impl Menu {
         from
     }
 
-    #[doc = include_str!("menu.doc/activate.md")]
+    /// Activates the highlighted item, returning its command when an item is
+    /// highlighted **and** enabled, then closes the menu. Returns `None` (and
+    /// still closes) when nothing is highlighted or the highlighted item is
+    /// disabled.
     pub fn activate(&mut self) -> Option<InternedSymbol> {
         let command = self
             .highlighted
@@ -209,37 +169,37 @@ impl Menu {
         command
     }
 
-    #[doc = include_str!("menu.doc/is_open.md")]
+    /// Returns whether the menu is open.
     #[must_use]
     pub const fn is_open(&self) -> bool {
         self.open
     }
 
-    #[doc = include_str!("menu.doc/highlighted.md")]
+    /// Returns the highlighted item index, if any.
     #[must_use]
     pub const fn highlighted(&self) -> Option<usize> {
         self.highlighted
     }
 
-    #[doc = include_str!("menu.doc/len.md")]
+    /// Returns the number of items.
     #[must_use]
     pub fn len(&self) -> usize {
         self.items.len()
     }
 
-    #[doc = include_str!("menu.doc/is_empty.md")]
+    /// Returns whether the menu has no items.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
 
-    #[doc = include_str!("menu.doc/semantic_role.md")]
+    /// Returns the accessible role of this control ([`SemanticRole::Menu`]).
     #[must_use]
     pub const fn semantic_role(&self) -> SemanticRole {
         SemanticRole::Menu
     }
 
-    #[doc = include_str!("menu.doc/view.md")]
+    #[doc = include_str!("../../docs/api/menu/menu.doc/view.md")]
     #[must_use]
     pub fn view(&self) -> View {
         let highlighted = self
@@ -288,6 +248,7 @@ impl Default for Menu {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use obscur_interaction::command::{Command, CommandState};
 
     fn cmd(raw: u32) -> InternedSymbol {
         InternedSymbol::from_raw(raw)

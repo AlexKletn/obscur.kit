@@ -1,26 +1,34 @@
-#![doc = include_str!("invalidation_kind.doc/_module.md")]
+//! The typed classification of a change (Obscur Kit 2 specs §4.3).
 
-#[doc = include_str!("invalidation_kind.doc/InvalidationKind.md")]
+#[doc = include_str!("../../docs/api/invalidation/invalidation_kind.doc/InvalidationKind.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum InvalidationKind {
-    #[doc = include_str!("invalidation_kind.doc/CompositionOnly.md")]
+    /// Only the scene composition changed (e.g. layer ordering / transform);
+    /// no repaint, relayout or restyle is required, only a recompose.
     CompositionOnly,
-    #[doc = include_str!("invalidation_kind.doc/Paint.md")]
+    /// A paint-level change (e.g. colour/opacity of already-laid-out content);
+    /// requires a repaint (and recompose) but no relayout or restyle.
     Paint,
-    #[doc = include_str!("invalidation_kind.doc/Text.md")]
+    /// Text / intrinsic content changed; requires relayout (content affects
+    /// sizing), repaint and recompose, but no restyle.
     Text,
-    #[doc = include_str!("invalidation_kind.doc/Style.md")]
+    /// A node's computed style changed; requires restyle. Because layout style
+    /// is derived from computed style, in Phase 1 this also requires relayout
+    /// (and hence repaint + recompose).
     Style,
-    #[doc = include_str!("invalidation_kind.doc/Layout.md")]
+    /// Layout inputs changed (e.g. constraints); requires relayout, repaint and
+    /// recompose, but no restyle.
     Layout,
-    #[doc = include_str!("invalidation_kind.doc/Tree.md")]
+    /// The node tree changed (children added/removed); requires restyle,
+    /// relayout, repaint and recompose.
     Tree,
-    #[doc = include_str!("invalidation_kind.doc/Environment.md")]
+    /// The window/environment changed (viewport, DPI); the deepest kind,
+    /// requiring restyle, relayout, repaint and recompose across the tree.
     Environment,
 }
 
 impl InvalidationKind {
-    #[doc = include_str!("invalidation_kind.doc/needs_restyle.md")]
+    #[doc = include_str!("../../docs/api/invalidation/invalidation_kind.doc/needs_restyle.md")]
     #[must_use]
     pub fn needs_restyle(self) -> bool {
         matches!(
@@ -29,7 +37,7 @@ impl InvalidationKind {
         )
     }
 
-    #[doc = include_str!("invalidation_kind.doc/needs_relayout.md")]
+    #[doc = include_str!("../../docs/api/invalidation/invalidation_kind.doc/needs_relayout.md")]
     #[must_use]
     pub fn needs_relayout(self) -> bool {
         matches!(
@@ -42,13 +50,13 @@ impl InvalidationKind {
         )
     }
 
-    #[doc = include_str!("invalidation_kind.doc/needs_repaint.md")]
+    #[doc = include_str!("../../docs/api/invalidation/invalidation_kind.doc/needs_repaint.md")]
     #[must_use]
     pub fn needs_repaint(self) -> bool {
         !matches!(self, InvalidationKind::CompositionOnly)
     }
 
-    #[doc = include_str!("invalidation_kind.doc/needs_recompose.md")]
+    #[doc = include_str!("../../docs/api/invalidation/invalidation_kind.doc/needs_recompose.md")]
     #[must_use]
     pub fn needs_recompose(self) -> bool {
         true

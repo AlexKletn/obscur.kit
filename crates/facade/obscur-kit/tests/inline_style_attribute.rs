@@ -187,3 +187,22 @@ fn a_faulty_declaration_is_reported_and_the_rest_of_the_block_holds() {
         "the dropped declaration was reported: {reported:?}"
     );
 }
+
+#[test]
+fn an_incremental_rematch_keeps_inline_values_on_untouched_siblings() {
+    let (mut runtime, sheets) = wired();
+    let view = |left: ViewNode| {
+        View::from_fragment(ViewFragment::from_nodes(vec![
+            left.with_key("left"),
+            boxed("box right", "width: 150px").with_key("right"),
+        ]))
+    };
+    let initial = view(boxed("box left", "width: 120px"));
+    runtime.render_now(&initial, &sheets);
+    runtime.render_now(&initial, &sheets);
+    let changed = view(Container::new().into_view_node().class("box left"));
+    runtime.render_now(&changed, &sheets);
+    let nodes = runtime.inspect_snapshot().nodes;
+    assert_eq!(width_of(&nodes, "left"), 40.0);
+    assert_eq!(width_of(&nodes, "right"), 150.0);
+}

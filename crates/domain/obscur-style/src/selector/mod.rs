@@ -1,12 +1,16 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Selector module.
 mod complex_selector;
-pub use complex_selector::{Combinator, ComplexSelector};
+pub use complex_selector::ComplexSelector;
+mod combinator;
+pub use combinator::Combinator;
 mod compound_selector;
 pub use compound_selector::CompoundSelector;
 mod match_element;
 pub use match_element::MatchElement;
 mod pseudo_class_selector;
-pub use pseudo_class_selector::{AnB, PseudoClassSelector};
+pub use pseudo_class_selector::PseudoClassSelector;
+mod an_b;
+pub use an_b::AnB;
 mod pseudo_state;
 pub use pseudo_state::PseudoState;
 mod selector_id;
@@ -20,4 +24,8 @@ pub use selector_matcher::SelectorMatcher;
 mod selector_specificity;
 pub use selector_specificity::SelectorSpecificity;
 mod simple_selector;
-pub use simple_selector::{AttrMatch, AttributeSelector, SimpleSelector};
+pub use simple_selector::SimpleSelector;
+mod attribute_selector;
+pub use attribute_selector::AttributeSelector;
+mod attr_match;
+pub use attr_match::AttrMatch;

@@ -1,20 +1,23 @@
-#![doc = include_str!("preedit.doc/_module.md")]
+//! The uncommitted composition string shown inline during IME input, kept
+//! separate from committed text (spec §5.12 IME).
 
 use crate::span::TextRange;
 
-#[doc = include_str!("preedit.doc/Preedit.md")]
+#[doc = include_str!("../../docs/api/ime/preedit.doc/Preedit.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Preedit {
-    #[doc = include_str!("preedit.doc/text.md")]
+    /// The uncommitted composition text.
     text: Box<str>,
-    #[doc = include_str!("preedit.doc/caret.md")]
+    /// Caret byte offset within `text`; clamped to `text.len()` and snapped to a
+    /// char boundary.
     caret: usize,
-    #[doc = include_str!("preedit.doc/highlight.md")]
+    /// The emphasized active/target clause, as a byte range within `text`.
     highlight: Option<TextRange>,
 }
 
 impl Preedit {
-    #[doc = include_str!("preedit.doc/new.md")]
+    /// Creates a preedit holding `text`, with the caret at the end of the text
+    /// and no highlight.
     #[must_use]
     pub fn new(text: impl Into<Box<str>>) -> Self {
         let text = text.into();
@@ -26,7 +29,7 @@ impl Preedit {
         }
     }
 
-    #[doc = include_str!("preedit.doc/empty.md")]
+    /// Creates an empty preedit (empty text, caret at `0`, no highlight).
     #[must_use]
     pub fn empty() -> Self {
         Self {
@@ -36,52 +39,54 @@ impl Preedit {
         }
     }
 
-    #[doc = include_str!("preedit.doc/with_caret.md")]
+    /// Returns a copy with the caret set to `caret`, clamped to the text length
+    /// and snapped down to the nearest UTF-8 character boundary.
     #[must_use]
     pub fn with_caret(mut self, caret: usize) -> Self {
         self.caret = snap_caret(&self.text, caret);
         self
     }
 
-    #[doc = include_str!("preedit.doc/with_highlight.md")]
+    #[doc = include_str!("../../docs/api/ime/preedit.doc/with_highlight.md")]
     #[must_use]
     pub fn with_highlight(mut self, highlight: TextRange) -> Self {
         self.highlight = Some(highlight);
         self
     }
 
-    #[doc = include_str!("preedit.doc/text_2.md")]
+    /// Returns the uncommitted composition text.
     #[must_use]
     pub fn text(&self) -> &str {
         &self.text
     }
 
-    #[doc = include_str!("preedit.doc/caret_2.md")]
+    /// Returns the caret byte offset within the preedit text.
     #[must_use]
     pub const fn caret(&self) -> usize {
         self.caret
     }
 
-    #[doc = include_str!("preedit.doc/highlight_2.md")]
+    /// Returns the emphasized clause range within the preedit text, if any.
     #[must_use]
     pub const fn highlight(&self) -> Option<TextRange> {
         self.highlight
     }
 
-    #[doc = include_str!("preedit.doc/is_empty.md")]
+    /// Returns whether the preedit text is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.text.is_empty()
     }
 
-    #[doc = include_str!("preedit.doc/len.md")]
+    /// Returns the byte length of the preedit text.
     #[must_use]
     pub fn len(&self) -> usize {
         self.text.len()
     }
 }
 
-#[doc = include_str!("preedit.doc/snap_caret.md")]
+/// Clamps `caret` to `text.len()` and snaps it down to the nearest UTF-8
+/// character boundary, so the returned offset always indexes `text` safely.
 fn snap_caret(text: &str, caret: usize) -> usize {
     let mut caret = caret.min(text.len());
     while !text.is_char_boundary(caret) {

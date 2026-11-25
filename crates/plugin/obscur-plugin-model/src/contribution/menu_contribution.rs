@@ -1,5 +1,6 @@
-#![doc = include_str!("menu_contribution.doc/_module.md")]
+//! `MenuContribution` (skeleton stub for the spec-defined entity; not yet implemented).
 
-#[doc = include_str!("menu_contribution.doc/MenuContribution.md")]
+/// Placeholder for the `MenuContribution` entity. See the Obscur Kit 2 specs for its
+/// contract; this stub exists to materialise the target source layout.
 #[derive(Debug)]
 pub struct MenuContribution;

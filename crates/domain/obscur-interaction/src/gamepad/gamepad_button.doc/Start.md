@@ -1,1 +1,0 @@
-The Start / Menu button.

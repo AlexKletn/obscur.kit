@@ -1,8 +1,9 @@
-#![doc = include_str!("validation_result.doc/_module.md")]
+//! `UiIrValidationResult`: the accumulated outcome of validating a UI IR
+//! document (spec §2.5 validation).
 
 use crate::validation::UiIrValidationError;
 
-#[doc = include_str!("validation_result.doc/UiIrValidationResult.md")]
+#[doc = include_str!("../../docs/api/validation/validation_result.doc/UiIrValidationResult.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct UiIrValidationResult {
     errors: Vec<UiIrValidationError>,
@@ -10,7 +11,7 @@ pub struct UiIrValidationResult {
 }
 
 impl UiIrValidationResult {
-    #[doc = include_str!("validation_result.doc/new.md")]
+    /// Creates an empty result — no errors and no warnings, hence valid.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -19,41 +20,42 @@ impl UiIrValidationResult {
         }
     }
 
-    #[doc = include_str!("validation_result.doc/push_error.md")]
+    /// Records a fatal error, making the result invalid.
     pub fn push_error(&mut self, error: UiIrValidationError) {
         self.errors.push(error);
     }
 
-    #[doc = include_str!("validation_result.doc/push_warning.md")]
+    /// Records a non-fatal warning; validity is unaffected.
     pub fn push_warning(&mut self, warning: UiIrValidationError) {
         self.warnings.push(warning);
     }
 
-    #[doc = include_str!("validation_result.doc/is_valid.md")]
+    /// Returns whether the document is valid — i.e. no errors were recorded.
+    /// Warnings are permitted.
     #[must_use]
     pub fn is_valid(&self) -> bool {
         self.errors.is_empty()
     }
 
-    #[doc = include_str!("validation_result.doc/errors.md")]
+    /// Returns the recorded errors.
     #[must_use]
     pub fn errors(&self) -> &[UiIrValidationError] {
         &self.errors
     }
 
-    #[doc = include_str!("validation_result.doc/warnings.md")]
+    /// Returns the recorded warnings.
     #[must_use]
     pub fn warnings(&self) -> &[UiIrValidationError] {
         &self.warnings
     }
 
-    #[doc = include_str!("validation_result.doc/error_count.md")]
+    /// Returns the number of recorded errors.
     #[must_use]
     pub fn error_count(&self) -> usize {
         self.errors.len()
     }
 
-    #[doc = include_str!("validation_result.doc/merge.md")]
+    /// Absorbs another result's errors and warnings into this one.
     pub fn merge(&mut self, other: UiIrValidationResult) {
         self.errors.extend(other.errors);
         self.warnings.extend(other.warnings);

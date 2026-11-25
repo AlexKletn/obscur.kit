@@ -1,4 +1,4 @@
-#![doc = include_str!("grid_areas.doc/_module.md")]
+#![doc = include_str!("../../docs/api/orchestration/grid_areas.doc/_module.md")]
 
 use obscur_layout::algorithm::{GridLine, GridPlacement};
 use obscur_style::computed::{ComputedStyle, ComputedValue};
@@ -7,7 +7,7 @@ use obscur_tree::tree::RetainedTree;
 
 use super::{ComputedStyles, LayoutStyles};
 
-#[doc = include_str!("grid_areas.doc/resolve_named_grid_areas.md")]
+#[doc = include_str!("../../docs/api/orchestration/grid_areas.doc/resolve_named_grid_areas.md")]
 pub fn resolve_named_grid_areas(
     styles: &mut LayoutStyles,
     tree: &RetainedTree,
@@ -17,7 +17,7 @@ pub fn resolve_named_grid_areas(
         let Some(name) = grid_area_name_of(style) else {
             continue;
         };
-        let Some(parent) = tree.get(node).and_then(|n| n.logical_parent().parent()) else {
+        let Some(parent) = tree.visual_parent_of(node) else {
             continue;
         };
         let Some(template) = computed.get(&parent).and_then(grid_areas_of) else {
@@ -33,7 +33,8 @@ pub fn resolve_named_grid_areas(
     }
 }
 
-#[doc = include_str!("grid_areas.doc/grid_area_name_of.md")]
+/// Reads a node's `grid-area: <name>` marker, or [`None`] when the node authored
+/// no named-area placement (or the property is not a name marker).
 fn grid_area_name_of(computed: &ComputedStyle) -> Option<&str> {
     computed
         .get(PropertyId::GridArea)
@@ -41,15 +42,17 @@ fn grid_area_name_of(computed: &ComputedStyle) -> Option<&str> {
         .and_then(PropertyValue::as_grid_area_name)
 }
 
-#[doc = include_str!("grid_areas.doc/grid_areas_of.md")]
-fn grid_areas_of(computed: &ComputedStyle) -> Option<&GridAreaTemplate> {
+/// Reads a container's parsed `grid-template-areas`, or [`None`] when it authored
+/// none (or the property is not a template value).
+pub(super) fn grid_areas_of(computed: &ComputedStyle) -> Option<&GridAreaTemplate> {
     computed
         .get(PropertyId::GridTemplateAreas)
         .map(ComputedValue::value)
         .and_then(PropertyValue::as_grid_areas)
 }
 
-#[doc = include_str!("grid_areas.doc/placement_from_area.md")]
+/// Converts a named area's 1-based line rectangle into a concrete
+/// [`GridPlacement`] (a definite `start / end` line on both axes).
 fn placement_from_area(rect: GridAreaRect) -> GridPlacement {
     GridPlacement::new(
         GridLine::Line(line(rect.column_start)),
@@ -59,7 +62,8 @@ fn placement_from_area(rect: GridAreaRect) -> GridPlacement {
     )
 }
 
-#[doc = include_str!("grid_areas.doc/line.md")]
+/// Narrows a 1-based `u32` grid line into the `i32` [`GridLine::Line`] carries,
+/// saturating so a pathologically large line cannot wrap.
 fn line(value: u32) -> i32 {
     i32::try_from(value).unwrap_or(i32::MAX)
 }

@@ -1,4 +1,4 @@
-#![doc = include_str!("socket_client.doc/_module.md")]
+#![doc = include_str!("../../docs/api/transport/socket_client.doc/_module.md")]
 
 use std::io;
 use std::net::{SocketAddr, TcpStream};
@@ -11,14 +11,14 @@ use obscur_devtools_protocol::message::{CommandMessage, HandshakeRequest, Handsh
 
 use crate::transport::{ClientBound, ServerBound, SocketStream, WireCodec};
 
-#[doc = include_str!("socket_client.doc/SocketClient.md")]
+/// The client end of a framed DevTools socket connection.
 #[derive(Debug)]
 pub struct SocketClient {
     stream: SocketStream,
 }
 
 impl SocketClient {
-    #[doc = include_str!("socket_client.doc/connect_loopback.md")]
+    #[doc = include_str!("../../docs/api/transport/socket_client.doc/connect_loopback.md")]
     pub fn connect_loopback(addr: SocketAddr) -> io::Result<Self> {
         let stream = TcpStream::connect(addr)?;
         Ok(Self {
@@ -26,7 +26,7 @@ impl SocketClient {
         })
     }
 
-    #[doc = include_str!("socket_client.doc/connect_unix.md")]
+    #[doc = include_str!("../../docs/api/transport/socket_client.doc/connect_unix.md")]
     #[cfg(unix)]
     pub fn connect_unix(path: impl AsRef<Path>) -> io::Result<Self> {
         let stream = UnixStream::connect(path)?;
@@ -35,7 +35,7 @@ impl SocketClient {
         })
     }
 
-    #[doc = include_str!("socket_client.doc/handshake.md")]
+    #[doc = include_str!("../../docs/api/transport/socket_client.doc/handshake.md")]
     pub fn handshake(&mut self, request: &HandshakeRequest) -> io::Result<HandshakeResponse> {
         match self.exchange(&ServerBound::Handshake(request.clone()))? {
             ClientBound::Handshake(response) => Ok(response),
@@ -45,12 +45,12 @@ impl SocketClient {
         }
     }
 
-    #[doc = include_str!("socket_client.doc/command.md")]
+    #[doc = include_str!("../../docs/api/transport/socket_client.doc/command.md")]
     pub fn command(&mut self, command: &CommandMessage) -> io::Result<ClientBound> {
         self.exchange(&ServerBound::Command(command.clone()))
     }
 
-    #[doc = include_str!("socket_client.doc/receive.md")]
+    #[doc = include_str!("../../docs/api/transport/socket_client.doc/receive.md")]
     pub fn receive(&mut self) -> io::Result<Option<ClientBound>> {
         let Some(frame) = self.stream.read_frame()? else {
             return Ok(None);
@@ -60,12 +60,12 @@ impl SocketClient {
             .map_err(|error| unexpected(&error.to_string()))
     }
 
-    #[doc = include_str!("socket_client.doc/set_read_timeout.md")]
+    #[doc = include_str!("../../docs/api/transport/socket_client.doc/set_read_timeout.md")]
     pub fn set_read_timeout(&mut self, timeout: Option<std::time::Duration>) -> io::Result<()> {
         self.stream.set_read_timeout(timeout)
     }
 
-    #[doc = include_str!("socket_client.doc/exchange.md")]
+    /// Writes one server-bound message and reads exactly one reply.
     fn exchange(&mut self, message: &ServerBound) -> io::Result<ClientBound> {
         self.stream
             .write_frame(&WireCodec::encode_server_bound(message))?;
@@ -77,7 +77,7 @@ impl SocketClient {
     }
 }
 
-#[doc = include_str!("socket_client.doc/unexpected.md")]
+/// Builds an `InvalidData` I/O error describing a protocol violation.
 fn unexpected(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.to_owned())
 }

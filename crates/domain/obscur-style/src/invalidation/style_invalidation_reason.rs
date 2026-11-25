@@ -1,19 +1,24 @@
-#![doc = include_str!("style_invalidation_reason.doc/_module.md")]
+#![doc = include_str!("../../docs/api/invalidation/style_invalidation_reason.doc/_module.md")]
 
-#[doc = include_str!("style_invalidation_reason.doc/StyleInvalidationReason.md")]
+#[doc = include_str!("../../docs/api/invalidation/style_invalidation_reason.doc/StyleInvalidationReason.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StyleInvalidationReason {
-    #[doc = include_str!("style_invalidation_reason.doc/StylesheetChanged.md")]
+    /// A stylesheet was added, removed or mutated, so the node's matched rules
+    /// may have changed and it must be re-matched and recomputed.
     StylesheetChanged,
-    #[doc = include_str!("style_invalidation_reason.doc/DeclarationsChanged.md")]
+    /// The node's own set of matched declarations changed (for example a rule
+    /// that targets it gained or lost a declaration), so it must recompute.
     DeclarationsChanged,
-    #[doc = include_str!("style_invalidation_reason.doc/ParentStyleChanged.md")]
+    /// An *inherited* value on the parent's computed style changed, so a value
+    /// this node inherited from its parent is now stale (inheritance flows down).
     ParentStyleChanged,
-    #[doc = include_str!("style_invalidation_reason.doc/CustomPropertyChanged.md")]
+    /// A custom property this node consumed (e.g. via `var()`) changed on an
+    /// ancestor, so any value substituted from it must be recomputed.
     CustomPropertyChanged,
-    #[doc = include_str!("style_invalidation_reason.doc/PseudoStateChanged.md")]
+    /// The node's active interaction/state pseudo-classes changed (e.g. `:hover`
+    /// toggled), so state-dependent selectors must be re-matched.
     PseudoStateChanged,
-    #[doc = include_str!("style_invalidation_reason.doc/InlineStyleChanged.md")]
+    /// The node's inline style declarations changed, so it must recompute.
     InlineStyleChanged,
 }
 

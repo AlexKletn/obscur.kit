@@ -1,8 +1,9 @@
-#![doc = include_str!("ui_ir_version_range.doc/_module.md")]
+//! An inclusive range of supported IR versions [`UiIrVersionRange`] (spec §2.5
+//! migrations).
 
 use crate::version::UiIrVersion;
 
-#[doc = include_str!("ui_ir_version_range.doc/UiIrVersionRange.md")]
+#[doc = include_str!("../../docs/api/version/ui_ir_version_range.doc/UiIrVersionRange.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UiIrVersionRange {
     min: UiIrVersion,
@@ -10,7 +11,7 @@ pub struct UiIrVersionRange {
 }
 
 impl UiIrVersionRange {
-    #[doc = include_str!("ui_ir_version_range.doc/new.md")]
+    #[doc = include_str!("../../docs/api/version/ui_ir_version_range.doc/new.md")]
     #[must_use]
     pub const fn new(min: UiIrVersion, max: UiIrVersion) -> Self {
         // `UiIrVersion` derives `Ord`, but trait methods are not usable in
@@ -22,13 +23,14 @@ impl UiIrVersionRange {
         Self { min, max }
     }
 
-    #[doc = include_str!("ui_ir_version_range.doc/exact.md")]
+    /// Creates a range matching exactly one version: `[v, v]`.
     #[must_use]
     pub const fn exact(v: UiIrVersion) -> Self {
         Self { min: v, max: v }
     }
 
-    #[doc = include_str!("ui_ir_version_range.doc/at_least.md")]
+    /// Creates an open-ended range from `v` up to the maximum representable
+    /// version (`[v, (u16::MAX, u16::MAX)]`).
     #[must_use]
     pub const fn at_least(v: UiIrVersion) -> Self {
         Self {
@@ -37,25 +39,25 @@ impl UiIrVersionRange {
         }
     }
 
-    #[doc = include_str!("ui_ir_version_range.doc/min.md")]
+    /// Returns the inclusive lower bound.
     #[must_use]
     pub const fn min(self) -> UiIrVersion {
         self.min
     }
 
-    #[doc = include_str!("ui_ir_version_range.doc/max.md")]
+    /// Returns the inclusive upper bound.
     #[must_use]
     pub const fn max(self) -> UiIrVersion {
         self.max
     }
 
-    #[doc = include_str!("ui_ir_version_range.doc/contains.md")]
+    /// Returns whether `v` lies within the range: `min <= v <= max`.
     #[must_use]
     pub fn contains(self, v: UiIrVersion) -> bool {
         self.min <= v && v <= self.max
     }
 
-    #[doc = include_str!("ui_ir_version_range.doc/overlaps.md")]
+    #[doc = include_str!("../../docs/api/version/ui_ir_version_range.doc/overlaps.md")]
     #[must_use]
     pub fn overlaps(&self, other: &UiIrVersionRange) -> bool {
         self.min <= other.max && other.min <= self.max

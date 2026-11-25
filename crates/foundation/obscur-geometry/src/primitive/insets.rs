@@ -1,20 +1,21 @@
-#![doc = include_str!("insets.doc/_module.md")]
+//! Directional insets in logical pixels.
 
-#[doc = include_str!("insets.doc/Insets.md")]
+/// Per-edge insets (padding/margin-like) in logical pixels. Physical edges are
+/// resolved from logical ones after direction is applied (spec §7.3).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Insets {
-    #[doc = include_str!("insets.doc/top.md")]
+    /// Top inset.
     pub top: f32,
-    #[doc = include_str!("insets.doc/right.md")]
+    /// Right inset.
     pub right: f32,
-    #[doc = include_str!("insets.doc/bottom.md")]
+    /// Bottom inset.
     pub bottom: f32,
-    #[doc = include_str!("insets.doc/left.md")]
+    /// Left inset.
     pub left: f32,
 }
 
 impl Insets {
-    #[doc = include_str!("insets.doc/uniform.md")]
+    /// Uniform insets on every edge.
     #[must_use]
     pub const fn uniform(value: f32) -> Self {
         Self {

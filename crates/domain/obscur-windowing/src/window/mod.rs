@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Window module.
 mod window;
 pub use window::Window;
 mod window_constraints;
@@ -8,6 +8,8 @@ pub use window_event::WindowEvent;
 mod window_properties;
 pub use window_properties::WindowProperties;
 mod window_relation;
-pub use window_relation::{Modality, WindowRelation};
+pub use window_relation::WindowRelation;
+mod modality;
+pub use modality::Modality;
 mod window_state;
 pub use window_state::WindowState;

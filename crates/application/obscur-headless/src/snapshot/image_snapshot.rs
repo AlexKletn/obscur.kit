@@ -1,174 +1,30 @@
-#![doc = include_str!("image_snapshot.doc/_module.md")]
+//! A backend-neutral capture of a rendered raster image: [`ImageSnapshot`],
+//! and the §7.14 tolerance it is compared under: [`ImageTolerance`].
 
 use std::sync::Arc;
 
-#[doc = include_str!("image_snapshot.doc/ImageTolerance.md")]
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ImageTolerance {
-    #[doc = include_str!("image_snapshot.doc/max_channel_delta.md")]
-    max_channel_delta: u8,
-    #[doc = include_str!("image_snapshot.doc/max_differing_fraction.md")]
-    max_differing_fraction: f64,
-}
+use super::{GoldenMismatch, ImageDiff, ImageTolerance};
 
-impl ImageTolerance {
-    #[doc = include_str!("image_snapshot.doc/exact.md")]
-    #[must_use]
-    pub const fn exact() -> Self {
-        Self {
-            max_channel_delta: 0,
-            max_differing_fraction: 0.0,
-        }
-    }
-
-    #[doc = include_str!("image_snapshot.doc/new.md")]
-    #[must_use]
-    pub fn new(max_channel_delta: u8, max_differing_fraction: f64) -> Self {
-        let max_differing_fraction = if max_differing_fraction.is_finite() {
-            max_differing_fraction.clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
-        Self {
-            max_channel_delta,
-            max_differing_fraction,
-        }
-    }
-
-    #[doc = include_str!("image_snapshot.doc/max_channel_delta_2.md")]
-    #[must_use]
-    pub const fn max_channel_delta(&self) -> u8 {
-        self.max_channel_delta
-    }
-
-    #[doc = include_str!("image_snapshot.doc/max_differing_fraction_2.md")]
-    #[must_use]
-    pub const fn max_differing_fraction(&self) -> f64 {
-        self.max_differing_fraction
-    }
-}
-
-#[doc = include_str!("image_snapshot.doc/ImageDiff.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ImageDiff {
-    #[doc = include_str!("image_snapshot.doc/differing_pixels.md")]
-    differing_pixels: u64,
-    #[doc = include_str!("image_snapshot.doc/total_pixels.md")]
-    total_pixels: u64,
-    #[doc = include_str!("image_snapshot.doc/max_channel_delta_3.md")]
-    max_channel_delta: u8,
-}
-
-impl ImageDiff {
-    #[doc = include_str!("image_snapshot.doc/differing_pixels_2.md")]
-    #[must_use]
-    pub const fn differing_pixels(&self) -> u64 {
-        self.differing_pixels
-    }
-
-    #[doc = include_str!("image_snapshot.doc/total_pixels_2.md")]
-    #[must_use]
-    pub const fn total_pixels(&self) -> u64 {
-        self.total_pixels
-    }
-
-    #[doc = include_str!("image_snapshot.doc/max_channel_delta_4.md")]
-    #[must_use]
-    pub const fn max_channel_delta(&self) -> u8 {
-        self.max_channel_delta
-    }
-
-    #[doc = include_str!("image_snapshot.doc/differing_fraction.md")]
-    #[must_use]
-    pub fn differing_fraction(&self) -> f64 {
-        if self.total_pixels == 0 {
-            return 0.0;
-        }
-        // Both counts are pixel counts of a raster that fits in memory, so the
-        // f64 mantissa is not a concern here.
-        self.differing_pixels as f64 / self.total_pixels as f64
-    }
-}
-
-#[doc = include_str!("image_snapshot.doc/GoldenMismatch.md")]
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum GoldenMismatch {
-    #[doc = include_str!("image_snapshot.doc/DimensionMismatch.md")]
-    DimensionMismatch {
-        #[doc = include_str!("image_snapshot.doc/expected.md")]
-        expected: (u32, u32),
-        #[doc = include_str!("image_snapshot.doc/actual.md")]
-        actual: (u32, u32),
-    },
-    #[doc = include_str!("image_snapshot.doc/PixelsUnavailable.md")]
-    PixelsUnavailable,
-    #[doc = include_str!("image_snapshot.doc/ByteLengthMismatch.md")]
-    ByteLengthMismatch {
-        #[doc = include_str!("image_snapshot.doc/expected_2.md")]
-        expected: usize,
-        #[doc = include_str!("image_snapshot.doc/actual_2.md")]
-        actual: usize,
-    },
-    #[doc = include_str!("image_snapshot.doc/TooManyDifferingPixels.md")]
-    TooManyDifferingPixels {
-        #[doc = include_str!("image_snapshot.doc/diff.md")]
-        diff: ImageDiff,
-        #[doc = include_str!("image_snapshot.doc/allowed.md")]
-        allowed: f64,
-    },
-}
-
-impl std::fmt::Display for GoldenMismatch {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::DimensionMismatch { expected, actual } => write!(
-                f,
-                "raster dimensions differ: expected {}x{}, got {}x{}",
-                expected.0, expected.1, actual.0, actual.1
-            ),
-            Self::PixelsUnavailable => write!(
-                f,
-                "a tolerant comparison needs pixels on both sides; one snapshot carries only a hash"
-            ),
-            Self::ByteLengthMismatch { expected, actual } => write!(
-                f,
-                "raster byte counts differ: expected {expected}, got {actual}"
-            ),
-            Self::TooManyDifferingPixels { diff, allowed } => write!(
-                f,
-                "{} of {} pixels ({:.4}) exceeded the channel noise floor, tolerance allows {:.4}; worst channel delta {}",
-                diff.differing_pixels(),
-                diff.total_pixels(),
-                diff.differing_fraction(),
-                allowed,
-                diff.max_channel_delta(),
-            ),
-        }
-    }
-}
-
-impl std::error::Error for GoldenMismatch {}
-
-#[doc = include_str!("image_snapshot.doc/ImageSnapshot.md")]
+#[doc = include_str!("../../docs/api/snapshot/image_snapshot.doc/ImageSnapshot.md")]
 #[derive(Debug, Clone)]
 pub struct ImageSnapshot {
-    #[doc = include_str!("image_snapshot.doc/width.md")]
+    /// The image width in physical pixels.
     width: u32,
-    #[doc = include_str!("image_snapshot.doc/height.md")]
+    /// The image height in physical pixels.
     height: u32,
-    #[doc = include_str!("image_snapshot.doc/pixel_hash.md")]
+    /// A stable FNV-1a content hash of the image's raw bytes.
     pixel_hash: u64,
-    #[doc = include_str!("image_snapshot.doc/pixels.md")]
+    /// The raster itself, when the snapshot was built from one.
     pixels: Option<Arc<[u8]>>,
 }
 
 impl ImageSnapshot {
-    #[doc = include_str!("image_snapshot.doc/FNV_OFFSET.md")]
+    /// The FNV-1a 64-bit offset basis.
     const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-    #[doc = include_str!("image_snapshot.doc/FNV_PRIME.md")]
+    /// The FNV-1a 64-bit prime.
     const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
-    #[doc = include_str!("image_snapshot.doc/from_rgba.md")]
+    #[doc = include_str!("../../docs/api/snapshot/image_snapshot.doc/from_rgba.md")]
     #[must_use]
     pub fn from_rgba(width: u32, height: u32, bytes: &[u8]) -> Self {
         let mut hash = Self::FNV_OFFSET;
@@ -184,7 +40,7 @@ impl ImageSnapshot {
         }
     }
 
-    #[doc = include_str!("image_snapshot.doc/from_parts.md")]
+    #[doc = include_str!("../../docs/api/snapshot/image_snapshot.doc/from_parts.md")]
     #[must_use]
     pub const fn from_parts(width: u32, height: u32, pixel_hash: u64) -> Self {
         Self {
@@ -195,37 +51,37 @@ impl ImageSnapshot {
         }
     }
 
-    #[doc = include_str!("image_snapshot.doc/width_2.md")]
+    /// The image width in physical pixels.
     #[must_use]
     pub const fn width(&self) -> u32 {
         self.width
     }
 
-    #[doc = include_str!("image_snapshot.doc/height_2.md")]
+    /// The image height in physical pixels.
     #[must_use]
     pub const fn height(&self) -> u32 {
         self.height
     }
 
-    #[doc = include_str!("image_snapshot.doc/pixel_hash_2.md")]
+    /// The stable content hash of the image's bytes.
     #[must_use]
     pub const fn pixel_hash(&self) -> u64 {
         self.pixel_hash
     }
 
-    #[doc = include_str!("image_snapshot.doc/pixels_2.md")]
+    /// The captured raster, if this snapshot was built from one.
     #[must_use]
     pub fn pixels(&self) -> Option<&[u8]> {
         self.pixels.as_deref()
     }
 
-    #[doc = include_str!("image_snapshot.doc/is_empty.md")]
+    /// Whether the image has zero area.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.width == 0 || self.height == 0
     }
 
-    #[doc = include_str!("image_snapshot.doc/compare_within.md")]
+    #[doc = include_str!("../../docs/api/snapshot/image_snapshot.doc/compare_within.md")]
     pub fn compare_within(
         &self,
         other: &Self,
@@ -262,11 +118,7 @@ impl ImageSnapshot {
             }
         }
 
-        let diff = ImageDiff {
-            differing_pixels,
-            total_pixels: (golden.len() / 4) as u64,
-            max_channel_delta: worst_delta,
-        };
+        let diff = ImageDiff::new(differing_pixels, (golden.len() / 4) as u64, worst_delta);
 
         if diff.differing_fraction() > tolerance.max_differing_fraction() {
             return Err(GoldenMismatch::TooManyDifferingPixels {
@@ -278,7 +130,7 @@ impl ImageSnapshot {
     }
 }
 
-#[doc = include_str!("image_snapshot.doc/PartialEq.md")]
+#[doc = include_str!("../../docs/api/snapshot/image_snapshot.doc/PartialEq.md")]
 impl PartialEq for ImageSnapshot {
     fn eq(&self, other: &Self) -> bool {
         self.width == other.width

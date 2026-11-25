@@ -1,26 +1,28 @@
-#![doc = include_str!("box_shadow.doc/_module.md")]
+//! A style-local `box-shadow` layer (spec §5.2).
 
 use crate::property::{Length, StyleColor};
 
-#[doc = include_str!("box_shadow.doc/BoxShadow.md")]
+#[doc = include_str!("../../docs/api/property/box_shadow.doc/BoxShadow.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct BoxShadow {
-    #[doc = include_str!("box_shadow.doc/offset_x.md")]
+    /// The horizontal offset: positive moves the shadow right.
     pub offset_x: Length,
-    #[doc = include_str!("box_shadow.doc/offset_y.md")]
+    /// The vertical offset: positive moves the shadow down.
     pub offset_y: Length,
-    #[doc = include_str!("box_shadow.doc/blur.md")]
+    /// The blur radius (`0` = a hard edge).
     pub blur: Length,
-    #[doc = include_str!("box_shadow.doc/spread.md")]
+    /// The spread distance: a drop shadow grows by this, an inset one shrinks.
     pub spread: Length,
-    #[doc = include_str!("box_shadow.doc/color.md")]
+    /// The shadow color, or [`None`] for the `currentColor` default.
     pub color: Option<StyleColor>,
-    #[doc = include_str!("box_shadow.doc/inset.md")]
+    /// Whether this is an `inset` shadow (painted inside the box) rather than a
+    /// drop shadow (painted behind it).
     pub inset: bool,
 }
 
 impl BoxShadow {
-    #[doc = include_str!("box_shadow.doc/new.md")]
+    /// Creates a shadow with the given offsets, blur, spread, optional color, and
+    /// `inset` flag.
     #[must_use]
     pub const fn new(
         offset_x: Length,
@@ -40,37 +42,37 @@ impl BoxShadow {
         }
     }
 
-    #[doc = include_str!("box_shadow.doc/offset_x_2.md")]
+    /// Returns the horizontal offset.
     #[must_use]
     pub const fn offset_x(&self) -> Length {
         self.offset_x
     }
 
-    #[doc = include_str!("box_shadow.doc/offset_y_2.md")]
+    /// Returns the vertical offset.
     #[must_use]
     pub const fn offset_y(&self) -> Length {
         self.offset_y
     }
 
-    #[doc = include_str!("box_shadow.doc/blur_2.md")]
+    /// Returns the blur radius.
     #[must_use]
     pub const fn blur(&self) -> Length {
         self.blur
     }
 
-    #[doc = include_str!("box_shadow.doc/spread_2.md")]
+    /// Returns the spread distance.
     #[must_use]
     pub const fn spread(&self) -> Length {
         self.spread
     }
 
-    #[doc = include_str!("box_shadow.doc/color_2.md")]
+    /// Returns the shadow color, or [`None`] for the `currentColor` default.
     #[must_use]
     pub const fn color(&self) -> Option<StyleColor> {
         self.color
     }
 
-    #[doc = include_str!("box_shadow.doc/uses_ch.md")]
+    #[doc = include_str!("../../docs/api/property/box_shadow.doc/uses_ch.md")]
     #[must_use]
     pub const fn uses_ch(&self) -> bool {
         self.offset_x().is_ch()
@@ -79,7 +81,7 @@ impl BoxShadow {
             || self.spread().is_ch()
     }
 
-    #[doc = include_str!("box_shadow.doc/is_inset.md")]
+    /// Returns whether this is an `inset` shadow.
     #[must_use]
     pub const fn is_inset(&self) -> bool {
         self.inset

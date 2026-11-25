@@ -1,30 +1,30 @@
-#![doc = include_str!("event_phase.doc/_module.md")]
+//! The DOM-like propagation phase an event is in as it routes (spec §4.7).
 
-#[doc = include_str!("event_phase.doc/EventPhase.md")]
+#[doc = include_str!("../../docs/api/event/event_phase.doc/EventPhase.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EventPhase {
-    #[doc = include_str!("event_phase.doc/Capture.md")]
+    /// Descending from the root toward (but not including) the target.
     Capture,
-    #[doc = include_str!("event_phase.doc/Target.md")]
+    /// Firing at the hit-test target itself.
     Target,
-    #[doc = include_str!("event_phase.doc/Bubble.md")]
+    /// Ascending from the target back toward the root.
     Bubble,
 }
 
 impl EventPhase {
-    #[doc = include_str!("event_phase.doc/is_target.md")]
+    /// Returns whether this is the [`Target`](Self::Target) phase.
     #[must_use]
     pub const fn is_target(self) -> bool {
         matches!(self, Self::Target)
     }
 
-    #[doc = include_str!("event_phase.doc/is_capture.md")]
+    /// Returns whether this is the [`Capture`](Self::Capture) phase.
     #[must_use]
     pub const fn is_capture(self) -> bool {
         matches!(self, Self::Capture)
     }
 
-    #[doc = include_str!("event_phase.doc/is_bubble.md")]
+    /// Returns whether this is the [`Bubble`](Self::Bubble) phase.
     #[must_use]
     pub const fn is_bubble(self) -> bool {
         matches!(self, Self::Bubble)

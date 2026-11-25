@@ -1,8 +1,13 @@
-#![doc = include_str!("canvas_painters.doc/_module.md")]
+#![doc = include_str!("../../docs/api/runtime/canvas_painters.doc/_module.md")]
 
-use std::collections::HashMap;
+use super::painter_key::PainterKey;
 
-use obscur_identity::{FastMap, InternedSymbol, NodeId};
+use std::collections::{HashMap, HashSet};
+use std::sync::Mutex;
+
+use obscur_diagnostics::{DiagnosticCode, DiagnosticSink};
+
+use obscur_identity::{FastMap, NodeId};
 use obscur_scene::command::{CanvasRegion, DisplayListBuilder, PaintCommand};
 use obscur_scene::path::{Path, PathSegment, PathTrim};
 use obscur_style::computed::ComputedValue;
@@ -12,57 +17,53 @@ use obscur_view::view::{CanvasPaint, canvas_painter};
 
 use crate::orchestration::{ComputedStyles, LayoutBoxes};
 
-#[doc = include_str!("canvas_painters.doc/CanvasPainter.md")]
+#[doc = include_str!("../../docs/api/runtime/canvas_painters.doc/CanvasPainter.md")]
 pub type CanvasPainter = Box<dyn FnMut(&mut CanvasRegion<'_>, &CanvasPaint<'_>) -> bool>;
 
-#[doc = include_str!("canvas_painters.doc/PainterKey.md")]
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum PainterKey {
-    #[doc = include_str!("canvas_painters.doc/Symbol.md")]
-    Symbol(InternedSymbol),
-    #[doc = include_str!("canvas_painters.doc/Name.md")]
-    Name(Box<str>),
-}
-
-#[doc = include_str!("canvas_painters.doc/CanvasPainters.md")]
+/// The registry, and the record of any painter that left the list unbalanced.
 #[derive(Default)]
 pub(crate) struct CanvasPainters {
-    #[doc = include_str!("canvas_painters.doc/painters_field.md")]
+    /// Registered painters, keyed by [`PainterKey`] — the symbol a node bound itself,
+    /// or the name a stylesheet's `-obscur-painter` gave it. The two are separate
+    /// namespaces, and the node's own symbol is looked up first.
     painters: HashMap<PainterKey, CanvasPainter>,
-    #[doc = include_str!("canvas_painters.doc/unbalanced.md")]
+    #[doc = include_str!("../../docs/api/runtime/canvas_painters.doc/unbalanced.md")]
     unbalanced: Vec<PainterKey>,
-    #[doc = include_str!("canvas_painters.doc/hits.md")]
+    #[doc = include_str!("../../docs/api/runtime/canvas_painters.doc/hits.md")]
     hits: FastMap<NodeId, PathTrim>,
+    /// Diagnostics emitted or repeated by live painters in the preceding paint pass.
+    reported: HashSet<(NodeId, DiagnosticCode, String)>,
 }
 
 impl CanvasPainters {
-    #[doc = include_str!("canvas_painters.doc/new.md")]
+    /// An empty registry.
     pub(crate) fn new() -> Self {
         Self::default()
     }
 
-    #[doc = include_str!("canvas_painters.doc/register.md")]
+    /// Registers `painter` under `id`, replacing any painter already there.
     pub(crate) fn register(&mut self, key: PainterKey, painter: CanvasPainter) {
         self.painters.insert(key, painter);
     }
 
-    #[doc = include_str!("canvas_painters.doc/hits.md")]
+    #[doc = include_str!("../../docs/api/runtime/canvas_painters.doc/hits.md")]
     pub(crate) fn hits(&self) -> &FastMap<NodeId, PathTrim> {
         &self.hits
     }
 
-    #[doc = include_str!("canvas_painters.doc/take_unbalanced.md")]
+    #[doc = include_str!("../../docs/api/runtime/canvas_painters.doc/take_unbalanced.md")]
     pub(crate) fn take_unbalanced(&mut self) -> Vec<PainterKey> {
         std::mem::take(&mut self.unbalanced)
     }
 
-    #[doc = include_str!("canvas_painters.doc/paint.md")]
+    #[doc = include_str!("../../docs/api/runtime/canvas_painters.doc/paint.md")]
     pub(crate) fn paint(
         &mut self,
         tree: &RetainedTree,
         boxes: &LayoutBoxes,
         computed: &ComputedStyles,
         elapsed: f32,
+        diagnostics: &dyn DiagnosticSink,
     ) -> (FastMap<NodeId, Vec<PaintCommand>>, bool) {
         let mut painted = HashMap::default();
         let mut animating = false;
@@ -73,6 +74,7 @@ impl CanvasPainters {
         if self.painters.is_empty() {
             return (painted, animating);
         }
+        let mut reported = HashSet::new();
         for (node, retained) in tree.iter() {
             let Some(key) = painter_key(retained.props(), computed.get(&node)) else {
                 continue;
@@ -93,7 +95,23 @@ impl CanvasPainters {
                 &mut builder,
                 obscur_geometry::Rect::new(bounds.origin(), bounds.size()),
             );
-            animating |= painter(&mut region, &CanvasPaint::new(retained.props(), elapsed));
+            let messages = Mutex::new(Vec::new());
+            let report = |diagnostic| {
+                messages
+                    .lock()
+                    .expect("canvas diagnostic queue")
+                    .push(diagnostic);
+            };
+            let paint = CanvasPaint::new(retained.props(), elapsed).with_report_handler(&report);
+            animating |= painter(&mut region, &paint);
+            for mut diagnostic in messages.into_inner().expect("canvas diagnostic queue") {
+                let source = *diagnostic.context.node.get_or_insert(node);
+                let key = (source, diagnostic.code, diagnostic.message.clone());
+                let previously_reported = self.reported.contains(&key);
+                if reported.insert(key) && !previously_reported {
+                    diagnostics.emit(&diagnostic);
+                }
+            }
             // §4.13: the shape a pointer must be inside. Measured once here —
             // the same flattening a trim would do — and kept in LAYOUT space, so
             // hit testing compares it against the point it already has rather
@@ -111,11 +129,12 @@ impl CanvasPainters {
                 painted.insert(node, commands);
             }
         }
+        self.reported = reported;
         (painted, animating)
     }
 }
 
-#[doc = include_str!("canvas_painters.doc/painter_key.md")]
+#[doc = include_str!("../../docs/api/runtime/canvas_painters.doc/painter_key.md")]
 fn painter_key(
     props: &[obscur_view::view::ViewProperty],
     style: Option<&obscur_style::computed::ComputedStyle>,
@@ -136,7 +155,7 @@ fn painter_key(
     }
 }
 
-#[doc = include_str!("canvas_painters.doc/drew_anything.md")]
+/// Whether a painter drew anything, as opposed to only opening and closing its region.
 fn drew_anything(commands: &[PaintCommand]) -> bool {
     // A region is never *empty*: opening one emits a transform and a clip, and
     // closing it emits their pops. So "did this painter draw" is not a length
@@ -155,7 +174,7 @@ fn drew_anything(commands: &[PaintCommand]) -> bool {
     })
 }
 
-#[doc = include_str!("canvas_painters.doc/translated.md")]
+#[doc = include_str!("../../docs/api/runtime/canvas_painters.doc/translated.md")]
 fn translated(path: &Path, origin: obscur_geometry::Point) -> Path {
     let mut out = Path::new();
     for segment in path.segments() {
@@ -188,7 +207,7 @@ fn translated(path: &Path, origin: obscur_geometry::Point) -> Path {
     out
 }
 
-#[doc = include_str!("canvas_painters.doc/shift.md")]
+/// A point moved by an offset.
 fn shift(p: obscur_geometry::Point, by: obscur_geometry::Point) -> obscur_geometry::Point {
     obscur_geometry::Point::new(p.x + by.x, p.y + by.y)
 }
@@ -261,7 +280,13 @@ mod tests {
         );
 
         let painted = painters
-            .paint(&tree, &boxes, &ComputedStyles::default(), 0.0)
+            .paint(
+                &tree,
+                &boxes,
+                &ComputedStyles::default(),
+                0.0,
+                &obscur_diagnostics::NullDiagnosticSink,
+            )
             .0;
         let commands = painted.get(&node).expect("the canvas painted");
         assert!(
@@ -278,7 +303,13 @@ mod tests {
         let mut painters = CanvasPainters::new();
         assert!(
             painters
-                .paint(&tree, &boxes, &ComputedStyles::default(), 0.0)
+                .paint(
+                    &tree,
+                    &boxes,
+                    &ComputedStyles::default(),
+                    0.0,
+                    &obscur_diagnostics::NullDiagnosticSink
+                )
                 .0
                 .is_empty()
         );
@@ -294,7 +325,13 @@ mod tests {
         );
         assert!(
             painters
-                .paint(&tree, &boxes, &ComputedStyles::default(), 0.0)
+                .paint(
+                    &tree,
+                    &boxes,
+                    &ComputedStyles::default(),
+                    0.0,
+                    &obscur_diagnostics::NullDiagnosticSink
+                )
                 .0
                 .is_empty()
         );
@@ -311,7 +348,13 @@ mod tests {
         painters.register(PainterKey::Symbol(CHART), Box::new(|_, _| false));
         assert!(
             painters
-                .paint(&tree, &boxes, &ComputedStyles::default(), 0.0)
+                .paint(
+                    &tree,
+                    &boxes,
+                    &ComputedStyles::default(),
+                    0.0,
+                    &obscur_diagnostics::NullDiagnosticSink
+                )
                 .0
                 .is_empty()
         );
@@ -348,7 +391,15 @@ mod tests {
             }),
         );
 
-        let painted = painters.paint(&tree, &boxes, &styles, 0.0).0;
+        let painted = painters
+            .paint(
+                &tree,
+                &boxes,
+                &styles,
+                0.0,
+                &obscur_diagnostics::NullDiagnosticSink,
+            )
+            .0;
         assert!(painted.contains_key(&node), "the stylesheet's painter ran");
     }
 
@@ -387,7 +438,13 @@ mod tests {
 
         assert!(
             painters
-                .paint(&tree, &boxes, &styles, 0.0)
+                .paint(
+                    &tree,
+                    &boxes,
+                    &styles,
+                    0.0,
+                    &obscur_diagnostics::NullDiagnosticSink
+                )
                 .0
                 .contains_key(&node)
         );
@@ -410,7 +467,13 @@ mod tests {
             }),
         );
 
-        let _ = painters.paint(&tree, &boxes, &ComputedStyles::default(), 0.0);
+        let _ = painters.paint(
+            &tree,
+            &boxes,
+            &ComputedStyles::default(),
+            0.0,
+            &obscur_diagnostics::NullDiagnosticSink,
+        );
         assert_eq!(
             painters.take_unbalanced(),
             vec![PainterKey::Symbol(CHART)],
@@ -441,7 +504,8 @@ mod tests {
                     &tree,
                     &LayoutBoxes::default(),
                     &ComputedStyles::default(),
-                    0.0
+                    0.0,
+                    &obscur_diagnostics::NullDiagnosticSink,
                 )
                 .0
                 .is_empty(),

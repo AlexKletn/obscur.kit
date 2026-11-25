@@ -1,13 +1,18 @@
-#![doc = include_str!("accesskit_bridge_error.doc/_module.md")]
+//! The AccessKit accessibility adapter's own error type (spec §7.1).
 
-#[doc = include_str!("accesskit_bridge_error.doc/AccessKitBridgeError.md")]
+#[doc = include_str!("../../docs/api/error/accesskit_bridge_error.doc/AccessKitBridgeError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AccessKitBridgeError {
-    #[doc = include_str!("accesskit_bridge_error.doc/MissingRoot.md")]
+    /// The semantic snapshot has no root node, so AccessKit — which requires a
+    /// single root for every [`accesskit::Tree`] — cannot be built from it.
     MissingRoot,
-    #[doc = include_str!("accesskit_bridge_error.doc/UnmappableRole.md")]
+    /// A semantic role had no AccessKit equivalent and could not be mapped. The
+    /// payload names the offending role for diagnostics. The built-in
+    /// [`RoleConverter`](crate::conversion::RoleConverter) never produces this
+    /// (it always falls back to [`accesskit::Role::Unknown`]); it exists for
+    /// stricter callers that reject approximations.
     UnmappableRole(Box<str>),
-    #[doc = include_str!("accesskit_bridge_error.doc/Backend.md")]
+    /// A generic AccessKit backend failure, carrying a human-readable reason.
     Backend(Box<str>),
 }
 

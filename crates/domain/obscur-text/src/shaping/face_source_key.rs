@@ -1,20 +1,21 @@
-#![doc = include_str!("face_source_key.doc/_module.md")]
+//! The stable, cheap cache identity of a [`FontSource`] (spec §5.10).
 
 use crate::font::FontSource;
 
-#[doc = include_str!("face_source_key.doc/FaceSourceKey.md")]
+#[doc = include_str!("../../docs/api/shaping/face_source_key.doc/FaceSourceKey.md")]
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub(crate) enum FaceSourceKey {
-    #[doc = include_str!("face_source_key.doc/System.md")]
+    /// A system face, keyed by its resolver name.
     System(Box<str>),
-    #[doc = include_str!("face_source_key.doc/Bundled.md")]
+    /// A bundled fallback face, keyed by its bundle key.
     Bundled(Box<str>),
-    #[doc = include_str!("face_source_key.doc/Memory.md")]
+    /// In-memory bytes, keyed by allocation pointer and length.
     Memory { ptr: usize, len: usize },
 }
 
 impl FaceSourceKey {
-    #[doc = include_str!("face_source_key.doc/from_source.md")]
+    /// Builds a stable, cheap key from a [`FontSource`] without copying font
+    /// bytes.
     pub(crate) fn from_source(source: &FontSource) -> Self {
         match source {
             FontSource::System(name) => Self::System(name.clone()),
@@ -31,7 +32,7 @@ impl FaceSourceKey {
         }
     }
 
-    #[doc = include_str!("face_source_key.doc/matches.md")]
+    #[doc = include_str!("../../docs/api/shaping/face_source_key.doc/matches.md")]
     pub(crate) fn matches(&self, source: &FontSource) -> bool {
         match (self, source) {
             (Self::System(name), FontSource::System(other))

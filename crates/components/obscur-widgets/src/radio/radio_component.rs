@@ -1,19 +1,19 @@
-#![doc = include_str!("radio_component.doc/_module.md")]
+#![doc = include_str!("../../docs/api/radio/radio_component.doc/_module.md")]
 
 use obscur_view::component::{Component, ComponentContext};
 use obscur_view::view::View;
 
 use super::{Radio, RadioProps};
 
-#[doc = include_str!("radio_component.doc/RadioComponent.md")]
+#[doc = include_str!("../../docs/api/radio/radio_component.doc/RadioComponent.md")]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RadioComponent;
 
 impl Component for RadioComponent {
-    #[doc = include_str!("radio_component.doc/Props.md")]
+    /// The authored surface: [`RadioProps`](super::RadioProps).
     type Props = RadioProps;
 
-    #[doc = include_str!("radio_component.doc/render.md")]
+    #[doc = include_str!("../../docs/api/radio/radio_component.doc/render.md")]
     fn render(&mut self, _ctx: &mut ComponentContext<'_>, props: &Self::Props) -> View {
         View::from_fragment(Radio::contents(props.selected, &props.label))
     }

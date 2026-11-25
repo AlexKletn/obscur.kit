@@ -1,23 +1,25 @@
-#![doc = include_str!("frame_scheduler.doc/_module.md")]
+//! The event-driven frame scheduler (spec §3.5 event-driven scheduling, §3.6
+//! priorities): [`FrameScheduler`].
 
 use super::{BackpressureDecision, BackpressurePolicy, SchedulerQueue, StarvationGuard};
 use crate::frame::{FrameReason, FrameRequest};
 
-#[doc = include_str!("frame_scheduler.doc/FrameScheduler.md")]
+#[doc = include_str!("../../docs/api/scheduler/frame_scheduler.doc/FrameScheduler.md")]
 #[derive(Debug, Clone)]
 pub struct FrameScheduler {
-    #[doc = include_str!("frame_scheduler.doc/queue.md")]
+    /// The pending, reason-coalesced frame requests (§3.5, §3.6).
     queue: SchedulerQueue,
-    #[doc = include_str!("frame_scheduler.doc/backpressure.md")]
+    /// The admission-control policy applied to incoming requests (§3.5).
     backpressure: BackpressurePolicy,
-    #[doc = include_str!("frame_scheduler.doc/starvation.md")]
+    /// The fairness guard preventing background-work starvation (§3.6).
     starvation: StarvationGuard,
-    #[doc = include_str!("frame_scheduler.doc/background_pending.md")]
+    /// Whether background task work is currently waiting to be serviced.
     background_pending: bool,
 }
 
 impl FrameScheduler {
-    #[doc = include_str!("frame_scheduler.doc/new.md")]
+    /// Creates a scheduler with an unbounded backpressure policy and the default
+    /// starvation guard.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -28,21 +30,21 @@ impl FrameScheduler {
         }
     }
 
-    #[doc = include_str!("frame_scheduler.doc/with_backpressure.md")]
+    #[doc = include_str!("../../docs/api/scheduler/frame_scheduler.doc/with_backpressure.md")]
     #[must_use]
     pub const fn with_backpressure(mut self, backpressure: BackpressurePolicy) -> Self {
         self.backpressure = backpressure;
         self
     }
 
-    #[doc = include_str!("frame_scheduler.doc/with_starvation_guard.md")]
+    #[doc = include_str!("../../docs/api/scheduler/frame_scheduler.doc/with_starvation_guard.md")]
     #[must_use]
     pub const fn with_starvation_guard(mut self, starvation: StarvationGuard) -> Self {
         self.starvation = starvation;
         self
     }
 
-    #[doc = include_str!("frame_scheduler.doc/request.md")]
+    #[doc = include_str!("../../docs/api/scheduler/frame_scheduler.doc/request.md")]
     pub fn request(&mut self, request: FrameRequest) -> BackpressureDecision {
         let already = self.queue.contains(request.reason());
         let decision = self.backpressure.decide(already, self.queue.len());
@@ -55,12 +57,12 @@ impl FrameScheduler {
         decision
     }
 
-    #[doc = include_str!("frame_scheduler.doc/request_reason.md")]
+    #[doc = include_str!("../../docs/api/scheduler/frame_scheduler.doc/request_reason.md")]
     pub fn request_reason(&mut self, reason: FrameReason) -> BackpressureDecision {
         self.request(FrameRequest::new(reason))
     }
 
-    #[doc = include_str!("frame_scheduler.doc/next_frame.md")]
+    #[doc = include_str!("../../docs/api/scheduler/frame_scheduler.doc/next_frame.md")]
     pub fn next_frame(&mut self) -> Option<FrameRequest> {
         let frame = self.queue.pop()?;
         if self.background_pending {
@@ -69,63 +71,68 @@ impl FrameScheduler {
         Some(frame)
     }
 
-    #[doc = include_str!("frame_scheduler.doc/coalesce_pending.md")]
+    #[doc = include_str!("../../docs/api/scheduler/frame_scheduler.doc/coalesce_pending.md")]
     pub fn coalesce_pending(&mut self) {
         self.queue.clear();
     }
 
-    #[doc = include_str!("frame_scheduler.doc/note_background_pending.md")]
+    /// Takes an additional reason for the frame already counted by `next_frame`.
+    pub(crate) fn take_coalesced_request(&mut self) -> Option<FrameRequest> {
+        self.queue.pop()
+    }
+
+    #[doc = include_str!("../../docs/api/scheduler/frame_scheduler.doc/note_background_pending.md")]
     pub fn note_background_pending(&mut self) {
         self.background_pending = true;
     }
 
-    #[doc = include_str!("frame_scheduler.doc/note_background_idle.md")]
+    #[doc = include_str!("../../docs/api/scheduler/frame_scheduler.doc/note_background_idle.md")]
     pub fn note_background_idle(&mut self) {
         self.background_pending = false;
     }
 
-    #[doc = include_str!("frame_scheduler.doc/service_background.md")]
+    #[doc = include_str!("../../docs/api/scheduler/frame_scheduler.doc/service_background.md")]
     pub fn service_background(&mut self) {
         self.starvation.record_served();
     }
 
-    #[doc = include_str!("frame_scheduler.doc/background_starved.md")]
+    #[doc = include_str!("../../docs/api/scheduler/frame_scheduler.doc/background_starved.md")]
     #[must_use]
     pub const fn background_starved(&self) -> bool {
         self.background_pending && self.starvation.is_starved()
     }
 
-    #[doc = include_str!("frame_scheduler.doc/pending_count.md")]
+    /// Returns the number of pending (coalesced) frame requests.
     #[must_use]
     pub fn pending_count(&self) -> usize {
         self.queue.len()
     }
 
-    #[doc = include_str!("frame_scheduler.doc/has_pending.md")]
+    /// Returns whether any frame request is pending.
     #[must_use]
     pub fn has_pending(&self) -> bool {
         !self.queue.is_empty()
     }
 
-    #[doc = include_str!("frame_scheduler.doc/peek.md")]
+    /// Returns the most-urgent pending frame without removing it, if any.
     #[must_use]
     pub fn peek(&self) -> Option<FrameRequest> {
         self.queue.peek()
     }
 
-    #[doc = include_str!("frame_scheduler.doc/is_background_pending.md")]
+    /// Returns whether background task work is currently marked pending.
     #[must_use]
     pub const fn is_background_pending(&self) -> bool {
         self.background_pending
     }
 
-    #[doc = include_str!("frame_scheduler.doc/backpressure_2.md")]
+    /// Returns the backpressure policy this scheduler admits requests with.
     #[must_use]
     pub const fn backpressure(&self) -> &BackpressurePolicy {
         &self.backpressure
     }
 
-    #[doc = include_str!("frame_scheduler.doc/starvation_2.md")]
+    /// Returns the starvation guard tracking background-work fairness.
     #[must_use]
     pub const fn starvation(&self) -> &StarvationGuard {
         &self.starvation
@@ -133,7 +140,7 @@ impl FrameScheduler {
 }
 
 impl Default for FrameScheduler {
-    #[doc = include_str!("frame_scheduler.doc/default.md")]
+    /// The default scheduler is [`FrameScheduler::new`].
     fn default() -> Self {
         Self::new()
     }

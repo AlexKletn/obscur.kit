@@ -1,4 +1,8 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Docking collection widget (spec §2.6).
 
 mod docking;
-pub use docking::{DockPanel, Docking};
+pub use docking::Docking;
+mod dock_panel;
+pub use dock_panel::DockPanel;
+mod docking_state;
+pub use docking_state::DockingState;

@@ -1,4 +1,5 @@
-#![doc = include_str!("check.doc/_module.md")]
+//! Graph-based architecture checks: layering direction, the facade-dependency
+//! ban, and workspace cycles (spec §3.16, §5.9).
 
 use std::path::Path;
 
@@ -10,20 +11,21 @@ const RULE_LAYERING: &str = "dependency-layering";
 const RULE_FACADE: &str = "facade-dependency";
 const RULE_CYCLE: &str = "dependency-cycle";
 
-#[doc = include_str!("check.doc/FACADE_CRATE.md")]
+/// The umbrella crate; no internal crate may depend on it (spec §2.10, §5.6).
 const FACADE_CRATE: &str = "obscur-kit";
 
-#[doc = include_str!("check.doc/check.md")]
+/// Builds the workspace dependency graph from member manifests and runs the
+/// layering, facade-ban and cycle checks.
 pub(crate) fn check(root: &Path) -> Vec<Violation> {
-    let graph = WorkspaceGraph::from_root(root);
-    let mut out = Vec::new();
+    let (graph, mut out) = WorkspaceGraph::from_root(root);
+    out.extend(super::super::dependency_direction::check(&graph));
     out.extend(layering_violations(&graph));
     out.extend(facade_violations(&graph));
     out.extend(cycle_violations(&graph));
     out
 }
 
-#[doc = include_str!("check.doc/layering_violations.md")]
+/// Flags any `obscur-*` edge that crosses an allowed dependency direction.
 fn layering_violations(graph: &WorkspaceGraph) -> Vec<Violation> {
     let mut out = Vec::new();
     for source in &graph.nodes {
@@ -55,7 +57,7 @@ fn layering_violations(graph: &WorkspaceGraph) -> Vec<Violation> {
     out
 }
 
-#[doc = include_str!("check.doc/facade_violations.md")]
+/// Flags any non-facade crate that depends on the umbrella `obscur-kit`.
 fn facade_violations(graph: &WorkspaceGraph) -> Vec<Violation> {
     let mut out = Vec::new();
     for source in &graph.nodes {
@@ -76,7 +78,7 @@ fn facade_violations(graph: &WorkspaceGraph) -> Vec<Violation> {
     out
 }
 
-#[doc = include_str!("check.doc/cycle_violations.md")]
+/// Flags the first dependency cycle among workspace crates, if any.
 fn cycle_violations(graph: &WorkspaceGraph) -> Vec<Violation> {
     let Some(cycle) = graph.find_cycle() else {
         return Vec::new();
@@ -107,6 +109,7 @@ mod tests {
             layer,
             manifest: PathBuf::from(format!("{name}/Cargo.toml")),
             deps: deps.iter().map(|d| (*d).to_owned()).collect(),
+            dev_deps: Vec::new(),
         }
     }
 
@@ -162,6 +165,56 @@ mod tests {
         };
         assert!(facade_violations(&graph).is_empty());
         assert!(layering_violations(&graph).is_empty());
+    }
+
+    #[test]
+    fn duplicate_package_names_report_both_manifests() {
+        let workspace = tempfile::tempdir().unwrap();
+        let first = workspace.path().join("crates/domain/first");
+        let second = workspace.path().join("tools/second");
+        for member in [&first, &second] {
+            std::fs::create_dir_all(member).unwrap();
+            std::fs::write(member.join("Cargo.toml"), "[package]\nname = \"same\"").unwrap();
+        }
+        let violations = check(workspace.path());
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].file, second.join("Cargo.toml"));
+        assert!(
+            violations[0]
+                .detail
+                .contains("crates/domain/first/Cargo.toml")
+                || violations[0]
+                    .detail
+                    .contains(r"crates\domain\first\Cargo.toml")
+        );
+    }
+
+    #[test]
+    fn workspace_aliases_are_checked_against_the_package_layer() {
+        let workspace = tempfile::tempdir().unwrap();
+        std::fs::write(
+            workspace.path().join("Cargo.toml"),
+            "[workspace.dependencies]\nwindow = { package = 'obscur-window', path = 'crates/adapters/window' }",
+        )
+        .unwrap();
+        for (member, manifest) in [
+            (
+                "crates/domain/model",
+                "[package]\nname = 'obscur-model'\n[dependencies]\nwindow.workspace = true",
+            ),
+            (
+                "crates/adapters/window",
+                "[package]\nname = 'obscur-window'",
+            ),
+        ] {
+            let member = workspace.path().join(member);
+            std::fs::create_dir_all(&member).unwrap();
+            std::fs::write(member.join("Cargo.toml"), manifest).unwrap();
+        }
+        let violations = check(workspace.path());
+        assert_eq!(violations.len(), 1);
+        assert_eq!(violations[0].rule, "dependency-layering");
+        assert!(violations[0].detail.contains("obscur-window"));
     }
 
     #[test]

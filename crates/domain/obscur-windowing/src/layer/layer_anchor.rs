@@ -1,22 +1,22 @@
-#![doc = include_str!("layer_anchor.doc/_module.md")]
+//! Which screen edges a layer surface is pinned to.
 
 use super::LayerEdge;
 
-#[doc = include_str!("layer_anchor.doc/LayerAnchor.md")]
+#[doc = include_str!("../../docs/api/layer/layer_anchor.doc/LayerAnchor.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct LayerAnchor {
-    #[doc = include_str!("layer_anchor.doc/top.md")]
+    /// Pinned to the top edge.
     pub top: bool,
-    #[doc = include_str!("layer_anchor.doc/right.md")]
+    /// Pinned to the right edge.
     pub right: bool,
-    #[doc = include_str!("layer_anchor.doc/bottom.md")]
+    /// Pinned to the bottom edge.
     pub bottom: bool,
-    #[doc = include_str!("layer_anchor.doc/left.md")]
+    /// Pinned to the left edge.
     pub left: bool,
 }
 
 impl LayerAnchor {
-    #[doc = include_str!("layer_anchor.doc/NONE.md")]
+    /// Anchored to nothing: the compositor centres the surface.
     pub const NONE: Self = Self {
         top: false,
         right: false,
@@ -24,7 +24,7 @@ impl LayerAnchor {
         left: false,
     };
 
-    #[doc = include_str!("layer_anchor.doc/TOP_BAR.md")]
+    /// A bar across the top of the screen: full width, requested height.
     pub const TOP_BAR: Self = Self {
         top: true,
         right: true,
@@ -32,7 +32,7 @@ impl LayerAnchor {
         left: true,
     };
 
-    #[doc = include_str!("layer_anchor.doc/BOTTOM_BAR.md")]
+    /// A bar across the bottom of the screen: full width, requested height.
     pub const BOTTOM_BAR: Self = Self {
         top: false,
         right: true,
@@ -40,7 +40,7 @@ impl LayerAnchor {
         left: true,
     };
 
-    #[doc = include_str!("layer_anchor.doc/LEFT_BAR.md")]
+    /// A column down the left of the screen: full height, requested width.
     pub const LEFT_BAR: Self = Self {
         top: true,
         right: false,
@@ -48,7 +48,7 @@ impl LayerAnchor {
         left: true,
     };
 
-    #[doc = include_str!("layer_anchor.doc/RIGHT_BAR.md")]
+    /// A column down the right of the screen: full height, requested width.
     pub const RIGHT_BAR: Self = Self {
         top: true,
         right: true,
@@ -56,7 +56,8 @@ impl LayerAnchor {
         left: false,
     };
 
-    #[doc = include_str!("layer_anchor.doc/ALL.md")]
+    /// Every edge: the surface fills the output, and the requested size is
+    /// ignored on both axes.
     pub const ALL: Self = Self {
         top: true,
         right: true,
@@ -64,25 +65,25 @@ impl LayerAnchor {
         left: true,
     };
 
-    #[doc = include_str!("layer_anchor.doc/stretches_horizontally.md")]
+    #[doc = include_str!("../../docs/api/layer/layer_anchor.doc/stretches_horizontally.md")]
     #[must_use]
     pub const fn stretches_horizontally(self) -> bool {
         self.left && self.right
     }
 
-    #[doc = include_str!("layer_anchor.doc/stretches_vertically.md")]
+    /// Whether the surface stretches vertically (anchored top **and** bottom).
     #[must_use]
     pub const fn stretches_vertically(self) -> bool {
         self.top && self.bottom
     }
 
-    #[doc = include_str!("layer_anchor.doc/is_empty.md")]
+    /// Whether no edge is anchored, so the compositor centres the surface.
     #[must_use]
     pub const fn is_empty(self) -> bool {
         !(self.top || self.right || self.bottom || self.left)
     }
 
-    #[doc = include_str!("layer_anchor.doc/docked_edge.md")]
+    #[doc = include_str!("../../docs/api/layer/layer_anchor.doc/docked_edge.md")]
     #[must_use]
     pub const fn docked_edge(self) -> Option<LayerEdge> {
         // Two spellings dock to each edge, and they are paired here rather than

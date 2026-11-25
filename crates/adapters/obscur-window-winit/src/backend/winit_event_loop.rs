@@ -1,13 +1,11 @@
-#![doc = include_str!("winit_event_loop.doc/_module.md")]
+#![doc = include_str!("../../docs/api/backend/winit_event_loop.doc/_module.md")]
 
 use std::collections::HashMap;
 use std::mem;
 use std::sync::{Arc, Mutex};
 
-use obscur_identity::WindowId;
-use obscur_windowing::display::{Display, DisplayEvent, DisplayId};
 use obscur_windowing::request::CreateWindow;
-use obscur_windowing::window::{WindowEvent, WindowProperties};
+use obscur_windowing::window::WindowEvent;
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalPosition, LogicalSize};
 use winit::event::WindowEvent as WinitWindowEvent;
@@ -18,143 +16,22 @@ use winit::window::{WindowAttributes, WindowId as WinitWindowId, WindowLevel};
 use crate::conversion::{DisplayConverter, WindowEventConverter};
 use crate::error::WinitBackendError;
 
+use super::backend_state::BackendState;
 use super::winit_window::WinitWindow;
 
-#[doc = include_str!("winit_event_loop.doc/UserEvent.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UserEvent {
-    #[doc = include_str!("winit_event_loop.doc/WakeUp.md")]
-    WakeUp,
-}
+use super::UserEvent;
 
-#[doc = include_str!("winit_event_loop.doc/BackendState.md")]
-#[derive(Debug, Default)]
-pub(crate) struct BackendState {
-    #[doc = include_str!("winit_event_loop.doc/pending_creates.md")]
-    pub(crate) pending_creates: Vec<(WindowId, CreateWindow)>,
-    #[doc = include_str!("winit_event_loop.doc/pending_closes.md")]
-    pub(crate) pending_closes: Vec<WindowId>,
-    #[doc = include_str!("winit_event_loop.doc/pending_property_updates.md")]
-    pub(crate) pending_property_updates: Vec<(WindowId, WindowProperties)>,
-    #[doc = include_str!("winit_event_loop.doc/pending_focus.md")]
-    pub(crate) pending_focus: Vec<WindowId>,
-    #[doc = include_str!("winit_event_loop.doc/windows.md")]
-    pub(crate) windows: HashMap<WindowId, WinitWindow>,
-    #[doc = include_str!("winit_event_loop.doc/winit_to_domain.md")]
-    pub(crate) winit_to_domain: HashMap<WinitWindowId, WindowId>,
-    #[doc = include_str!("winit_event_loop.doc/window_events.md")]
-    pub(crate) window_events: Vec<(WindowId, WindowEvent)>,
-    #[doc = include_str!("winit_event_loop.doc/focused.md")]
-    pub(crate) focused: Option<WindowId>,
-    #[doc = include_str!("winit_event_loop.doc/creation_errors.md")]
-    pub(crate) creation_errors: Vec<WinitBackendError>,
-    #[doc = include_str!("winit_event_loop.doc/displays.md")]
-    pub(crate) displays: Vec<Display>,
-    #[doc = include_str!("winit_event_loop.doc/display_events.md")]
-    pub(crate) display_events: Vec<DisplayEvent>,
-    #[doc = include_str!("winit_event_loop.doc/display_ids.md")]
-    display_ids: HashMap<MonitorKey, DisplayId>,
-    #[doc = include_str!("winit_event_loop.doc/next_display_id.md")]
-    next_display_id: u64,
-}
-
-#[doc = include_str!("winit_event_loop.doc/MonitorKey.md")]
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct MonitorKey {
-    #[doc = include_str!("winit_event_loop.doc/name.md")]
-    name: Option<String>,
-    #[doc = include_str!("winit_event_loop.doc/ordinal.md")]
-    ordinal: usize,
-}
-
-impl BackendState {
-    #[doc = include_str!("winit_event_loop.doc/record_window_event.md")]
-    pub(crate) fn record_window_event(&mut self, id: WindowId, event: WindowEvent) {
-        match event {
-            WindowEvent::FocusGained => self.focused = Some(id),
-            WindowEvent::FocusLost if self.focused == Some(id) => self.focused = None,
-            _ => {}
-        }
-        self.window_events.push((id, event));
-    }
-
-    #[doc = include_str!("winit_event_loop.doc/record_displays.md")]
-    pub(crate) fn record_displays(&mut self, displays: Vec<Display>) {
-        for previous in &self.displays {
-            if !displays.iter().any(|display| display.id() == previous.id()) {
-                self.display_events
-                    .push(DisplayEvent::Disconnected(previous.id()));
-            }
-        }
-        for display in &displays {
-            match self
-                .displays
-                .iter()
-                .find(|previous| previous.id() == display.id())
-            {
-                None => self
-                    .display_events
-                    .push(DisplayEvent::Connected(display.id())),
-                Some(previous) if configuration_changed(previous, display) => self
-                    .display_events
-                    .push(DisplayEvent::ConfigurationChanged(display.id())),
-                Some(_) => {}
-            }
-        }
-
-        let was_primary = primary_of(&self.displays);
-        let is_primary = primary_of(&displays);
-        if is_primary != was_primary
-            && let Some(id) = is_primary
-        {
-            self.display_events.push(DisplayEvent::PrimaryChanged(id));
-        }
-
-        self.displays = displays;
-    }
-
-    #[doc = include_str!("winit_event_loop.doc/display_id_for.md")]
-    pub(crate) fn display_id_for(&mut self, name: Option<String>, ordinal: usize) -> DisplayId {
-        let key = MonitorKey { name, ordinal };
-        if let Some(&id) = self.display_ids.get(&key) {
-            return id;
-        }
-        let id = DisplayId::from_raw(self.next_display_id);
-        self.next_display_id += 1;
-        self.display_ids.insert(key, id);
-        id
-    }
-}
-
-#[doc = include_str!("winit_event_loop.doc/primary_of.md")]
-fn primary_of(displays: &[Display]) -> Option<DisplayId> {
-    displays
-        .iter()
-        .find(|display| display.is_primary())
-        .map(Display::id)
-}
-
-#[doc = include_str!("winit_event_loop.doc/configuration_changed.md")]
-fn configuration_changed(previous: &Display, current: &Display) -> bool {
-    previous.current_mode() != current.current_mode()
-        || previous.available_modes() != current.available_modes()
-        || previous.scale_factor() != current.scale_factor()
-        || previous.logical_bounds() != current.logical_bounds()
-        || previous.physical_bounds() != current.physical_bounds()
-        || previous.work_area() != current.work_area()
-}
-
-#[doc = include_str!("winit_event_loop.doc/WinitAppHandler.md")]
+#[doc = include_str!("../../docs/api/backend/winit_event_loop.doc/WinitAppHandler.md")]
 #[derive(Debug)]
 pub struct WinitAppHandler {
-    #[doc = include_str!("winit_event_loop.doc/state.md")]
+    /// The shared winit-side state, cloned from the backend handle.
     state: Arc<Mutex<BackendState>>,
-    #[doc = include_str!("winit_event_loop.doc/window_events_2.md")]
+    /// The pure native→domain window-event converter.
     window_events: WindowEventConverter,
 }
 
 impl WinitAppHandler {
-    #[doc = include_str!("winit_event_loop.doc/new.md")]
+    /// Builds a handler sharing `state` with its originating backend handle.
     pub(crate) fn new(state: Arc<Mutex<BackendState>>) -> Self {
         Self {
             state,
@@ -162,7 +39,7 @@ impl WinitAppHandler {
         }
     }
 
-    #[doc = include_str!("winit_event_loop.doc/pump.md")]
+    #[doc = include_str!("../../docs/api/backend/winit_event_loop.doc/pump.md")]
     fn pump(&self, event_loop: &ActiveEventLoop) {
         let mut state = self.lock();
         pump_displays(event_loop, &mut state);
@@ -207,19 +84,19 @@ impl WinitAppHandler {
         }
     }
 
-    #[doc = include_str!("winit_event_loop.doc/lock.md")]
+    /// Locks the shared state, treating a poisoned mutex as an unrecoverable bug.
     fn lock(&self) -> std::sync::MutexGuard<'_, BackendState> {
         self.state.lock().expect("backend state mutex poisoned")
     }
 }
 
 impl ApplicationHandler<UserEvent> for WinitAppHandler {
-    #[doc = include_str!("winit_event_loop.doc/resumed.md")]
+    #[doc = include_str!("../../docs/api/backend/winit_event_loop.doc/resumed.md")]
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         self.pump(event_loop);
     }
 
-    #[doc = include_str!("winit_event_loop.doc/window_event.md")]
+    #[doc = include_str!("../../docs/api/backend/winit_event_loop.doc/window_event.md")]
     fn window_event(
         &mut self,
         _event_loop: &ActiveEventLoop,
@@ -235,12 +112,12 @@ impl ApplicationHandler<UserEvent> for WinitAppHandler {
         }
     }
 
-    #[doc = include_str!("winit_event_loop.doc/about_to_wait.md")]
+    #[doc = include_str!("../../docs/api/backend/winit_event_loop.doc/about_to_wait.md")]
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         self.pump(event_loop);
     }
 
-    #[doc = include_str!("winit_event_loop.doc/user_event.md")]
+    #[doc = include_str!("../../docs/api/backend/winit_event_loop.doc/user_event.md")]
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
             UserEvent::WakeUp => {
@@ -253,7 +130,7 @@ impl ApplicationHandler<UserEvent> for WinitAppHandler {
     }
 }
 
-#[doc = include_str!("winit_event_loop.doc/pump_displays.md")]
+#[doc = include_str!("../../docs/api/backend/winit_event_loop.doc/pump_displays.md")]
 fn pump_displays(event_loop: &ActiveEventLoop, state: &mut BackendState) {
     let monitors: Vec<_> = event_loop.available_monitors().collect();
     let converter = if global_coordinates_are_published(&monitors) {
@@ -281,7 +158,7 @@ fn pump_displays(event_loop: &ActiveEventLoop, state: &mut BackendState) {
     state.record_displays(displays);
 }
 
-#[doc = include_str!("winit_event_loop.doc/global_coordinates_are_published.md")]
+#[doc = include_str!("../../docs/api/backend/winit_event_loop.doc/global_coordinates_are_published.md")]
 fn global_coordinates_are_published(monitors: &[MonitorHandle]) -> bool {
     let positions: Vec<_> = monitors
         .iter()
@@ -293,12 +170,14 @@ fn global_coordinates_are_published(monitors: &[MonitorHandle]) -> bool {
     positions_carry_a_topology(&positions)
 }
 
-#[doc = include_str!("winit_event_loop.doc/positions_carry_a_topology.md")]
+/// The decision behind [`global_coordinates_are_published`], over plain positions
+/// so it is reachable without an event loop (a `MonitorHandle` needs one, which is
+/// why the rule this replaced was never tested).
 fn positions_carry_a_topology(positions: &[(i32, i32)]) -> bool {
     positions.len() < 2 || !positions.iter().all(|&position| position == (0, 0))
 }
 
-#[doc = include_str!("winit_event_loop.doc/window_attributes.md")]
+#[doc = include_str!("../../docs/api/backend/winit_event_loop.doc/window_attributes.md")]
 fn window_attributes(request: &CreateWindow) -> WindowAttributes {
     let properties = request.properties();
     let mut attributes = WindowAttributes::default()
@@ -341,7 +220,10 @@ fn window_attributes(request: &CreateWindow) -> WindowAttributes {
 mod tests {
     use super::*;
     use obscur_geometry::{Point, Rect, ScaleFactor, Size};
+    use obscur_identity::WindowId;
+    use obscur_windowing::display::{Display, DisplayEvent, DisplayId};
     use obscur_windowing::window::WindowConstraints;
+    use obscur_windowing::window::WindowProperties;
     use winit::dpi::Size as WinitSize;
 
     /// §6.6's condition is *unavailable* coordinates, not a platform. A second

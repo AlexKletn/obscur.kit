@@ -1,4 +1,4 @@
-#![doc = include_str!("component_render_pass.doc/_module.md")]
+//! The frame's component-render phase: [`ComponentRenderPass`].
 
 use std::collections::HashSet;
 
@@ -7,6 +7,7 @@ use obscur_diagnostics::{
     RecoveryAction,
 };
 use obscur_identity::{FastSet, NodeId};
+use obscur_style::matching::Stylesheet;
 use obscur_tree::node::{NodeKind, RetainedNode};
 use obscur_tree::reconciliation::Reconciler;
 use obscur_tree::tree::RetainedTree;
@@ -18,27 +19,30 @@ use crate::component::{ComponentStore, GuardedRender};
 use crate::recovery::RecoveryResult;
 use crate::transaction::ReconcileEnactor;
 
-#[doc = include_str!("component_render_pass.doc/MAX_PASSES.md")]
+use super::reconcile_counts::ReconcileCounts;
+
+#[doc = include_str!("../../docs/api/runtime/component_render_pass.doc/MAX_PASSES.md")]
 const MAX_PASSES: usize = 32;
 
-#[doc = include_str!("component_render_pass.doc/ComponentRenderPass.md")]
+#[doc = include_str!("../../docs/api/runtime/component_render_pass.doc/ComponentRenderPass.md")]
 pub(crate) struct ComponentRenderPass<'a> {
-    #[doc = include_str!("component_render_pass.doc/tree.md")]
+    /// The retained tree the sub-reconciles commit into.
     tree: &'a mut RetainedTree,
-    #[doc = include_str!("component_render_pass.doc/components.md")]
+    /// The mounted instances, their staleness and their boundary policies.
     components: &'a mut ComponentStore,
-    #[doc = include_str!("component_render_pass.doc/reconciler.md")]
+    /// The reconciler each component's output is diffed with.
     reconciler: &'a Reconciler,
-    #[doc = include_str!("component_render_pass.doc/enactor.md")]
+    /// The transaction boundary every sub-reconcile is enacted through, so a
+    /// component's output is committed and versioned exactly like the root's.
     enactor: &'a mut ReconcileEnactor,
-    #[doc = include_str!("component_render_pass.doc/telemetry.md")]
+    /// Where the `component.rendered` / `component.props_errors` counters land.
     telemetry: &'a mut FrameTelemetry,
-    #[doc = include_str!("component_render_pass.doc/diagnostics.md")]
+    /// Where a failed render and the recovery taken for it are reported (§1.6).
     diagnostics: &'a dyn DiagnosticSink,
 }
 
 impl<'a> ComponentRenderPass<'a> {
-    #[doc = include_str!("component_render_pass.doc/new.md")]
+    /// Bundles the state one component-render phase reads and writes.
     pub(crate) fn new(
         tree: &'a mut RetainedTree,
         components: &'a mut ComponentStore,
@@ -57,11 +61,15 @@ impl<'a> ComponentRenderPass<'a> {
         }
     }
 
-    #[doc = include_str!("component_render_pass.doc/run.md")]
-    pub(crate) fn run(&mut self) -> Option<Vec<NodeId>> {
+    #[doc = include_str!("../../docs/api/runtime/component_render_pass.doc/run.md")]
+    pub(crate) fn run(
+        &mut self,
+        previous_sheets: Option<&[Stylesheet]>,
+        mut counts: Option<&mut ReconcileCounts>,
+    ) -> (bool, Option<Vec<NodeId>>) {
         // The common case by far: no host registrations, nothing mounted.
         if self.components.is_empty() {
-            return Some(Vec::new());
+            return (false, Some(Vec::new()));
         }
         // The restyle roots every sub-reconcile below implies. This used to be
         // thrown away and answered as "unknowable", which made the style phase
@@ -156,6 +164,9 @@ impl<'a> ComponentRenderPass<'a> {
                     .commit_subtree(self.reconciler, self.tree, host, view.root())
                     .expect("a component rerender is a single, structurally-valid Rerender");
                 changed |= !plan.is_empty();
+                if let Some(counts) = counts.as_deref_mut() {
+                    counts.record(&plan);
+                }
                 // A component whose output matched what was already retained
                 // edited nothing, and so dirties nothing — that is the whole
                 // saving, and it is the common case in a tree of components
@@ -163,12 +174,7 @@ impl<'a> ComponentRenderPass<'a> {
                 if !plan.is_empty()
                     && let Some(collected) = roots.as_mut()
                 {
-                    // The host as well as the plan's own roots: the component's
-                    // output decides the host's children and its `:empty`, and a
-                    // root is a subtree, so this bounds the restyle to the key
-                    // that changed rather than to the keyboard.
-                    collected.push(host);
-                    match RestylePhase::roots_of(self.tree, &plan) {
+                    match RestylePhase::roots_of(self.tree, &plan, previous_sheets) {
                         Some(from_plan) => collected.extend(from_plan),
                         // A sub-plan that cannot be bounded widens the whole
                         // frame, exactly as an unboundable root reconcile does.
@@ -194,18 +200,10 @@ impl<'a> ComponentRenderPass<'a> {
             self.telemetry
                 .count(DiagnosticSubsystem::Tree, "component.props_errors", errors);
         }
-        // `changed` and the roots agree by construction: a plan that edited
-        // nothing contributes no root, and `roots.is_none()` is the unbounded
-        // case, which is a change by definition.
-        debug_assert_eq!(
-            changed,
-            roots.as_ref().is_none_or(|collected| !collected.is_empty()),
-            "a component pass that changed the tree must name at least one root"
-        );
-        roots
+        (changed, roots)
     }
 
-    #[doc = include_str!("component_render_pass.doc/report_slot_mismatches.md")]
+    #[doc = include_str!("../../docs/api/runtime/component_render_pass.doc/report_slot_mismatches.md")]
     fn report_slot_mismatches(&self, node: NodeId, output: &View, retained: &RetainedNode) {
         let NodeKind::Element { component } = retained.kind else {
             return;
@@ -255,7 +253,7 @@ impl<'a> ComponentRenderPass<'a> {
         }
     }
 
-    #[doc = include_str!("component_render_pass.doc/report_failure.md")]
+    #[doc = include_str!("../../docs/api/runtime/component_render_pass.doc/report_failure.md")]
     fn report_failure(&self, node: NodeId, diagnostic: &Diagnostic, recovery: RecoveryAction) {
         let mut diagnostic = diagnostic.clone();
         diagnostic.context.node = Some(node);
@@ -263,7 +261,7 @@ impl<'a> ComponentRenderPass<'a> {
         self.diagnostics.emit(&diagnostic);
     }
 
-    #[doc = include_str!("component_render_pass.doc/contain_escaped.md")]
+    #[doc = include_str!("../../docs/api/runtime/component_render_pass.doc/contain_escaped.md")]
     fn contain_escaped(
         &mut self,
         node: NodeId,
@@ -284,7 +282,7 @@ impl<'a> ComponentRenderPass<'a> {
         Some((host, fallback))
     }
 
-    #[doc = include_str!("component_render_pass.doc/enclosing_boundary.md")]
+    #[doc = include_str!("../../docs/api/runtime/component_render_pass.doc/enclosing_boundary.md")]
     fn enclosing_boundary(&self, node: NodeId) -> Option<NodeId> {
         let mut current = self.tree.get(node)?.logical_parent.parent();
         while let Some(id) = current {
@@ -322,8 +320,8 @@ mod tests {
             &sink,
         );
         assert_eq!(
-            pass.run(),
-            Some(Vec::new()),
+            pass.run(None, None),
+            (false, Some(Vec::new())),
             "nothing mounted names no restyle root — not `None`, which would \
              widen every frame of a component-free application to a full restyle"
         );

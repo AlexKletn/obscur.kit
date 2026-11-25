@@ -1,21 +1,25 @@
-#![doc = include_str!("color_matrix.doc/_module.md")]
+#![doc = include_str!("../../docs/api/effects/color_matrix.doc/_module.md")]
 
-#[doc = include_str!("color_matrix.doc/COLOR_MATRIX_FORMAT.md")]
+/// The render-target texture format the color-matrix pipeline is built for —
+/// matching [`GaussianBlur`](super::GaussianBlur)'s and the Vello offscreen frame's
+/// [`wgpu::TextureFormat::Rgba8Unorm`], so the passes chain without a reformat.
 const COLOR_MATRIX_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
-#[doc = include_str!("color_matrix.doc/MAX_EXTENT.md")]
+/// The largest per-axis extent of a color-matrix scratch texture, clamping a
+/// pathological size so the pass never allocates an unbounded texture.
 const MAX_EXTENT: u32 = 8192;
 
-#[doc = include_str!("color_matrix.doc/ColorMatrix.md")]
+#[doc = include_str!("../../docs/api/effects/color_matrix.doc/ColorMatrix.md")]
 pub struct ColorMatrix {
     pipeline: wgpu::RenderPipeline,
     layout: wgpu::BindGroupLayout,
-    #[doc = include_str!("color_matrix.doc/sampler.md")]
+    /// Clamp-to-edge linear sampler (the pass is 1:1, so filtering is a no-op, but
+    /// a sampler is still required by the bind group).
     sampler: wgpu::Sampler,
 }
 
 impl ColorMatrix {
-    #[doc = include_str!("color_matrix.doc/new.md")]
+    /// Builds the color-matrix pipeline on `device` for [`COLOR_MATRIX_FORMAT`].
     #[must_use]
     pub fn new(device: &wgpu::Device) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -105,7 +109,10 @@ impl ColorMatrix {
         }
     }
 
-    #[doc = include_str!("color_matrix.doc/scratch_texture.md")]
+    /// A scratch color texture (`COLOR_MATRIX_FORMAT`, sampled + render target) the
+    /// pass writes its transformed output into, `width`×`height` clamped to
+    /// [`MAX_EXTENT`] per axis. The caller owns it so it can feed a following blur /
+    /// composite, keeping it alive until the encoder is submitted.
     #[must_use]
     pub fn scratch_texture(&self, device: &wgpu::Device, width: u32, height: u32) -> wgpu::Texture {
         device.create_texture(&wgpu::TextureDescriptor {
@@ -124,7 +131,7 @@ impl ColorMatrix {
         })
     }
 
-    #[doc = include_str!("color_matrix.doc/apply.md")]
+    #[doc = include_str!("../../docs/api/effects/color_matrix.doc/apply.md")]
     pub fn apply(
         &self,
         device: &wgpu::Device,
@@ -182,7 +189,8 @@ impl std::fmt::Debug for ColorMatrix {
     }
 }
 
-#[doc = include_str!("color_matrix.doc/uniform_buffer.md")]
+/// A transient uniform buffer initialised with the matrix's little-endian bytes
+/// (avoiding a `bytemuck` dependency — no new external deps).
 fn uniform_buffer(device: &wgpu::Device, matrix: &[f32; 20], label: &'static str) -> wgpu::Buffer {
     use wgpu::util::DeviceExt;
     let mut bytes = Vec::with_capacity(matrix.len() * 4);

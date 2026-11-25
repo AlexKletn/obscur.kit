@@ -1,4 +1,4 @@
-#![doc = include_str!("message_catalog.doc/_module.md")]
+//! `MessageCatalog`: the reference in-memory [`MessageProvider`] (spec §7.2).
 
 use std::collections::HashMap;
 
@@ -8,20 +8,20 @@ use crate::catalog::MessageProvider;
 use crate::locale::LanguageTag;
 use crate::message::{MessageKey, MessagePattern, MessagePatternError};
 
-#[doc = include_str!("message_catalog.doc/MessageCatalog.md")]
+#[doc = include_str!("../../docs/api/catalog/message_catalog.doc/MessageCatalog.md")]
 #[derive(Debug, Default)]
 pub struct MessageCatalog {
     locales: HashMap<LanguageTag, HashMap<MessageKey, MessagePattern>>,
 }
 
 impl MessageCatalog {
-    #[doc = include_str!("message_catalog.doc/new.md")]
+    /// Creates an empty catalogue.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    #[doc = include_str!("message_catalog.doc/insert.md")]
+    #[doc = include_str!("../../docs/api/catalog/message_catalog.doc/insert.md")]
     pub fn insert(
         &mut self,
         locale: &LanguageTag,
@@ -36,13 +36,13 @@ impl MessageCatalog {
         Ok(())
     }
 
-    #[doc = include_str!("message_catalog.doc/locale_count.md")]
+    /// Returns how many locales hold at least one message.
     #[must_use]
     pub fn locale_count(&self) -> usize {
         self.locales.len()
     }
 
-    #[doc = include_str!("message_catalog.doc/is_empty.md")]
+    /// Returns whether the catalogue holds no messages at all.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.locales.values().all(HashMap::is_empty)

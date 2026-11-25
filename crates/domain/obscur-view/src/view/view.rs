@@ -1,15 +1,15 @@
-#![doc = include_str!("view.doc/_module.md")]
+//! `View`: the root of a component's desired output.
 
 use super::{ViewFragment, ViewNode};
 
-#[doc = include_str!("view.doc/View.md")]
+#[doc = include_str!("../../docs/api/view/view.doc/View.md")]
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct View {
     root: ViewFragment,
 }
 
 impl View {
-    #[doc = include_str!("view.doc/empty.md")]
+    /// Creates a `View` producing no top-level nodes.
     #[must_use]
     pub const fn empty() -> Self {
         Self {
@@ -17,7 +17,7 @@ impl View {
         }
     }
 
-    #[doc = include_str!("view.doc/single.md")]
+    /// Creates a `View` with a single top-level node.
     #[must_use]
     pub fn single(node: ViewNode) -> Self {
         Self {
@@ -25,25 +25,25 @@ impl View {
         }
     }
 
-    #[doc = include_str!("view.doc/from_fragment.md")]
+    /// Creates a `View` from an existing root fragment.
     #[must_use]
     pub fn from_fragment(root: ViewFragment) -> Self {
         Self { root }
     }
 
-    #[doc = include_str!("view.doc/root.md")]
+    /// Returns the root fragment of top-level nodes.
     #[must_use]
     pub const fn root(&self) -> &ViewFragment {
         &self.root
     }
 
-    #[doc = include_str!("view.doc/into_fragment.md")]
+    /// Consumes this `View`, returning its root fragment.
     #[must_use]
     pub fn into_fragment(self) -> ViewFragment {
         self.root
     }
 
-    #[doc = include_str!("view.doc/into_single_node.md")]
+    #[doc = include_str!("../../docs/api/view/view.doc/into_single_node.md")]
     #[must_use]
     pub fn into_single_node(self) -> Option<ViewNode> {
         let mut nodes = self.root.into_nodes();

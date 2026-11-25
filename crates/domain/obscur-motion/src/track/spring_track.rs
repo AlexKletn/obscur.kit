@@ -1,25 +1,26 @@
-#![doc = include_str!("spring_track.doc/_module.md")]
+//! The [`SpringTrack`] spring-shaped from→to track (spec §4.17).
 
 use crate::track::MotionTrack;
 use crate::value::MotionValue;
 
-#[doc = include_str!("spring_track.doc/SpringTrack.md")]
+#[doc = include_str!("../../docs/api/track/spring_track.doc/SpringTrack.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SpringTrack {
-    #[doc = include_str!("spring_track.doc/from.md")]
+    /// The value at rest at the start (`t == 0`).
     from: MotionValue,
-    #[doc = include_str!("spring_track.doc/to.md")]
+    /// The target the spring settles toward (`t ≈ 1`).
     to: MotionValue,
-    #[doc = include_str!("spring_track.doc/stiffness.md")]
+    /// Spring constant `k`: higher is stiffer / faster.
     stiffness: f32,
-    #[doc = include_str!("spring_track.doc/damping.md")]
+    /// Damping coefficient `c`: higher settles sooner with less overshoot.
     damping: f32,
-    #[doc = include_str!("spring_track.doc/mass.md")]
+    /// Oscillator mass `m`: higher is heavier / slower.
     mass: f32,
 }
 
 impl SpringTrack {
-    #[doc = include_str!("spring_track.doc/new.md")]
+    /// Creates a spring from `from` to `to` with common UI defaults
+    /// (stiffness `170`, damping `26`, mass `1`).
     #[must_use]
     pub const fn new(from: MotionValue, to: MotionValue) -> Self {
         Self {
@@ -31,58 +32,58 @@ impl SpringTrack {
         }
     }
 
-    #[doc = include_str!("spring_track.doc/with_stiffness.md")]
+    /// Returns this spring with `stiffness` set (fluent setter).
     #[must_use]
     pub const fn with_stiffness(mut self, stiffness: f32) -> Self {
         self.stiffness = stiffness;
         self
     }
 
-    #[doc = include_str!("spring_track.doc/with_damping.md")]
+    /// Returns this spring with `damping` set (fluent setter).
     #[must_use]
     pub const fn with_damping(mut self, damping: f32) -> Self {
         self.damping = damping;
         self
     }
 
-    #[doc = include_str!("spring_track.doc/with_mass.md")]
+    /// Returns this spring with `mass` set (fluent setter).
     #[must_use]
     pub const fn with_mass(mut self, mass: f32) -> Self {
         self.mass = mass;
         self
     }
 
-    #[doc = include_str!("spring_track.doc/from_2.md")]
+    /// Returns the start (`t == 0`) value.
     #[must_use]
     pub const fn from(&self) -> MotionValue {
         self.from
     }
 
-    #[doc = include_str!("spring_track.doc/to_2.md")]
+    /// Returns the target value.
     #[must_use]
     pub const fn to(&self) -> MotionValue {
         self.to
     }
 
-    #[doc = include_str!("spring_track.doc/stiffness_2.md")]
+    /// Returns the spring constant `k`.
     #[must_use]
     pub const fn stiffness(&self) -> f32 {
         self.stiffness
     }
 
-    #[doc = include_str!("spring_track.doc/damping_2.md")]
+    /// Returns the damping coefficient `c`.
     #[must_use]
     pub const fn damping(&self) -> f32 {
         self.damping
     }
 
-    #[doc = include_str!("spring_track.doc/mass_2.md")]
+    /// Returns the oscillator mass `m`.
     #[must_use]
     pub const fn mass(&self) -> f32 {
         self.mass
     }
 
-    #[doc = include_str!("spring_track.doc/spring_progress.md")]
+    #[doc = include_str!("../../docs/api/track/spring_track.doc/spring_progress.md")]
     fn spring_progress(&self, t: f32) -> f32 {
         if t <= 0.0 {
             return 0.0;
@@ -104,7 +105,7 @@ impl SpringTrack {
 }
 
 impl MotionTrack for SpringTrack {
-    #[doc = include_str!("spring_track.doc/sample.md")]
+    #[doc = include_str!("../../docs/api/track/spring_track.doc/sample.md")]
     fn sample(&self, t: f32) -> MotionValue {
         self.from
             .interpolate_checked(&self.to, self.spring_progress(t))

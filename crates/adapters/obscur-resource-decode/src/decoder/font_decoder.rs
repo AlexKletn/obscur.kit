@@ -1,4 +1,4 @@
-#![doc = include_str!("font_decoder.doc/_module.md")]
+#![doc = include_str!("../../docs/api/decoder/font_decoder.doc/_module.md")]
 
 use std::sync::Arc;
 
@@ -6,12 +6,12 @@ use obscur_resources::handle::ResourceKind;
 use obscur_resources::port::{DecodedResource, ResourceDecoder};
 use obscur_resources::state::{ResourceError, ResourceMetadata};
 
-#[doc = include_str!("font_decoder.doc/FontDecoder.md")]
+#[doc = include_str!("../../docs/api/decoder/font_decoder.doc/FontDecoder.md")]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct FontDecoder;
 
 impl FontDecoder {
-    #[doc = include_str!("font_decoder.doc/new.md")]
+    /// Creates a font decoder.
     #[must_use]
     pub const fn new() -> Self {
         Self
@@ -34,9 +34,7 @@ impl ResourceDecoder for FontDecoder {
         let face = ttf_parser::Face::parse(bytes, 0)
             .map_err(|err| ResourceError::DecodeFailed(err.to_string().into()))?;
 
-        // Touch a metric so the validated face is genuinely exercised, and reject
-        // a degenerate face with no glyphs.
-        let _units_per_em = face.units_per_em();
+        // A parsed face may still be unusable for rendering.
         if face.number_of_glyphs() == 0 {
             return Err(ResourceError::DecodeFailed("font has no glyphs".into()));
         }

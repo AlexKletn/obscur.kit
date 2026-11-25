@@ -1,20 +1,21 @@
-#![doc = include_str!("router.doc/_module.md")]
+//! The router composing a route registry with a history provider (spec §6.13).
 
 use crate::history::{HistoryProvider, MemoryHistory, NavigationEntry};
 use crate::route::{Route, RouteState};
 use crate::router::{NavigationResult, RouteRegistry};
 
-#[doc = include_str!("router.doc/Router.md")]
+#[doc = include_str!("../../docs/api/router/router.doc/Router.md")]
 #[derive(Debug)]
 pub struct Router {
-    #[doc = include_str!("router.doc/registry.md")]
+    /// The pattern-to-target mapping navigations resolve against.
     registry: RouteRegistry,
-    #[doc = include_str!("router.doc/history.md")]
+    /// The replaceable history stack backing back/forward navigation.
     history: Box<dyn HistoryProvider>,
 }
 
 impl Router {
-    #[doc = include_str!("router.doc/new.md")]
+    /// Creates a router for `registry`, backed by an in-memory history
+    /// ([`MemoryHistory`]).
     #[must_use]
     pub fn new(registry: RouteRegistry) -> Self {
         Self {
@@ -23,18 +24,19 @@ impl Router {
         }
     }
 
-    #[doc = include_str!("router.doc/with_history.md")]
+    /// Creates a router for `registry` backed by the supplied `history`
+    /// provider.
     #[must_use]
     pub fn with_history(registry: RouteRegistry, history: Box<dyn HistoryProvider>) -> Self {
         Self { registry, history }
     }
 
-    #[doc = include_str!("router.doc/navigate.md")]
+    #[doc = include_str!("../../docs/api/router/router.doc/navigate.md")]
     pub fn navigate(&mut self, path: &str) -> NavigationResult {
         self.navigate_with_state(path, RouteState::empty())
     }
 
-    #[doc = include_str!("router.doc/navigate_with_state.md")]
+    #[doc = include_str!("../../docs/api/router/router.doc/navigate_with_state.md")]
     pub fn navigate_with_state(&mut self, path: &str, state: RouteState) -> NavigationResult {
         let route = Route::parse(path);
         match self.registry.resolve(&route) {
@@ -51,7 +53,7 @@ impl Router {
         }
     }
 
-    #[doc = include_str!("router.doc/back.md")]
+    #[doc = include_str!("../../docs/api/router/router.doc/back.md")]
     pub fn back(&mut self) -> Option<NavigationResult> {
         // Move the cursor; the borrowed entry is dropped at the semicolon so
         // resolve_current can re-borrow self.
@@ -59,7 +61,7 @@ impl Router {
         self.resolve_current()
     }
 
-    #[doc = include_str!("router.doc/forward.md")]
+    #[doc = include_str!("../../docs/api/router/router.doc/forward.md")]
     pub fn forward(&mut self) -> Option<NavigationResult> {
         // Move the cursor; the borrowed entry is dropped at the semicolon so
         // resolve_current can re-borrow self.
@@ -67,7 +69,7 @@ impl Router {
         self.resolve_current()
     }
 
-    #[doc = include_str!("router.doc/resolve_current.md")]
+    #[doc = include_str!("../../docs/api/router/router.doc/resolve_current.md")]
     fn resolve_current(&self) -> Option<NavigationResult> {
         let entry = self.history.current()?;
         let route = entry.route();
@@ -81,25 +83,30 @@ impl Router {
         })
     }
 
-    #[doc = include_str!("router.doc/current.md")]
+    /// Returns the current history entry, or `None` when history is empty.
     #[must_use]
     pub fn current(&self) -> Option<&NavigationEntry> {
         self.history.current()
     }
 
-    #[doc = include_str!("router.doc/can_go_back.md")]
+    /// Returns whether a [`back`](Router::back) move is possible.
     #[must_use]
     pub fn can_go_back(&self) -> bool {
         self.history.can_go_back()
     }
 
-    #[doc = include_str!("router.doc/can_go_forward.md")]
+    /// Returns whether a [`forward`](Router::forward) move is possible.
     #[must_use]
     pub fn can_go_forward(&self) -> bool {
         self.history.can_go_forward()
     }
 
-    #[doc = include_str!("router.doc/registry_2.md")]
+    /// Replaces the effective routes while retaining the current location and navigation history.
+    pub fn replace_registry(&mut self, registry: RouteRegistry) {
+        self.registry = registry;
+    }
+
+    /// Returns the pattern-to-target registry this router resolves against.
     #[must_use]
     pub fn registry(&self) -> &RouteRegistry {
         &self.registry

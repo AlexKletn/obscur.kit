@@ -1,23 +1,23 @@
-#![doc = include_str!("mount_context.doc/_module.md")]
+//! `MountContext`: the per-hook context handed to `on_mount`.
 
 use core::ops::{Deref, DerefMut};
 
 use crate::component::ComponentContext;
 
-#[doc = include_str!("mount_context.doc/MountContext.md")]
+#[doc = include_str!("../../docs/api/lifecycle/mount_context.doc/MountContext.md")]
 #[derive(Debug)]
 pub struct MountContext<'ctx, 'scope> {
     context: &'ctx mut ComponentContext<'scope>,
 }
 
 impl<'ctx, 'scope> MountContext<'ctx, 'scope> {
-    #[doc = include_str!("mount_context.doc/new.md")]
+    /// Wraps a borrowed [`ComponentContext`] for the mount hook.
     #[must_use]
     pub fn new(context: &'ctx mut ComponentContext<'scope>) -> Self {
         Self { context }
     }
 
-    #[doc = include_str!("mount_context.doc/context.md")]
+    /// Mutable access to the underlying [`ComponentContext`].
     #[must_use]
     pub fn context(&mut self) -> &mut ComponentContext<'scope> {
         self.context

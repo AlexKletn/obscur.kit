@@ -1,4 +1,4 @@
-#![doc = include_str!("layer.doc/_module.md")]
+//! A compositing layer that groups a subtree for composition.
 
 use obscur_identity::NodeId;
 
@@ -7,19 +7,19 @@ use crate::tree::RetainedTree;
 
 use super::{LayerId, StackingContext};
 
-#[doc = include_str!("layer.doc/Layer.md")]
+#[doc = include_str!("../../docs/api/layer/layer.doc/Layer.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Layer {
-    #[doc = include_str!("layer.doc/id.md")]
+    /// The opaque identity of this layer.
     id: LayerId,
-    #[doc = include_str!("layer.doc/root.md")]
+    /// The node that establishes this layer's stacking context.
     root: NodeId,
-    #[doc = include_str!("layer.doc/stacking_context.md")]
+    /// The stacking context describing this layer's paint order.
     stacking_context: StackingContext,
 }
 
 impl Layer {
-    #[doc = include_str!("layer.doc/new.md")]
+    #[doc = include_str!("../../docs/api/layer/layer.doc/new.md")]
     #[must_use]
     pub const fn new(id: LayerId, root: NodeId, z_index: i32) -> Self {
         Self {
@@ -29,7 +29,7 @@ impl Layer {
         }
     }
 
-    #[doc = include_str!("layer.doc/with_context.md")]
+    #[doc = include_str!("../../docs/api/layer/layer.doc/with_context.md")]
     #[must_use]
     pub const fn with_context(id: LayerId, stacking_context: StackingContext) -> Self {
         Self {
@@ -39,25 +39,25 @@ impl Layer {
         }
     }
 
-    #[doc = include_str!("layer.doc/id_2.md")]
+    /// Returns this layer's opaque identity.
     #[must_use]
     pub const fn id(self) -> LayerId {
         self.id
     }
 
-    #[doc = include_str!("layer.doc/root_2.md")]
+    /// Returns the node that establishes this layer.
     #[must_use]
     pub const fn root(self) -> NodeId {
         self.root
     }
 
-    #[doc = include_str!("layer.doc/stacking_context_2.md")]
+    /// Returns the stacking context describing this layer's paint order.
     #[must_use]
     pub const fn stacking_context(self) -> StackingContext {
         self.stacking_context
     }
 
-    #[doc = include_str!("layer.doc/establish.md")]
+    #[doc = include_str!("../../docs/api/layer/layer.doc/establish.md")]
     pub fn establish(self, tree: &mut RetainedTree) -> bool {
         let Some(root) = tree.get_mut(self.root) else {
             return false;

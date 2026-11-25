@@ -1,25 +1,27 @@
-#![doc = include_str!("cpu_render_error.doc/_module.md")]
+//! The CPU renderer adapter's internal error, mapped onto the domain
+//! [`RendererError`] (spec §5.2 explicit diagnostics).
 
 use obscur_render::RendererError;
 
-#[doc = include_str!("cpu_render_error.doc/CpuRenderError.md")]
+#[doc = include_str!("../../docs/api/error/cpu_render_error.doc/CpuRenderError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CpuRenderError {
-    #[doc = include_str!("cpu_render_error.doc/PixmapAllocationFailed.md")]
+    /// `tiny_skia::Pixmap::new` returned `None` for the requested dimensions —
+    /// the pixel buffer could not be allocated (e.g. a zero or too-large edge).
     PixmapAllocationFailed {
-        #[doc = include_str!("cpu_render_error.doc/width.md")]
+        /// The requested buffer width, in physical pixels.
         width: u32,
-        #[doc = include_str!("cpu_render_error.doc/height.md")]
+        /// The requested buffer height, in physical pixels.
         height: u32,
     },
-    #[doc = include_str!("cpu_render_error.doc/EmptyTarget.md")]
+    /// The render target has zero area, so there is nothing to rasterize into.
     EmptyTarget,
-    #[doc = include_str!("cpu_render_error.doc/Backend.md")]
+    /// A generic rasterizer-backend failure, carrying a human-readable reason.
     Backend(Box<str>),
 }
 
 impl CpuRenderError {
-    #[doc = include_str!("cpu_render_error.doc/into_renderer_error.md")]
+    #[doc = include_str!("../../docs/api/error/cpu_render_error.doc/into_renderer_error.md")]
     #[must_use]
     pub fn into_renderer_error(self) -> RendererError {
         match self {

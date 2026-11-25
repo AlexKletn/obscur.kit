@@ -1,8 +1,9 @@
-#![doc = include_str!("ui_ir_property.doc/_module.md")]
+//! `UiIrProperty`: a named property on a node whose value is a
+//! [`UiIrExpression`] (spec §2.5).
 
 use crate::document::{UiIrExpression, UiIrValue};
 
-#[doc = include_str!("ui_ir_property.doc/UiIrProperty.md")]
+#[doc = include_str!("../../docs/api/document/ui_ir_property.doc/UiIrProperty.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct UiIrProperty {
     name: Box<str>,
@@ -10,7 +11,7 @@ pub struct UiIrProperty {
 }
 
 impl UiIrProperty {
-    #[doc = include_str!("ui_ir_property.doc/new.md")]
+    /// Creates a property binding `name` to `value`.
     #[must_use]
     pub fn new(name: impl Into<Box<str>>, value: UiIrExpression) -> Self {
         Self {
@@ -19,37 +20,38 @@ impl UiIrProperty {
         }
     }
 
-    #[doc = include_str!("ui_ir_property.doc/literal.md")]
+    /// Creates a property whose value is a literal [`UiIrValue`].
     #[must_use]
     pub fn literal(name: impl Into<Box<str>>, value: UiIrValue) -> Self {
         Self::new(name, UiIrExpression::literal(value))
     }
 
-    #[doc = include_str!("ui_ir_property.doc/text.md")]
+    /// Creates a property whose value is a literal text expression.
     #[must_use]
     pub fn text(name: impl Into<Box<str>>, value: impl Into<Box<str>>) -> Self {
         Self::new(name, UiIrExpression::text(value))
     }
 
-    #[doc = include_str!("ui_ir_property.doc/binding.md")]
+    /// Creates a property whose value is a dynamic binding to `path`.
     #[must_use]
     pub fn binding(name: impl Into<Box<str>>, path: impl Into<Box<str>>) -> Self {
         Self::new(name, UiIrExpression::binding(path))
     }
 
-    #[doc = include_str!("ui_ir_property.doc/name.md")]
+    /// Returns the property name.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    #[doc = include_str!("ui_ir_property.doc/value.md")]
+    /// Returns the property's value expression.
     #[must_use]
     pub const fn value(&self) -> &UiIrExpression {
         &self.value
     }
 
-    #[doc = include_str!("ui_ir_property.doc/is_dynamic.md")]
+    /// Returns whether the value is dynamic — i.e. not a literal (a binding or
+    /// call resolved at runtime).
     #[must_use]
     pub const fn is_dynamic(&self) -> bool {
         !self.value.is_literal()

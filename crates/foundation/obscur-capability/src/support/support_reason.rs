@@ -1,5 +1,6 @@
-#![doc = include_str!("support_reason.doc/_module.md")]
+//! `SupportReason` (skeleton stub for the spec-defined entity; not yet implemented).
 
-#[doc = include_str!("support_reason.doc/SupportReason.md")]
+/// Placeholder for the `SupportReason` entity. See the Obscur Kit 2 specs for its
+/// contract; this stub exists to materialise the target source layout.
 #[derive(Debug)]
 pub(crate) struct SupportReason;

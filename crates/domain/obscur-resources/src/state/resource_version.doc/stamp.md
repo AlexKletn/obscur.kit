@@ -1,1 +1,0 @@
-The underlying version stamp.

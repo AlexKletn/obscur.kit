@@ -1,4 +1,4 @@
-#![doc = include_str!("resource_hub.doc/_module.md")]
+//! The centralized, versioned resource registry and state machine (spec §5.15).
 
 use std::collections::HashMap;
 
@@ -9,32 +9,33 @@ use crate::hub::{ResourceEntry, ResourceNamespace, ResourceRequest};
 use crate::source::ResourceSource;
 use crate::state::{ResourceError, ResourceMetadata, ResourceState, ResourceVersion};
 
-#[doc = include_str!("resource_hub.doc/ResourceHub.md")]
+#[doc = include_str!("../../docs/api/hub/resource_hub.doc/ResourceHub.md")]
 #[derive(Debug, Clone, Default)]
 pub struct ResourceHub {
-    #[doc = include_str!("resource_hub.doc/entries.md")]
+    /// Every tracked resource, keyed by its minted identity.
     entries: HashMap<ResourceId, ResourceEntry>,
-    #[doc = include_str!("resource_hub.doc/by_source.md")]
+    /// Deduplication index from a resource's `(source, kind)` identity to the
+    /// [`ResourceId`] that owns it (spec §5.15 deduplication).
     by_source: HashMap<(ResourceSource, ResourceKind), ResourceId>,
-    #[doc = include_str!("resource_hub.doc/next_id.md")]
+    /// The source of fresh resource identities: a plain incrementing counter.
     next_id: u64,
 }
 
 impl ResourceHub {
-    #[doc = include_str!("resource_hub.doc/new.md")]
+    /// Creates an empty hub tracking no resources.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    #[doc = include_str!("resource_hub.doc/allocate_id.md")]
+    /// Mints the next fresh [`ResourceId`] from the monotonic counter.
     fn allocate_id(&mut self) -> ResourceId {
         let id = ResourceId::from_raw(self.next_id);
         self.next_id += 1;
         id
     }
 
-    #[doc = include_str!("resource_hub.doc/request.md")]
+    #[doc = include_str!("../../docs/api/hub/resource_hub.doc/request.md")]
     pub fn request(&mut self, request: ResourceRequest) -> ResourceHandle {
         if let Some(&id) = self
             .by_source
@@ -54,7 +55,8 @@ impl ResourceHub {
         handle
     }
 
-    #[doc = include_str!("resource_hub.doc/handle_for.md")]
+    /// Returns the handle for an already-tracked `(source, kind)`, or `None` if
+    /// none is tracked (spec §5.15 deduplication).
     #[must_use]
     pub fn handle_for(
         &self,
@@ -65,33 +67,40 @@ impl ResourceHub {
         self.entries.get(id).map(ResourceEntry::handle)
     }
 
-    #[doc = include_str!("resource_hub.doc/entry.md")]
+    /// Returns the full record for `handle`, or `None` if it is unknown.
     #[must_use]
     pub fn entry(&self, handle: ResourceHandle) -> Option<&ResourceEntry> {
         self.entries.get(&handle.id())
     }
 
-    #[doc = include_str!("resource_hub.doc/state.md")]
+    /// Returns the current version of a registered resource.
+    #[must_use]
+    pub fn version(&self, id: ResourceId) -> Option<ResourceVersion> {
+        self.entries.get(&id).map(ResourceEntry::version)
+    }
+
+    /// Returns the current load lifecycle state for `handle`, or `None` if it is
+    /// unknown (spec §5.15 loading/ready/failed).
     #[must_use]
     pub fn state(&self, handle: ResourceHandle) -> Option<&ResourceState> {
         self.entries.get(&handle.id()).map(ResourceEntry::state)
     }
 
-    #[doc = include_str!("resource_hub.doc/begin_load.md")]
+    #[doc = include_str!("../../docs/api/hub/resource_hub.doc/begin_load.md")]
     pub fn begin_load(&mut self, handle: ResourceHandle) -> Option<ResourceVersion> {
         let entry = self.entries.get_mut(&handle.id())?;
         entry.set_state(ResourceState::loading(None));
         Some(entry.version())
     }
 
-    #[doc = include_str!("resource_hub.doc/set_progress.md")]
+    #[doc = include_str!("../../docs/api/hub/resource_hub.doc/set_progress.md")]
     pub fn set_progress(&mut self, handle: ResourceHandle, progress: Option<f32>) {
         if let Some(entry) = self.entries.get_mut(&handle.id()) {
             entry.set_state(ResourceState::loading(progress));
         }
     }
 
-    #[doc = include_str!("resource_hub.doc/complete.md")]
+    #[doc = include_str!("../../docs/api/hub/resource_hub.doc/complete.md")]
     pub fn complete(
         &mut self,
         handle: ResourceHandle,
@@ -108,7 +117,7 @@ impl ResourceHub {
         true
     }
 
-    #[doc = include_str!("resource_hub.doc/fail.md")]
+    #[doc = include_str!("../../docs/api/hub/resource_hub.doc/fail.md")]
     pub fn fail(
         &mut self,
         handle: ResourceHandle,
@@ -125,7 +134,7 @@ impl ResourceHub {
         true
     }
 
-    #[doc = include_str!("resource_hub.doc/reload.md")]
+    #[doc = include_str!("../../docs/api/hub/resource_hub.doc/reload.md")]
     pub fn reload(&mut self, handle: ResourceHandle) -> Option<ResourceVersion> {
         let entry = self.entries.get_mut(&handle.id())?;
         let version = entry.bump_version();
@@ -133,7 +142,7 @@ impl ResourceHub {
         Some(version)
     }
 
-    #[doc = include_str!("resource_hub.doc/release.md")]
+    #[doc = include_str!("../../docs/api/hub/resource_hub.doc/release.md")]
     pub fn release(&mut self, handle: ResourceHandle) -> bool {
         let Some(entry) = self.entries.get_mut(&handle.id()) else {
             return false;
@@ -146,7 +155,7 @@ impl ResourceHub {
         }
     }
 
-    #[doc = include_str!("resource_hub.doc/evict.md")]
+    /// Removes an entry and its deduplication index by id.
     fn evict(&mut self, id: ResourceId) {
         if let Some(entry) = self.entries.remove(&id) {
             self.by_source
@@ -154,7 +163,7 @@ impl ResourceHub {
         }
     }
 
-    #[doc = include_str!("resource_hub.doc/dispose_namespace.md")]
+    #[doc = include_str!("../../docs/api/hub/resource_hub.doc/dispose_namespace.md")]
     pub fn dispose_namespace(&mut self, namespace: &ResourceNamespace) -> usize {
         let doomed: Vec<ResourceId> = self
             .entries
@@ -168,19 +177,19 @@ impl ResourceHub {
         doomed.len()
     }
 
-    #[doc = include_str!("resource_hub.doc/len.md")]
+    /// Returns how many resources the hub currently tracks.
     #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
-    #[doc = include_str!("resource_hub.doc/is_empty.md")]
+    /// Returns whether the hub tracks no resources.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
-    #[doc = include_str!("resource_hub.doc/contains.md")]
+    /// Returns whether `handle` is currently tracked.
     #[must_use]
     pub fn contains(&self, handle: ResourceHandle) -> bool {
         self.entries.contains_key(&handle.id())

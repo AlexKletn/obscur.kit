@@ -1,39 +1,10 @@
-#![doc = include_str!("network_request.doc/_module.md")]
+#![doc = include_str!("../../docs/api/network/network_request.doc/_module.md")]
 
 use std::sync::Arc;
 
-#[doc = include_str!("network_request.doc/HttpMethod.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HttpMethod {
-    #[doc = include_str!("network_request.doc/Get.md")]
-    Get,
-    #[doc = include_str!("network_request.doc/Head.md")]
-    Head,
-    #[doc = include_str!("network_request.doc/Post.md")]
-    Post,
-    #[doc = include_str!("network_request.doc/Put.md")]
-    Put,
-    #[doc = include_str!("network_request.doc/Delete.md")]
-    Delete,
-    #[doc = include_str!("network_request.doc/Patch.md")]
-    Patch,
-}
+use super::HttpMethod;
 
-impl HttpMethod {
-    #[doc = include_str!("network_request.doc/is_safe.md")]
-    #[must_use]
-    pub const fn is_safe(&self) -> bool {
-        matches!(self, Self::Get | Self::Head)
-    }
-
-    #[doc = include_str!("network_request.doc/has_body.md")]
-    #[must_use]
-    pub const fn has_body(&self) -> bool {
-        matches!(self, Self::Post | Self::Put | Self::Patch)
-    }
-}
-
-#[doc = include_str!("network_request.doc/NetworkRequest.md")]
+#[doc = include_str!("../../docs/api/network/network_request.doc/NetworkRequest.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NetworkRequest {
     method: HttpMethod,
@@ -43,7 +14,7 @@ pub struct NetworkRequest {
 }
 
 impl NetworkRequest {
-    #[doc = include_str!("network_request.doc/new.md")]
+    /// Creates a bodyless request with `method` targeting `url` (spec §5.15).
     #[must_use]
     pub fn new(method: HttpMethod, url: impl Into<Box<str>>) -> Self {
         Self {
@@ -54,57 +25,60 @@ impl NetworkRequest {
         }
     }
 
-    #[doc = include_str!("network_request.doc/get.md")]
+    /// Creates a [`HttpMethod::Get`] request for `url` (spec §5.15).
     #[must_use]
     pub fn get(url: impl Into<Box<str>>) -> Self {
         Self::new(HttpMethod::Get, url)
     }
 
-    #[doc = include_str!("network_request.doc/post.md")]
+    /// Creates a [`HttpMethod::Post`] request for `url` carrying `body`
+    /// (spec §5.15).
     #[must_use]
     pub fn post(url: impl Into<Box<str>>, body: impl Into<Arc<[u8]>>) -> Self {
         Self::new(HttpMethod::Post, url).with_body(body)
     }
 
-    #[doc = include_str!("network_request.doc/header.md")]
+    #[doc = include_str!("../../docs/api/network/network_request.doc/header.md")]
     #[must_use]
     pub fn header(mut self, name: impl Into<Box<str>>, value: impl Into<Box<str>>) -> Self {
         self.headers.push((name.into(), value.into()));
         self
     }
 
-    #[doc = include_str!("network_request.doc/with_body.md")]
+    /// Attaches `body` to the request, replacing any existing body (fluent;
+    /// spec §5.15).
     #[must_use]
     pub fn with_body(mut self, body: impl Into<Arc<[u8]>>) -> Self {
         self.body = Some(body.into());
         self
     }
 
-    #[doc = include_str!("network_request.doc/method.md")]
+    /// Returns the request method (spec §5.15).
     #[must_use]
     pub const fn method(&self) -> HttpMethod {
         self.method
     }
 
-    #[doc = include_str!("network_request.doc/url.md")]
+    /// Returns the target URL (spec §5.15).
     #[must_use]
     pub fn url(&self) -> &str {
         &self.url
     }
 
-    #[doc = include_str!("network_request.doc/headers.md")]
+    /// Returns the ordered header name/value pairs (spec §5.15).
     #[must_use]
     pub fn headers(&self) -> &[(Box<str>, Box<str>)] {
         &self.headers
     }
 
-    #[doc = include_str!("network_request.doc/body.md")]
+    /// Returns the request body bytes, or `None` when the request has no body
+    /// (spec §5.15).
     #[must_use]
     pub fn body(&self) -> Option<&[u8]> {
         self.body.as_deref()
     }
 
-    #[doc = include_str!("network_request.doc/header_value.md")]
+    #[doc = include_str!("../../docs/api/network/network_request.doc/header_value.md")]
     #[must_use]
     pub fn header_value(&self, name: &str) -> Option<&str> {
         self.headers
@@ -165,17 +139,5 @@ mod tests {
             Some("application/json")
         );
         assert_eq!(request.header_value("missing"), None);
-    }
-
-    #[test]
-    fn method_predicates_classify() {
-        assert!(HttpMethod::Get.is_safe());
-        assert!(HttpMethod::Head.is_safe());
-        assert!(!HttpMethod::Post.is_safe());
-        assert!(HttpMethod::Post.has_body());
-        assert!(HttpMethod::Put.has_body());
-        assert!(HttpMethod::Patch.has_body());
-        assert!(!HttpMethod::Get.has_body());
-        assert!(!HttpMethod::Delete.has_body());
     }
 }

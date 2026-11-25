@@ -1,28 +1,28 @@
-#![doc = include_str!("paragraph_line.doc/_module.md")]
+//! One laid-out visual line of a multi-font paragraph (spec §5.10).
 
 use crate::shaping::ShapedRun;
 use crate::shaping::TextDirection;
 use crate::span::TextRange;
 
-#[doc = include_str!("paragraph_line.doc/ParagraphLine.md")]
+#[doc = include_str!("../../docs/api/layout/paragraph_line.doc/ParagraphLine.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParagraphLine {
-    #[doc = include_str!("paragraph_line.doc/segments.md")]
+    /// The contiguous same-font segments composing the line, in visual order.
     segments: Vec<ShapedRun>,
-    #[doc = include_str!("paragraph_line.doc/range.md")]
+    /// The byte range of the source text this line covers.
     range: TextRange,
-    #[doc = include_str!("paragraph_line.doc/top.md")]
+    /// The y of the line box's top edge within the paragraph, in logical pixels.
     top: f32,
-    #[doc = include_str!("paragraph_line.doc/height.md")]
+    /// The line box height, in logical pixels.
     height: f32,
-    #[doc = include_str!("paragraph_line.doc/baseline.md")]
+    /// The baseline offset measured down from `top`, in logical pixels.
     baseline: f32,
-    #[doc = include_str!("paragraph_line.doc/x_offset.md")]
+    /// The horizontal start offset from alignment, in logical pixels.
     x_offset: f32,
 }
 
 impl ParagraphLine {
-    #[doc = include_str!("paragraph_line.doc/new.md")]
+    #[doc = include_str!("../../docs/api/layout/paragraph_line.doc/new.md")]
     #[must_use]
     pub fn new(
         segments: Vec<ShapedRun>,
@@ -41,50 +41,51 @@ impl ParagraphLine {
         }
     }
 
-    #[doc = include_str!("paragraph_line.doc/with_x_offset.md")]
+    /// Returns this line with its horizontal start offset set to `x_offset`.
     #[must_use]
     pub fn with_x_offset(mut self, x_offset: f32) -> Self {
         self.x_offset = x_offset;
         self
     }
 
-    #[doc = include_str!("paragraph_line.doc/segments_2.md")]
+    /// Returns the contiguous same-font segments composing the line, in visual
+    /// order.
     #[must_use]
     pub fn segments(&self) -> &[ShapedRun] {
         &self.segments
     }
 
-    #[doc = include_str!("paragraph_line.doc/range_2.md")]
+    /// Returns the byte range of the source text this line covers.
     #[must_use]
     pub const fn range(&self) -> TextRange {
         self.range
     }
 
-    #[doc = include_str!("paragraph_line.doc/top_2.md")]
+    /// Returns the y of the line box's top edge within the paragraph.
     #[must_use]
     pub const fn top(&self) -> f32 {
         self.top
     }
 
-    #[doc = include_str!("paragraph_line.doc/height_2.md")]
+    /// Returns the line box height, in logical pixels.
     #[must_use]
     pub const fn height(&self) -> f32 {
         self.height
     }
 
-    #[doc = include_str!("paragraph_line.doc/baseline_2.md")]
+    /// Returns the baseline offset measured down from [`top`](Self::top).
     #[must_use]
     pub const fn baseline(&self) -> f32 {
         self.baseline
     }
 
-    #[doc = include_str!("paragraph_line.doc/x_offset_2.md")]
+    /// Returns the horizontal start offset from alignment, in logical pixels.
     #[must_use]
     pub const fn x_offset(&self) -> f32 {
         self.x_offset
     }
 
-    #[doc = include_str!("paragraph_line.doc/direction.md")]
+    #[doc = include_str!("../../docs/api/layout/paragraph_line.doc/direction.md")]
     #[must_use]
     pub fn direction(&self) -> TextDirection {
         self.segments
@@ -94,7 +95,8 @@ impl ParagraphLine {
             })
     }
 
-    #[doc = include_str!("paragraph_line.doc/width.md")]
+    /// Returns the line's total advance width: the sum of every segment's run
+    /// advance, in logical pixels (spec §5.10).
     #[must_use]
     pub fn width(&self) -> f32 {
         self.segments
@@ -103,7 +105,7 @@ impl ParagraphLine {
             .sum()
     }
 
-    #[doc = include_str!("paragraph_line.doc/glyph_count.md")]
+    /// Returns the total number of glyphs across all of the line's segments.
     #[must_use]
     pub fn glyph_count(&self) -> usize {
         self.segments
@@ -112,7 +114,7 @@ impl ParagraphLine {
             .sum()
     }
 
-    #[doc = include_str!("paragraph_line.doc/is_empty.md")]
+    /// Returns whether the line contains no glyphs.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.glyph_count() == 0

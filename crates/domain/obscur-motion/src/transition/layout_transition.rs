@@ -1,4 +1,5 @@
-#![doc = include_str!("layout_transition.doc/_module.md")]
+//! The [`LayoutTransition`] FLIP-style layout-box animation (spec §4.17
+//! "layout-affecting animations", "before/after layout geometry").
 
 use obscur_geometry::Rect;
 
@@ -6,7 +7,7 @@ use crate::track::Easing;
 use crate::transition::TransitionDirection;
 use crate::value::Interpolatable;
 
-#[doc = include_str!("layout_transition.doc/LayoutTransition.md")]
+#[doc = include_str!("../../docs/api/transition/layout_transition.doc/LayoutTransition.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LayoutTransition {
     from_bounds: Rect,
@@ -16,7 +17,9 @@ pub struct LayoutTransition {
 }
 
 impl LayoutTransition {
-    #[doc = include_str!("layout_transition.doc/new.md")]
+    /// Creates a layout transition between `from_bounds` (before) and
+    /// `to_bounds` (after), playing [`Linear`](Easing::Linear) and
+    /// [`Forward`](TransitionDirection::Forward) (spec §4.17).
     #[must_use]
     pub const fn new(from_bounds: Rect, to_bounds: Rect) -> Self {
         Self {
@@ -27,51 +30,52 @@ impl LayoutTransition {
         }
     }
 
-    #[doc = include_str!("layout_transition.doc/with_easing.md")]
+    /// Returns this transition with `easing` applied (spec §4.17).
     #[must_use]
     pub const fn with_easing(mut self, easing: Easing) -> Self {
         self.easing = easing;
         self
     }
 
-    #[doc = include_str!("layout_transition.doc/with_direction.md")]
+    /// Returns this transition with `direction` applied (spec §4.17).
     #[must_use]
     pub const fn with_direction(mut self, direction: TransitionDirection) -> Self {
         self.direction = direction;
         self
     }
 
-    #[doc = include_str!("layout_transition.doc/from_bounds.md")]
+    /// The element's layout box *before* the change (spec §4.17).
     #[must_use]
     pub const fn from_bounds(&self) -> Rect {
         self.from_bounds
     }
 
-    #[doc = include_str!("layout_transition.doc/to_bounds.md")]
+    /// The element's layout box *after* the change (spec §4.17).
     #[must_use]
     pub const fn to_bounds(&self) -> Rect {
         self.to_bounds
     }
 
-    #[doc = include_str!("layout_transition.doc/easing.md")]
+    /// The easing curve applied to progress (spec §4.17).
     #[must_use]
     pub const fn easing(&self) -> Easing {
         self.easing
     }
 
-    #[doc = include_str!("layout_transition.doc/direction.md")]
+    /// The direction this transition plays in (spec §4.17).
     #[must_use]
     pub const fn direction(&self) -> TransitionDirection {
         self.direction
     }
 
-    #[doc = include_str!("layout_transition.doc/is_noop.md")]
+    /// Returns `true` if the box does not move (`from_bounds == to_bounds`), so
+    /// the transition produces no visible motion (spec §4.17).
     #[must_use]
     pub fn is_noop(&self) -> bool {
         self.from_bounds == self.to_bounds
     }
 
-    #[doc = include_str!("layout_transition.doc/sample.md")]
+    #[doc = include_str!("../../docs/api/transition/layout_transition.doc/sample.md")]
     #[must_use]
     pub fn sample(&self, t: f32) -> Rect {
         let oriented = self.direction.orient(t);

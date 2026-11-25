@@ -1,15 +1,16 @@
-#![doc = include_str!("capability.doc/_module.md")]
+//! A capability paired with its current support level.
 
 use super::{CapabilityId, CapabilityScope};
 use crate::support::SupportLevel;
 
-#[doc = include_str!("capability.doc/Capability.md")]
+/// A capability entry: its identity, the scope it applies to and how well it is
+/// currently supported.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Capability {
-    #[doc = include_str!("capability.doc/id.md")]
+    /// Stable capability identity.
     pub id: CapabilityId,
-    #[doc = include_str!("capability.doc/scope.md")]
+    /// Scope the capability is issued at.
     pub scope: CapabilityScope,
-    #[doc = include_str!("capability.doc/support.md")]
+    /// Current support level.
     pub support: SupportLevel,
 }

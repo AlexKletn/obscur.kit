@@ -1,17 +1,17 @@
-#![doc = include_str!("timeline_id.doc/_module.md")]
+//! The [`TimelineId`] stable timeline identity (spec §4.17 "stable identity").
 
-#[doc = include_str!("timeline_id.doc/TimelineId.md")]
+#[doc = include_str!("../../docs/api/timeline/timeline_id.doc/TimelineId.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TimelineId(u64);
 
 impl TimelineId {
-    #[doc = include_str!("timeline_id.doc/from_raw.md")]
+    /// Wraps a raw handle value into a `TimelineId`.
     #[must_use]
     pub const fn from_raw(raw: u64) -> Self {
         Self(raw)
     }
 
-    #[doc = include_str!("timeline_id.doc/raw.md")]
+    /// Returns the raw handle value backing this identifier.
     #[must_use]
     pub const fn raw(self) -> u64 {
         self.0

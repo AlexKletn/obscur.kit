@@ -1,34 +1,34 @@
-#![doc = include_str!("route_registry.doc/_module.md")]
+//! The registered pattern-to-target mapping for a router (spec §6.13).
 
 use crate::route::{Route, RouteMatch, RoutePattern};
 
-#[doc = include_str!("route_registry.doc/RouteRegistry.md")]
+#[doc = include_str!("../../docs/api/router/route_registry.doc/RouteRegistry.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RouteRegistry {
-    #[doc = include_str!("route_registry.doc/routes.md")]
+    /// The registered pattern/target pairs, in priority (registration) order.
     routes: Vec<(RoutePattern, Box<str>)>,
 }
 
 impl RouteRegistry {
-    #[doc = include_str!("route_registry.doc/new.md")]
+    /// Creates an empty registry with no registered routes.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    #[doc = include_str!("route_registry.doc/register.md")]
+    #[doc = include_str!("../../docs/api/router/route_registry.doc/register.md")]
     pub fn register(&mut self, pattern: RoutePattern, target: impl Into<Box<str>>) {
         self.routes.push((pattern, target.into()));
     }
 
-    #[doc = include_str!("route_registry.doc/with_route.md")]
+    /// Registers `pattern` mapped to `target` and returns `self` (builder style).
     #[must_use]
     pub fn with_route(mut self, pattern: RoutePattern, target: impl Into<Box<str>>) -> Self {
         self.register(pattern, target);
         self
     }
 
-    #[doc = include_str!("route_registry.doc/resolve.md")]
+    #[doc = include_str!("../../docs/api/router/route_registry.doc/resolve.md")]
     #[must_use]
     pub fn resolve(&self, route: &Route) -> Option<(RouteMatch, &str)> {
         self.routes.iter().find_map(|(pattern, target)| {
@@ -36,13 +36,13 @@ impl RouteRegistry {
         })
     }
 
-    #[doc = include_str!("route_registry.doc/len.md")]
+    /// Returns the number of registered routes.
     #[must_use]
     pub fn len(&self) -> usize {
         self.routes.len()
     }
 
-    #[doc = include_str!("route_registry.doc/is_empty.md")]
+    /// Returns whether no routes are registered.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.routes.is_empty()

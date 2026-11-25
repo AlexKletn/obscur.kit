@@ -1,5 +1,11 @@
-#![doc = include_str!("main.doc/_module.md")]
+#![doc = include_str!("../docs/api/main.doc/_module.md")]
 #![forbid(unsafe_code)]
+
+mod connection_options;
+mod endpoint;
+
+use connection_options::{ConnectionOptions, parse_options};
+use endpoint::Endpoint;
 
 use std::process::ExitCode;
 
@@ -7,7 +13,7 @@ use obscur_devtools::cli;
 use obscur_devtools::host;
 use obscur_devtools_protocol::error::ProtocolError;
 use obscur_devtools_protocol::message::{
-    HandshakeResponse, InjectedEvent, PermissionScope, ScopeSet,
+    CommandId, CommandKind, CommandMessage, HandshakeResponse, InjectedEvent, StableSelector,
 };
 use obscur_devtools_server::transport::{ClientBound, SocketClient, SocketListener};
 
@@ -22,7 +28,7 @@ fn main() -> ExitCode {
     }
 }
 
-#[doc = include_str!("main.doc/run.md")]
+/// Parses `args` and runs the selected command, returning a human error string.
 fn run(args: &[String]) -> Result<(), String> {
     let Some((command, rest)) = args.split_first() else {
         print_usage();
@@ -31,6 +37,8 @@ fn run(args: &[String]) -> Result<(), String> {
     match command.as_str() {
         "serve" => run_serve(rest),
         "inspect" => run_inspect(rest),
+        "select" => run_select(rest),
+        "select-id" => run_select_id(rest),
         "subscribe" => run_subscribe(rest),
         "inject" => run_inject(rest),
         "ping" => run_ping(rest),
@@ -42,91 +50,58 @@ fn run(args: &[String]) -> Result<(), String> {
     }
 }
 
-#[doc = include_str!("main.doc/Endpoint.md")]
-enum Endpoint {
-    #[doc = include_str!("main.doc/Tcp.md")]
-    Tcp(Option<String>),
-    #[doc = include_str!("main.doc/Unix.md")]
-    Unix(String),
-}
-
-#[doc = include_str!("main.doc/Options.md")]
-struct Options {
-    endpoint: Endpoint,
-    token: String,
-    scopes: ScopeSet,
-    positionals: Vec<String>,
-}
-
-#[doc = include_str!("main.doc/parse_options.md")]
-fn parse_options(args: &[String]) -> Result<Options, String> {
-    let mut endpoint = Endpoint::Tcp(None);
-    let mut token = "dev".to_owned();
-    let mut scopes = ScopeSet::all();
-    let mut positionals = Vec::new();
-
-    let mut index = 0;
-    while index < args.len() {
-        let arg = args[index].as_str();
-        match arg {
-            "--tcp" => {
-                // `--tcp` may stand alone (serve, ephemeral) or take an address.
-                let next = args.get(index + 1).filter(|next| !next.starts_with("--"));
-                endpoint = Endpoint::Tcp(next.map(|addr| {
-                    index += 1;
-                    addr.clone()
-                }));
-            }
-            "--unix" => {
-                let path = args.get(index + 1).ok_or("--unix needs a path")?;
-                endpoint = Endpoint::Unix(path.clone());
-                index += 1;
-            }
-            "--token" => {
-                token = args.get(index + 1).ok_or("--token needs a value")?.clone();
-                index += 1;
-            }
-            "--scopes" => {
-                scopes = parse_scopes(args.get(index + 1).ok_or("--scopes needs a value")?)?;
-                index += 1;
-            }
-            other if other.starts_with("--") => {
-                return Err(format!("unknown option '{other}'"));
-            }
-            value => positionals.push(value.to_owned()),
+fn run_select(args: &[String]) -> Result<(), String> {
+    let options = parse_options(args)?;
+    let (role, name) = match options.positionals.as_slice() {
+        [role] => (role.as_str(), None),
+        [role, name] => (role.as_str(), Some(name.as_str())),
+        _ => return Err("select needs a semantic role and optionally an accessible name".into()),
+    };
+    let mut client = connect_and_handshake(&options)?;
+    let reply =
+        cli::select_semantic(&mut client, 1, role, name).map_err(|error| error.to_string())?;
+    match reply {
+        ClientBound::Snapshot(snapshot) => {
+            println!("{}", cli::format_snapshot(&snapshot));
+            Ok(())
         }
-        index += 1;
+        other => Err(cli::format_client_bound(&other)),
     }
-    Ok(Options {
-        endpoint,
-        token,
-        scopes,
-        positionals,
-    })
 }
 
-#[doc = include_str!("main.doc/parse_scopes.md")]
-fn parse_scopes(spec: &str) -> Result<ScopeSet, String> {
-    match spec {
-        "all" => return Ok(ScopeSet::all()),
-        "observer" => return Ok(ScopeSet::observer()),
-        _ => {}
+fn run_select_id(args: &[String]) -> Result<(), String> {
+    let options = parse_options(args)?;
+    let [kind, id] = options.positionals.as_slice() else {
+        return Err("select-id needs an identifier kind and value".into());
+    };
+    let numeric = || {
+        id.parse::<u64>()
+            .map_err(|_| "expected a numeric ID".to_owned())
+    };
+    let selector = match kind.as_str() {
+        "test" => StableSelector::TestId(id.as_str().into()),
+        "automation" => StableSelector::AutomationId(id.as_str().into()),
+        "component" => StableSelector::Component(numeric()?),
+        "node" => StableSelector::Node(numeric()?),
+        _ => return Err("identifier kind must be test, automation, component, or node".into()),
+    };
+    let mut client = connect_and_handshake(&options)?;
+    let reply = client
+        .command(&CommandMessage::new(
+            CommandId::new(1),
+            CommandKind::SelectStableId(selector),
+        ))
+        .map_err(|error| error.to_string())?;
+    match reply {
+        ClientBound::Snapshot(snapshot) => {
+            println!("{}", cli::format_snapshot(&snapshot));
+            Ok(())
+        }
+        other => Err(cli::format_client_bound(&other)),
     }
-    let mut set = ScopeSet::empty();
-    for name in spec.split(',') {
-        let scope = match name.trim() {
-            "read" => PermissionScope::Read,
-            "subscribe" => PermissionScope::Subscribe,
-            "control" => PermissionScope::Control,
-            "inject" => PermissionScope::Inject,
-            other => return Err(format!("unknown scope '{other}'")),
-        };
-        set = set.with(scope);
-    }
-    Ok(set)
 }
 
-#[doc = include_str!("main.doc/connect.md")]
+/// Connects a [`SocketClient`] to the resolved endpoint.
 fn connect(endpoint: &Endpoint) -> Result<SocketClient, String> {
     match endpoint {
         Endpoint::Tcp(Some(addr)) => {
@@ -147,8 +122,9 @@ fn connect(endpoint: &Endpoint) -> Result<SocketClient, String> {
     }
 }
 
-#[doc = include_str!("main.doc/connect_and_handshake.md")]
-fn connect_and_handshake(options: &Options) -> Result<SocketClient, String> {
+/// Connects and handshakes, returning the client on acceptance or a rejection
+/// error message.
+fn connect_and_handshake(options: &ConnectionOptions) -> Result<SocketClient, String> {
     let mut client = connect(&options.endpoint)?;
     let response = cli::handshake(&mut client, &options.token).map_err(|e| e.to_string())?;
     println!("{}", cli::format_handshake(&response));
@@ -158,7 +134,7 @@ fn connect_and_handshake(options: &Options) -> Result<SocketClient, String> {
     }
 }
 
-#[doc = include_str!("main.doc/run_inspect.md")]
+/// `inspect <target|all>`: connect, handshake, and print each target's snapshot.
 fn run_inspect(args: &[String]) -> Result<(), String> {
     let options = parse_options(args)?;
     let target_arg = options
@@ -184,7 +160,7 @@ fn run_inspect(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-#[doc = include_str!("main.doc/run_subscribe.md")]
+/// `subscribe <topic>`: connect, handshake, and print the subscription grant.
 fn run_subscribe(args: &[String]) -> Result<(), String> {
     let options = parse_options(args)?;
     let topic_arg = options
@@ -216,7 +192,8 @@ fn run_subscribe(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-#[doc = include_str!("main.doc/print_pushed_events.md")]
+/// Streams pushed events to stdout until the connection ends or the user
+/// interrupts — a granted subscription now delivers, so print what arrives.
 fn print_pushed_events(client: &mut SocketClient) {
     println!("subscribed · streaming events (^C to stop)");
     loop {
@@ -232,7 +209,8 @@ fn print_pushed_events(client: &mut SocketClient) {
     }
 }
 
-#[doc = include_str!("main.doc/run_inject.md")]
+/// `inject <down|up|click> <x> <y>`: connect, handshake, and inject synthetic
+/// pointer events at logical `(x, y)` — the write half of the agent loop.
 fn run_inject(args: &[String]) -> Result<(), String> {
     let options = parse_options(args)?;
     let kind = options
@@ -283,14 +261,14 @@ fn run_inject(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-#[doc = include_str!("main.doc/run_ping.md")]
+/// `ping`: connect and handshake only.
 fn run_ping(args: &[String]) -> Result<(), String> {
     let options = parse_options(args)?;
     connect_and_handshake(&options)?;
     Ok(())
 }
 
-#[doc = include_str!("main.doc/run_serve.md")]
+/// `serve`: stand up the demo host and serve client sessions.
 fn run_serve(args: &[String]) -> Result<(), String> {
     let options = parse_options(args)?;
     let listener = match &options.endpoint {
@@ -322,13 +300,15 @@ fn run_serve(args: &[String]) -> Result<(), String> {
     host::serve_forever(&listener, &options.token, options.scopes).map_err(|e| e.to_string())
 }
 
-#[doc = include_str!("main.doc/print_usage.md")]
+/// Prints the command summary.
 fn print_usage() {
     println!(
         "obscur-devtools — external DevTools client (spec §7.6)\n\n\
          USAGE:\n  \
          obscur-devtools serve [--tcp | --unix <path>] [--token <t>] [--scopes <list>]\n  \
          obscur-devtools inspect <target|all> --tcp <addr> | --unix <path> [--token <t>]\n  \
+         obscur-devtools select <Role> [name] --tcp <addr> | --unix <path> [--token <t>]\n  \
+         obscur-devtools select-id <test|automation|component|node> <id> --tcp <addr> | --unix <path> [--token <t>]\n  \
          obscur-devtools subscribe <topic>    --tcp <addr> | --unix <path> [--token <t>]\n  \
          obscur-devtools inject <down|up|click> <x> <y>  --tcp <addr> | --unix <path> [--token <t>]\n  \
          obscur-devtools ping                 --tcp <addr> | --unix <path> [--token <t>]\n\n\

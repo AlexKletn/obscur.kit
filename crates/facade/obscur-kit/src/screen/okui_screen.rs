@@ -1,42 +1,56 @@
-#![doc = include_str!("okui_screen.doc/_module.md")]
+//! [`OkuiScreen`] — a compiled `.okui` document, re-lowered to a [`View`] per frame.
 
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
-use crate::okui_compiler::bridge::UiIrViewBridge;
-use crate::okui_compiler::compile::Compiler;
+use crate::okui_compiler::compile::{Compiler, ContractRegistry};
 use crate::okui_compiler::symbol::Symbol;
 use crate::okui_syntax::ast::Document;
 use crate::okui_syntax::parser::Parser;
-use crate::ui_ir::document::{UiIrDocument, UiIrExpression, UiIrNode, UiIrNodeKind, UiIrValue};
-use crate::ui_ir::name_binding;
-use crate::view::view::{View, ViewFragment, ViewNode, ViewProperty, ViewValue};
+use crate::ui_ir::document::UiIrDocument;
+use crate::view::view::{View, ViewFragment};
 
-use super::{ScreenData, ScreenError};
+use super::{
+    ScreenData, ScreenError,
+    screen_lowering::{ScreenLowering, mark_dynamic},
+};
 
-#[doc = include_str!("okui_screen.doc/SCREEN_NAME.md")]
+/// The logical name compile diagnostics are reported against. A screen handed over
+/// as a string has no path, and inventing one would put a file that does not exist
+/// in an error message.
 const SCREEN_NAME: &str = "screen.okui";
 
-#[doc = include_str!("okui_screen.doc/VIRTUAL_FOR.md")]
-const VIRTUAL_FOR: &str = "VirtualFor";
-
-#[doc = include_str!("okui_screen.doc/OkuiScreen.md")]
+#[doc = include_str!("../../docs/api/screen/okui_screen.doc/OkuiScreen.md")]
 pub struct OkuiScreen {
-    #[doc = include_str!("okui_screen.doc/document.md")]
+    /// The compiled IR — the artefact §2.9 calls the shared representation. Kept
+    /// instead of the lowered `View` so a frame can be rebuilt from it.
     document: UiIrDocument,
-    #[doc = include_str!("okui_screen.doc/data.md")]
+    /// The values this screen's bindings read.
     data: ScreenData,
-    #[doc = include_str!("okui_screen.doc/dynamic.md")]
-    dynamic: HashSet<u64>,
+    /// The ids of the IR nodes whose lowering the data can change: a node with a
+    /// bound property or a body interpolation, and every ancestor of one. A node
+    /// outside this set lowers identically on every frame, so the bridge's own
+    /// result for it is reused verbatim.
+    dynamic: Arc<HashSet<u64>>,
+    list_scope: u32,
 }
 
 impl OkuiScreen {
-    #[doc = include_str!("okui_screen.doc/compile.md")]
+    #[doc = include_str!("../../docs/api/screen/okui_screen.doc/compile.md")]
     pub fn compile(source: &str) -> Result<Self, ScreenError> {
         Self::compile_with(source, ScreenData::new())
     }
 
-    #[doc = include_str!("okui_screen.doc/compile_with.md")]
+    #[doc = include_str!("../../docs/api/screen/okui_screen.doc/compile_with.md")]
     pub fn compile_with(source: &str, data: ScreenData) -> Result<Self, ScreenError> {
+        Self::compile_with_registry(source, data, ContractRegistry::builtins())
+    }
+
+    /// Compiles a screen against the supplied component contract registry and application data bindings.
+    pub fn compile_with_registry(
+        source: &str,
+        data: ScreenData,
+        registry: ContractRegistry,
+    ) -> Result<Self, ScreenError> {
         let parsed = Parser::new().parse(source);
         if !parsed.errors().is_empty() {
             return Err(ScreenError::Parse(
@@ -46,7 +60,7 @@ impl OkuiScreen {
         let document = Document::cast(parsed.tree().root().clone()).ok_or_else(|| {
             ScreenError::Parse(vec!["the `.okui` root is not a document".to_owned()])
         })?;
-        let mut compiler = Compiler::new(SCREEN_NAME);
+        let mut compiler = Compiler::new(SCREEN_NAME).with_registry(registry);
         for name in data.names() {
             compiler = compiler.defining(Symbol::state(name));
         }
@@ -65,135 +79,47 @@ impl OkuiScreen {
             .ok_or_else(|| ScreenError::Compile(vec!["no document was produced".to_owned()]))?;
         let mut dynamic = HashSet::new();
         mark_dynamic(document.root(), &mut dynamic);
+        static NEXT_SCOPE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let list_scope = NEXT_SCOPE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         Ok(Self {
             document,
             data,
-            dynamic,
+            dynamic: Arc::new(dynamic),
+            list_scope,
         })
     }
 
-    #[doc = include_str!("okui_screen.doc/data_2.md")]
+    /// The table this screen's bindings resolve against.
     #[must_use]
     pub const fn data(&self) -> &ScreenData {
         &self.data
     }
 
-    #[doc = include_str!("okui_screen.doc/document_2.md")]
+    /// The compiled IR, for a host that wants to inspect or re-lower it itself.
     #[must_use]
     pub const fn document(&self) -> &UiIrDocument {
         &self.document
     }
 
-    #[doc = include_str!("okui_screen.doc/dynamic_node_count.md")]
+    /// How many IR nodes the data can change — the size of the per-frame walk that
+    /// is *not* a plain [`UiIrViewBridge`] call. `0` means this screen is entirely
+    /// static and its lowering is the bridge's, node for node.
     #[must_use]
     pub fn dynamic_node_count(&self) -> usize {
         self.dynamic.len()
     }
 
-    #[doc = include_str!("okui_screen.doc/view.md")]
+    #[doc = include_str!("../../docs/api/screen/okui_screen.doc/view.md")]
     #[must_use]
     pub fn view(&self) -> View {
-        View::from_fragment(ViewFragment::from_nodes(self.lower(self.document.root())))
-    }
-
-    #[doc = include_str!("okui_screen.doc/lower.md")]
-    fn lower(&self, node: &UiIrNode) -> Vec<ViewNode> {
-        // A body `{expr}`: the IR carries the expression, and the bridge — which
-        // has nothing to evaluate it with — lowers it to an anonymous element with
-        // the expression under a hashed property, i.e. an empty box. This is the
-        // one node kind whose lowering is *replaced* rather than repaired.
-        if let Some(expression) = node.interpolated_value() {
-            return vec![ViewNode::text(self.render(expression))];
-        }
-        // Nothing in this subtree reads the data, so the bridge's lowering of it is
-        // already this frame's answer. This is what keeps a mostly static screen at
-        // one bridge call.
-        if !self.dynamic.contains(&node.id()) {
-            return UiIrViewBridge::node_to_view_nodes(node);
-        }
-        match node.kind() {
-            // A real element: keep the bridge's node, substitute its own bound
-            // properties, and re-lower its children through this path so a nested
-            // binding is substituted too.
-            UiIrNodeKind::Element | UiIrNodeKind::Component => {
-                let mut lowered = UiIrViewBridge::node_to_view_nodes(node);
-                for view in &mut lowered {
-                    self.substitute(node, view);
-                }
-                lowered
-            }
-            // Transparent kinds: the bridge splices their children into the
-            // surrounding fragment, so the re-lowered children *are* the result.
-            // Read from the node's own `kind`, not re-derived from its tag — the
-            // front ends already decided which it is.
-            UiIrNodeKind::Fragment | UiIrNodeKind::Conditional | UiIrNodeKind::Loop => {
-                self.lower_children(node)
-            }
-            // Literal content: nothing to substitute (and never marked dynamic —
-            // this arm exists so the match stays total rather than by luck).
-            UiIrNodeKind::Text => UiIrViewBridge::node_to_view_nodes(node),
-        }
-    }
-
-    #[doc = include_str!("okui_screen.doc/lower_children.md")]
-    fn lower_children(&self, node: &UiIrNode) -> Vec<ViewNode> {
-        node.children()
-            .iter()
-            .flat_map(|child| self.lower(child))
-            .collect()
-    }
-
-    #[doc = include_str!("okui_screen.doc/substitute.md")]
-    fn substitute(&self, node: &UiIrNode, view: &mut ViewNode) {
-        let ViewNode::Element {
-            props, children, ..
-        } = view
-        else {
-            return;
-        };
-        for property in node.properties() {
-            let UiIrExpression::Binding(path) = property.value() else {
-                continue;
-            };
-            let Some(value) = self.data.get(path) else {
-                // Unbound: the bridge left the path there, and that is what stays.
-                continue;
-            };
-            // The symbol the bridge bound this attribute to — through the same
-            // tag-aware function it used, so the two cannot disagree about which
-            // property to overwrite.
-            let symbol = name_binding::attr_symbol_on(node.tag(), property.name());
-            for existing in props.iter_mut().filter(|prop| prop.name() == symbol) {
-                *existing = ViewProperty::new(symbol, value.clone());
-            }
-        }
-        // A `<VirtualFor>`'s children are its row template, not content; see the
-        // note on `view`. `dynamic` never marks one, so this only guards a template
-        // reached through an ancestor that is dynamic for its own reasons.
-        if node.kind() == UiIrNodeKind::Loop && node.tag() == VIRTUAL_FOR {
-            return;
-        }
-        *children = ViewFragment::from_nodes(self.lower_children(node));
-    }
-
-    #[doc = include_str!("okui_screen.doc/render.md")]
-    fn render(&self, expression: &UiIrExpression) -> Box<str> {
-        match expression {
-            UiIrExpression::Binding(path) => match self.data.get(path) {
-                Some(value) => ScreenData::render(&value),
-                // Keep the path visible rather than rendering nothing: an unbound
-                // binding is a mistake, and a blank line hides it.
-                None => path.clone(),
-            },
-            // Text is its own rendering; the other literals go through the value
-            // mapping so one function decides how a number reads.
-            UiIrExpression::Literal(UiIrValue::Text(text)) => text.clone(),
-            UiIrExpression::Literal(value) => ScreenData::render(&view_value(value)),
-            // `{format(x)}` has no evaluator on this route — there are no Rust
-            // locals to call anything with. The build-time route emits the call as
-            // Rust and is the one that can run it.
-            UiIrExpression::Call { .. } => Box::from(""),
-        }
+        let lowering = ScreenLowering::new(
+            self.data.snapshot(),
+            Arc::clone(&self.dynamic),
+            self.list_scope,
+        );
+        View::from_fragment(ViewFragment::from_nodes(
+            lowering.lower_nodes(std::iter::once(self.document.root())),
+        ))
     }
 }
 
@@ -204,41 +130,6 @@ impl std::fmt::Debug for OkuiScreen {
             .field("dynamic", &self.dynamic.len())
             .field("data", &self.data)
             .finish()
-    }
-}
-
-#[doc = include_str!("okui_screen.doc/mark_dynamic.md")]
-fn mark_dynamic(node: &UiIrNode, out: &mut HashSet<u64>) -> bool {
-    // A `<VirtualFor>` row template is shared by every realized row, so a value
-    // substituted into it would appear in all of them; stop the walk here.
-    if node.kind() == UiIrNodeKind::Loop && node.tag() == VIRTUAL_FOR {
-        return false;
-    }
-    let mut dynamic = node.interpolated_value().is_some()
-        || node
-            .properties()
-            .iter()
-            .any(|property| matches!(property.value(), UiIrExpression::Binding(_)));
-    for child in node.children() {
-        // Not `||`: every child must be visited, so short-circuiting would leave
-        // later subtrees unmarked.
-        dynamic |= mark_dynamic(child, out);
-    }
-    if dynamic {
-        out.insert(node.id());
-    }
-    dynamic
-}
-
-#[doc = include_str!("okui_screen.doc/view_value.md")]
-const fn view_value(value: &UiIrValue) -> ViewValue {
-    match value {
-        // Text is unreachable here — the caller matches it first (see the note
-        // above) — and joins `Null` rather than duplicating its arm.
-        UiIrValue::Null | UiIrValue::Text(_) => ViewValue::Null,
-        UiIrValue::Bool(flag) => ViewValue::Bool(*flag),
-        UiIrValue::Int(number) => ViewValue::Int(*number),
-        UiIrValue::Float(number) => ViewValue::Float(*number),
     }
 }
 
@@ -305,6 +196,28 @@ mod tests {
             .find(|prop| prop.name() == CLASS)
             .expect("the class property survives substitution");
         assert_eq!(class.value(), &ViewValue::Text("dark".into()));
+    }
+
+    #[test]
+    fn a_custom_screen_contract_validates_its_required_props() {
+        use crate::okui_compiler::compile::ContractRegistry;
+        use crate::view::contract::ComponentSurface;
+
+        let surface = ComponentSurface::new("CustomBadge").requiring_prop("label");
+        let registry = ContractRegistry::builtins().with_surface(&surface);
+        let invalid = OkuiScreen::compile_with_registry(
+            "<CustomBadge/>",
+            ScreenData::new(),
+            registry.clone(),
+        );
+        assert!(matches!(invalid, Err(super::ScreenError::Compile(messages))
+            if messages.iter().any(|message| message.contains("label"))));
+        let valid = OkuiScreen::compile_with_registry(
+            r#"<CustomBadge label="ok"/>"#,
+            ScreenData::new(),
+            registry,
+        );
+        assert!(valid.is_ok());
     }
 
     #[test]

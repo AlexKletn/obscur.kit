@@ -1,23 +1,27 @@
-#![doc = include_str!("line_metrics.doc/_module.md")]
+//! A font's vertical line metrics at a concrete size (spec §5.10).
 
-#[doc = include_str!("line_metrics.doc/LineMetrics.md")]
+#[doc = include_str!("../../docs/api/shaping/line_metrics.doc/LineMetrics.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LineMetrics {
-    #[doc = include_str!("line_metrics.doc/ascent.md")]
+    /// The ascent above the baseline, in logical pixels (non-negative).
     ascent: f32,
-    #[doc = include_str!("line_metrics.doc/descent.md")]
+    /// The descent below the baseline, in logical pixels, as a positive
+    /// magnitude.
     descent: f32,
-    #[doc = include_str!("line_metrics.doc/line_gap.md")]
+    /// Extra leading between lines, in logical pixels.
     line_gap: f32,
 }
 
 impl LineMetrics {
-    #[doc = include_str!("line_metrics.doc/IDEAL_ASCENT_RATIO.md")]
+    /// The fraction of the font size used as the ascent by the idealized default
+    /// ([`idealized`](Self::idealized)).
     pub const IDEAL_ASCENT_RATIO: f32 = 0.8;
-    #[doc = include_str!("line_metrics.doc/IDEAL_DESCENT_RATIO.md")]
+    /// The fraction of the font size used as the descent by the idealized default
+    /// ([`idealized`](Self::idealized)).
     pub const IDEAL_DESCENT_RATIO: f32 = 0.2;
 
-    #[doc = include_str!("line_metrics.doc/new.md")]
+    /// Creates line metrics from an `ascent`, a positive-magnitude `descent`, and
+    /// a `line_gap`, all in logical pixels.
     #[must_use]
     pub const fn new(ascent: f32, descent: f32, line_gap: f32) -> Self {
         Self {
@@ -27,7 +31,7 @@ impl LineMetrics {
         }
     }
 
-    #[doc = include_str!("line_metrics.doc/idealized.md")]
+    #[doc = include_str!("../../docs/api/shaping/line_metrics.doc/idealized.md")]
     #[must_use]
     pub fn idealized(font_size: f32) -> Self {
         Self::new(
@@ -37,31 +41,34 @@ impl LineMetrics {
         )
     }
 
-    #[doc = include_str!("line_metrics.doc/ascent_2.md")]
+    /// Returns the ascent above the baseline, in logical pixels.
     #[must_use]
     pub const fn ascent(&self) -> f32 {
         self.ascent
     }
 
-    #[doc = include_str!("line_metrics.doc/descent_2.md")]
+    /// Returns the descent below the baseline, in logical pixels (positive
+    /// magnitude).
     #[must_use]
     pub const fn descent(&self) -> f32 {
         self.descent
     }
 
-    #[doc = include_str!("line_metrics.doc/line_gap_2.md")]
+    /// Returns the extra leading between lines, in logical pixels.
     #[must_use]
     pub const fn line_gap(&self) -> f32 {
         self.line_gap
     }
 
-    #[doc = include_str!("line_metrics.doc/line_height.md")]
+    /// Returns the natural line height: `ascent + descent + line_gap`, in logical
+    /// pixels.
     #[must_use]
     pub fn line_height(&self) -> f32 {
         self.ascent + self.descent + self.line_gap
     }
 
-    #[doc = include_str!("line_metrics.doc/baseline.md")]
+    /// Returns the baseline offset from the top of the line box: the
+    /// [`ascent`](Self::ascent), in logical pixels.
     #[must_use]
     pub const fn baseline(&self) -> f32 {
         self.ascent

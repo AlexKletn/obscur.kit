@@ -1,22 +1,26 @@
-#![doc = include_str!("line_strut.doc/_module.md")]
+//! The inline line-box strut: the floor every line box is sized from
+//! (CSS 2.1 §10.8.1 / CSS Inline 3 §5).
 
 use crate::font::FontId;
 
 use super::tagged_glyph::TaggedGlyph;
 
-#[doc = include_str!("line_strut.doc/LineStrut.md")]
+#[doc = include_str!("../../docs/api/layout/line_strut.doc/LineStrut.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LineStrut {
-    #[doc = include_str!("line_strut.doc/line_height.md")]
+    /// The CSS *used* `line-height` L, in logical pixels.
     line_height: f32,
-    #[doc = include_str!("line_strut.doc/ascent.md")]
+    /// The primary font's ascent above the baseline, in logical pixels.
     ascent: f32,
-    #[doc = include_str!("line_strut.doc/descent.md")]
+    /// The primary font's descent below the baseline (magnitude, incl. line-gap),
+    /// in logical pixels.
     descent: f32,
 }
 
 impl LineStrut {
-    #[doc = include_str!("line_strut.doc/new.md")]
+    /// Creates a strut from the used `line_height` L and the primary font's
+    /// `ascent` and `descent` (both logical pixels, `descent` a positive
+    /// magnitude below the baseline).
     #[must_use]
     pub const fn new(line_height: f32, ascent: f32, descent: f32) -> Self {
         Self {
@@ -26,25 +30,26 @@ impl LineStrut {
         }
     }
 
-    #[doc = include_str!("line_strut.doc/line_height_2.md")]
+    /// The used `line-height` L, in logical pixels.
     #[must_use]
     pub const fn line_height(&self) -> f32 {
         self.line_height
     }
 
-    #[doc = include_str!("line_strut.doc/ascent_2.md")]
+    /// The primary font's ascent above the baseline, in logical pixels.
     #[must_use]
     pub const fn ascent(&self) -> f32 {
         self.ascent
     }
 
-    #[doc = include_str!("line_strut.doc/descent_2.md")]
+    /// The primary font's descent below the baseline (magnitude), in logical
+    /// pixels.
     #[must_use]
     pub const fn descent(&self) -> f32 {
         self.descent
     }
 
-    #[doc = include_str!("line_strut.doc/line_box.md")]
+    #[doc = include_str!("../../docs/api/layout/line_strut.doc/line_box.md")]
     pub(super) fn line_box(
         self,
         glyphs: &[TaggedGlyph],

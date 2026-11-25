@@ -1,14 +1,16 @@
-#![doc = include_str!("element.doc/_module.md")]
+//! `Element`: the typed AST view of an element node (spec §2.2).
 
 use crate::ast::Attribute;
 use crate::syntax::{SyntaxKind, SyntaxNode};
 
-#[doc = include_str!("element.doc/Element.md")]
+#[doc = include_str!("../../docs/api/ast/element.doc/Element.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Element(SyntaxNode);
 
 impl Element {
-    #[doc = include_str!("element.doc/cast.md")]
+    /// Casts a syntax node to an `Element`, returning `Some` iff its kind is
+    /// element-shaped ([`Element`](SyntaxKind::Element),
+    /// [`Conditional`](SyntaxKind::Conditional) or [`ForLoop`](SyntaxKind::ForLoop)).
     #[must_use]
     pub fn cast(node: SyntaxNode) -> Option<Self> {
         if matches!(
@@ -21,20 +23,21 @@ impl Element {
         }
     }
 
-    #[doc = include_str!("element.doc/syntax.md")]
+    /// Returns the wrapped syntax node.
     #[must_use]
     pub const fn syntax(&self) -> &SyntaxNode {
         &self.0
     }
 
-    #[doc = include_str!("element.doc/open_tag.md")]
+    /// Returns the element's `<Tag …>` open-tag node, if present.
     fn open_tag(&self) -> Option<&SyntaxNode> {
         self.0
             .child_nodes()
             .find(|n| n.kind() == SyntaxKind::OpenTag)
     }
 
-    #[doc = include_str!("element.doc/tag_name.md")]
+    /// Returns the element's tag name — the first [`Ident`](SyntaxKind::Ident)
+    /// token inside the [`OpenTag`](SyntaxKind::OpenTag) node.
     #[must_use]
     pub fn tag_name(&self) -> Option<String> {
         self.open_tag()?
@@ -43,19 +46,22 @@ impl Element {
             .map(|t| t.text().to_owned())
     }
 
-    #[doc = include_str!("element.doc/is_conditional.md")]
+    /// Returns `true` if this element is a [`Conditional`](SyntaxKind::Conditional)
+    /// (`<If>`/`<ElseIf>`/`<Else>`).
     #[must_use]
     pub const fn is_conditional(&self) -> bool {
         matches!(self.0.kind(), SyntaxKind::Conditional)
     }
 
-    #[doc = include_str!("element.doc/is_loop.md")]
+    /// Returns `true` if this element is a [`ForLoop`](SyntaxKind::ForLoop)
+    /// (`<For>`/`<VirtualFor>`).
     #[must_use]
     pub const fn is_loop(&self) -> bool {
         matches!(self.0.kind(), SyntaxKind::ForLoop)
     }
 
-    #[doc = include_str!("element.doc/attributes.md")]
+    /// Iterates the element's attributes — the [`Attribute`](SyntaxKind::Attribute)
+    /// child nodes of its [`OpenTag`](SyntaxKind::OpenTag) node.
     pub fn attributes(&self) -> impl Iterator<Item = Attribute> + '_ {
         self.open_tag()
             .into_iter()
@@ -64,14 +70,14 @@ impl Element {
             .filter_map(Attribute::cast)
     }
 
-    #[doc = include_str!("element.doc/attribute.md")]
+    /// Returns the first attribute whose [`name`](Attribute::name) equals `name`.
     #[must_use]
     pub fn attribute(&self, name: &str) -> Option<Attribute> {
         self.attributes()
             .find(|attr| attr.name().as_deref() == Some(name))
     }
 
-    #[doc = include_str!("element.doc/children.md")]
+    #[doc = include_str!("../../docs/api/ast/element.doc/children.md")]
     pub fn children(&self) -> impl Iterator<Item = SyntaxNode> + use<> {
         self.0
             .child_nodes()
@@ -90,7 +96,8 @@ impl Element {
             .into_iter()
     }
 
-    #[doc = include_str!("element.doc/is_self_closing.md")]
+    /// Returns `true` if the element is self-closing (`<Tag …/>`): it has an
+    /// [`OpenTag`](SyntaxKind::OpenTag) but no [`CloseTag`](SyntaxKind::CloseTag).
     #[must_use]
     pub fn is_self_closing(&self) -> bool {
         self.open_tag().is_some()

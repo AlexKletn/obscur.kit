@@ -1,49 +1,79 @@
-#![doc = include_str!("background_work.doc/_module.md")]
+//! [`BackgroundWork`]: the §3.6 band-5 work queue's accounting.
 
-#[doc = include_str!("background_work.doc/BackgroundServiced.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum BackgroundServiced {
-    #[doc = include_str!("background_work.doc/More.md")]
-    More,
-    #[doc = include_str!("background_work.doc/Drained.md")]
-    Drained,
-}
+use super::background_serviced::BackgroundServiced;
 
-#[doc = include_str!("background_work.doc/BackgroundWork.md")]
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+use obscur_task::CancellationToken;
+use std::collections::VecDeque;
+use std::time::Duration;
+
+type BackgroundJob = (
+    Option<CancellationToken>,
+    Option<Duration>,
+    Box<dyn FnOnce()>,
+);
+
+#[doc = include_str!("../../docs/api/runtime/background_work.doc/BackgroundWork.md")]
+#[derive(Default)]
 pub(crate) struct BackgroundWork {
-    #[doc = include_str!("background_work.doc/pending.md")]
+    /// Units enqueued and not yet serviced.
     pending: usize,
-    #[doc = include_str!("background_work.doc/serviced.md")]
+    /// Units serviced over this runtime's whole life — never reset, so it is the
+    /// observable proof that background work made progress under a stream of
+    /// higher-priority frames.
     serviced: u64,
+    /// Runnable units in the order in which they were enqueued.
+    jobs: VecDeque<BackgroundJob>,
 }
 
 impl BackgroundWork {
-    #[doc = include_str!("background_work.doc/new.md")]
+    /// An empty queue that has serviced nothing.
     pub(crate) const fn new() -> Self {
         Self {
             pending: 0,
             serviced: 0,
+            jobs: VecDeque::new(),
         }
     }
 
-    #[doc = include_str!("background_work.doc/request.md")]
+    #[doc = include_str!("../../docs/api/runtime/background_work.doc/request.md")]
     pub(crate) const fn request(&mut self) -> bool {
         self.pending = self.pending.saturating_add(1);
         self.pending == 1
     }
 
-    #[doc = include_str!("background_work.doc/pending_2.md")]
+    /// Adds a runnable unit and reports whether it started a pending batch.
+    pub(crate) fn enqueue(
+        &mut self,
+        cancellation: Option<CancellationToken>,
+        deadline: Option<Duration>,
+        job: impl FnOnce() + 'static,
+    ) -> bool {
+        self.jobs.push_back((cancellation, deadline, Box::new(job)));
+        self.request()
+    }
+
+    /// Takes the oldest queued callback with its cancellation token and deadline,
+    /// when supplied.
+    pub(crate) fn take_job(&mut self) -> Option<BackgroundJob> {
+        self.jobs.pop_front()
+    }
+
+    /// Removes a taken job from the pending count without counting it as serviced.
+    pub(crate) fn discard_job(&mut self) {
+        self.pending -= 1;
+    }
+
+    /// Units still waiting to be serviced.
     pub(crate) const fn pending(&self) -> usize {
         self.pending
     }
 
-    #[doc = include_str!("background_work.doc/serviced_2.md")]
+    /// Units serviced so far.
     pub(crate) const fn serviced(&self) -> u64 {
         self.serviced
     }
 
-    #[doc = include_str!("background_work.doc/service.md")]
+    #[doc = include_str!("../../docs/api/runtime/background_work.doc/service.md")]
     pub(crate) const fn service(&mut self) -> Option<BackgroundServiced> {
         if self.pending == 0 {
             return None;
@@ -126,6 +156,7 @@ mod tests {
         let mut work = BackgroundWork {
             pending: 1,
             serviced: u64::MAX,
+            ..BackgroundWork::new()
         };
         assert_eq!(work.service(), Some(BackgroundServiced::Drained));
         assert_eq!(work.serviced(), u64::MAX);
@@ -133,6 +164,7 @@ mod tests {
         let mut full = BackgroundWork {
             pending: usize::MAX,
             serviced: 0,
+            ..BackgroundWork::new()
         };
         assert!(!full.request());
         assert_eq!(full.pending(), usize::MAX);

@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Command module.
 mod command;
 pub use command::Command;
 mod command_registry;
@@ -10,8 +10,14 @@ pub use command_state::CommandState;
 mod key_event;
 pub use key_event::KeyEvent;
 mod logical_key;
-pub use logical_key::{LogicalKey, NamedKey};
+pub use logical_key::LogicalKey;
+mod named_key;
+pub use named_key::NamedKey;
 mod physical_key;
 pub use physical_key::PhysicalKey;
 mod shortcut;
-pub use shortcut::{Modifier, Modifiers, Shortcut};
+pub use shortcut::Shortcut;
+mod modifier;
+pub use modifier::Modifier;
+mod modifiers;
+pub use modifiers::Modifiers;

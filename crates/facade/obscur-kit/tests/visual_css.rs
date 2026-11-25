@@ -474,20 +474,23 @@ fn authored_filter_drop_shadow_paints_draw_shadow_behind_background() {
     );
 }
 
-// Regression guard: an out-of-scope filter function (`blur(...)`) is dropped and
-// emits no DrawShadow — it is not faked.
 #[test]
-fn filter_blur_only_emits_no_draw_shadow() {
+fn filter_blur_emits_a_layer_effect() {
     let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
     let sheet = compile(".box{width:40px;height:40px;background-color:#00ff00;filter:blur(4px)}");
     let result = rt.render_now(&one_box_view(), std::slice::from_ref(&sheet));
 
     let commands = result.snapshot().display_list().commands();
+    assert!(commands.iter().any(|command| matches!(
+        command,
+        PaintCommand::PushLayer(layer) if layer.effects().iter().any(|effect| matches!(
+            effect, obscur_scene::layer::LayerEffect::Blur { radius } if *radius == 4.0
+        ))
+    )));
     assert!(
         !commands
             .iter()
-            .any(|c| matches!(c, PaintCommand::DrawShadow { .. })),
-        "an out-of-scope blur() filter emits no DrawShadow (dropped, not faked)"
+            .any(|command| matches!(command, PaintCommand::DrawShadow { .. }))
     );
 }
 
@@ -872,4 +875,46 @@ fn collapsed_content_box_occupies_its_border_widths() {
         bounds.size
     );
     assert!(result.is_balanced());
+}
+
+#[doc = include_str!("visual_css.doc/percentage_radius_math_rounds_paint_and_hits.md")]
+#[test]
+fn percentage_radius_math_rounds_paint_and_hits() {
+    use obscur_kit::geometry::{CornerRadius, Point};
+    use obscur_kit::scene::clip::{Clip, ClipShape};
+
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
+    let sheet = compile(
+        ".box { width:200px; height:100px; background-color:red;
+                border-radius:min(calc(10% + 5px), 22px) }",
+    );
+    let frame = runtime.render_now(&one_box_view(), &[sheet]);
+    let clip = frame
+        .snapshot()
+        .display_list()
+        .commands()
+        .iter()
+        .find_map(|command| match command {
+            PaintCommand::PushClip(Clip::Shape(ClipShape::RoundedRect { radii, .. })) => {
+                Some(radii)
+            }
+            _ => None,
+        })
+        .expect("the math expression creates a rounded clip");
+    assert_eq!(clip.top_left, CornerRadius::new(22.0, 15.0));
+    let node = box_node(&runtime);
+    assert_ne!(
+        runtime
+            .hit_test(Point::new(1.0, 1.0))
+            .target()
+            .map(|hit| hit.node()),
+        Some(node)
+    );
+    assert_eq!(
+        runtime
+            .hit_test(Point::new(30.0, 10.0))
+            .target()
+            .map(|hit| hit.node()),
+        Some(node)
+    );
 }

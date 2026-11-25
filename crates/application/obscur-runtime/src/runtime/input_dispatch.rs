@@ -1,18 +1,20 @@
-#![doc = include_str!("input_dispatch.doc/_module.md")]
+//! [`InputDispatch`]: what dispatching one queued [`InputEvent`] produced.
 
 use obscur_identity::NodeId;
 
 use super::{KeyDispatch, PointerDispatch};
 
-#[doc = include_str!("input_dispatch.doc/InputDispatch.md")]
+#[doc = include_str!("../../docs/api/runtime/input_dispatch.doc/InputDispatch.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum InputDispatch {
-    #[doc = include_str!("input_dispatch.doc/Pointer.md")]
+    /// What [`handle_pointer`](super::UiRuntime::handle_pointer) returned.
     Pointer(PointerDispatch),
-    #[doc = include_str!("input_dispatch.doc/Key.md")]
+    /// What [`handle_key`](super::UiRuntime::handle_key) returned.
     Key(KeyDispatch),
-    #[doc = include_str!("input_dispatch.doc/Composition.md")]
+    /// Whether [`handle_ime`](super::UiRuntime::handle_ime) consumed the
+    /// composition.
     Composition(bool),
-    #[doc = include_str!("input_dispatch.doc/Scroll.md")]
+    /// The node [`handle_scroll`](super::UiRuntime::handle_scroll) scrolled, if
+    /// any.
     Scroll(Option<NodeId>),
 }

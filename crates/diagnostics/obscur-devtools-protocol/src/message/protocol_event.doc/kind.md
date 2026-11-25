@@ -1,1 +1,0 @@
-The typed event body.

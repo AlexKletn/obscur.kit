@@ -1,31 +1,37 @@
-#![doc = include_str!("stroke.doc/_module.md")]
+//! How a path outline is stroked.
 
 use super::{Brush, LineCap, LineJoin};
 
-#[doc = include_str!("stroke.doc/Stroke.md")]
+#[doc = include_str!("../../docs/api/paint/stroke.doc/Stroke.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Stroke {
-    #[doc = include_str!("stroke.doc/brush.md")]
+    /// The brush used to paint the stroked band.
     pub brush: Brush,
-    #[doc = include_str!("stroke.doc/width.md")]
+    /// Stroke width, in user-space units.
     pub width: f32,
-    #[doc = include_str!("stroke.doc/line_cap.md")]
+    /// End-cap style for open path ends.
     pub line_cap: LineCap,
-    #[doc = include_str!("stroke.doc/line_join.md")]
+    /// Corner-join style.
     pub line_join: LineJoin,
-    #[doc = include_str!("stroke.doc/miter_limit.md")]
+    /// Miter length limit, as a multiple of half the stroke width, beyond which
+    /// a [`LineJoin::Miter`] join is bevelled.
     pub miter_limit: f32,
-    #[doc = include_str!("stroke.doc/dash.md")]
+    /// The dash pattern: alternating on/off run lengths in user-space units.
+    /// Empty (the default) is a solid, continuous stroke.
     pub dash: Box<[f32]>,
-    #[doc = include_str!("stroke.doc/dash_offset.md")]
+    /// The starting phase (in user-space units) into the dash pattern. Ignored
+    /// when `dash` is empty.
     pub dash_offset: f32,
 }
 
 impl Stroke {
-    #[doc = include_str!("stroke.doc/DEFAULT_MITER_LIMIT.md")]
+    /// The default miter limit (`4.0`), matching common vector conventions.
     pub const DEFAULT_MITER_LIMIT: f32 = 4.0;
 
-    #[doc = include_str!("stroke.doc/new.md")]
+    /// Creates a stroke of the given `brush` and `width` with default join
+    /// settings: [`LineCap::Butt`], [`LineJoin::Miter`], a miter limit of
+    /// [`Self::DEFAULT_MITER_LIMIT`], and **no** dash (a solid, continuous
+    /// stroke).
     #[must_use]
     pub fn new(brush: Brush, width: f32) -> Self {
         Self {
@@ -39,28 +45,28 @@ impl Stroke {
         }
     }
 
-    #[doc = include_str!("stroke.doc/with_line_cap.md")]
+    /// Returns a copy of this stroke with its line cap set to `cap`.
     #[must_use]
     pub fn with_line_cap(mut self, cap: LineCap) -> Self {
         self.line_cap = cap;
         self
     }
 
-    #[doc = include_str!("stroke.doc/with_line_join.md")]
+    /// Returns a copy of this stroke with its line join set to `join`.
     #[must_use]
     pub fn with_line_join(mut self, join: LineJoin) -> Self {
         self.line_join = join;
         self
     }
 
-    #[doc = include_str!("stroke.doc/with_miter_limit.md")]
+    /// Returns a copy of this stroke with its miter limit set to `limit`.
     #[must_use]
     pub fn with_miter_limit(mut self, limit: f32) -> Self {
         self.miter_limit = limit;
         self
     }
 
-    #[doc = include_str!("stroke.doc/with_dash.md")]
+    #[doc = include_str!("../../docs/api/paint/stroke.doc/with_dash.md")]
     #[must_use]
     pub fn with_dash(mut self, pattern: impl Into<Box<[f32]>>, offset: f32) -> Self {
         self.dash = pattern.into();
@@ -68,49 +74,50 @@ impl Stroke {
         self
     }
 
-    #[doc = include_str!("stroke.doc/brush_2.md")]
+    /// Returns the stroke's brush.
     #[must_use]
     pub const fn brush(&self) -> &Brush {
         &self.brush
     }
 
-    #[doc = include_str!("stroke.doc/width_2.md")]
+    /// Returns the stroke width.
     #[must_use]
     pub const fn width(&self) -> f32 {
         self.width
     }
 
-    #[doc = include_str!("stroke.doc/line_cap_2.md")]
+    /// Returns the stroke's end-cap style.
     #[must_use]
     pub const fn line_cap(&self) -> LineCap {
         self.line_cap
     }
 
-    #[doc = include_str!("stroke.doc/line_join_2.md")]
+    /// Returns the stroke's corner-join style.
     #[must_use]
     pub const fn line_join(&self) -> LineJoin {
         self.line_join
     }
 
-    #[doc = include_str!("stroke.doc/miter_limit_2.md")]
+    /// Returns the stroke's miter limit.
     #[must_use]
     pub const fn miter_limit(&self) -> f32 {
         self.miter_limit
     }
 
-    #[doc = include_str!("stroke.doc/dash_2.md")]
+    /// Returns the stroke's dash pattern (empty for a solid stroke).
     #[must_use]
     pub fn dash(&self) -> &[f32] {
         &self.dash
     }
 
-    #[doc = include_str!("stroke.doc/dash_offset_2.md")]
+    /// Returns the stroke's dash phase offset (unused when [`Self::dash`] is
+    /// empty).
     #[must_use]
     pub const fn dash_offset(&self) -> f32 {
         self.dash_offset
     }
 
-    #[doc = include_str!("stroke.doc/is_dashed.md")]
+    /// Returns whether this stroke carries a non-empty dash pattern.
     #[must_use]
     pub const fn is_dashed(&self) -> bool {
         !self.dash.is_empty()

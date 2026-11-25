@@ -1,70 +1,54 @@
-#![doc = include_str!("pointer_event.doc/_module.md")]
+//! The [`PointerEvent`] payload carried by a hit-tested pointer event and its
+//! [`PointerEventKind`] discriminant (spec §4.7).
 
 use obscur_geometry::Point;
 
 use super::{PointerButton, PointerButtons, PointerDelta, PointerDevice, PointerId, PointerTilt};
 use crate::event::EventTrust;
 
-#[doc = include_str!("pointer_event.doc/PointerEventKind.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum PointerEventKind {
-    #[doc = include_str!("pointer_event.doc/Down.md")]
-    Down,
-    #[doc = include_str!("pointer_event.doc/Up.md")]
-    Up,
-    #[doc = include_str!("pointer_event.doc/Move.md")]
-    Move,
-    #[doc = include_str!("pointer_event.doc/Enter.md")]
-    Enter,
-    #[doc = include_str!("pointer_event.doc/Leave.md")]
-    Leave,
-    #[doc = include_str!("pointer_event.doc/Cancel.md")]
-    Cancel,
-}
+use super::PointerEventKind;
 
-impl PointerEventKind {
-    #[doc = include_str!("pointer_event.doc/is_terminal.md")]
-    #[must_use]
-    pub const fn is_terminal(self) -> bool {
-        matches!(self, Self::Up | Self::Cancel | Self::Leave)
-    }
-}
-
-#[doc = include_str!("pointer_event.doc/PointerEvent.md")]
+#[doc = include_str!("../../docs/api/pointer/pointer_event.doc/PointerEvent.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PointerEvent {
-    #[doc = include_str!("pointer_event.doc/pointer.md")]
+    /// The pointer that produced this event.
     pub pointer: PointerId,
-    #[doc = include_str!("pointer_event.doc/device.md")]
+    /// The device that produced this event.
     pub device: PointerDevice,
-    #[doc = include_str!("pointer_event.doc/kind.md")]
+    /// The lifecycle kind of this event.
     pub kind: PointerEventKind,
-    #[doc = include_str!("pointer_event.doc/position.md")]
+    /// The pointer position in the hit target's coordinate space.
     pub position: Point,
-    #[doc = include_str!("pointer_event.doc/delta.md")]
+    /// §2.4's delta: how far this pointer moved since its own previous event.
     pub delta: PointerDelta,
-    #[doc = include_str!("pointer_event.doc/buttons.md")]
+    /// The buttons held down after this event.
     pub buttons: PointerButtons,
-    #[doc = include_str!("pointer_event.doc/button.md")]
+    #[doc = include_str!("../../docs/api/pointer/pointer_event.doc/button.md")]
     pub button: Option<PointerButton>,
-    #[doc = include_str!("pointer_event.doc/pressure.md")]
+    /// The contact pressure in `0.0..=1.0` (`0.0` for hover / no contact).
     pub pressure: f32,
-    #[doc = include_str!("pointer_event.doc/tilt.md")]
+    /// §2.4's tilt: the angle the device is held at, per axis.
     pub tilt: PointerTilt,
-    #[doc = include_str!("pointer_event.doc/rotation.md")]
+    /// §2.4's rotation: the stylus barrel's twist about its own axis, in
+    /// `0..360` degrees.
     pub rotation: f32,
-    #[doc = include_str!("pointer_event.doc/primary.md")]
+    /// §2.4's primary-pointer status: whether this pointer is the primary one of
+    /// its kind (the mouse always is; of several simultaneous contacts, only the
+    /// first).
     pub primary: bool,
-    #[doc = include_str!("pointer_event.doc/hover_capable.md")]
+    /// §2.4's hover capability: whether this device can be *over* a target
+    /// without touching it. False for a touchscreen contact, which is why touch
+    /// leaves no persistent hover.
     pub hover_capable: bool,
-    #[doc = include_str!("pointer_event.doc/timestamp_micros.md")]
+    /// A logical timestamp in microseconds, supplied by the caller.
     pub timestamp_micros: u64,
-    #[doc = include_str!("pointer_event.doc/trust.md")]
+    /// Whether this came from a real user gesture (§2.3 trusted/untrusted
+    /// origin). Untrusted unless a platform adapter vouched for it.
     pub trust: EventTrust,
 }
 
 impl PointerEvent {
-    #[doc = include_str!("pointer_event.doc/new.md")]
+    #[doc = include_str!("../../docs/api/pointer/pointer_event.doc/new.md")]
     #[must_use]
     pub const fn new(
         pointer: PointerId,
@@ -90,167 +74,171 @@ impl PointerEvent {
         }
     }
 
-    #[doc = include_str!("pointer_event.doc/as_trusted.md")]
+    #[doc = include_str!("../../docs/api/pointer/pointer_event.doc/as_trusted.md")]
     #[must_use]
     pub const fn as_trusted(mut self) -> Self {
         self.trust = EventTrust::Trusted;
         self
     }
 
-    #[doc = include_str!("pointer_event.doc/trust_2.md")]
+    /// Returns this event's trusted/untrusted origin (§2.3).
     #[must_use]
     pub const fn trust(&self) -> EventTrust {
         self.trust
     }
 
-    #[doc = include_str!("pointer_event.doc/is_trusted.md")]
+    /// Returns whether this event came from a real user gesture (§2.3).
     #[must_use]
     pub const fn is_trusted(&self) -> bool {
         self.trust.is_trusted()
     }
 
-    #[doc = include_str!("pointer_event.doc/with_buttons.md")]
+    /// Returns this event with its held buttons set (fluent).
     #[must_use]
     pub const fn with_buttons(mut self, buttons: PointerButtons) -> Self {
         self.buttons = buttons;
         self
     }
 
-    #[doc = include_str!("pointer_event.doc/with_button.md")]
+    /// Returns this event with the button whose transition it reports set (fluent).
     #[must_use]
     pub const fn with_button(mut self, button: PointerButton) -> Self {
         self.button = Some(button);
         self
     }
 
-    #[doc = include_str!("pointer_event.doc/with_pressure.md")]
+    /// Returns this event with its contact pressure set, clamped to
+    /// `0.0..=1.0` (fluent).
     #[must_use]
     pub fn with_pressure(mut self, pressure: f32) -> Self {
         self.pressure = pressure.clamp(0.0, 1.0);
         self
     }
 
-    #[doc = include_str!("pointer_event.doc/with_delta.md")]
+    /// Returns this event with its §2.4 movement delta set (fluent).
     #[must_use]
     pub const fn with_delta(mut self, delta: PointerDelta) -> Self {
         self.delta = delta;
         self
     }
 
-    #[doc = include_str!("pointer_event.doc/with_tilt.md")]
+    /// Returns this event with its §2.4 stylus tilt set (fluent).
     #[must_use]
     pub const fn with_tilt(mut self, tilt: PointerTilt) -> Self {
         self.tilt = tilt;
         self
     }
 
-    #[doc = include_str!("pointer_event.doc/with_rotation.md")]
+    /// Returns this event with its §2.4 barrel rotation set, normalized into
+    /// `0..360` degrees (fluent).
     #[must_use]
     pub fn with_rotation(mut self, degrees: f32) -> Self {
         self.rotation = degrees.rem_euclid(360.0);
         self
     }
 
-    #[doc = include_str!("pointer_event.doc/with_primary.md")]
+    #[doc = include_str!("../../docs/api/pointer/pointer_event.doc/with_primary.md")]
     #[must_use]
     pub const fn with_primary(mut self, primary: bool) -> Self {
         self.primary = primary;
         self
     }
 
-    #[doc = include_str!("pointer_event.doc/with_hover_capability.md")]
+    #[doc = include_str!("../../docs/api/pointer/pointer_event.doc/with_hover_capability.md")]
     #[must_use]
     pub const fn with_hover_capability(mut self, hover_capable: bool) -> Self {
         self.hover_capable = hover_capable;
         self
     }
 
-    #[doc = include_str!("pointer_event.doc/with_timestamp.md")]
+    /// Returns this event with its logical timestamp set (fluent).
     #[must_use]
     pub const fn with_timestamp(mut self, timestamp_micros: u64) -> Self {
         self.timestamp_micros = timestamp_micros;
         self
     }
 
-    #[doc = include_str!("pointer_event.doc/pointer_2.md")]
+    /// Returns the pointer that produced this event.
     #[must_use]
     pub const fn pointer(&self) -> PointerId {
         self.pointer
     }
 
-    #[doc = include_str!("pointer_event.doc/device_2.md")]
+    /// Returns the device that produced this event.
     #[must_use]
     pub const fn device(&self) -> PointerDevice {
         self.device
     }
 
-    #[doc = include_str!("pointer_event.doc/kind_2.md")]
+    /// Returns the lifecycle kind of this event.
     #[must_use]
     pub const fn kind(&self) -> PointerEventKind {
         self.kind
     }
 
-    #[doc = include_str!("pointer_event.doc/position_2.md")]
+    /// Returns the pointer position in the hit target's coordinate space.
     #[must_use]
     pub const fn position(&self) -> Point {
         self.position
     }
 
-    #[doc = include_str!("pointer_event.doc/buttons_2.md")]
+    /// Returns the buttons held down after this event.
     #[must_use]
     pub const fn buttons(&self) -> PointerButtons {
         self.buttons
     }
 
-    #[doc = include_str!("pointer_event.doc/button_2.md")]
+    /// Returns the button whose transition this event reports, if it names one.
     #[must_use]
     pub const fn button(&self) -> Option<PointerButton> {
         self.button
     }
 
-    #[doc = include_str!("pointer_event.doc/pressure_2.md")]
+    /// Returns the contact pressure in `0.0..=1.0`.
     #[must_use]
     pub const fn pressure(&self) -> f32 {
         self.pressure
     }
 
-    #[doc = include_str!("pointer_event.doc/delta_2.md")]
+    /// Returns §2.4's delta: how far this pointer moved since its own previous
+    /// event.
     #[must_use]
     pub const fn delta(&self) -> PointerDelta {
         self.delta
     }
 
-    #[doc = include_str!("pointer_event.doc/tilt_2.md")]
+    /// Returns §2.4's tilt: the angle the device is held at, per axis.
     #[must_use]
     pub const fn tilt(&self) -> PointerTilt {
         self.tilt
     }
 
-    #[doc = include_str!("pointer_event.doc/rotation_2.md")]
+    /// Returns §2.4's rotation: the barrel's twist in `0..360` degrees.
     #[must_use]
     pub const fn rotation(&self) -> f32 {
         self.rotation
     }
 
-    #[doc = include_str!("pointer_event.doc/is_primary.md")]
+    /// Returns §2.4's primary-pointer status.
     #[must_use]
     pub const fn is_primary(&self) -> bool {
         self.primary
     }
 
-    #[doc = include_str!("pointer_event.doc/hover_capable_2.md")]
+    /// Returns §2.4's hover capability: whether this device can be over a target
+    /// without touching it.
     #[must_use]
     pub const fn hover_capable(&self) -> bool {
         self.hover_capable
     }
 
-    #[doc = include_str!("pointer_event.doc/timestamp.md")]
+    /// Returns the logical timestamp, in microseconds, supplied by the caller.
     #[must_use]
     pub const fn timestamp(&self) -> u64 {
         self.timestamp_micros
     }
 
-    #[doc = include_str!("pointer_event.doc/is_pressed.md")]
+    /// Returns whether any button is pressed after this event.
     #[must_use]
     pub const fn is_pressed(&self) -> bool {
         !self.buttons.is_empty()
@@ -414,15 +402,5 @@ mod tests {
         );
         assert!(!contact.hover_capable());
         assert!(base().hover_capable(), "a mouse drives a resting cursor");
-    }
-
-    #[test]
-    fn kind_is_terminal() {
-        assert!(PointerEventKind::Up.is_terminal());
-        assert!(PointerEventKind::Cancel.is_terminal());
-        assert!(PointerEventKind::Leave.is_terminal());
-        assert!(!PointerEventKind::Down.is_terminal());
-        assert!(!PointerEventKind::Move.is_terminal());
-        assert!(!PointerEventKind::Enter.is_terminal());
     }
 }

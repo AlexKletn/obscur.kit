@@ -16,6 +16,66 @@ fn runtime() -> UiRuntime {
     UiRuntime::new(RuntimeId::from_raw(1), Size::new(400.0, 300.0))
 }
 
+#[test]
+fn accesskit_can_change_the_live_text_selection() {
+    use accesskit::{ActionData, ActionRequest, TextPosition, TextSelection};
+    use obscur_kit::identity::InternedSymbol;
+    use obscur_kit::view::view::{EVENT_INPUT, ViewEventBinding};
+
+    let view = View::from_fragment(ViewFragment::from_nodes(vec![
+        element(2, "textarea", "aé\nz", &[]).with_event(ViewEventBinding::new(
+            EVENT_INPUT,
+            InternedSymbol::named("edit"),
+        )),
+    ]));
+    let mut runtime = runtime();
+    let bridge = Rc::new(RefCell::new(AccessKitBridge::new()));
+    runtime.set_accessibility_bridge(bridge.clone());
+    let _ = runtime.render_now(&view, &[]);
+    let root = runtime.tree().root().unwrap();
+    let field = runtime.tree().get(root).unwrap().child_nodes()[0];
+    assert!(runtime.focus_node(Some(field)));
+    let _ = runtime.render_now(&view, &[]);
+    let children = {
+        let bridge = bridge.borrow();
+        let update = bridge.last_tree_update().unwrap();
+        let field = update
+            .nodes
+            .iter()
+            .find(|(id, _)| *id == update.focus)
+            .unwrap();
+        assert!(field.1.supports_action(Action::SetTextSelection));
+        field.1.children().to_vec()
+    };
+    let [first, second] = children[children.len() - 2..] else {
+        unreachable!()
+    };
+    let request = |node, index| ActionRequest {
+        action: Action::SetTextSelection,
+        target: AkNodeId(field.raw()),
+        data: Some(ActionData::SetTextSelection(TextSelection {
+            anchor: TextPosition {
+                node: second,
+                character_index: 1,
+            },
+            focus: TextPosition {
+                node,
+                character_index: index,
+            },
+        })),
+    };
+    assert!(
+        !bridge
+            .borrow_mut()
+            .push_action_request(request(AkNodeId(999), 1))
+    );
+    assert!(!bridge.borrow_mut().push_action_request(request(first, 99)));
+    assert!(bridge.borrow_mut().push_action_request(request(first, 1)));
+    assert_eq!(runtime.poll_accessibility_actions(), 1);
+    let selection = runtime.editing_selection().unwrap();
+    assert_eq!([selection.anchor(), selection.focus()], [5, 1]);
+}
+
 #[doc = include_str!("accessibility_output_path.doc/element.md")]
 fn element(component: u64, local_name: &str, label: &str, state: &[ViewProperty]) -> ViewNode {
     let mut node = ViewNode::element(ComponentId::from_raw(component))
@@ -216,4 +276,66 @@ fn focus_reaches_the_bridge_with_the_tree() {
         AkNodeId(focused.raw()),
         "the platform is told which node has focus, not just that the tree changed"
     );
+}
+
+#[test]
+fn platform_actions_reach_the_runtime_and_ignore_disabled_or_stale_targets() {
+    use accesskit::ActionRequest;
+    use obscur_kit::identity::{InternedSymbol, NodeId};
+    use obscur_kit::interaction::event::{EventOrigin, UiEvent};
+    use obscur_kit::view::view::{EVENT_CLICK, ViewEventBinding};
+    use std::cell::Cell;
+
+    let mut runtime = runtime();
+    let bridge = Rc::new(RefCell::new(AccessKitBridge::new()));
+    runtime.set_accessibility_bridge(bridge.clone());
+
+    let activate = InternedSymbol::named("a11y_activate");
+    let count = Rc::new(Cell::new(0));
+    let activated = Rc::clone(&count);
+    runtime.on_command(activate, move |event: &mut UiEvent| {
+        assert_eq!(event.origin(), EventOrigin::Accessibility);
+        assert!(event.is_trusted());
+        activated.set(activated.get() + 1);
+    });
+    let view = View::from_fragment(ViewFragment::from_nodes(vec![
+        element(1, "button", "Run", &[]).with_event(ViewEventBinding::new(EVENT_CLICK, activate)),
+        element(
+            2,
+            "button",
+            "Disabled",
+            &[ViewProperty::new(DISABLED, ViewValue::Bool(true))],
+        )
+        .with_event(ViewEventBinding::new(EVENT_CLICK, activate)),
+    ]));
+    let _ = runtime.render_now(&view, &[]);
+    while runtime.run_due_frame(&view, &[]).is_some() {}
+
+    let (target, disabled) = {
+        let bridge = bridge.borrow();
+        let snapshot = bridge.last_tree_update().unwrap();
+        (
+            labelled(snapshot, "Run").0,
+            labelled(snapshot, "Disabled").0,
+        )
+    };
+    let queue = |action, target| {
+        bridge.borrow_mut().push_action_request(ActionRequest {
+            action,
+            target,
+            data: None,
+        })
+    };
+
+    assert!(!queue(Action::SetValue, target));
+    assert!(queue(Action::Click, AkNodeId(u64::MAX)));
+    assert!(queue(Action::Click, disabled));
+    assert!(queue(Action::Focus, disabled));
+    assert!(queue(Action::Focus, target));
+    assert!(queue(Action::Click, target));
+
+    assert!(runtime.run_due_frame(&view, &[]).is_some());
+    assert_eq!(count.get(), 1);
+    assert_eq!(runtime.focused(), Some(NodeId::from_raw(target.0)));
+    assert_eq!(runtime.poll_accessibility_actions(), 0);
 }

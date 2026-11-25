@@ -17,3 +17,9 @@ obscur-geometry = { workspace = true }
 obscur-windowing = { workspace = true }
 obscur-interaction = { workspace = true }
 winit = "0.30"
+
+[features]
+gamepad = ["dep:gilrs"]
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gilrs = { version = "0.11", optional = true }

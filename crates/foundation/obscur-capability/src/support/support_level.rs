@@ -1,14 +1,15 @@
-#![doc = include_str!("support_level.doc/_module.md")]
+//! How well a capability is supported on the current platform.
 
-#[doc = include_str!("support_level.doc/SupportLevel.md")]
+/// The level at which a platform operation is available (spec §6.2, §8.58).
+/// Unsupported operations return a level, never a panic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SupportLevel {
-    #[doc = include_str!("support_level.doc/Native.md")]
+    /// Fully supported natively.
     Native,
-    #[doc = include_str!("support_level.doc/Emulated.md")]
+    /// Supported through emulation with possible differences.
     Emulated,
-    #[doc = include_str!("support_level.doc/Limited.md")]
+    /// Supported with documented restrictions.
     Limited,
-    #[doc = include_str!("support_level.doc/Unavailable.md")]
+    /// Not available on this platform/configuration.
     Unavailable,
 }

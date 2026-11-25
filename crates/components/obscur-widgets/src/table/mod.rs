@@ -1,4 +1,9 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Table collection widget (spec §2.6).
 
 mod table;
-pub use table::{Column, SortDirection, Table};
+mod table_row;
+pub use table::Table;
+mod column;
+pub use column::Column;
+mod sort_direction;
+pub use sort_direction::SortDirection;

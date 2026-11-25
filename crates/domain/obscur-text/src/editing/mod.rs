@@ -1,8 +1,10 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Editing module.
 mod deletion_unit;
 pub use deletion_unit::DeletionUnit;
 mod edit_command;
-pub use edit_command::{EditCommand, EditDirection};
+pub use edit_command::EditCommand;
+mod edit_direction;
+pub use edit_direction::EditDirection;
 mod edit_transaction;
 pub use edit_transaction::EditTransaction;
 mod navigation_unit;
@@ -10,4 +12,6 @@ pub use navigation_unit::NavigationUnit;
 mod text_buffer;
 pub use text_buffer::TextBuffer;
 mod undo_unit;
-pub use undo_unit::{UndoKind, UndoUnit};
+pub use undo_unit::UndoUnit;
+mod undo_kind;
+pub use undo_kind::UndoKind;

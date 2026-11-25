@@ -36,3 +36,8 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let colour = textureSample(source, source_sampler, in.uv);
     return vec4<f32>(colour.rgb * colour.a, colour.a);
 }
+
+@fragment
+fn fragment_copy(in: VertexOutput) -> @location(0) vec4<f32> {
+    return textureSample(source, source_sampler, in.uv);
+}

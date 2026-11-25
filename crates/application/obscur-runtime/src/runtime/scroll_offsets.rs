@@ -1,86 +1,283 @@
-#![doc = include_str!("scroll_offsets.doc/_module.md")]
+//! [`ScrollOffsets`]: every scroll container's live vertical offset, and the
+//! viewport-relative box projection derived from it.
 
 use std::collections::HashMap;
 
+use obscur_geometry::Point;
 use obscur_identity::{FastMap, NodeId};
 use obscur_tree::tree::RetainedTree;
 
+use super::FoldInputs;
+use super::scroll_motion::ScrollMotion;
 use crate::orchestration::{LayoutBoxes, ScrollContainer};
 
-#[doc = include_str!("scroll_offsets.doc/FoldInputs.md")]
-#[derive(Clone, Copy)]
-pub(crate) struct FoldInputs<'a> {
-    #[doc = include_str!("scroll_offsets.doc/tree.md")]
-    pub(crate) tree: &'a RetainedTree,
-    #[doc = include_str!("scroll_offsets.doc/boxes.md")]
-    pub(crate) boxes: &'a LayoutBoxes,
-    #[doc = include_str!("scroll_offsets.doc/containers.md")]
-    pub(crate) containers: &'a [ScrollContainer],
-}
-
-#[doc = include_str!("scroll_offsets.doc/ScrollOffsets.md")]
+#[doc = include_str!("../../docs/api/runtime/scroll_offsets.doc/ScrollOffsets.md")]
 pub(crate) struct ScrollOffsets {
-    #[doc = include_str!("scroll_offsets.doc/offsets.md")]
-    offsets: FastMap<NodeId, f32>,
-    #[doc = include_str!("scroll_offsets.doc/folded.md")]
+    /// Each scroll container's stored vertical offset in logical CSS px. Stored
+    /// unclamped-by-later-layout (see the type doc) and floored at zero on every
+    /// write.
+    offsets: FastMap<NodeId, Point>,
+    /// In-flight programmatic scrolls keyed by container.
+    motions: FastMap<NodeId, ScrollMotion>,
+    /// Accumulated offset changes awaiting the next motion tick.
+    motion_deltas: FastMap<NodeId, Point>,
+    /// Measured scroll velocities from the latest positive motion tick.
+    velocities: FastMap<NodeId, Point>,
+    /// The scroll-chain-adjusted (viewport-relative) view of the last folded
+    /// boxes, which the public geometry accessor exposes for observers (spec
+    /// §4.4). Populated only while [`folded_active`](Self::folded_active) is set —
+    /// i.e. some scroll container overflows — so an unscrolled tree keeps
+    /// returning the content-space boxes by reference with no per-frame clone.
     folded: LayoutBoxes,
-    #[doc = include_str!("scroll_offsets.doc/folded_active.md")]
+    /// Whether [`folded`](Self::folded) currently holds a distinct (scroll-folded)
+    /// map. `false` when no scroll container overflows, in which case
+    /// [`projection`](Self::projection) returns the content-space boxes unchanged.
     folded_active: bool,
 }
 
 impl ScrollOffsets {
-    #[doc = include_str!("scroll_offsets.doc/new.md")]
+    /// An unscrolled document: no container has an offset, and the projection is
+    /// inactive, so [`projection`](Self::projection) hands back whatever boxes it
+    /// is given.
     pub(crate) fn new() -> Self {
         Self {
             offsets: HashMap::default(),
+            motions: HashMap::default(),
+            motion_deltas: HashMap::default(),
+            velocities: HashMap::default(),
             folded: LayoutBoxes::default(),
             folded_active: false,
         }
     }
 
-    #[doc = include_str!("scroll_offsets.doc/retain_live.md")]
+    #[doc = include_str!("../../docs/api/runtime/scroll_offsets.doc/retain_live.md")]
     pub(crate) fn retain_live(&mut self, tree: &RetainedTree) {
-        self.offsets.retain(|node, _| tree.contains(*node));
+        self.retain_nodes(|node| tree.contains(node));
     }
 
-    #[doc = include_str!("scroll_offsets.doc/clamped.md")]
+    /// Discards stored offsets and motion for nodes outside the retained scroll set.
+    pub(crate) fn retain_nodes(&mut self, keep: impl Fn(NodeId) -> bool) {
+        self.offsets.retain(|node, _| keep(*node));
+        self.motions.retain(|node, _| keep(*node));
+        self.motion_deltas.retain(|node, _| keep(*node));
+        self.velocities.retain(|node, _| keep(*node));
+    }
+
+    #[cfg(test)]
+    /// Counts stored node scroll offsets for retention tests.
+    pub(crate) fn stored_offset_count(&self) -> usize {
+        self.offsets.len()
+    }
+
+    /// The scroll container `c`'s stored offset, re-clamped to `c`'s **live**
+    /// range — so a layout change that shrinks the content never surfaces a stale
+    /// over-scroll.
     pub(crate) fn clamped(&self, c: ScrollContainer) -> f32 {
-        self.offsets
-            .get(&c.node)
-            .copied()
-            .unwrap_or(0.0)
-            .clamp(0.0, c.max_scroll_top())
+        self.offset(c).y
     }
 
-    #[doc = include_str!("scroll_offsets.doc/stored.md")]
+    pub(crate) fn offset(&self, c: ScrollContainer) -> Point {
+        let offset = self.offsets.get(&c.node).copied().unwrap_or_default();
+        Point::new(
+            c.clamp_left(offset.x),
+            offset.y.clamp(0.0, c.max_scroll_top()),
+        )
+    }
+
+    /// Returns a container’s latest sampled velocity in logical pixels per second.
+    pub(crate) fn velocity(&self, node: NodeId) -> Point {
+        self.velocities.get(&node).copied().unwrap_or_default()
+    }
+
+    /// Publishes the combined displacement since the previous motion tick.
+    pub(crate) fn sample_velocities(&mut self, elapsed: f32) {
+        if !elapsed.is_finite() || elapsed <= 0.0 {
+            return;
+        }
+        self.velocities.clear();
+        self.velocities
+            .extend(self.motion_deltas.drain().filter_map(|(node, delta)| {
+                let velocity = Point::new(delta.x / elapsed, delta.y / elapsed);
+                (velocity.x.is_finite() && velocity.y.is_finite()).then_some((node, velocity))
+            }));
+    }
+
+    /// Accumulates scrolling displacement for the next velocity sample.
+    fn record_motion(
+        deltas: &mut FastMap<NodeId, Point>,
+        node: NodeId,
+        before: Point,
+        after: Point,
+    ) {
+        if before != after {
+            let delta = deltas.entry(node).or_default();
+            delta.x += after.x - before.x;
+            delta.y += after.y - before.y;
+        }
+    }
+
+    /// Discards motion samples after a programmatic jump.
+    fn clear_velocity(&mut self, node: NodeId) {
+        self.motion_deltas.remove(&node);
+        self.velocities.remove(&node);
+    }
+
+    /// Starts or replaces the motion for the container.
+    pub(crate) fn animate(&mut self, container: ScrollContainer, offset: Point, duration: f32) {
+        let start = self.offset(container);
+        let end = Point::new(
+            container.clamp_left(offset.x),
+            offset.y.clamp(0.0, container.max_scroll_top()),
+        );
+        self.motions.remove(&container.node);
+        if start != end {
+            self.motions
+                .insert(container.node, ScrollMotion::new(start, end, duration));
+        }
+    }
+
+    /// Reports whether any programmatic scrolls are in flight.
+    pub(crate) fn has_motion(&self) -> bool {
+        !self.motions.is_empty()
+    }
+
+    /// Samples active programmatic scrolls and refreshes folded geometry once.
+    pub(crate) fn advance_motion(&mut self, delta: f32, fold: FoldInputs<'_>) -> bool {
+        let mut sampled = false;
+        self.motions.retain(|node, motion| {
+            let Some(container) = fold
+                .containers
+                .iter()
+                .find(|container| container.node == *node)
+            else {
+                return false;
+            };
+            let before = self.offsets.get(node).copied().unwrap_or_default();
+            let (offset, active) = motion.advance(delta);
+            let clamp = |point: Point| {
+                Point::new(
+                    container.clamp_left(point.x),
+                    point.y.clamp(0.0, container.max_scroll_top()),
+                )
+            };
+            let offset = clamp(offset);
+            self.offsets.insert(*node, offset);
+            Self::record_motion(&mut self.motion_deltas, *node, clamp(before), offset);
+            sampled = true;
+            active
+        });
+        if sampled {
+            self.refold(fold);
+        }
+        sampled
+    }
+
+    pub(crate) fn shift_offset(
+        &mut self,
+        c: ScrollContainer,
+        delta: Point,
+        fold: FoldInputs<'_>,
+    ) -> Point {
+        let offset = self.shift_unfolded(c, delta);
+        self.refold(fold);
+        offset
+    }
+
+    /// Shifts one container and leaves folded geometry refresh to the caller.
+    pub(crate) fn shift_unfolded(&mut self, c: ScrollContainer, delta: Point) -> Point {
+        let current = self.offset(c);
+        let offset = Point::new(
+            if delta.x.is_finite() {
+                c.clamp_left(current.x + delta.x)
+            } else {
+                current.x
+            },
+            if delta.y.is_finite() {
+                (current.y + delta.y).clamp(0.0, c.max_scroll_top())
+            } else {
+                current.y
+            },
+        );
+        if offset != current {
+            self.motions.remove(&c.node);
+        }
+        Self::record_motion(&mut self.motion_deltas, c.node, current, offset);
+        let stored = self.offsets.entry(c.node).or_default();
+        if delta.x.is_finite() && delta.x != 0.0 {
+            stored.x = offset.x;
+        }
+        if delta.y.is_finite() && delta.y != 0.0 {
+            stored.y = offset.y;
+        }
+        offset
+    }
+
+    pub(crate) fn set_left(&mut self, c: ScrollContainer, px: f32, fold: FoldInputs<'_>) {
+        if px.is_finite() {
+            self.motions.remove(&c.node);
+            self.clear_velocity(c.node);
+            self.offsets.entry(c.node).or_default().x = c.clamp_left(px);
+            self.refold(fold);
+        }
+    }
+
+    /// Clamps both persisted axes to the current content and refolds once.
+    pub(crate) fn restore(&mut self, c: ScrollContainer, offset: Point, fold: FoldInputs<'_>) {
+        self.restore_unfolded(c, offset);
+        self.refold(fold);
+    }
+
+    /// Restores an offset before the caller refreshes folded geometry.
+    pub(crate) fn restore_unfolded(&mut self, c: ScrollContainer, offset: Point) {
+        self.motions.remove(&c.node);
+        self.clear_velocity(c.node);
+        self.offsets.insert(
+            c.node,
+            Point::new(
+                c.clamp_left(offset.x),
+                offset.y.clamp(0.0, c.max_scroll_top()),
+            ),
+        );
+    }
+
+    #[doc = include_str!("../../docs/api/runtime/scroll_offsets.doc/stored.md")]
     pub(crate) fn stored(&self, node: NodeId) -> f32 {
-        self.offsets.get(&node).copied().unwrap_or(0.0).max(0.0)
+        self.offsets
+            .get(&node)
+            .map_or(0.0, |offset| offset.y.max(0.0))
     }
 
-    #[doc = include_str!("scroll_offsets.doc/set.md")]
+    #[doc = include_str!("../../docs/api/runtime/scroll_offsets.doc/set.md")]
     pub(crate) fn set(&mut self, c: ScrollContainer, px: f32, fold: FoldInputs<'_>) {
         if !px.is_finite() {
             return;
         }
-        self.offsets
-            .insert(c.node, px.clamp(0.0, c.max_scroll_top()));
+        self.motions.remove(&c.node);
+        self.clear_velocity(c.node);
+        self.offsets.entry(c.node).or_default().y = px.clamp(0.0, c.max_scroll_top());
         self.refold(fold);
     }
 
-    #[doc = include_str!("scroll_offsets.doc/shift.md")]
+    /// Moves `c`'s offset by `dy` logical px (positive = toward the content's
+    /// end), clamped to the scrollable range, refolds the projection against
+    /// `fold`, and returns the resulting offset.
     pub(crate) fn shift(&mut self, c: ScrollContainer, dy: f32, fold: FoldInputs<'_>) -> f32 {
+        self.motions.remove(&c.node);
+        self.clear_velocity(c.node);
         let next = (self.clamped(c) + dy).clamp(0.0, c.max_scroll_top());
-        self.offsets.insert(c.node, next);
+        self.offsets.entry(c.node).or_default().y = next;
         self.refold(fold);
         next
     }
 
-    #[doc = include_str!("scroll_offsets.doc/seat.md")]
+    #[doc = include_str!("../../docs/api/runtime/scroll_offsets.doc/seat.md")]
     pub(crate) fn seat(&mut self, node: NodeId, px: f32) {
-        self.offsets.insert(node, px);
+        self.motions.remove(&node);
+        self.clear_velocity(node);
+        self.offsets.entry(node).or_default().y = px;
     }
 
-    #[doc = include_str!("scroll_offsets.doc/refold.md")]
+    #[doc = include_str!("../../docs/api/runtime/scroll_offsets.doc/refold.md")]
     pub(crate) fn refold(&mut self, fold: FoldInputs<'_>) {
         if fold.containers.is_empty() {
             self.folded_active = false;
@@ -89,38 +286,36 @@ impl ScrollOffsets {
         }
         // The live scroll offset of each overflowing scroll container, so an
         // ancestor walk can add every crossed container's contribution.
-        let scroll_of: FastMap<NodeId, f32> = fold
+        let scroll_of: FastMap<NodeId, Point> = fold
             .containers
             .iter()
-            .map(|c| (c.node, self.clamped(*c)))
+            .map(|c| (c.node, self.offset(*c)))
             .collect();
         let mut folded = fold.boxes.clone();
         let ancestor_walk_limit = fold.tree.len();
         for (&node, layout_box) in &mut folded {
-            let mut dy = 0.0;
+            let mut offset = Point::ORIGIN;
             let mut current = node;
             // Fold every scroll-container ancestor, exclusive of the node itself: a
             // scroll container reports its own unscrolled position.
             for _ in 0..ancestor_walk_limit {
-                let Some(parent) = fold
-                    .tree
-                    .get(current)
-                    .and_then(|n| n.logical_parent().parent())
-                else {
+                let Some(parent) = fold.tree.visual_parent_of(current) else {
                     break;
                 };
-                if let Some(offset) = scroll_of.get(&parent) {
-                    dy += *offset;
+                if let Some(parent_offset) = scroll_of.get(&parent) {
+                    offset.x += parent_offset.x;
+                    offset.y += parent_offset.y;
                 }
                 current = parent;
             }
-            layout_box.bounds.origin.y -= dy;
+            layout_box.bounds.origin.x -= offset.x;
+            layout_box.bounds.origin.y -= offset.y;
         }
         self.folded = folded;
         self.folded_active = true;
     }
 
-    #[doc = include_str!("scroll_offsets.doc/projection.md")]
+    #[doc = include_str!("../../docs/api/runtime/scroll_offsets.doc/projection.md")]
     pub(crate) fn projection<'a>(&'a self, boxes: &'a LayoutBoxes) -> &'a LayoutBoxes {
         if self.folded_active {
             &self.folded
@@ -147,6 +342,8 @@ mod tests {
             node,
             scrollport: Rect::new(Point::new(0.0, top), Size::new(100.0, height)),
             content_height: content,
+            content_width: 100.0,
+            rtl: false,
             depth: 0,
         }
     }

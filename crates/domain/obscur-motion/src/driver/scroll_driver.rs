@@ -1,20 +1,20 @@
-#![doc = include_str!("scroll_driver.doc/_module.md")]
+//! The [`ScrollDriver`] scroll-driven motion source (spec §4.17).
 
 use crate::driver::MotionDriver;
 
-#[doc = include_str!("scroll_driver.doc/ScrollDriver.md")]
+#[doc = include_str!("../../docs/api/driver/scroll_driver.doc/ScrollDriver.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ScrollDriver {
-    #[doc = include_str!("scroll_driver.doc/offset.md")]
+    /// The current scroll position.
     offset: f32,
-    #[doc = include_str!("scroll_driver.doc/start.md")]
+    /// The scroll position mapped to progress `0` (the animation's start).
     start: f32,
-    #[doc = include_str!("scroll_driver.doc/end.md")]
+    /// The scroll position mapped to progress `1` (the animation's end).
     end: f32,
 }
 
 impl ScrollDriver {
-    #[doc = include_str!("scroll_driver.doc/new.md")]
+    #[doc = include_str!("../../docs/api/driver/scroll_driver.doc/new.md")]
     #[must_use]
     pub const fn new(start: f32, end: f32) -> Self {
         Self {
@@ -24,31 +24,31 @@ impl ScrollDriver {
         }
     }
 
-    #[doc = include_str!("scroll_driver.doc/with_offset.md")]
+    /// Returns this driver with its current scroll `offset` set.
     #[must_use]
     pub const fn with_offset(mut self, offset: f32) -> Self {
         self.offset = offset;
         self
     }
 
-    #[doc = include_str!("scroll_driver.doc/set_offset.md")]
+    #[doc = include_str!("../../docs/api/driver/scroll_driver.doc/set_offset.md")]
     pub fn set_offset(&mut self, offset: f32) {
         self.offset = offset;
     }
 
-    #[doc = include_str!("scroll_driver.doc/offset_2.md")]
+    /// Returns the current scroll offset.
     #[must_use]
     pub const fn offset(&self) -> f32 {
         self.offset
     }
 
-    #[doc = include_str!("scroll_driver.doc/start_2.md")]
+    /// Returns the scroll position mapped to progress `0`.
     #[must_use]
     pub const fn start(&self) -> f32 {
         self.start
     }
 
-    #[doc = include_str!("scroll_driver.doc/end_2.md")]
+    /// Returns the scroll position mapped to progress `1`.
     #[must_use]
     pub const fn end(&self) -> f32 {
         self.end
@@ -56,7 +56,7 @@ impl ScrollDriver {
 }
 
 impl MotionDriver for ScrollDriver {
-    #[doc = include_str!("scroll_driver.doc/progress.md")]
+    #[doc = include_str!("../../docs/api/driver/scroll_driver.doc/progress.md")]
     fn progress(&self) -> f32 {
         let span = self.end - self.start;
         if span == 0.0 {
@@ -65,7 +65,8 @@ impl MotionDriver for ScrollDriver {
         ((self.offset - self.start) / span).clamp(0.0, 1.0)
     }
 
-    #[doc = include_str!("scroll_driver.doc/is_active.md")]
+    /// Always `true`: scroll can move either way at any time, so the driver is
+    /// never considered settled.
     fn is_active(&self) -> bool {
         true
     }

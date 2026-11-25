@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Concrete resource decoders, one per format family (spec §5.15).
 mod font_decoder;
 pub use font_decoder::FontDecoder;
 mod image_decoder;

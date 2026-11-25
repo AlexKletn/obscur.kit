@@ -1,8 +1,12 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Timeline module.
 mod fill_mode;
 pub use fill_mode::FillMode;
 mod timeline;
-pub use timeline::{PlaybackDirection, RepeatCount, Timeline};
+pub use timeline::Timeline;
+mod playback_direction;
+pub use playback_direction::PlaybackDirection;
+mod repeat_count;
+pub use repeat_count::RepeatCount;
 mod timeline_id;
 pub use timeline_id::TimelineId;
 mod timeline_position;

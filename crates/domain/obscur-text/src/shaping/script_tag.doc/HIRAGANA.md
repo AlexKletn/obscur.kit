@@ -1,1 +1,0 @@
-Hiragana script (`Hira`).

@@ -1,4 +1,4 @@
-#![doc = include_str!("grid_templates.doc/_module.md")]
+#![doc = include_str!("../../docs/api/orchestration/grid_templates.doc/_module.md")]
 
 use obscur_geometry::Size;
 use obscur_identity::{FastMap, NodeId};
@@ -9,12 +9,15 @@ use obscur_style::property::{GridTrack, Length, LengthContext, PropertyId, Prope
 use obscur_text::shaping::ParagraphShaper;
 
 use super::ComputedStyles;
-use super::length_resolution::{ch_width_for, length_context};
+use super::grid_areas::grid_areas_of;
+use super::length_resolution::{
+    ch_width_for, length_context, track_limit_length, track_limit_math,
+};
 
-#[doc = include_str!("grid_templates.doc/GridTemplates.md")]
+#[doc = include_str!("../../docs/api/orchestration/grid_templates.doc/GridTemplates.md")]
 pub type GridTemplates = FastMap<NodeId, GridTemplate>;
 
-#[doc = include_str!("grid_templates.doc/grid_templates_from.md")]
+#[doc = include_str!("../../docs/api/orchestration/grid_templates.doc/grid_templates_from.md")]
 #[must_use]
 pub fn grid_templates_from(
     computed: &ComputedStyles,
@@ -31,7 +34,7 @@ pub fn grid_templates_from(
         .collect()
 }
 
-#[doc = include_str!("grid_templates.doc/grid_template_for.md")]
+#[doc = include_str!("../../docs/api/orchestration/grid_templates.doc/grid_template_for.md")]
 #[must_use]
 pub fn grid_template_for(
     computed: &ComputedStyle,
@@ -43,7 +46,13 @@ pub fn grid_template_for(
     let rows = grid_tracks_of(computed, PropertyId::GridTemplateRows);
     let auto_columns = grid_tracks_of(computed, PropertyId::GridAutoColumns);
     let auto_rows = grid_tracks_of(computed, PropertyId::GridAutoRows);
-    if columns.is_none() && rows.is_none() && auto_columns.is_none() && auto_rows.is_none() {
+    let areas = grid_areas_of(computed);
+    if columns.is_none()
+        && rows.is_none()
+        && auto_columns.is_none()
+        && auto_rows.is_none()
+        && areas.is_none()
+    {
         return None;
     }
     let ctx = length_context(
@@ -58,18 +67,22 @@ pub fn grid_template_for(
     // straight to a `TrackSize` via the same conversion the template tracks use. An
     // absent list stays empty → the algorithm's default `Auto` implicit tracks.
     let auto_map = |tracks: Option<&[GridTrack]>| auto_track_sizes(tracks.unwrap_or(&[]), &ctx);
+    let (area_columns, area_rows) = areas.map_or((0, 0), |template| {
+        (template.columns() as usize, template.rows() as usize)
+    });
     Some(
         GridTemplate::from_track_lists(map(columns), map(rows))
-            .with_auto_tracks(auto_map(auto_columns), auto_map(auto_rows)),
+            .with_auto_tracks(auto_map(auto_columns), auto_map(auto_rows))
+            .with_area_dimensions(area_columns, area_rows),
     )
 }
 
-#[doc = include_str!("grid_templates.doc/auto_track_sizes.md")]
+#[doc = include_str!("../../docs/api/orchestration/grid_templates.doc/auto_track_sizes.md")]
 fn auto_track_sizes(tracks: &[GridTrack], ctx: &LengthContext) -> Vec<TrackSize> {
     tracks.iter().map(|t| track_size_of(t, ctx)).collect()
 }
 
-#[doc = include_str!("grid_templates.doc/track_list_of.md")]
+#[doc = include_str!("../../docs/api/orchestration/grid_templates.doc/track_list_of.md")]
 fn track_list_of(tracks: &[GridTrack], ctx: &LengthContext) -> TrackList {
     let mut leading = Vec::new();
     let mut auto_repeat = None;
@@ -79,6 +92,7 @@ fn track_list_of(tracks: &[GridTrack], ctx: &LengthContext) -> TrackList {
             GridTrack::AutoRepeat {
                 fill,
                 tracks: pattern,
+                ..
             } if auto_repeat.is_none() => {
                 let mode = if *fill {
                     AutoRepeatMode::AutoFill
@@ -101,7 +115,8 @@ fn track_list_of(tracks: &[GridTrack], ctx: &LengthContext) -> TrackList {
     TrackList::new(leading, auto_repeat, trailing)
 }
 
-#[doc = include_str!("grid_templates.doc/grid_tracks_of.md")]
+/// Reads a `grid-template-*` property as its authored [`GridTrack`] slice, or
+/// [`None`] when the property is absent or not a track list.
 fn grid_tracks_of(computed: &ComputedStyle, property: PropertyId) -> Option<&[GridTrack]> {
     computed
         .get(property)
@@ -109,7 +124,7 @@ fn grid_tracks_of(computed: &ComputedStyle, property: PropertyId) -> Option<&[Gr
         .and_then(PropertyValue::as_grid_tracks)
 }
 
-#[doc = include_str!("grid_templates.doc/track_size_of.md")]
+#[doc = include_str!("../../docs/api/orchestration/grid_templates.doc/track_size_of.md")]
 fn track_size_of(track: &GridTrack, ctx: &LengthContext) -> TrackSize {
     match track {
         GridTrack::Fixed(length) => fixed_track_size(*length, ctx),
@@ -119,6 +134,10 @@ fn track_size_of(track: &GridTrack, ctx: &LengthContext) -> TrackSize {
         // the items placed in the track.
         GridTrack::MinContent => TrackSize::MinContent,
         GridTrack::MaxContent => TrackSize::MaxContent,
+        GridTrack::FitContent(limit) => TrackSize::FitContent(track_limit_length(*limit, ctx)),
+        GridTrack::FitContentMath(limit) => {
+            TrackSize::FitContentMath(Box::new(track_limit_math(limit, ctx)))
+        }
         GridTrack::MinMax(min, max) => {
             TrackSize::minmax(track_size_of(min, ctx), track_size_of(max, ctx))
         }
@@ -130,7 +149,7 @@ fn track_size_of(track: &GridTrack, ctx: &LengthContext) -> TrackSize {
     }
 }
 
-#[doc = include_str!("grid_templates.doc/fixed_track_size.md")]
+#[doc = include_str!("../../docs/api/orchestration/grid_templates.doc/fixed_track_size.md")]
 fn fixed_track_size(length: Length, ctx: &LengthContext) -> TrackSize {
     match length {
         Length::Px(px) => TrackSize::Fixed(px.0),
@@ -305,6 +324,7 @@ mod tests {
             ComputedValue::from_concrete(PropertyValue::grid_tracks([
                 GridTrack::Fixed(Length::px(50.0)),
                 GridTrack::AutoRepeat {
+                    line_names: Box::from([]),
                     fill: true,
                     tracks: Box::from([GridTrack::Fixed(Length::px(100.0))]),
                 },
@@ -327,6 +347,7 @@ mod tests {
         computed.set(
             PropertyId::GridTemplateColumns,
             ComputedValue::from_concrete(PropertyValue::grid_tracks([GridTrack::AutoRepeat {
+                line_names: Box::from([]),
                 fill: false,
                 tracks: Box::from([GridTrack::Fixed(Length::px(100.0))]),
             }]))

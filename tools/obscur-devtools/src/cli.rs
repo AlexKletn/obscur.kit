@@ -1,4 +1,4 @@
-#![doc = include_str!("cli.doc/_module.md")]
+#![doc = include_str!("../docs/api/cli.doc/_module.md")]
 
 use std::io;
 
@@ -8,7 +8,7 @@ use obscur_devtools_protocol::message::{
 };
 use obscur_devtools_server::transport::{ClientBound, SocketClient};
 
-#[doc = include_str!("cli.doc/TARGETS.md")]
+/// The twelve inspectable live-state targets (spec §7.6), with their CLI names.
 pub const TARGETS: &[(&str, Inspectable)] = &[
     ("tree", Inspectable::Tree),
     ("styles", Inspectable::Styles),
@@ -24,7 +24,7 @@ pub const TARGETS: &[(&str, Inspectable)] = &[
     ("plugin-state", Inspectable::PluginState),
 ];
 
-#[doc = include_str!("cli.doc/TOPICS.md")]
+/// The four subscribable event topics (spec §7.6/§7.8), with their CLI names.
 pub const TOPICS: &[(&str, Topic)] = &[
     ("diagnostics", Topic::Diagnostics),
     ("lifecycle", Topic::Lifecycle),
@@ -32,7 +32,7 @@ pub const TOPICS: &[(&str, Topic)] = &[
     ("focus", Topic::Focus),
 ];
 
-#[doc = include_str!("cli.doc/parse_target.md")]
+/// Resolves a CLI target name to its [`Inspectable`], if known.
 #[must_use]
 pub fn parse_target(name: &str) -> Option<Inspectable> {
     TARGETS
@@ -41,13 +41,13 @@ pub fn parse_target(name: &str) -> Option<Inspectable> {
         .map(|(_, target)| *target)
 }
 
-#[doc = include_str!("cli.doc/all_targets.md")]
+/// Returns every inspectable target (the `all` expansion).
 #[must_use]
 pub fn all_targets() -> Vec<Inspectable> {
     TARGETS.iter().map(|(_, target)| *target).collect()
 }
 
-#[doc = include_str!("cli.doc/target_label.md")]
+/// The CLI name for an [`Inspectable`] target.
 #[must_use]
 pub fn target_label(target: Inspectable) -> &'static str {
     TARGETS
@@ -56,7 +56,7 @@ pub fn target_label(target: Inspectable) -> &'static str {
         .map_or("unknown", |(label, _)| label)
 }
 
-#[doc = include_str!("cli.doc/parse_topic.md")]
+/// Resolves a CLI topic name to its [`Topic`], if known.
 #[must_use]
 pub fn parse_topic(name: &str) -> Option<Topic> {
     TOPICS
@@ -65,13 +65,13 @@ pub fn parse_topic(name: &str) -> Option<Topic> {
         .map(|(_, topic)| *topic)
 }
 
-#[doc = include_str!("cli.doc/handshake.md")]
+#[doc = include_str!("../docs/api/cli.doc/handshake.md")]
 pub fn handshake(client: &mut SocketClient, token: &str) -> io::Result<HandshakeResponse> {
     let request = HandshakeRequest::new(VersionRange::exact(ProtocolVersion::CURRENT), token);
     client.handshake(&request)
 }
 
-#[doc = include_str!("cli.doc/inspect.md")]
+#[doc = include_str!("../docs/api/cli.doc/inspect.md")]
 pub fn inspect(client: &mut SocketClient, id: u64, target: Inspectable) -> io::Result<ClientBound> {
     client.command(&CommandMessage::new(
         CommandId::new(id),
@@ -79,7 +79,23 @@ pub fn inspect(client: &mut SocketClient, id: u64, target: Inspectable) -> io::R
     ))
 }
 
-#[doc = include_str!("cli.doc/subscribe.md")]
+/// Sends a read-only semantic selector request.
+pub fn select_semantic(
+    client: &mut SocketClient,
+    id: u64,
+    role: &str,
+    name: Option<&str>,
+) -> io::Result<ClientBound> {
+    client.command(&CommandMessage::new(
+        CommandId::new(id),
+        CommandKind::SelectSemantic {
+            role: role.into(),
+            name: name.map(Into::into),
+        },
+    ))
+}
+
+#[doc = include_str!("../docs/api/cli.doc/subscribe.md")]
 pub fn subscribe(client: &mut SocketClient, id: u64, topic: Topic) -> io::Result<ClientBound> {
     client.command(&CommandMessage::new(
         CommandId::new(id),
@@ -87,7 +103,7 @@ pub fn subscribe(client: &mut SocketClient, id: u64, topic: Topic) -> io::Result
     ))
 }
 
-#[doc = include_str!("cli.doc/inject.md")]
+#[doc = include_str!("../docs/api/cli.doc/inject.md")]
 pub fn inject(client: &mut SocketClient, id: u64, event: InjectedEvent) -> io::Result<ClientBound> {
     client.command(&CommandMessage::new(
         CommandId::new(id),
@@ -95,7 +111,7 @@ pub fn inject(client: &mut SocketClient, id: u64, event: InjectedEvent) -> io::R
     ))
 }
 
-#[doc = include_str!("cli.doc/format_handshake.md")]
+/// Formats a handshake response as one human-readable line.
 #[must_use]
 pub fn format_handshake(response: &HandshakeResponse) -> String {
     match response {
@@ -109,7 +125,7 @@ pub fn format_handshake(response: &HandshakeResponse) -> String {
     }
 }
 
-#[doc = include_str!("cli.doc/format_scopes.md")]
+/// Formats a granted scope set as a comma-separated list (or `none`).
 #[must_use]
 pub fn format_scopes(scopes: ScopeSet) -> String {
     let mut names = Vec::new();
@@ -130,7 +146,7 @@ pub fn format_scopes(scopes: ScopeSet) -> String {
     }
 }
 
-#[doc = include_str!("cli.doc/format_snapshot.md")]
+/// Formats an inspect snapshot as one human-readable line.
 #[must_use]
 pub fn format_snapshot(message: &SnapshotMessage) -> String {
     let ids = if message.payload.entity_ids.is_empty() {
@@ -160,7 +176,7 @@ pub fn format_snapshot(message: &SnapshotMessage) -> String {
     line
 }
 
-#[doc = include_str!("cli.doc/format_client_bound.md")]
+/// Formats any client-bound reply for display (used for non-snapshot replies).
 #[must_use]
 pub fn format_client_bound(reply: &ClientBound) -> String {
     match reply {
@@ -176,7 +192,7 @@ pub fn format_client_bound(reply: &ClientBound) -> String {
     }
 }
 
-#[doc = include_str!("cli.doc/join_ids.md")]
+/// Renders up to eight entity ids, eliding the tail of longer lists.
 fn join_ids(ids: &[u64]) -> String {
     const MAX: usize = 8;
     let shown: Vec<String> = ids.iter().take(MAX).map(u64::to_string).collect();

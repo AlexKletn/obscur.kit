@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Model module.
 mod align_items;
 pub use align_items::AlignItems;
 mod align_self;
@@ -31,5 +31,10 @@ mod margin_edges;
 pub use margin_edges::MarginEdges;
 mod position;
 pub use position::Position;
+mod size_containment;
+pub use size_containment::SizeContainment;
 mod writing_mode;
 pub use writing_mode::WritingMode;
+
+mod track_limit;
+pub use track_limit::TrackLimit;

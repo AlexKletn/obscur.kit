@@ -1,20 +1,23 @@
-#![doc = include_str!("grid_line_value.doc/_module.md")]
+//! `GridLineValue`: one style-local edge of a grid item's line placement.
 
-#[doc = include_str!("grid_line_value.doc/GridLineValue.md")]
+#[doc = include_str!("../../docs/api/property/grid_line_value.doc/GridLineValue.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GridLineValue {
-    #[doc = include_str!("grid_line_value.doc/Auto.md")]
+    /// No explicit line on this edge; the item is auto-placed here.
     Auto,
-    #[doc = include_str!("grid_line_value.doc/Line.md")]
+    /// A 1-based grid line index.
     Line(i32),
-    #[doc = include_str!("grid_line_value.doc/Span.md")]
+    /// `span N`: this edge is `N` tracks from the opposite edge.
     Span(u16),
-    #[doc = include_str!("grid_line_value.doc/Named.md")]
+    /// A `<custom-ident>` line name, resolved against the container's named lines
+    /// in the runtime (spec §4.13).
     Named(Box<str>),
+    /// A nonzero occurrence of a line name, counted from the end if negative.
+    NamedOccurrence(Box<str>, std::num::NonZeroI32),
 }
 
 impl Default for GridLineValue {
-    #[doc = include_str!("grid_line_value.doc/default.md")]
+    /// The initial value: [`Auto`](GridLineValue::Auto) (pure auto-placement).
     fn default() -> Self {
         GridLineValue::Auto
     }

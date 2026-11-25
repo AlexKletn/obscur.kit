@@ -1,28 +1,28 @@
-#![doc = include_str!("portal_target.doc/_module.md")]
+//! The visual destination a portal renders its content into.
 
 use obscur_identity::NodeId;
 
-#[doc = include_str!("portal_target.doc/PortalTarget.md")]
+#[doc = include_str!("../../docs/api/portal/portal_target.doc/PortalTarget.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PortalTarget {
-    #[doc = include_str!("portal_target.doc/host.md")]
+    /// The host node that will visually parent the portalled content.
     host: NodeId,
 }
 
 impl PortalTarget {
-    #[doc = include_str!("portal_target.doc/new.md")]
+    /// Creates a portal target rendering into the given `host` node.
     #[must_use]
     pub const fn new(host: NodeId) -> Self {
         Self { host }
     }
 
-    #[doc = include_str!("portal_target.doc/host_2.md")]
+    #[doc = include_str!("../../docs/api/portal/portal_target.doc/host_2.md")]
     #[must_use]
     pub const fn host(host: NodeId) -> Self {
         Self::new(host)
     }
 
-    #[doc = include_str!("portal_target.doc/host_node.md")]
+    /// Returns the host node this target renders its content into.
     #[must_use]
     pub const fn host_node(self) -> NodeId {
         self.host

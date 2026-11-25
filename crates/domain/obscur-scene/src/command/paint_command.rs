@@ -1,4 +1,4 @@
-#![doc = include_str!("paint_command.doc/_module.md")]
+//! A single entry in a [`DisplayList`](crate::command::DisplayList).
 
 use obscur_geometry::{AffineTransform, CornerRadii, Rect};
 
@@ -8,95 +8,120 @@ use crate::layer::SceneLayer;
 use crate::paint::{Paint, SceneImage};
 use crate::path::Path;
 
-#[doc = include_str!("paint_command.doc/PaintCommand.md")]
+use super::command_scope::CommandScope;
+
+#[doc = include_str!("../../docs/api/command/paint_command.doc/PaintCommand.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum PaintCommand {
-    #[doc = include_str!("paint_command.doc/DrawPath.md")]
+    /// Fill or stroke `path`. The [`Paint`] decides which: a fill paint fills
+    /// the path's interior, a stroke paint draws its outline. This is a leaf
+    /// command and never affects nesting.
     DrawPath {
-        #[doc = include_str!("paint_command.doc/path.md")]
+        /// The vector outline to paint.
         path: Path,
-        #[doc = include_str!("paint_command.doc/paint.md")]
+        /// How the outline is painted (fill or stroke).
         paint: Paint,
     },
-    #[doc = include_str!("paint_command.doc/DrawText.md")]
+    #[doc = include_str!("../../docs/api/command/paint_command.doc/DrawText.md")]
     DrawText {
-        #[doc = include_str!("paint_command.doc/origin.md")]
+        /// Top-left origin of the run, in absolute scene coordinates.
         origin: obscur_geometry::Point,
-        #[doc = include_str!("paint_command.doc/run.md")]
+        /// The shaped, positioned glyphs (with the font size and source text).
         run: crate::text::GlyphRun,
-        #[doc = include_str!("paint_command.doc/brush.md")]
+        /// The brush the glyphs are painted with.
         brush: crate::paint::Brush,
     },
-    #[doc = include_str!("paint_command.doc/DrawShadow.md")]
+    #[doc = include_str!("../../docs/api/command/paint_command.doc/DrawShadow.md")]
     DrawShadow {
-        #[doc = include_str!("paint_command.doc/rect.md")]
+        /// The box's border-box rectangle, before offset / spread are applied.
         rect: Rect,
-        #[doc = include_str!("paint_command.doc/radii.md")]
+        /// The border box's per-corner radii (all zero for a square box).
         radii: CornerRadii,
-        #[doc = include_str!("paint_command.doc/color.md")]
+        /// The (already resolved) shadow color.
         color: Color,
-        #[doc = include_str!("paint_command.doc/blur.md")]
+        /// The CSS blur *radius* in logical pixels (`0` = a hard edge).
         blur: f32,
-        #[doc = include_str!("paint_command.doc/spread.md")]
+        /// The spread distance in logical pixels: a drop shadow grows by this,
+        /// an inset shadow shrinks by it.
         spread: f32,
-        #[doc = include_str!("paint_command.doc/offset.md")]
+        /// The shadow's `(x, y)` offset from the box, in logical pixels.
         offset: (f32, f32),
-        #[doc = include_str!("paint_command.doc/inset.md")]
+        /// Whether this is an **inset** shadow (painted inside the box) rather
+        /// than a drop shadow (painted behind it).
         inset: bool,
     },
-    #[doc = include_str!("paint_command.doc/DrawImage.md")]
+    #[doc = include_str!("../../docs/api/command/paint_command.doc/DrawImage.md")]
     DrawImage {
-        #[doc = include_str!("paint_command.doc/image.md")]
+        /// The decoded RGBA8 image to draw.
         image: SceneImage,
-        #[doc = include_str!("paint_command.doc/tile.md")]
+        /// The rectangle of one image copy (position + size), in absolute scene
+        /// coordinates. The image is scaled from its intrinsic size to this rect.
         tile: Rect,
-        #[doc = include_str!("paint_command.doc/region.md")]
+        /// The background paint area (border box) the image(s) are clipped to.
         region: Rect,
-        #[doc = include_str!("paint_command.doc/repeat_x.md")]
+        /// Whether to tile the image horizontally to fill `region`.
         repeat_x: bool,
-        #[doc = include_str!("paint_command.doc/repeat_y.md")]
+        /// Whether to tile the image vertically to fill `region`.
         repeat_y: bool,
     },
-    #[doc = include_str!("paint_command.doc/BackdropFilter.md")]
+    #[doc = include_str!("../../docs/api/command/paint_command.doc/BackdropFilter.md")]
     BackdropFilter {
-        #[doc = include_str!("paint_command.doc/bounds.md")]
+        /// The element's border-box rectangle: the backdrop region to frost.
         bounds: Rect,
-        #[doc = include_str!("paint_command.doc/radii_2.md")]
+        /// The border box's per-corner radii (all zero for a square panel); the
+        /// frosted region is clipped to this rounded shape.
         radii: CornerRadii,
-        #[doc = include_str!("paint_command.doc/blur_2.md")]
+        /// The CSS blur *radius* in logical pixels (`> 0`; `0` = no effect).
         blur: f32,
     },
-    #[doc = include_str!("paint_command.doc/PushTransform.md")]
+    #[doc = include_str!("../../docs/api/command/paint_command.doc/PushTransform.md")]
     PushTransform(AffineTransform),
-    #[doc = include_str!("paint_command.doc/PopTransform.md")]
+    /// Pop the most recently pushed transform, ending its region.
     PopTransform,
-    #[doc = include_str!("paint_command.doc/PushClip.md")]
+    /// Push a clip onto the clip stack. Subsequent drawing is confined to the
+    /// clip until the matching [`PaintCommand::PopClip`].
     PushClip(Clip),
-    #[doc = include_str!("paint_command.doc/PopClip.md")]
+    /// Pop the most recently pushed clip, ending its region.
     PopClip,
-    #[doc = include_str!("paint_command.doc/PushLayer.md")]
+    /// Begin a composited layer described by the given [`SceneLayer`].
+    /// Subsequent drawing composites into the layer until the matching
+    /// [`PaintCommand::PopLayer`].
     PushLayer(SceneLayer),
-    #[doc = include_str!("paint_command.doc/PopLayer.md")]
+    /// End the most recently pushed layer, compositing it into its parent.
     PopLayer,
 }
 
 impl PaintCommand {
-    #[doc = include_str!("paint_command.doc/is_push.md")]
+    /// Returns whether this command opens a transform, clip or layer.
     #[must_use]
     pub const fn is_push(&self) -> bool {
-        matches!(
-            self,
-            Self::PushClip(_) | Self::PushLayer(_) | Self::PushTransform(_)
-        )
+        CommandScope::from_push(self).is_some()
     }
 
-    #[doc = include_str!("paint_command.doc/is_pop.md")]
+    /// Returns whether this command closes a transform, clip or layer.
     #[must_use]
     pub const fn is_pop(&self) -> bool {
         matches!(self, Self::PopClip | Self::PopLayer | Self::PopTransform)
     }
 
-    #[doc = include_str!("paint_command.doc/nesting_delta.md")]
+    /// Returns the closing command for a transform, clip or layer push.
+    #[must_use]
+    pub const fn scope_close(&self) -> Option<Self> {
+        match CommandScope::from_push(self) {
+            Some(scope) => Some(scope.close()),
+            None => None,
+        }
+    }
+
+    /// Checks whether this command closes the scope opened by `opening`.
+    #[must_use]
+    pub fn closes_scope(&self, opening: &Self) -> bool {
+        opening.scope_close().is_some_and(|expected| {
+            core::mem::discriminant(self) == core::mem::discriminant(&expected)
+        })
+    }
+
+    #[doc = include_str!("../../docs/api/command/paint_command.doc/nesting_delta.md")]
     #[must_use]
     pub const fn nesting_delta(&self) -> i32 {
         match self {

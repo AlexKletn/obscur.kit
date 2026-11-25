@@ -1,18 +1,20 @@
-#![doc = include_str!("extend_mode.doc/_module.md")]
+//! How a gradient extends beyond its defined `[0, 1]` range.
 
-#[doc = include_str!("extend_mode.doc/ExtendMode.md")]
+#[doc = include_str!("../../docs/api/paint/extend_mode.doc/ExtendMode.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ExtendMode {
-    #[doc = include_str!("extend_mode.doc/Pad.md")]
+    /// Clamp to the edge stops: positions below `0.0` take the first stop's
+    /// color and positions above `1.0` take the last stop's color.
     Pad,
-    #[doc = include_str!("extend_mode.doc/Repeat.md")]
+    /// Tile the gradient, repeating the `[0, 1]` pattern periodically.
     Repeat,
-    #[doc = include_str!("extend_mode.doc/Reflect.md")]
+    /// Tile the gradient, mirroring every other repetition so adjacent tiles
+    /// meet seamlessly.
     Reflect,
 }
 
 impl ExtendMode {
-    #[doc = include_str!("extend_mode.doc/is_pad.md")]
+    /// Returns whether this is the [`ExtendMode::Pad`] mode.
     #[must_use]
     pub const fn is_pad(self) -> bool {
         matches!(self, Self::Pad)
@@ -20,7 +22,7 @@ impl ExtendMode {
 }
 
 impl Default for ExtendMode {
-    #[doc = include_str!("extend_mode.doc/default.md")]
+    /// The default extend mode is [`ExtendMode::Pad`].
     fn default() -> Self {
         Self::Pad
     }

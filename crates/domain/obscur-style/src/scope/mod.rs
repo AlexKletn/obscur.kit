@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Scope module.
 mod exported_style_part;
 pub use exported_style_part::ExportedStylePart;
 mod module_scope;

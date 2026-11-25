@@ -1,60 +1,27 @@
-#![doc = include_str!("value_parser.doc/_module.md")]
+#![doc = include_str!("../../docs/api/parser/value_parser.doc/_module.md")]
 
 use crate::error::{CssParseError, CssParseErrorKind};
 use crate::source::CssSource;
 
-use super::css_tokenizer::{CssToken, CssTokenKind, Tokenizer};
 use super::token_cursor::TokenCursor;
+use super::{css_token::CssToken, css_token_kind::CssTokenKind, css_tokenizer::Tokenizer};
 
-#[doc = include_str!("value_parser.doc/ParsedValue.md")]
-#[derive(Debug, Clone, PartialEq)]
-pub enum ParsedValue {
-    #[doc = include_str!("value_parser.doc/Keyword.md")]
-    Keyword(Box<str>),
-    #[doc = include_str!("value_parser.doc/Number.md")]
-    Number(f64),
-    #[doc = include_str!("value_parser.doc/Percentage.md")]
-    Percentage(f64),
-    #[doc = include_str!("value_parser.doc/Dimension.md")]
-    Dimension {
-        #[doc = include_str!("value_parser.doc/value.md")]
-        value: f64,
-        #[doc = include_str!("value_parser.doc/unit.md")]
-        unit: Box<str>,
-    },
-    #[doc = include_str!("value_parser.doc/String.md")]
-    String(Box<str>),
-    #[doc = include_str!("value_parser.doc/Hash.md")]
-    Hash(Box<str>),
-    #[doc = include_str!("value_parser.doc/Function.md")]
-    Function {
-        #[doc = include_str!("value_parser.doc/name.md")]
-        name: Box<str>,
-        #[doc = include_str!("value_parser.doc/args.md")]
-        args: Vec<ParsedValue>,
-    },
-    #[doc = include_str!("value_parser.doc/Comma.md")]
-    Comma,
-    #[doc = include_str!("value_parser.doc/Delimiter.md")]
-    Delimiter(char),
-    #[doc = include_str!("value_parser.doc/LineNames.md")]
-    LineNames(Box<[Box<str>]>),
-}
+use super::ParsedValue;
 
-#[doc = include_str!("value_parser.doc/ValueParser.md")]
+#[doc = include_str!("../../docs/api/parser/value_parser.doc/ValueParser.md")]
 #[derive(Debug, Clone, Default)]
 pub struct ValueParser {
     _private: (),
 }
 
 impl ValueParser {
-    #[doc = include_str!("value_parser.doc/new.md")]
+    /// Creates a value parser.
     #[must_use]
     pub fn new() -> Self {
         Self { _private: () }
     }
 
-    #[doc = include_str!("value_parser.doc/parse.md")]
+    #[doc = include_str!("../../docs/api/parser/value_parser.doc/parse.md")]
     pub fn parse(&self, source: &CssSource) -> Result<Vec<ParsedValue>, CssParseError> {
         let text = source.text();
         let eof = u32::try_from(text.len()).unwrap_or(u32::MAX);
@@ -65,7 +32,7 @@ impl ValueParser {
         Self::parse_tokens(&tokens, eof)
     }
 
-    #[doc = include_str!("value_parser.doc/parse_tokens.md")]
+    #[doc = include_str!("../../docs/api/parser/value_parser.doc/parse_tokens.md")]
     pub(crate) fn parse_tokens(
         tokens: &[CssToken],
         eof: u32,
@@ -75,7 +42,8 @@ impl ValueParser {
     }
 }
 
-#[doc = include_str!("value_parser.doc/parse_components.md")]
+/// Parses a run of components. When `in_function`, stops at (and consumes) the
+/// matching `)`; otherwise stops at end-of-input.
 fn parse_components(
     cursor: &mut TokenCursor<'_>,
     in_function: bool,
@@ -106,7 +74,7 @@ fn parse_components(
     }
 }
 
-#[doc = include_str!("value_parser.doc/parse_component.md")]
+/// Parses exactly one component value.
 fn parse_component(cursor: &mut TokenCursor<'_>) -> Result<ParsedValue, CssParseError> {
     let span = cursor.here_span();
     let kind = cursor.peek_kind().cloned();
@@ -171,7 +139,7 @@ fn parse_component(cursor: &mut TokenCursor<'_>) -> Result<ParsedValue, CssParse
     }
 }
 
-#[doc = include_str!("value_parser.doc/parse_line_names.md")]
+#[doc = include_str!("../../docs/api/parser/value_parser.doc/parse_line_names.md")]
 fn parse_line_names(cursor: &mut TokenCursor<'_>) -> Result<ParsedValue, CssParseError> {
     let mut names: Vec<Box<str>> = Vec::new();
     loop {
@@ -197,7 +165,7 @@ fn parse_line_names(cursor: &mut TokenCursor<'_>) -> Result<ParsedValue, CssPars
     }
 }
 
-#[doc = include_str!("value_parser.doc/parse_str.md")]
+/// Tokenizes `text` and parses it as a component-value list (test helper).
 #[cfg(test)]
 fn parse_str(text: &str) -> Result<Vec<ParsedValue>, CssParseError> {
     let src = CssSource::anonymous(text);

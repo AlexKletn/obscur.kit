@@ -1,26 +1,26 @@
-#![doc = include_str!("system_palette.doc/_module.md")]
+//! The colours a desktop states, where it states any.
 
 use obscur_scene::color::Color;
 
-#[doc = include_str!("system_palette.doc/SystemPalette.md")]
+#[doc = include_str!("../../docs/api/appearance/system_palette.doc/SystemPalette.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct SystemPalette {
-    #[doc = include_str!("system_palette.doc/window_background.md")]
+    /// Behind window chrome — toolbars, panels, dialog bodies.
     pub window_background: Option<Color>,
-    #[doc = include_str!("system_palette.doc/window_foreground.md")]
+    /// Text and icons on the window background.
     pub window_foreground: Option<Color>,
-    #[doc = include_str!("system_palette.doc/view_background.md")]
+    #[doc = include_str!("../../docs/api/appearance/system_palette.doc/view_background.md")]
     pub view_background: Option<Color>,
-    #[doc = include_str!("system_palette.doc/view_foreground.md")]
+    /// Text inside a view.
     pub view_foreground: Option<Color>,
-    #[doc = include_str!("system_palette.doc/selection_background.md")]
+    /// Behind selected text or a selected row.
     pub selection_background: Option<Color>,
-    #[doc = include_str!("system_palette.doc/selection_foreground.md")]
+    /// Selected text itself.
     pub selection_foreground: Option<Color>,
 }
 
 impl SystemPalette {
-    #[doc = include_str!("system_palette.doc/is_empty.md")]
+    #[doc = include_str!("../../docs/api/appearance/system_palette.doc/is_empty.md")]
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.window_background.is_none()
@@ -31,7 +31,7 @@ impl SystemPalette {
             && self.selection_foreground.is_none()
     }
 
-    #[doc = include_str!("system_palette.doc/stated.md")]
+    /// How many of the six the desktop actually named.
     #[must_use]
     pub const fn stated(&self) -> usize {
         let mut count = 0;

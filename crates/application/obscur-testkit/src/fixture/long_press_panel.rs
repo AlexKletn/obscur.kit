@@ -1,4 +1,4 @@
-#![doc = include_str!("long_press_panel.doc/_module.md")]
+//! The panel that tells a hold from a tap.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -13,36 +13,36 @@ use obscur_view::view::{
 
 use crate::fixture::{InteractionPanel, TestFixture};
 
-#[doc = include_str!("long_press_panel.doc/LongPressPanel.md")]
+#[doc = include_str!("../../docs/api/fixture/long_press_panel.doc/LongPressPanel.md")]
 #[derive(Debug)]
 pub struct LongPressPanel {
-    #[doc = include_str!("long_press_panel.doc/runtime.md")]
+    /// The runtime, with one frame already rendered.
     pub runtime: UiRuntime,
-    #[doc = include_str!("long_press_panel.doc/view.md")]
+    /// The view the fixture rendered, so a test can run further frames over it.
     pub view: View,
-    #[doc = include_str!("long_press_panel.doc/sheet.md")]
+    /// The sheet the fixture rendered, alongside [`view`](Self::view).
     pub sheet: Stylesheet,
-    #[doc = include_str!("long_press_panel.doc/tappable.md")]
+    /// `a` — bound to a click only, so a contact on it arms no hold.
     pub tappable: NodeId,
-    #[doc = include_str!("long_press_panel.doc/holdable.md")]
+    /// `b` — bound to both a click and a long press.
     pub holdable: NodeId,
-    #[doc = include_str!("long_press_panel.doc/clicked.md")]
+    /// Set when the click command's handler runs.
     pub clicked: Rc<Cell<bool>>,
-    #[doc = include_str!("long_press_panel.doc/held.md")]
+    /// Set when the long-press command's handler runs.
     pub held: Rc<Cell<bool>>,
 }
 
 impl LongPressPanel {
-    #[doc = include_str!("long_press_panel.doc/CMD_CLICK.md")]
+    /// The click command both children bind.
     pub const CMD_CLICK: InternedSymbol = InternedSymbol::from_raw(0x1A);
 
-    #[doc = include_str!("long_press_panel.doc/CMD_HOLD.md")]
+    /// The long-press command only `b` binds.
     pub const CMD_HOLD: InternedSymbol = InternedSymbol::from_raw(0x1B);
 
-    #[doc = include_str!("long_press_panel.doc/HOLD_TARGET_Y.md")]
+    /// A y inside `b`, the child that binds the hold.
     pub const HOLD_TARGET_Y: f32 = 75.0;
 
-    #[doc = include_str!("long_press_panel.doc/new.md")]
+    /// Renders the panel and registers a handler for each of the two commands.
     #[must_use]
     pub fn new() -> Self {
         let mut runtime = TestFixture::runtime();
@@ -67,7 +67,7 @@ impl LongPressPanel {
         }
     }
 
-    #[doc = include_str!("long_press_panel.doc/build_view.md")]
+    /// The panel with `a` click-bound and `b` click- and hold-bound.
     fn build_view() -> View {
         View::from_fragment(ViewFragment::from_nodes(vec![
             ViewNode::element(ComponentId::from_raw(100))

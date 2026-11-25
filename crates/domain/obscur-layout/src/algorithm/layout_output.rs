@@ -1,38 +1,45 @@
-#![doc = include_str!("layout_output.doc/_module.md")]
+//! `LayoutOutput`: the result of laying out one node.
 
 use obscur_geometry::Size;
+use obscur_identity::NodeId;
 
 use super::ChildPercentBasis;
 use crate::model::LayoutBox;
 
-#[doc = include_str!("layout_output.doc/LayoutOutput.md")]
+#[doc = include_str!("../../docs/api/algorithm/layout_output.doc/LayoutOutput.md")]
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct LayoutOutput {
     size: Size,
     child_boxes: Vec<LayoutBox>,
-    #[doc = include_str!("layout_output.doc/child_percent_bases.md")]
+    /// Parallel to `child_boxes` when stated, and **empty** when the algorithm
+    /// stated nothing (the overwhelmingly common case, and the reason this is not
+    /// a `Vec<Option<…>>` sized to match): an out-of-range index reads as
+    /// [`ChildPercentBasis::UNSTATED`].
     child_percent_bases: Vec<ChildPercentBasis>,
+    grid_limited_item: Option<NodeId>,
 }
 
 impl LayoutOutput {
-    #[doc = include_str!("layout_output.doc/new.md")]
+    /// Creates an output from a node's border-box `size` and its arranged
+    /// `child_boxes` (in this node's coordinate space, parallel to the children).
     #[must_use]
     pub fn new(size: Size, child_boxes: Vec<LayoutBox>) -> Self {
         Self {
             size,
             child_boxes,
             child_percent_bases: Vec::new(),
+            grid_limited_item: None,
         }
     }
 
-    #[doc = include_str!("layout_output.doc/with_child_percent_bases.md")]
+    #[doc = include_str!("../../docs/api/algorithm/layout_output.doc/with_child_percent_bases.md")]
     #[must_use]
     pub fn with_child_percent_bases(mut self, bases: Vec<ChildPercentBasis>) -> Self {
         self.child_percent_bases = bases;
         self
     }
 
-    #[doc = include_str!("layout_output.doc/child_percent_basis.md")]
+    #[doc = include_str!("../../docs/api/algorithm/layout_output.doc/child_percent_basis.md")]
     #[must_use]
     pub fn child_percent_basis(&self, index: usize) -> ChildPercentBasis {
         self.child_percent_bases
@@ -41,19 +48,31 @@ impl LayoutOutput {
             .unwrap_or(ChildPercentBasis::UNSTATED)
     }
 
-    #[doc = include_str!("layout_output.doc/size.md")]
+    /// Records the first item whose placement exceeded the implicit grid limit.
+    pub(super) const fn with_grid_limited_item(mut self, item: Option<NodeId>) -> Self {
+        self.grid_limited_item = item;
+        self
+    }
+
+    /// The first item whose placement was clamped to the implicit grid limit, if any.
+    #[must_use]
+    pub const fn grid_limited_item(&self) -> Option<NodeId> {
+        self.grid_limited_item
+    }
+
+    /// The node's resolved border-box size.
     #[must_use]
     pub const fn size(&self) -> Size {
         self.size
     }
 
-    #[doc = include_str!("layout_output.doc/child_boxes.md")]
+    /// The arranged child boxes, in this node's coordinate space.
     #[must_use]
     pub fn child_boxes(&self) -> &[LayoutBox] {
         &self.child_boxes
     }
 
-    #[doc = include_str!("layout_output.doc/is_empty.md")]
+    /// Returns `true` if the node has no arranged children.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.child_boxes.is_empty()

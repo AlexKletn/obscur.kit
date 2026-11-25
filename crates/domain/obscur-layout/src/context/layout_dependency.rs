@@ -1,19 +1,20 @@
-#![doc = include_str!("layout_dependency.doc/_module.md")]
+//! What a layout context's output depends on, for incremental recomputation.
 
 use obscur_identity::{FastSet, NodeId};
 use std::collections::HashSet;
 
-#[doc = include_str!("layout_dependency.doc/LayoutDependency.md")]
+#[doc = include_str!("../../docs/api/context/layout_dependency.doc/LayoutDependency.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LayoutDependency {
-    #[doc = include_str!("layout_dependency.doc/constraints_affect_size.md")]
+    /// Whether the node's measured size depends on the incoming constraints.
     constraints_affect_size: bool,
-    #[doc = include_str!("layout_dependency.doc/children.md")]
+    /// The children whose sizes feed this context's measure.
     children: FastSet<NodeId>,
 }
 
 impl LayoutDependency {
-    #[doc = include_str!("layout_dependency.doc/new.md")]
+    /// Creates an empty dependency: size does not depend on constraints and no
+    /// children feed the measure.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -22,37 +23,37 @@ impl LayoutDependency {
         }
     }
 
-    #[doc = include_str!("layout_dependency.doc/with_constraints_affect_size.md")]
+    /// Returns a copy with `constraints_affect_size` set to the given value.
     #[must_use]
     pub fn with_constraints_affect_size(mut self, affects: bool) -> Self {
         self.constraints_affect_size = affects;
         self
     }
 
-    #[doc = include_str!("layout_dependency.doc/add_child.md")]
+    /// Records that `child`'s size feeds this context's measure.
     pub fn add_child(&mut self, child: NodeId) {
         self.children.insert(child);
     }
 
-    #[doc = include_str!("layout_dependency.doc/constraints_affect_size_2.md")]
+    /// Whether the node's measured size depends on the incoming constraints.
     #[must_use]
     pub const fn constraints_affect_size(&self) -> bool {
         self.constraints_affect_size
     }
 
-    #[doc = include_str!("layout_dependency.doc/children_2.md")]
+    /// The set of children whose sizes feed this context's measure.
     #[must_use]
     pub const fn children(&self) -> &FastSet<NodeId> {
         &self.children
     }
 
-    #[doc = include_str!("layout_dependency.doc/affected_by_constraint_change.md")]
+    #[doc = include_str!("../../docs/api/context/layout_dependency.doc/affected_by_constraint_change.md")]
     #[must_use]
     pub const fn affected_by_constraint_change(&self) -> bool {
         self.constraints_affect_size
     }
 
-    #[doc = include_str!("layout_dependency.doc/affected_by_child.md")]
+    #[doc = include_str!("../../docs/api/context/layout_dependency.doc/affected_by_child.md")]
     #[must_use]
     pub fn affected_by_child(&self, child: NodeId) -> bool {
         self.children.contains(&child)

@@ -1,4 +1,4 @@
-#![doc = include_str!("mounted_component.doc/_module.md")]
+//! `MountedComponent`: one live component instance the runtime renders through.
 
 use core::fmt;
 
@@ -15,27 +15,32 @@ use obscur_view::view::{View, ViewProperty};
 use crate::component::GuardedRender;
 use crate::recovery::ComponentRecovery;
 
-#[doc = include_str!("mounted_component.doc/COMPONENT_PROPS_FAILED.md")]
+#[doc = include_str!("../../docs/api/component/mounted_component.doc/COMPONENT_PROPS_FAILED.md")]
 pub const COMPONENT_PROPS_FAILED: DiagnosticCode = DiagnosticCode::new("view.component.props");
 
-#[doc = include_str!("mounted_component.doc/MountedComponent.md")]
+#[doc = include_str!("../../docs/api/component/mounted_component.doc/MountedComponent.md")]
 pub struct MountedComponent {
-    #[doc = include_str!("mounted_component.doc/instance.md")]
+    /// Identity, lifecycle phase and scoped subscriptions.
     instance: ComponentInstance,
-    #[doc = include_str!("mounted_component.doc/component.md")]
+    /// The author's component value, behind the erasure. Holds its local state.
     component: Box<dyn ErasedComponent>,
-    #[doc = include_str!("mounted_component.doc/needs_update.md")]
+    /// Set by [`ComponentContext::request_update`] during a render or hook.
     needs_update: bool,
-    #[doc = include_str!("mounted_component.doc/needs_render.md")]
+    /// The runtime's dirty mark: this component's output is stale and must be
+    /// re-rendered. True from mount (nothing has rendered it yet).
     needs_render: bool,
-    #[doc = include_str!("mounted_component.doc/boundary.md")]
+    /// This component's §1.7 error boundary, governed by the author's policy.
     boundary: ErrorBoundary,
-    #[doc = include_str!("mounted_component.doc/attempts.md")]
+    /// How many failures this boundary has recorded since the component last
+    /// rendered cleanly — the attempt the next failure counts as, and so what
+    /// spends the policy's retry budget. Reset by a healthy render, which is
+    /// what makes the budget per *episode* rather than per instance.
     attempts: u32,
 }
 
 impl MountedComponent {
-    #[doc = include_str!("mounted_component.doc/new.md")]
+    /// Pairs a freshly minted `instance` record with its `component` value, and
+    /// builds the component's error boundary from its own policy and fallback.
     #[must_use]
     pub fn new(instance: ComponentInstance, component: Box<dyn ErasedComponent>) -> Self {
         let mut boundary = ErrorBoundary::new(component.error_boundary_erased());
@@ -52,48 +57,50 @@ impl MountedComponent {
         }
     }
 
-    #[doc = include_str!("mounted_component.doc/boundary_policy.md")]
+    /// The §1.7 policy governing this component's boundary.
     #[must_use]
     pub fn boundary_policy(&self) -> ErrorBoundaryPolicy {
         self.boundary.policy()
     }
 
-    #[doc = include_str!("mounted_component.doc/boundary_2.md")]
+    /// This component's error boundary.
     #[must_use]
     pub const fn boundary(&self) -> &ErrorBoundary {
         &self.boundary
     }
 
-    #[doc = include_str!("mounted_component.doc/instance_id.md")]
+    /// This instance's identity.
     #[must_use]
     pub const fn instance_id(&self) -> InstanceId {
         self.instance.id()
     }
 
-    #[doc = include_str!("mounted_component.doc/instance_2.md")]
+    /// The bookkeeping record.
     #[must_use]
     pub const fn instance(&self) -> &ComponentInstance {
         &self.instance
     }
 
-    #[doc = include_str!("mounted_component.doc/needs_update_2.md")]
+    /// Whether the component asked to be re-rendered since the flag was last
+    /// cleared.
     #[must_use]
     pub const fn needs_update(&self) -> bool {
         self.needs_update
     }
 
-    #[doc = include_str!("mounted_component.doc/needs_render_2.md")]
+    /// Whether this component's output is stale and must be re-rendered.
     #[must_use]
     pub const fn needs_render(&self) -> bool {
         self.needs_render
     }
 
-    #[doc = include_str!("mounted_component.doc/mark_dirty.md")]
+    /// Marks the component's output stale — e.g. because the node's authored
+    /// props changed, so its typed props may decode differently.
     pub const fn mark_dirty(&mut self) {
         self.needs_render = true;
     }
 
-    #[doc = include_str!("mounted_component.doc/mount.md")]
+    /// Advances the instance to `Mounted` and runs the component's `on_mount`.
     pub fn mount(&mut self, signals: &SignalGenerations) {
         self.instance.mount();
         let Self {
@@ -108,7 +115,7 @@ impl MountedComponent {
         component.on_mount_erased(&mut mount);
     }
 
-    #[doc = include_str!("mounted_component.doc/unmount.md")]
+    #[doc = include_str!("../../docs/api/component/mounted_component.doc/unmount.md")]
     pub fn unmount(&mut self, signals: &SignalGenerations) {
         let Self {
             instance,
@@ -123,13 +130,14 @@ impl MountedComponent {
         self.instance.unmount();
     }
 
-    #[doc = include_str!("mounted_component.doc/depends_on_stale.md")]
+    /// Whether this component depends on `source` and has not seen its `current`
+    /// generation — i.e. it is a consumer of a value that changed (spec §3.1).
     #[must_use]
     pub fn depends_on_stale(&self, source: SignalId, current: StateGeneration) -> bool {
         self.instance.scope().is_stale_for(source, current)
     }
 
-    #[doc = include_str!("mounted_component.doc/render.md")]
+    #[doc = include_str!("../../docs/api/component/mounted_component.doc/render.md")]
     pub fn render(&mut self, props: &[ViewProperty], signals: &SignalGenerations) -> GuardedRender {
         match self.try_render(props, signals) {
             Ok(view) => {
@@ -144,7 +152,7 @@ impl MountedComponent {
         }
     }
 
-    #[doc = include_str!("mounted_component.doc/contain.md")]
+    /// Applies the §1.7 boundary to a render that failed with `error`.
     fn contain(&mut self, error: &PropsError) -> GuardedRender {
         let failure = ComponentFailure::new(
             self.instance.state(),
@@ -170,7 +178,7 @@ impl MountedComponent {
         }
     }
 
-    #[doc = include_str!("mounted_component.doc/contain_escaped.md")]
+    #[doc = include_str!("../../docs/api/component/mounted_component.doc/contain_escaped.md")]
     pub fn contain_escaped(&mut self, diagnostic: Diagnostic) -> (ComponentFailure, View) {
         let failure =
             ComponentFailure::from_diagnostic(self.instance.state(), self.attempts, diagnostic);
@@ -179,12 +187,12 @@ impl MountedComponent {
         (failure, self.fallback())
     }
 
-    #[doc = include_str!("mounted_component.doc/fallback.md")]
+    #[doc = include_str!("../../docs/api/component/mounted_component.doc/fallback.md")]
     fn fallback(&self) -> View {
         self.boundary.fallback_view().cloned().unwrap_or_default()
     }
 
-    #[doc = include_str!("mounted_component.doc/try_render.md")]
+    #[doc = include_str!("../../docs/api/component/mounted_component.doc/try_render.md")]
     fn try_render(
         &mut self,
         props: &[ViewProperty],
@@ -216,7 +224,9 @@ impl MountedComponent {
 }
 
 impl fmt::Debug for MountedComponent {
-    #[doc = include_str!("mounted_component.doc/fmt.md")]
+    /// Shows the record and the update flag; the erased component is opaque by
+    /// construction (it has no `Debug` bound — requiring one would force every
+    /// author's component to derive it).
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("MountedComponent")
             .field("instance", &self.instance)

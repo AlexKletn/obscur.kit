@@ -1,9 +1,9 @@
-#![doc = include_str!("scroll.doc/_module.md")]
+//! `Scroll`: a scrollable-viewport primitive (spec §2.6, §4.8).
 
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_view::view::{View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-#[doc = include_str!("scroll.doc/Scroll.md")]
+#[doc = include_str!("../docs/api/scroll.doc/Scroll.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Scroll {
     children: Vec<ViewNode>,
@@ -12,7 +12,7 @@ pub struct Scroll {
 }
 
 impl Default for Scroll {
-    #[doc = include_str!("scroll.doc/default.md")]
+    /// A vertical-only viewport with no children.
     fn default() -> Self {
         Self {
             children: Vec::new(),
@@ -23,42 +23,45 @@ impl Default for Scroll {
 }
 
 impl Scroll {
-    #[doc = include_str!("scroll.doc/COMPONENT_ID.md")]
+    #[doc = include_str!("../docs/api/scroll.doc/COMPONENT_ID.md")]
     pub const COMPONENT_ID: ComponentId = ComponentId::from_raw(0x00C0_0004);
 
-    #[doc = include_str!("scroll.doc/PROP_SCROLL_X.md")]
+    #[doc = include_str!("../docs/api/scroll.doc/PROP_SCROLL_X.md")]
     pub const PROP_SCROLL_X: InternedSymbol = InternedSymbol::from_raw(0x00C1_0401);
-    #[doc = include_str!("scroll.doc/PROP_SCROLL_Y.md")]
+    /// Property name for the vertical-scroll flag.
     pub const PROP_SCROLL_Y: InternedSymbol = InternedSymbol::from_raw(0x00C1_0402);
 
-    #[doc = include_str!("scroll.doc/new.md")]
+    /// Creates a default scroll viewport (vertical only, no children).
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    #[doc = include_str!("scroll.doc/child.md")]
+    /// Appends a child node, returning the updated viewport.
     #[must_use]
     pub fn child(mut self, node: ViewNode) -> Self {
         self.children.push(node);
         self
     }
 
-    #[doc = include_str!("scroll.doc/horizontal.md")]
+    /// Sets whether the viewport scrolls horizontally, returning the updated
+    /// viewport.
     #[must_use]
     pub const fn horizontal(mut self, enabled: bool) -> Self {
         self.horizontal = enabled;
         self
     }
 
-    #[doc = include_str!("scroll.doc/vertical.md")]
+    /// Sets whether the viewport scrolls vertically, returning the updated
+    /// viewport.
     #[must_use]
     pub const fn vertical(mut self, enabled: bool) -> Self {
         self.vertical = enabled;
         self
     }
 
-    #[doc = include_str!("scroll.doc/into_view_node.md")]
+    /// Lowers this viewport into its [`ViewNode::Element`], emitting both axis
+    /// flags as properties and its children as the fragment.
     #[must_use]
     pub fn into_view_node(self) -> ViewNode {
         ViewNode::element(Self::COMPONENT_ID)
@@ -73,7 +76,7 @@ impl Scroll {
             .with_children(ViewFragment::from_nodes(self.children))
     }
 
-    #[doc = include_str!("scroll.doc/view.md")]
+    /// Lowers this viewport into a single-node [`View`].
     #[must_use]
     pub fn view(self) -> View {
         View::single(self.into_view_node())

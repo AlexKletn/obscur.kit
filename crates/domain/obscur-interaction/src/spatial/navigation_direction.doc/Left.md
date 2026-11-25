@@ -1,1 +1,0 @@
-Toward smaller `x` (leftward).

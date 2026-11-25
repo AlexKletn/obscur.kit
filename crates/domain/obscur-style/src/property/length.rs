@@ -1,55 +1,67 @@
-#![doc = include_str!("length.doc/_module.md")]
+#![doc = include_str!("../../docs/api/property/length.doc/_module.md")]
 
 use crate::property::{EnvVar, LengthContext};
 use obscur_geometry::LogicalPx;
 
-#[doc = include_str!("length.doc/Length.md")]
+#[doc = include_str!("../../docs/api/property/length.doc/Length.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Length {
-    #[doc = include_str!("length.doc/Px.md")]
+    /// An absolute length in logical pixels.
     Px(LogicalPx),
-    #[doc = include_str!("length.doc/Percent.md")]
+    /// A percentage of some base dimension, expressed as a percentage value
+    /// (for example `50.0` for `50%`). The base is resolved later, during
+    /// layout, because it depends on context.
     Percent(f32),
-    #[doc = include_str!("length.doc/Auto.md")]
+    /// The `auto` keyword; its used value is resolved later, during layout.
     Auto,
-    #[doc = include_str!("length.doc/Em.md")]
+    /// A font-relative `em` length: this many times the element's own
+    /// `font-size` (`LengthContext::font_size`).
     Em(f32),
-    #[doc = include_str!("length.doc/Rem.md")]
+    /// A font-relative `rem` length: this many times the document root's
+    /// `font-size` (`LengthContext::root_font_size`).
     Rem(f32),
-    #[doc = include_str!("length.doc/Ch.md")]
+    #[doc = include_str!("../../docs/api/property/length.doc/Ch.md")]
     Ch(f32),
-    #[doc = include_str!("length.doc/Vw.md")]
+    /// A viewport-relative `vw` length: this many percent of the viewport width.
     Vw(f32),
-    #[doc = include_str!("length.doc/Vh.md")]
+    /// A viewport-relative `vh` length: this many percent of the viewport
+    /// height.
     Vh(f32),
-    #[doc = include_str!("length.doc/Vmin.md")]
+    /// A viewport-relative `vmin` length: this many percent of the smaller
+    /// viewport dimension.
     Vmin(f32),
-    #[doc = include_str!("length.doc/Vmax.md")]
+    /// A viewport-relative `vmax` length: this many percent of the larger
+    /// viewport dimension.
     Vmax(f32),
-    #[doc = include_str!("length.doc/Cqw.md")]
+    #[doc = include_str!("../../docs/api/property/length.doc/Cqw.md")]
     Cqw(f32),
-    #[doc = include_str!("length.doc/Cqh.md")]
+    /// A container-relative `cqh` length: this many percent of the query
+    /// container's height.
     Cqh(f32),
-    #[doc = include_str!("length.doc/Cqi.md")]
+    /// A container-relative `cqi` length: this many percent of the query
+    /// container's inline size.
     Cqi(f32),
-    #[doc = include_str!("length.doc/Cqb.md")]
+    /// A container-relative `cqb` length: this many percent of the query
+    /// container's block size.
     Cqb(f32),
-    #[doc = include_str!("length.doc/Cqmin.md")]
+    /// A container-relative `cqmin` length: this many percent of the smaller of
+    /// the `cqi` and `cqb` bases.
     Cqmin(f32),
-    #[doc = include_str!("length.doc/Cqmax.md")]
+    /// A container-relative `cqmax` length: this many percent of the larger of
+    /// the `cqi` and `cqb` bases.
     Cqmax(f32),
-    #[doc = include_str!("length.doc/Env.md")]
+    #[doc = include_str!("../../docs/api/property/length.doc/Env.md")]
     Env(EnvVar),
 }
 
 impl Length {
-    #[doc = include_str!("length.doc/px.md")]
+    /// Convenience constructor for an absolute pixel length.
     #[must_use]
     pub const fn px(value: f32) -> Self {
         Self::Px(LogicalPx(value))
     }
 
-    #[doc = include_str!("length.doc/as_px.md")]
+    /// Returns the absolute pixel length if this is a [`Length::Px`].
     #[must_use]
     pub const fn as_px(self) -> Option<LogicalPx> {
         match self {
@@ -58,19 +70,19 @@ impl Length {
         }
     }
 
-    #[doc = include_str!("length.doc/is_auto.md")]
+    /// Returns `true` when this length is the `auto` keyword.
     #[must_use]
     pub const fn is_auto(self) -> bool {
         matches!(self, Self::Auto)
     }
 
-    #[doc = include_str!("length.doc/is_ch.md")]
+    #[doc = include_str!("../../docs/api/property/length.doc/is_ch.md")]
     #[must_use]
     pub const fn is_ch(self) -> bool {
         matches!(self, Self::Ch(_))
     }
 
-    #[doc = include_str!("length.doc/absolutize.md")]
+    #[doc = include_str!("../../docs/api/property/length.doc/absolutize.md")]
     #[must_use]
     pub fn absolutize(self, ctx: &LengthContext) -> Self {
         match self {
@@ -80,7 +92,7 @@ impl Length {
         }
     }
 
-    #[doc = include_str!("length.doc/resolve_px.md")]
+    #[doc = include_str!("../../docs/api/property/length.doc/resolve_px.md")]
     #[must_use]
     pub fn resolve_px(self, ctx: &LengthContext) -> Option<f32> {
         match self {
@@ -249,10 +261,6 @@ mod tests {
         assert_eq!(Length::Cqmax(10.0).resolve_px(&ctx()), Some(80.0));
     }
 
-    /// Container units carry no basis a later pass could improve on (no element
-    /// in this engine accepts container size queries — see
-    /// `LengthContext::container_width`), so they retire at the computed-value
-    /// step like the viewport units rather than staying symbolic.
     #[test]
     fn container_units_absolutize_at_the_computed_value_step() {
         assert_eq!(Length::Cqi(50.0).absolutize(&ctx()), Length::px(400.0));

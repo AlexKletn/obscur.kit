@@ -1,20 +1,21 @@
-#![doc = include_str!("style_color.doc/_module.md")]
+#![doc = include_str!("../../docs/api/property/style_color.doc/_module.md")]
 
-#[doc = include_str!("style_color.doc/StyleColor.md")]
+#[doc = include_str!("../../docs/api/property/style_color.doc/StyleColor.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct StyleColor {
-    #[doc = include_str!("style_color.doc/r.md")]
+    /// Red channel in `0.0..=1.0` (sRGB).
     pub r: f32,
-    #[doc = include_str!("style_color.doc/g.md")]
+    /// Green channel in `0.0..=1.0` (sRGB).
     pub g: f32,
-    #[doc = include_str!("style_color.doc/b.md")]
+    /// Blue channel in `0.0..=1.0` (sRGB).
     pub b: f32,
-    #[doc = include_str!("style_color.doc/a.md")]
+    /// Straight (non-premultiplied) alpha in `0.0..=1.0`.
     pub a: f32,
 }
 
 impl StyleColor {
-    #[doc = include_str!("style_color.doc/TRANSPARENT.md")]
+    /// Fully transparent black (`rgba(0, 0, 0, 0)`), the used value of the CSS
+    /// `transparent` keyword.
     pub const TRANSPARENT: Self = Self {
         r: 0.0,
         g: 0.0,
@@ -22,7 +23,7 @@ impl StyleColor {
         a: 0.0,
     };
 
-    #[doc = include_str!("style_color.doc/BLACK.md")]
+    /// Opaque black (`rgba(0, 0, 0, 1)`).
     pub const BLACK: Self = Self {
         r: 0.0,
         g: 0.0,
@@ -30,7 +31,7 @@ impl StyleColor {
         a: 1.0,
     };
 
-    #[doc = include_str!("style_color.doc/rgba.md")]
+    #[doc = include_str!("../../docs/api/property/style_color.doc/rgba.md")]
     #[must_use]
     pub const fn rgba(r: f32, g: f32, b: f32, a: f32) -> Self {
         Self { r, g, b, a }

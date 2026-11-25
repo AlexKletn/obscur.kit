@@ -1,61 +1,62 @@
-#![doc = include_str!("edit_command.doc/_module.md")]
+//! The vocabulary of editing operations submitted to the engine (spec §5.11).
 
 use crate::selection::TextSelection;
 use crate::span::TextRange;
 
 use super::{DeletionUnit, NavigationUnit};
 
-#[doc = include_str!("edit_command.doc/EditDirection.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum EditDirection {
-    #[doc = include_str!("edit_command.doc/Backward.md")]
-    Backward,
-    #[doc = include_str!("edit_command.doc/Forward.md")]
-    Forward,
-}
+use super::EditDirection;
 
-#[doc = include_str!("edit_command.doc/EditCommand.md")]
+#[doc = include_str!("../../docs/api/editing/edit_command.doc/EditCommand.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum EditCommand {
-    #[doc = include_str!("edit_command.doc/Insert.md")]
+    /// Insert text at the caret, replacing the current selection if it is
+    /// non-empty (typing, IME commit of simple text, or programmatic insert).
     Insert(Box<str>),
-    #[doc = include_str!("edit_command.doc/Delete.md")]
+    /// Delete `unit` worth of text in `direction` from the caret, or the
+    /// selection if one is active (deletion semantics).
     Delete {
-        #[doc = include_str!("edit_command.doc/unit.md")]
+        /// How much text to remove.
         unit: DeletionUnit,
-        #[doc = include_str!("edit_command.doc/direction.md")]
+        /// Which side of the caret to remove it from.
         direction: EditDirection,
     },
-    #[doc = include_str!("edit_command.doc/Move.md")]
+    /// Move the caret by one `unit` in `direction`. When `extend` is true the
+    /// selection's anchor is kept and only the focus moves (shift-extend);
+    /// otherwise the selection collapses to the moved caret.
     Move {
-        #[doc = include_str!("edit_command.doc/unit_2.md")]
+        /// The granularity of the movement.
         unit: NavigationUnit,
-        #[doc = include_str!("edit_command.doc/direction_2.md")]
+        /// The direction to move.
         direction: EditDirection,
-        #[doc = include_str!("edit_command.doc/extend.md")]
+        /// Whether to extend the selection (shift held) rather than collapse it.
         extend: bool,
     },
-    #[doc = include_str!("edit_command.doc/SelectAll.md")]
+    /// Select the entire document (Ctrl+A / Cmd+A).
     SelectAll,
-    #[doc = include_str!("edit_command.doc/SetSelection.md")]
+    /// Replace the current selection with `selection` outright — used to seat a
+    /// caret from a pointer hit or to restore a saved selection.
     SetSelection(TextSelection),
-    #[doc = include_str!("edit_command.doc/Replace.md")]
+    /// Replace an explicit byte `range` with `text`, independent of the current
+    /// caret — used for IME commits over the composition span and for
+    /// programmatic edits.
     Replace {
-        #[doc = include_str!("edit_command.doc/range.md")]
+        /// The pre-edit byte range to replace.
         range: TextRange,
-        #[doc = include_str!("edit_command.doc/text.md")]
+        /// The replacement text.
         text: Box<str>,
     },
 }
 
 impl EditCommand {
-    #[doc = include_str!("edit_command.doc/insert.md")]
+    /// Creates an [`Insert`](Self::Insert) command from anything convertible into
+    /// a `Box<str>` (`&str`, `String`, `Box<str>`).
     #[must_use]
     pub fn insert(text: impl Into<Box<str>>) -> Self {
         Self::Insert(text.into())
     }
 
-    #[doc = include_str!("edit_command.doc/is_mutating.md")]
+    #[doc = include_str!("../../docs/api/editing/edit_command.doc/is_mutating.md")]
     #[must_use]
     pub const fn is_mutating(&self) -> bool {
         matches!(

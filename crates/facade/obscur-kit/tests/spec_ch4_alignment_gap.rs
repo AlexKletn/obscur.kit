@@ -79,7 +79,7 @@ fn a_gutter_is_a_floor_that_justify_content_grows() {
     let rt = drive(
         VW,
         VW,
-        ".c{display:flex;width:400px;height:40px;gap:20px;\
+        ".c{display:flex;width:400px;height:40px;column-gap:20px;\
             justify-content:space-between} \
          .i{width:100px;height:10px;flex:0 0 auto}",
         &items(3),
@@ -108,4 +108,63 @@ fn gap_normal_is_zero_outside_multicol() {
     let x = xs(&rt, 2);
     approx(x[0], 0.0, "first item");
     approx(x[1], 100.0, "the used gap is 0px, not 1em");
+}
+
+#[doc = include_str!("spec_ch4_alignment_gap.doc/overflow_preserves_center_and_end_alignment.md")]
+#[test]
+fn overflow_preserves_center_and_end_alignment() {
+    for (mode, first) in [
+        ("center", -40.0),
+        ("end", -80.0),
+        ("space-between", 0.0),
+        ("space-around", 0.0),
+        ("space-evenly", 0.0),
+    ] {
+        for (layout, distribution, item, vertical) in [
+            (
+                "display:flex",
+                "justify-content",
+                "width:60px;height:60px;flex:none;margin-left:auto",
+                false,
+            ),
+            (
+                "display:flex;flex-wrap:wrap",
+                "align-content",
+                "width:100px;height:60px;flex:none",
+                true,
+            ),
+            (
+                "display:grid;grid-template-columns:repeat(3,60px)",
+                "justify-content",
+                "",
+                false,
+            ),
+            (
+                "display:grid;grid-template-rows:repeat(3,60px)",
+                "align-content",
+                "",
+                true,
+            ),
+        ] {
+            let rt = drive(
+                VW,
+                VW,
+                &format!(
+                    ".c{{width:100px;height:100px;{layout};{distribution}:{mode}}}
+                           .i{{{item}}}"
+                ),
+                &items(3),
+            );
+            for i in 0..3 {
+                let (x, y, _, _) = geom(&rt, at(&rt, &[0, i]));
+                #[allow(clippy::cast_precision_loss)]
+                let expected = first + 60.0 * i as f32;
+                approx(
+                    if vertical { y } else { x },
+                    expected,
+                    &format!("{layout}, {distribution}: {mode}, item {i}"),
+                );
+            }
+        }
+    }
 }

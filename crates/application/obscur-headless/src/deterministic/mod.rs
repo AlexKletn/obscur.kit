@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Deterministic module.
 mod deterministic_clock;
 
 pub use deterministic_clock::DeterministicClock;
@@ -8,4 +8,5 @@ pub use completion::Completion;
 mod completion_queue;
 pub use completion_queue::CompletionQueue;
 mod deterministic_executor;
+mod job_queue;
 pub use deterministic_executor::DeterministicExecutor;

@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Surface module.
 mod canvas_surface;
 pub use canvas_surface::CanvasSurface;
 mod foreign_surface;

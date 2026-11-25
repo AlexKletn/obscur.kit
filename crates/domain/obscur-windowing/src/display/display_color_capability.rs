@@ -1,18 +1,19 @@
-#![doc = include_str!("display_color_capability.doc/_module.md")]
+//! A display's color and HDR capability (spec §6.6).
 
-#[doc = include_str!("display_color_capability.doc/DisplayColorCapability.md")]
+#[doc = include_str!("../../docs/api/display/display_color_capability.doc/DisplayColorCapability.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DisplayColorCapability {
-    #[doc = include_str!("display_color_capability.doc/bit_depth.md")]
+    /// The bit depth per color channel, or `None` if unknown.
     pub bit_depth: Option<u8>,
-    #[doc = include_str!("display_color_capability.doc/hdr.md")]
+    /// Whether the display supports high dynamic range.
     pub hdr: bool,
-    #[doc = include_str!("display_color_capability.doc/wide_gamut.md")]
+    /// Whether the display covers a wide color gamut.
     pub wide_gamut: bool,
 }
 
 impl DisplayColorCapability {
-    #[doc = include_str!("display_color_capability.doc/new.md")]
+    /// Creates the conservative SDR baseline: unknown bit depth, no HDR, no wide
+    /// gamut.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -22,40 +23,41 @@ impl DisplayColorCapability {
         }
     }
 
-    #[doc = include_str!("display_color_capability.doc/with_bit_depth.md")]
+    /// Sets the per-channel bit depth, returning the updated capability.
     #[must_use]
     pub const fn with_bit_depth(mut self, bit_depth: u8) -> Self {
         self.bit_depth = Some(bit_depth);
         self
     }
 
-    #[doc = include_str!("display_color_capability.doc/with_hdr.md")]
+    /// Sets whether the display supports HDR, returning the updated capability.
     #[must_use]
     pub const fn with_hdr(mut self, hdr: bool) -> Self {
         self.hdr = hdr;
         self
     }
 
-    #[doc = include_str!("display_color_capability.doc/with_wide_gamut.md")]
+    /// Sets whether the display covers a wide color gamut, returning the updated
+    /// capability.
     #[must_use]
     pub const fn with_wide_gamut(mut self, wide_gamut: bool) -> Self {
         self.wide_gamut = wide_gamut;
         self
     }
 
-    #[doc = include_str!("display_color_capability.doc/bit_depth_2.md")]
+    /// Returns the per-channel bit depth, or `None` if unknown.
     #[must_use]
     pub const fn bit_depth(&self) -> Option<u8> {
         self.bit_depth
     }
 
-    #[doc = include_str!("display_color_capability.doc/is_hdr.md")]
+    /// Returns whether the display supports high dynamic range.
     #[must_use]
     pub const fn is_hdr(&self) -> bool {
         self.hdr
     }
 
-    #[doc = include_str!("display_color_capability.doc/is_wide_gamut.md")]
+    /// Returns whether the display covers a wide color gamut.
     #[must_use]
     pub const fn is_wide_gamut(&self) -> bool {
         self.wide_gamut
@@ -63,7 +65,7 @@ impl DisplayColorCapability {
 }
 
 impl Default for DisplayColorCapability {
-    #[doc = include_str!("display_color_capability.doc/default.md")]
+    /// The conservative SDR baseline, equal to [`DisplayColorCapability::new`].
     fn default() -> Self {
         Self::new()
     }

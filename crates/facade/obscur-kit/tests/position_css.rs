@@ -308,6 +308,14 @@ fn sticky_child_clamps_on_scroll_leaving_sibling_in_flow() {
         0.0,
         "no horizontal inset → a.x unchanged",
     );
+    rt.set_viewport_scroll(f32::NAN, f32::INFINITY);
+    let _ = rt.render_now(&view, std::slice::from_ref(&sheet));
+    assert_eq!(rt.viewport_scroll(), (0.0, 100.0));
+    approx(
+        origin(&rt, a_node).1,
+        110.0,
+        "invalid scroll preserves sticky position",
+    );
 }
 
 // End-to-end: two overlapping `position: absolute` boxes with `background-color`
@@ -366,4 +374,103 @@ fn z_index_orders_overlapping_absolute_fills_by_stacking() {
         "higher z-index (.boxa, z=5) must paint after lower (.boxb, z=1): \
          boxa at {index_a}, boxb at {index_b}",
     );
+}
+
+#[doc = include_str!("position_css.doc/a_full_width_child_of_a_large_parent_stays_finite.md")]
+#[test]
+fn a_full_width_child_of_a_large_parent_stays_finite() {
+    let rt = drive(".row { width: 1e37px } .a { width: 100%; height: 10px }");
+    let parent = box_size(&rt, container_node(&rt)).0;
+    let child = box_size(&rt, children(&rt).0).0;
+    assert_eq!(parent, 1e37_f32);
+    assert_eq!(child, parent);
+}
+
+#[doc = include_str!("position_css.doc/opposing_insets_respect_size_constraints_and_margins.md")]
+#[test]
+fn opposing_insets_respect_size_constraints_and_margins() {
+    let v = View::single(
+        tag(el(1), "parent").with_children(ViewFragment::from_nodes(vec![tag(el(2), "child")])),
+    );
+    for (direction, rules, expected) in [
+        (
+            "ltr",
+            "left:10px;right:10px;width:100px",
+            (10.0, 0.0, 100.0, 50.0),
+        ),
+        (
+            "rtl",
+            "left:10px;right:20px;width:100px;direction:ltr",
+            (280.0, 0.0, 100.0, 50.0),
+        ),
+        (
+            "ltr",
+            "left:0;right:0;width:100px;margin-inline:auto",
+            (150.0, 0.0, 100.0, 50.0),
+        ),
+        (
+            "ltr",
+            "left:10px;right:10px;margin-left:20px;margin-right:30px",
+            (30.0, 0.0, 330.0, 50.0),
+        ),
+        (
+            "ltr",
+            "left:0;right:0;max-width:100px;margin-inline:auto",
+            (150.0, 0.0, 100.0, 50.0),
+        ),
+        (
+            "ltr",
+            "left:10px;margin-left:5%;width:100px;top:10px;bottom:10px;margin-block:auto",
+            (30.0, 125.0, 100.0, 50.0),
+        ),
+    ] {
+        let rt = drive_view(
+            &format!(
+                ".parent{{position:relative;width:400px;height:300px;direction:{direction}}}
+                       .child{{position:absolute;height:50px;{rules}}}"
+            ),
+            &v,
+        );
+        let child = rt.tree().get(container_node(&rt)).unwrap().child_nodes()[0];
+        let (x, y) = origin(&rt, child);
+        let (w, h) = box_size(&rt, child);
+        assert_eq!((x, y, w, h), expected, "{direction} / {rules}");
+    }
+}
+
+#[doc = include_str!("position_css.doc/invalid_lengths_leave_valid_cascade_values_in_place.md")]
+#[test]
+fn invalid_lengths_leave_valid_cascade_values_in_place() {
+    let rt = drive(
+        ".row { width: 400px }
+         .a { width: 60px; height: 20px; padding: 5px; border: 1px solid red }
+         .a { width: -webkit-fill-available; width: not a length; width: red; width: -50px;
+              height: -25%; padding: 10px -10px; border: -5px solid red; margin-left: -10px }",
+    );
+    let (node, _) = children(&rt);
+    assert_eq!(box_size(&rt, node), (72.0, 32.0));
+    assert_eq!(origin(&rt, node).0, -10.0);
+    let child = leaf_node(&rt, node);
+    assert_eq!(origin(&rt, child), (-4.0, 6.0));
+}
+
+#[doc = include_str!("position_css.doc/percentage_math_uses_the_layout_axis_basis.md")]
+#[test]
+fn percentage_math_uses_the_layout_axis_basis() {
+    for (expression, width) in [
+        ("calc(50%)", 200.0),
+        ("calc(100% - 40px)", 360.0),
+        ("min(50%, 100px)", 100.0),
+        ("max(50%, 100px)", 200.0),
+        ("clamp(100px, 50%, 150px)", 150.0),
+    ] {
+        let rt = drive(&format!(
+            ".row{{position:relative;width:400px;height:300px}}
+             .a{{position:absolute;width:{expression};height:calc(100% - 40px);
+                 left:min(25%, 200px);margin-left:calc(5% + 10px);top:calc(10% - 50px)}}",
+        ));
+        let (node, _) = children(&rt);
+        assert_eq!(box_size(&rt, node), (width, 260.0), "{expression}");
+        assert_eq!(origin(&rt, node), (130.0, -20.0), "{expression}");
+    }
 }

@@ -1,20 +1,20 @@
-#![doc = include_str!("layer_edge.doc/_module.md")]
+//! The screen edge a docked surface is attached to.
 
-#[doc = include_str!("layer_edge.doc/LayerEdge.md")]
+#[doc = include_str!("../../docs/api/layer/layer_edge.doc/LayerEdge.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LayerEdge {
-    #[doc = include_str!("layer_edge.doc/Top.md")]
+    /// The top of the screen.
     Top,
-    #[doc = include_str!("layer_edge.doc/Right.md")]
+    /// The right of the screen.
     Right,
-    #[doc = include_str!("layer_edge.doc/Bottom.md")]
+    /// The bottom of the screen.
     Bottom,
-    #[doc = include_str!("layer_edge.doc/Left.md")]
+    /// The left of the screen.
     Left,
 }
 
 impl LayerEdge {
-    #[doc = include_str!("layer_edge.doc/opposite.md")]
+    /// The edge across the screen from this one.
     #[must_use]
     pub const fn opposite(self) -> Self {
         match self {
@@ -25,7 +25,7 @@ impl LayerEdge {
         }
     }
 
-    #[doc = include_str!("layer_edge.doc/is_horizontal.md")]
+    #[doc = include_str!("../../docs/api/layer/layer_edge.doc/is_horizontal.md")]
     #[must_use]
     pub const fn is_horizontal(self) -> bool {
         matches!(self, Self::Top | Self::Bottom)

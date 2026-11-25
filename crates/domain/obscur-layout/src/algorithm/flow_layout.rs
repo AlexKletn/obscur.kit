@@ -1,56 +1,20 @@
-#![doc = include_str!("flow_layout.doc/_module.md")]
+//! `FlowLayout`: normal-flow (block) layout for the `Block` formatting context.
 
 use obscur_geometry::{BoxConstraints, Point, Rect, Size};
 
 use crate::model::{Dimension, LayoutBox, LayoutStyle, WritingMode};
 
+use super::collapsing_margins::CollapsingMargins;
+use super::size_containment::contained_style;
+use super::vertical_placement::VerticalPlacement;
 use super::{
     ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput, clamp_content,
     clamp_content_measured, intrinsic_inline_size,
 };
 
-#[doc = include_str!("flow_layout.doc/FlowLayout.md")]
+#[doc = include_str!("../../docs/api/algorithm/flow_layout.doc/FlowLayout.md")]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct FlowLayout;
-
-#[doc = include_str!("flow_layout.doc/CollapsingMargins.md")]
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct CollapsingMargins {
-    #[doc = include_str!("flow_layout.doc/max_positive.md")]
-    max_positive: f32,
-    #[doc = include_str!("flow_layout.doc/min_negative.md")]
-    min_negative: f32,
-}
-
-impl CollapsingMargins {
-    #[doc = include_str!("flow_layout.doc/EMPTY.md")]
-    const EMPTY: Self = Self {
-        max_positive: 0.0,
-        min_negative: 0.0,
-    };
-
-    #[doc = include_str!("flow_layout.doc/adjoin.md")]
-    #[must_use]
-    fn adjoin(self, margin: f32) -> Self {
-        if margin >= 0.0 {
-            Self {
-                max_positive: self.max_positive.max(margin),
-                ..self
-            }
-        } else {
-            Self {
-                min_negative: self.min_negative.min(margin),
-                ..self
-            }
-        }
-    }
-
-    #[doc = include_str!("flow_layout.doc/solve.md")]
-    #[must_use]
-    fn solve(self) -> f32 {
-        self.max_positive + self.min_negative
-    }
-}
 
 impl LayoutAlgorithm for FlowLayout {
     fn layout(
@@ -60,6 +24,8 @@ impl LayoutAlgorithm for FlowLayout {
         constraints: BoxConstraints,
         measurer: &mut dyn ChildMeasurer,
     ) -> LayoutOutput {
+        let contained = contained_style(style.clone(), constraints);
+        let style = contained.as_ref().unwrap_or(style);
         // A vertical writing mode rotates the block axis to horizontal; its
         // placement is a separate path so this — the default `horizontal-tb` — is
         // left byte-for-byte unchanged (css-writing-modes-4 §6.2).
@@ -74,7 +40,13 @@ impl LayoutAlgorithm for FlowLayout {
         let bp_y = bp_top + border.bottom + padding.bottom;
 
         // Available content height for measuring children under (may be infinite).
-        let avail_content_height = (constraints.max.height - bp_y).max(0.0);
+        // In-flow contents can overflow a size-contained block without changing
+        // its size. Percentage heights still use its own definite content box.
+        let avail_content_height = if style.size_containment.contains_height(style.writing_mode) {
+            f32::INFINITY
+        } else {
+            (constraints.max.height - bp_y).max(0.0)
+        };
 
         // The content width a `width: auto` box takes: everything its container
         // offers. Also the `stretch` term `fit-content` is bounded by. It is
@@ -119,13 +91,13 @@ impl LayoutAlgorithm for FlowLayout {
         // the probe, which is dead without it. The degenerate box was overflowing
         // its parent either way.
         let width = if explicit.is_some() || style.width.is_intrinsic() {
-            style.width
+            style.width.clone()
         } else if !stretch.is_finite() {
             Dimension::MaxContent
         } else if stretch <= 0.0 {
             Dimension::MinContent
         } else {
-            style.width
+            style.width.clone()
         };
         // Content width: an intrinsic keyword is answered by *measuring* the
         // children (`min-content` / `max-content` / `fit-content`, spec §4.2); an
@@ -150,14 +122,14 @@ impl LayoutAlgorithm for FlowLayout {
         // the containing block, the same basis `explicit` used above — `max.width` is
         // the space offered, and the two coincide when no caller stated a basis.
         let min_width_measured = intrinsic_inline_size(
-            style.min_width,
+            style.min_width.clone(),
             children,
             stretch,
             avail_content_height,
             measurer,
         );
         let max_width_measured = intrinsic_inline_size(
-            style.max_width,
+            style.max_width.clone(),
             children,
             stretch,
             avail_content_height,
@@ -165,8 +137,8 @@ impl LayoutAlgorithm for FlowLayout {
         );
         let content_width = clamp_content_measured(
             content_width,
-            (style.min_width, min_width_measured),
-            (style.max_width, max_width_measured),
+            (style.min_width.clone(), min_width_measured),
+            (style.max_width.clone(), max_width_measured),
             constraints.percent_width(),
             bp_x,
             style.box_sizing,
@@ -212,8 +184,8 @@ impl LayoutAlgorithm for FlowLayout {
                 let content = style.box_sizing.content_extent(h, bp_y).max(0.0);
                 clamp_content(
                     content,
-                    style.min_height,
-                    style.max_height,
+                    style.min_height.clone(),
+                    style.max_height.clone(),
                     constraints.percent_height(),
                     bp_y,
                     style.box_sizing,
@@ -242,8 +214,8 @@ impl LayoutAlgorithm for FlowLayout {
                     // its `height: 100%` child would have resolved against the 0.
                     clamp_content(
                         (constraints.max.height - bp_y).max(0.0),
-                        style.min_height,
-                        style.max_height,
+                        style.min_height.clone(),
+                        style.max_height.clone(),
                         constraints.percent_height(),
                         bp_y,
                         style.box_sizing,
@@ -306,7 +278,11 @@ impl LayoutAlgorithm for FlowLayout {
         for (index, child) in children.iter().enumerate() {
             let child_style = child.style();
             if index > 0 {
-                accrued_gap += style.gap;
+                accrued_gap += style
+                    .row_gap
+                    .as_ref()
+                    .and_then(|gap| gap.resolve(0.0))
+                    .unwrap_or(style.gap);
             }
             // This child's top margin joins the currently-open collapsing set. A
             // block-axis `auto` margin is zero in normal flow (CSS 2.1 §10.6.3):
@@ -357,11 +333,17 @@ impl LayoutAlgorithm for FlowLayout {
             // resolve to zero — exactly what §10.3.3 says. Centring engages only for
             // a child whose width is definite (or intrinsic, which is how
             // `width: fit-content; margin: 0 auto` centres).
-            let leftover = (content_width - fixed_inline - child_size.width).max(0.0);
+            let free_inline = content_width - fixed_inline - child_size.width;
+            let leftover = free_inline.max(0.0);
             let left_margin = match (
                 child_style.margin.left.is_auto(),
                 child_style.margin.right.is_auto(),
             ) {
+                // The inline-end margin also absorbs a deficit. Keep the
+                // right edge anchored so oversized children extend left in RTL.
+                _ if style.direction.is_rtl() && free_inline < 0.0 => {
+                    child_style.margin.left.resolve(content_width) + free_inline
+                }
                 (true, true) => leftover / 2.0,
                 (true, false) => leftover,
                 (false, true) => child_style.margin.left.resolve(content_width),
@@ -460,8 +442,14 @@ impl LayoutAlgorithm for FlowLayout {
             |bound: Dimension| bound.is_intrinsic().then_some(children_content_height);
         let content_height = clamp_content_measured(
             content_height,
-            (style.min_height, block_intrinsic(style.min_height)),
-            (style.max_height, block_intrinsic(style.max_height)),
+            (
+                style.min_height.clone(),
+                block_intrinsic(style.min_height.clone()),
+            ),
+            (
+                style.max_height.clone(),
+                block_intrinsic(style.max_height.clone()),
+            ),
             constraints.percent_height(),
             bp_y,
             style.box_sizing,
@@ -484,17 +472,7 @@ impl LayoutAlgorithm for FlowLayout {
     }
 }
 
-#[doc = include_str!("flow_layout.doc/VerticalPlacement.md")]
-struct VerticalPlacement {
-    #[doc = include_str!("flow_layout.doc/block_start_offset.md")]
-    block_start_offset: f32,
-    #[doc = include_str!("flow_layout.doc/inline_offset.md")]
-    inline_offset: f32,
-    #[doc = include_str!("flow_layout.doc/size.md")]
-    size: Size,
-}
-
-#[doc = include_str!("flow_layout.doc/layout_vertical.md")]
+#[doc = include_str!("../../docs/api/algorithm/flow_layout.doc/layout_vertical.md")]
 fn layout_vertical(
     style: &LayoutStyle,
     children: &[LayoutChild],
@@ -529,8 +507,8 @@ fn layout_vertical(
         .max(0.0);
     let content_inline = clamp_content(
         content_inline,
-        style.min_height,
-        style.max_height,
+        style.min_height.clone(),
+        style.max_height.clone(),
         constraints.percent_height(),
         bp_y,
         style.box_sizing,
@@ -538,7 +516,11 @@ fn layout_vertical(
 
     // Block extent = physical width: an explicit width resolves now; an `auto`
     // width shrink-wraps the children and is decided after they are placed.
-    let block_avail = (constraints.max.width - bp_x).max(0.0);
+    let block_avail = if style.size_containment.contains_width(style.writing_mode) {
+        f32::INFINITY
+    } else {
+        (constraints.max.width - bp_x).max(0.0)
+    };
     let explicit_block = style
         .width
         .resolve(constraints.percent_width())
@@ -555,8 +537,8 @@ fn layout_vertical(
     let definite_content_block = explicit_block.map(|b| {
         clamp_content(
             b,
-            style.min_width,
-            style.max_width,
+            style.min_width.clone(),
+            style.max_width.clone(),
             constraints.percent_width(),
             bp_x,
             style.box_sizing,
@@ -584,15 +566,19 @@ fn layout_vertical(
     for (index, child) in children.iter().enumerate() {
         let cs = child.style();
         if index > 0 {
-            accrued_gap += style.gap;
+            accrued_gap += style
+                .row_gap
+                .as_ref()
+                .and_then(|gap| gap.resolve(0.0))
+                .unwrap_or(style.gap);
         }
         // Block-start (leading) and block-end (trailing) margins, from the physical
         // edges the mode maps them to. Percentage margins resolve against the
         // containing block's inline size (CSS 2.1 §8.3) — the container's height.
         let (lead_margin, trail_margin) = if rl {
-            (cs.margin.right, cs.margin.left)
+            (&cs.margin.right, &cs.margin.left)
         } else {
-            (cs.margin.left, cs.margin.right)
+            (&cs.margin.left, &cs.margin.right)
         };
         open_margins = open_margins.adjoin(lead_margin.resolve(content_inline));
 
@@ -671,8 +657,8 @@ fn layout_vertical(
     let content_block = definite_content_block.unwrap_or(children_block).max(0.0);
     let content_block = clamp_content(
         content_block,
-        style.min_width,
-        style.max_width,
+        style.min_width.clone(),
+        style.max_width.clone(),
         constraints.percent_width(),
         bp_x,
         style.box_sizing,
@@ -1264,7 +1250,7 @@ mod tests {
 
     impl crate::algorithm::ChildMeasurer for NestedBlocks {
         fn measure_child(&mut self, index: usize, constraints: BoxConstraints) -> Size {
-            let style = self.0.get(index).copied().unwrap_or_default();
+            let style = self.0.get(index).cloned().unwrap_or_default();
             FlowLayout
                 .layout(&style, &[], constraints, &mut FixedChildMeasurer::default())
                 .size()
@@ -1427,7 +1413,7 @@ mod tests {
                 &app,
                 &[child(1), child(2)],
                 BoxConstraints::loose(Size::new(480.0, 240.0)),
-                &mut NestedBlocks(vec![style, style]),
+                &mut NestedBlocks(vec![style.clone(), style]),
             );
             let boxes = out.child_boxes();
             (boxes[0].size().height, boxes[1].size().height)
@@ -1480,7 +1466,7 @@ mod tests {
             &app,
             &[child(1), child(2)],
             BoxConstraints::tight(Size::new(480.0, 240.0)),
-            &mut NestedBlocks(vec![floored, floored]),
+            &mut NestedBlocks(vec![floored.clone(), floored]),
         );
         let boxes = out.child_boxes();
         // 50% of 240 for BOTH, not 50% of what the first one left over.
@@ -1514,7 +1500,7 @@ mod tests {
             &app,
             &[child(1), child(2)],
             BoxConstraints::tight(Size::new(480.0, 240.0)),
-            &mut NestedBlocks(vec![half, half]),
+            &mut NestedBlocks(vec![half.clone(), half]),
         );
         let boxes = out.child_boxes();
         assert_eq!(boxes[0].origin(), Point::new(0.0, 0.0));
@@ -1559,7 +1545,7 @@ mod tests {
         };
         let out = FlowLayout.layout(
             &LayoutStyle::default(),
-            &[LayoutChild::new(NodeId::from_raw(1), full)],
+            &[LayoutChild::new(NodeId::from_raw(1), full.clone())],
             BoxConstraints::tight(Size::new(56.0, 56.0)),
             &mut Nested(full),
         );
@@ -1578,7 +1564,7 @@ mod tests {
         };
         let out = FlowLayout.layout(
             &LayoutStyle::default(),
-            &[LayoutChild::new(NodeId::from_raw(1), full)],
+            &[LayoutChild::new(NodeId::from_raw(1), full.clone())],
             BoxConstraints::loose(Size::new(56.0, 56.0)),
             &mut Nested(full),
         );
@@ -1610,7 +1596,7 @@ mod tests {
         };
         let out = FlowLayout.layout(
             &host,
-            &[LayoutChild::new(NodeId::from_raw(1), full)],
+            &[LayoutChild::new(NodeId::from_raw(1), full.clone())],
             BoxConstraints::tight(Size::new(56.0, 0.0)),
             &mut Nested(full),
         );
@@ -1633,7 +1619,7 @@ mod tests {
         };
         let out = FlowLayout.layout(
             &host,
-            &[LayoutChild::new(NodeId::from_raw(1), full)],
+            &[LayoutChild::new(NodeId::from_raw(1), full.clone())],
             BoxConstraints::tight(Size::new(56.0, 56.0)),
             &mut Nested(full),
         );

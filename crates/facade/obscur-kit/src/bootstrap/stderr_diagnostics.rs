@@ -1,16 +1,16 @@
-#![doc = include_str!("stderr_diagnostics.doc/_module.md")]
+//! A diagnostic sink that writes to stderr.
 
 use obscur_diagnostics::{Diagnostic, DiagnosticSeverity, DiagnosticSink};
 
-#[doc = include_str!("stderr_diagnostics.doc/StderrDiagnostics.md")]
+#[doc = include_str!("../../docs/api/bootstrap/stderr_diagnostics.doc/StderrDiagnostics.md")]
 #[derive(Debug, Clone, Copy)]
 pub struct StderrDiagnostics {
-    #[doc = include_str!("stderr_diagnostics.doc/floor.md")]
+    /// The lowest severity that is worth a line.
     floor: DiagnosticSeverity,
 }
 
 impl StderrDiagnostics {
-    #[doc = include_str!("stderr_diagnostics.doc/new.md")]
+    #[doc = include_str!("../../docs/api/bootstrap/stderr_diagnostics.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -18,19 +18,19 @@ impl StderrDiagnostics {
         }
     }
 
-    #[doc = include_str!("stderr_diagnostics.doc/from_severity.md")]
+    /// Report from a chosen severity upward.
     #[must_use]
     pub const fn from_severity(floor: DiagnosticSeverity) -> Self {
         Self { floor }
     }
 
-    #[doc = include_str!("stderr_diagnostics.doc/reports.md")]
+    /// Whether a diagnostic of this severity clears the floor.
     #[must_use]
     pub fn reports(&self, severity: DiagnosticSeverity) -> bool {
         rank(severity) >= rank(self.floor)
     }
 
-    #[doc = include_str!("stderr_diagnostics.doc/format.md")]
+    #[doc = include_str!("../../docs/api/bootstrap/stderr_diagnostics.doc/format.md")]
     #[must_use]
     pub fn format(diagnostic: &Diagnostic) -> String {
         format!(
@@ -57,7 +57,7 @@ impl DiagnosticSink for StderrDiagnostics {
     }
 }
 
-#[doc = include_str!("stderr_diagnostics.doc/rank.md")]
+/// Severities as comparable numbers, ordered the way they read.
 const fn rank(severity: DiagnosticSeverity) -> u8 {
     match severity {
         DiagnosticSeverity::Trace => 0,
@@ -68,7 +68,7 @@ const fn rank(severity: DiagnosticSeverity) -> u8 {
     }
 }
 
-#[doc = include_str!("stderr_diagnostics.doc/label.md")]
+/// The word that goes in the line.
 const fn label(severity: DiagnosticSeverity) -> &'static str {
     match severity {
         DiagnosticSeverity::Trace => "trace",

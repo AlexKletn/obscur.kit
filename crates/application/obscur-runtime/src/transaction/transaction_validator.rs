@@ -1,21 +1,21 @@
-#![doc = include_str!("transaction_validator.doc/_module.md")]
+//! [`TransactionValidator`]: stateless structural validation of UI transactions (spec §3.2).
 
 use super::transaction_error::TransactionError;
 use super::ui_operation::UiOperation;
 use super::ui_transaction::UiTransaction;
 
-#[doc = include_str!("transaction_validator.doc/TransactionValidator.md")]
+#[doc = include_str!("../../docs/api/transaction/transaction_validator.doc/TransactionValidator.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct TransactionValidator;
 
 impl TransactionValidator {
-    #[doc = include_str!("transaction_validator.doc/new.md")]
+    /// Creates a new validator. The validator is zero-sized and stateless.
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    #[doc = include_str!("transaction_validator.doc/validate.md")]
+    #[doc = include_str!("../../docs/api/transaction/transaction_validator.doc/validate.md")]
     pub fn validate(&self, tx: &UiTransaction) -> Result<(), TransactionError> {
         let mut root_replacements = 0usize;
         // A small linear scan is used to stay allocation-light and
@@ -43,7 +43,8 @@ impl TransactionValidator {
         Ok(())
     }
 
-    #[doc = include_str!("transaction_validator.doc/kind_tag.md")]
+    /// Returns a stable discriminant tag for the node-targeting operation kinds,
+    /// used only to compare "same kind" during duplicate detection.
     const fn kind_tag(op: &UiOperation) -> u8 {
         match op {
             UiOperation::ReplaceRoot => 0,

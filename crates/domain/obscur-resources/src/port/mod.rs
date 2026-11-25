@@ -1,11 +1,27 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Port module.
 mod cache_store;
-pub use cache_store::{CacheStore, InMemoryCacheStore};
+pub use cache_store::CacheStore;
+mod in_memory_cache_store;
+pub use in_memory_cache_store::InMemoryCacheStore;
 mod resource_compiler;
-pub use resource_compiler::{CompiledResource, NullCompiler, ResourceCompiler};
+pub use resource_compiler::ResourceCompiler;
+mod compiled_resource;
+pub use compiled_resource::CompiledResource;
+mod null_compiler;
+pub use null_compiler::NullCompiler;
 mod resource_decoder;
-pub use resource_decoder::{DecodedResource, NullDecoder, ResourceDecoder};
+pub use resource_decoder::ResourceDecoder;
+mod decoded_resource;
+pub use decoded_resource::DecodedResource;
+mod null_decoder;
+pub use null_decoder::NullDecoder;
 mod vector_decoder;
-pub use vector_decoder::{NullVectorDecoder, VectorDecoder};
+pub use vector_decoder::VectorDecoder;
+mod null_vector_decoder;
+pub use null_vector_decoder::NullVectorDecoder;
 mod resource_loader;
-pub use resource_loader::{InlineLoader, LoadedBytes, ResourceLoader};
+pub use resource_loader::ResourceLoader;
+mod inline_loader;
+pub use inline_loader::InlineLoader;
+mod loaded_bytes;
+pub use loaded_bytes::LoadedBytes;

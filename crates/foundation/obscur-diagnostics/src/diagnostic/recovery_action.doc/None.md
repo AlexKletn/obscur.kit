@@ -1,1 +1,0 @@
-No recovery was needed.

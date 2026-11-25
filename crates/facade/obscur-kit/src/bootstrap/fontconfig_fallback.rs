@@ -1,24 +1,51 @@
-#![doc = include_str!("fontconfig_fallback.doc/_module.md")]
+//! [`FontconfigFallback`]: the host's per-character font lookup, wired to the
+//! text stack (spec §5.10 font fallback, §5.18).
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
-use crate::font_fontconfig::source::FontconfigSource;
+use crate::font_fontconfig::source::{FontconfigSource, SystemFace};
 use crate::text::font::{FallbackFace, FontAttributes, FontFamily, SystemFontFallback};
 
-#[doc = include_str!("fontconfig_fallback.doc/FontconfigFallback.md")]
-#[derive(Debug, Clone, Default)]
+#[doc = include_str!("../../docs/api/bootstrap/fontconfig_fallback.doc/FontconfigFallback.md")]
+#[derive(Debug, Clone)]
 pub struct FontconfigFallback {
     source: FontconfigSource,
+    catalog: Arc<OnceLock<Vec<SystemFace>>>,
 }
 
 impl FontconfigFallback {
-    #[doc = include_str!("fontconfig_fallback.doc/new.md")]
+    /// Creates a fallback over the conventional `fc-match`.
     #[must_use]
     pub fn new() -> Self {
-        Self {
-            source: FontconfigSource::new(),
+        let source = FontconfigSource::new();
+        let catalog = Arc::new(OnceLock::new());
+        if std::env::var_os("OBSCUR_FONTCONFIG_SYNC_LOOKUP").as_deref() != Some("1".as_ref()) {
+            let source = source.clone();
+            let catalog = Arc::clone(&catalog);
+            let _ = std::thread::Builder::new()
+                .name("obscur-fontconfig".into())
+                .spawn(move || {
+                    if let Some(faces) = source.list_faces() {
+                        let _ = catalog.set(faces);
+                    }
+                });
         }
+        Self { source, catalog }
     }
+}
+
+impl Default for FontconfigFallback {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn load_named_face(face: &SystemFace) -> Option<FallbackFace> {
+    let bytes = std::fs::read(face.path()).ok()?;
+    Some(
+        FallbackFace::new(FontFamily::named(face.family()), Arc::from(bytes))
+            .with_attributes(*face.attributes()),
+    )
 }
 
 impl SystemFontFallback for FontconfigFallback {
@@ -32,17 +59,16 @@ impl SystemFontFallback for FontconfigFallback {
     }
 
     fn face_for_family(&self, name: &str, attributes: &FontAttributes) -> Option<FallbackFace> {
-        // `fc-list` rather than `fc-match`: matching *substitutes*, and a
-        // substitute is exactly the wrong answer here — it would report the
-        // system sans under the author's name and make an uninstalled font
-        // indistinguishable from an installed one. `find_family` keeps only
-        // faces whose family really is this name, and picks the nearest cut.
-        let face = self.source.find_family(name, attributes)?;
-        let bytes = std::fs::read(face.path()).ok()?;
-        Some(
-            FallbackFace::new(FontFamily::named(face.family()), Arc::from(bytes))
-                .with_attributes(*face.attributes()),
-        )
+        self.catalog
+            .get()
+            .and_then(|faces| FontconfigSource::closest_family(faces, name, attributes))
+            .and_then(load_named_face)
+            .or_else(|| {
+                self.source
+                    .find_family(name, attributes)
+                    .as_ref()
+                    .and_then(load_named_face)
+            })
     }
 }
 

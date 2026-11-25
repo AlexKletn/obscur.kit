@@ -1,42 +1,58 @@
-#![doc = include_str!("layout_box.doc/_module.md")]
+//! The arranged box of a node.
 
 use obscur_geometry::{Insets, Point, Rect, Size};
 
-#[doc = include_str!("layout_box.doc/LayoutBox.md")]
+#[doc = include_str!("../../docs/api/model/layout_box.doc/LayoutBox.md")]
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct LayoutBox {
-    #[doc = include_str!("layout_box.doc/bounds.md")]
+    /// Arranged border-box bounds in parent-relative logical pixels.
     pub bounds: Rect,
+    content_insets: Option<Insets>,
 }
 
 impl LayoutBox {
-    #[doc = include_str!("layout_box.doc/new.md")]
+    /// Creates a layout box from arranged border-box bounds.
     #[must_use]
     pub const fn new(bounds: Rect) -> Self {
-        Self { bounds }
-    }
-
-    #[doc = include_str!("layout_box.doc/from_size.md")]
-    #[must_use]
-    pub const fn from_size(size: Size) -> Self {
         Self {
-            bounds: Rect::new(Point::ORIGIN, size),
+            bounds,
+            content_insets: None,
         }
     }
 
-    #[doc = include_str!("layout_box.doc/size.md")]
+    /// Creates a layout box sized to `size` with its origin at `(0, 0)`.
+    #[must_use]
+    pub const fn from_size(size: Size) -> Self {
+        Self::new(Rect::new(Point::ORIGIN, size))
+    }
+
+    /// Records the used border and padding offsets from the border box.
+    #[must_use]
+    pub const fn with_content_insets(mut self, insets: Insets) -> Self {
+        self.content_insets = Some(insets);
+        self
+    }
+
+    /// Returns the content rectangle when the arrange pass captured its used insets.
+    #[must_use]
+    pub fn used_content_rect(self) -> Option<Rect> {
+        self.content_insets
+            .map(|insets| self.content_rect(insets, Insets::uniform(0.0)))
+    }
+
+    /// The size of the border box.
     #[must_use]
     pub const fn size(self) -> Size {
         self.bounds.size
     }
 
-    #[doc = include_str!("layout_box.doc/origin.md")]
+    /// The origin of the border box, relative to the parent.
     #[must_use]
     pub const fn origin(self) -> Point {
         self.bounds.origin
     }
 
-    #[doc = include_str!("layout_box.doc/content_rect.md")]
+    #[doc = include_str!("../../docs/api/model/layout_box.doc/content_rect.md")]
     #[must_use]
     pub fn content_rect(self, padding: Insets, border: Insets) -> Rect {
         let left = border.left + padding.left;

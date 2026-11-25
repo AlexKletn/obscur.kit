@@ -1,11 +1,37 @@
-#![doc = include_str!("custom_value_parser.doc/_module.md")]
+#![doc = include_str!("../../docs/api/computed/custom_value_parser.doc/_module.md")]
 
+use crate::matching::StyleRangeValue;
 use crate::property::{PropertyId, PropertyValue};
 
-#[doc = include_str!("custom_value_parser.doc/CustomValueParser.md")]
+#[doc = include_str!("../../docs/api/computed/custom_value_parser.doc/CustomValueParser.md")]
 pub trait CustomValueParser {
-    #[doc = include_str!("custom_value_parser.doc/parse.md")]
+    #[doc = include_str!("../../docs/api/computed/custom_value_parser.doc/parse.md")]
     fn parse(&self, property: PropertyId, tokens: &str) -> Option<PropertyValue>;
+
+    /// Parses a custom-property token stream used as the expected value of a standard style query.
+    fn parse_style_property(&self, property: PropertyId, tokens: &str) -> Option<PropertyValue> {
+        self.parse(property, tokens)
+    }
+
+    /// Parses custom property tokens as a numeric value for a container style range.
+    fn parse_style_range(&self, _tokens: &str) -> Option<StyleRangeValue> {
+        None
+    }
+
+    /// Parses the row and column values of a substituted gap shorthand.
+    fn parse_gap(&self, _tokens: &str) -> Option<[PropertyValue; 2]> {
+        None
+    }
+
+    /// Parses substituted flex-flow tokens into direction and wrap values.
+    fn parse_flex_flow(&self, _tokens: &str) -> Option<[PropertyValue; 2]> {
+        None
+    }
+
+    /// Parses substituted container shorthand tokens into the name and type longhands, in that order.
+    fn parse_container(&self, _tokens: &str) -> Option<(PropertyValue, PropertyValue)> {
+        None
+    }
 }
 
 // The installer already has a function — the CSS frontend's lowering entry

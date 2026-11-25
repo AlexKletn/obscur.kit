@@ -1,4 +1,6 @@
-#![doc = include_str!("text_pointer_selection.doc/_module.md")]
+//! What a pointer does to a field's selection: [`TextPointerSelection`], [`TextPress`].
+
+use super::text_press::TextPress;
 
 use obscur_geometry::Point;
 use obscur_identity::NodeId;
@@ -9,38 +11,25 @@ use obscur_tree::tree::RetainedTree;
 use super::{EditableField, TextEditSession};
 use crate::orchestration::{ComputedStyles, LayoutBoxes, SceneCoordinator, caret_offset_at_point};
 
-#[doc = include_str!("text_pointer_selection.doc/TextPress.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TextPress {
-    #[doc = include_str!("text_pointer_selection.doc/Ignored.md")]
-    Ignored,
-    #[doc = include_str!("text_pointer_selection.doc/Caret.md")]
-    Caret {
-        #[doc = include_str!("text_pointer_selection.doc/field.md")]
-        field: NodeId,
-        #[doc = include_str!("text_pointer_selection.doc/offset.md")]
-        offset: usize,
-    },
-    #[doc = include_str!("text_pointer_selection.doc/Range.md")]
-    Range(TextSelection),
-}
-
-#[doc = include_str!("text_pointer_selection.doc/TextPointerSelection.md")]
+#[doc = include_str!("../../docs/api/runtime/text_pointer_selection.doc/TextPointerSelection.md")]
 pub(crate) struct TextPointerSelection<'a> {
-    #[doc = include_str!("text_pointer_selection.doc/tree.md")]
+    /// The retained tree: which node is editable, and where its text leaf is.
     tree: &'a RetainedTree,
-    #[doc = include_str!("text_pointer_selection.doc/computed.md")]
+    /// This frame's computed styles — the shaping inputs the offset is resolved
+    /// with.
     computed: &'a ComputedStyles,
-    #[doc = include_str!("text_pointer_selection.doc/boxes.md")]
+    /// This frame's arranged boxes, which supply the text run's origin and width.
     boxes: &'a LayoutBoxes,
-    #[doc = include_str!("text_pointer_selection.doc/composer.md")]
+    /// The scene's paragraph orchestrator — the SAME advance model compose paints
+    /// the caret with, which is what makes the offset the paint's inverse.
     composer: &'a SceneCoordinator,
-    #[doc = include_str!("text_pointer_selection.doc/session.md")]
+    /// The live session: the source of truth for the field's glyphs, and the
+    /// buffer the word/line brackets are walked in.
     session: &'a mut TextEditSession,
 }
 
 impl<'a> TextPointerSelection<'a> {
-    #[doc = include_str!("text_pointer_selection.doc/new.md")]
+    /// Bundles the retained frame and the live session for one pointer event.
     pub(crate) fn new(
         tree: &'a RetainedTree,
         computed: &'a ComputedStyles,
@@ -57,7 +46,7 @@ impl<'a> TextPointerSelection<'a> {
         }
     }
 
-    #[doc = include_str!("text_pointer_selection.doc/press.md")]
+    #[doc = include_str!("../../docs/api/runtime/text_pointer_selection.doc/press.md")]
     pub(crate) fn press(&mut self, target: Option<NodeId>, point: Point, clicks: u32) -> TextPress {
         let Some(target) = target else {
             return TextPress::Ignored;
@@ -88,13 +77,13 @@ impl<'a> TextPointerSelection<'a> {
         }
     }
 
-    #[doc = include_str!("text_pointer_selection.doc/drag.md")]
+    #[doc = include_str!("../../docs/api/runtime/text_pointer_selection.doc/drag.md")]
     pub(crate) fn drag(&self, field: NodeId, anchor: usize, point: Point) -> Option<TextSelection> {
         let current = self.offset_at(field, point)?;
         Some(TextSelection::new(anchor, current))
     }
 
-    #[doc = include_str!("text_pointer_selection.doc/offset_at.md")]
+    #[doc = include_str!("../../docs/api/runtime/text_pointer_selection.doc/offset_at.md")]
     fn offset_at(&self, field: NodeId, point: Point) -> Option<usize> {
         if self.session.node() != field {
             return None;
@@ -125,7 +114,7 @@ impl<'a> TextPointerSelection<'a> {
         ))
     }
 
-    #[doc = include_str!("text_pointer_selection.doc/word_at.md")]
+    #[doc = include_str!("../../docs/api/runtime/text_pointer_selection.doc/word_at.md")]
     fn word_at(&mut self, offset: usize) -> TextSelection {
         let buffer = self.session.buffer_mut();
         buffer.apply(EditCommand::SetSelection(TextSelection::caret(offset)));
@@ -143,7 +132,7 @@ impl<'a> TextPointerSelection<'a> {
         TextSelection::new(range.start, range.end)
     }
 
-    #[doc = include_str!("text_pointer_selection.doc/line_at.md")]
+    #[doc = include_str!("../../docs/api/runtime/text_pointer_selection.doc/line_at.md")]
     fn line_at(&mut self, offset: usize) -> TextSelection {
         let buffer = self.session.buffer_mut();
         buffer.apply(EditCommand::SetSelection(TextSelection::caret(offset)));

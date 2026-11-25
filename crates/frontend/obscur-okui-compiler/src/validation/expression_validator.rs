@@ -1,44 +1,18 @@
-#![doc = include_str!("expression_validator.doc/_module.md")]
+//! `ExpressionValidator`: enforces the `.okui` expression restrictions (spec
+//! §2.10), plus the shared [`ValidationDiagnostic`] used across the validation
+//! module.
 
 use obscur_okui_syntax::ast::{Document, Element, Expression};
 use syn::{BinOp, Expr};
 
-#[doc = include_str!("expression_validator.doc/ValidationDiagnostic.md")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ValidationDiagnostic {
-    message: Box<str>,
-    offset: u32,
-}
+use super::ValidationDiagnostic;
 
-impl ValidationDiagnostic {
-    #[doc = include_str!("expression_validator.doc/new.md")]
-    #[must_use]
-    pub fn new(message: impl Into<Box<str>>, offset: u32) -> Self {
-        Self {
-            message: message.into(),
-            offset,
-        }
-    }
-
-    #[doc = include_str!("expression_validator.doc/message.md")]
-    #[must_use]
-    pub fn message(&self) -> &str {
-        &self.message
-    }
-
-    #[doc = include_str!("expression_validator.doc/offset.md")]
-    #[must_use]
-    pub const fn offset(&self) -> u32 {
-        self.offset
-    }
-}
-
-#[doc = include_str!("expression_validator.doc/check_expression.md")]
+#[doc = include_str!("../../docs/api/validation/expression_validator.doc/check_expression.md")]
 pub fn check_expression(expr: &Expr) -> Result<(), String> {
     check_expression_in(expr, &[])
 }
 
-#[doc = include_str!("expression_validator.doc/check_expression_in.md")]
+#[doc = include_str!("../../docs/api/validation/expression_validator.doc/check_expression_in.md")]
 pub fn check_expression_in(expr: &Expr, functions: &[Box<str>]) -> Result<(), String> {
     match expr {
         Expr::Path(_) | Expr::Lit(_) => Ok(()),
@@ -97,7 +71,7 @@ pub fn check_expression_in(expr: &Expr, functions: &[Box<str>]) -> Result<(), St
     }
 }
 
-#[doc = include_str!("expression_validator.doc/simple_callee_name.md")]
+#[doc = include_str!("../../docs/api/validation/expression_validator.doc/simple_callee_name.md")]
 fn simple_callee_name(func: &Expr) -> Option<String> {
     let Expr::Path(path) = func else {
         return None;
@@ -109,7 +83,9 @@ fn simple_callee_name(func: &Expr) -> Option<String> {
     matches!(segment.arguments, syn::PathArguments::None).then(|| segment.ident.to_string())
 }
 
-#[doc = include_str!("expression_validator.doc/refused_call_message.md")]
+/// The message for a bare call to a function no `Function` symbol declared: it
+/// names the refused callee and attributes the refusal to §2.10's exported-pure
+/// rule.
 fn refused_call_message(name: &str) -> String {
     format!(
         "`{name}` is not an explicitly exported pure function, so it may not be \
@@ -117,11 +93,11 @@ fn refused_call_message(name: &str) -> String {
     )
 }
 
-#[doc = include_str!("expression_validator.doc/FORBIDDEN_FREE_CALL.md")]
+/// What a caller is told when a qualified or computed free call is refused.
 pub const FORBIDDEN_FREE_CALL: &str =
     "only explicitly exported pure functions may be called in an expression (spec §2.10)";
 
-#[doc = include_str!("expression_validator.doc/field_method_message.md")]
+#[doc = include_str!("../../docs/api/validation/expression_validator.doc/field_method_message.md")]
 fn field_method_message(method: &str) -> String {
     format!(
         "`{method}` is called on a value reached through a field, a shape an \
@@ -131,7 +107,7 @@ fn field_method_message(method: &str) -> String {
     )
 }
 
-#[doc = include_str!("expression_validator.doc/is_mutating_method.md")]
+#[doc = include_str!("../../docs/api/validation/expression_validator.doc/is_mutating_method.md")]
 fn is_mutating_method(method: &str) -> bool {
     matches!(
         method,
@@ -163,13 +139,13 @@ fn is_mutating_method(method: &str) -> bool {
     )
 }
 
-#[doc = include_str!("expression_validator.doc/FORBIDDEN_MESSAGE.md")]
+/// What a caller is told when an expression is outside §2.10's subset.
 pub const FORBIDDEN_MESSAGE: &str = "this expression is outside what `.okui` allows (spec §2.10): an expression may \
      read props, state and loop locals, access fields, compare, and combine with \
      logical operators — it may not assign, mutate, await, or call a function that \
      has not been declared pure";
 
-#[doc = include_str!("expression_validator.doc/is_assigning_op.md")]
+#[doc = include_str!("../../docs/api/validation/expression_validator.doc/is_assigning_op.md")]
 fn is_assigning_op(op: BinOp) -> bool {
     matches!(
         op,
@@ -186,15 +162,19 @@ fn is_assigning_op(op: BinOp) -> bool {
     )
 }
 
-#[doc = include_str!("expression_validator.doc/ExpressionValidator.md")]
+#[doc = include_str!("../../docs/api/validation/expression_validator.doc/ExpressionValidator.md")]
 #[derive(Debug, Clone, Default)]
 pub struct ExpressionValidator {
-    #[doc = include_str!("expression_validator.doc/functions.md")]
+    /// The names of `.okui`-declared **explicitly exported pure functions**, so a
+    /// call to one is admitted where an unconstrained free call is refused
+    /// (spec §2.10). Empty by default — [`new`](Self::new) — which is what the
+    /// macro front end wants, since it has no way to declare a pure function.
     functions: Vec<Box<str>>,
 }
 
 impl ExpressionValidator {
-    #[doc = include_str!("expression_validator.doc/new_2.md")]
+    /// Creates a new expression validator with no exported-pure functions in
+    /// scope (every free call refused).
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -202,14 +182,15 @@ impl ExpressionValidator {
         }
     }
 
-    #[doc = include_str!("expression_validator.doc/with_functions.md")]
+    /// Returns the validator with `functions` declared as the
+    /// explicitly-exported pure functions a call may name (fluent; spec §2.10).
     #[must_use]
     pub fn with_functions(mut self, functions: impl IntoIterator<Item = Box<str>>) -> Self {
         self.functions = functions.into_iter().collect();
         self
     }
 
-    #[doc = include_str!("expression_validator.doc/validate.md")]
+    #[doc = include_str!("../../docs/api/validation/expression_validator.doc/validate.md")]
     #[must_use]
     pub fn validate(&self, expr_text: &str, offset: u32) -> Vec<ValidationDiagnostic> {
         let Ok(expr) = syn::parse_str::<Expr>(expr_text) else {
@@ -224,7 +205,7 @@ impl ExpressionValidator {
         }
     }
 
-    #[doc = include_str!("expression_validator.doc/validate_document.md")]
+    #[doc = include_str!("../../docs/api/validation/expression_validator.doc/validate_document.md")]
     #[must_use]
     pub fn validate_document(&self, doc: &Document) -> Vec<ValidationDiagnostic> {
         let mut diagnostics = Vec::new();
@@ -234,7 +215,8 @@ impl ExpressionValidator {
         diagnostics
     }
 
-    #[doc = include_str!("expression_validator.doc/validate_element.md")]
+    /// Validates one element's dynamic-attribute expressions, then recurses into
+    /// its element-shaped children.
     fn validate_element(&self, element: &Element, diagnostics: &mut Vec<ValidationDiagnostic>) {
         for attribute in element.attributes() {
             if let Some(expression) = attribute.value_expression() {

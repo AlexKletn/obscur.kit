@@ -1,9 +1,9 @@
-#![doc = include_str!("exported_style_part.doc/_module.md")]
+#![doc = include_str!("../../docs/api/scope/exported_style_part.doc/_module.md")]
 
 use crate::scope::ScopeId;
 use obscur_identity::InternedSymbol;
 
-#[doc = include_str!("exported_style_part.doc/ExportedStylePart.md")]
+#[doc = include_str!("../../docs/api/scope/exported_style_part.doc/ExportedStylePart.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExportedStylePart {
     scope: ScopeId,
@@ -12,7 +12,7 @@ pub struct ExportedStylePart {
 }
 
 impl ExportedStylePart {
-    #[doc = include_str!("exported_style_part.doc/new.md")]
+    /// Creates an exported part named `name` in `scope`, exposing `states`.
     #[must_use]
     pub fn new(scope: ScopeId, name: InternedSymbol, states: Vec<InternedSymbol>) -> Self {
         Self {
@@ -22,31 +22,31 @@ impl ExportedStylePart {
         }
     }
 
-    #[doc = include_str!("exported_style_part.doc/stateless.md")]
+    /// Creates an exported part that exposes no states.
     #[must_use]
     pub fn stateless(scope: ScopeId, name: InternedSymbol) -> Self {
         Self::new(scope, name, Vec::new())
     }
 
-    #[doc = include_str!("exported_style_part.doc/scope.md")]
+    /// Returns the scope that exports this part.
     #[must_use]
     pub const fn scope(&self) -> ScopeId {
         self.scope
     }
 
-    #[doc = include_str!("exported_style_part.doc/name.md")]
+    /// Returns the exported part's name.
     #[must_use]
     pub const fn name(&self) -> InternedSymbol {
         self.name
     }
 
-    #[doc = include_str!("exported_style_part.doc/states.md")]
+    /// Returns the states this part exposes.
     #[must_use]
     pub fn states(&self) -> &[InternedSymbol] {
         &self.states
     }
 
-    #[doc = include_str!("exported_style_part.doc/exposes.md")]
+    /// Returns `true` when this part exposes the given visual state.
     #[must_use]
     pub fn exposes(&self, state: InternedSymbol) -> bool {
         self.states.contains(&state)

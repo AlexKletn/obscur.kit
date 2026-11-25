@@ -1,1 +1,0 @@
-Literal text, emitted verbatim.

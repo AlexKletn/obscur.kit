@@ -1,9 +1,10 @@
-#![doc = include_str!("lib.doc/_module.md")]
+//! Events, pointer, focus, commands, gestures, selection and hit testing.
 #![forbid(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
 pub mod command;
 pub mod event;
+pub mod feedback;
 pub mod focus;
 pub mod gamepad;
 pub mod gesture;

@@ -1,18 +1,18 @@
-#![doc = include_str!("initial_value.doc/_module.md")]
+#![doc = include_str!("../../docs/api/computed/initial_value.doc/_module.md")]
 
 use crate::computed::ComputedValue;
 use crate::property::{Length, PropertyId, PropertyValue, StyleColor};
 
-#[doc = include_str!("initial_value.doc/INITIAL_FONT_SIZE.md")]
+#[doc = include_str!("../../docs/api/computed/initial_value.doc/INITIAL_FONT_SIZE.md")]
 pub(super) const INITIAL_FONT_SIZE: f32 = 16.0;
 
-#[doc = include_str!("initial_value.doc/initial_value_of.md")]
+#[doc = include_str!("../../docs/api/computed/initial_value.doc/initial_value_of.md")]
 //
 // Several arms share a body (`Some(number(1.0))`, `None`) but are grouped by
 // CSS meaning with distinct explanatory comments; merging them would obscure
 // why each property is unresolved or shares an initial.
 #[allow(clippy::match_same_arms)]
-pub(super) fn initial_value_of(property: PropertyId) -> Option<ComputedValue> {
+pub(crate) fn initial_value_of(property: PropertyId) -> Option<ComputedValue> {
     match property {
         // A logical property has no computed value of its own: it resolves
         // INTO its physical counterpart, which carries the initial. It is not
@@ -116,7 +116,11 @@ pub(super) fn initial_value_of(property: PropertyId) -> Option<ComputedValue> {
         // `mix-blend-mode` initial is the `normal` keyword, an interned symbol
         // Phase 1 cannot mint, so it is left unresolved (the coordinator treats
         // an absent value as `normal` and brackets nothing) — like `display`.
-        PropertyId::MixBlendMode => None,
+        PropertyId::ClipPath | PropertyId::BackgroundClip | PropertyId::BackgroundOrigin
+        | PropertyId::BackgroundAttachment | PropertyId::MixBlendMode | PropertyId::BackgroundBlendMode | PropertyId::Isolation => None,
+        PropertyId::Visibility => Some(ComputedValue::keyword(
+            crate::property::layout_keyword::VISIBILITY_VISIBLE,
+        )),
         PropertyId::Opacity => Some(ComputedValue::number(1.0)),
         PropertyId::Width | PropertyId::Height => Some(ComputedValue::length(Length::Auto)),
         // Box-model spacing: initial `0`.
@@ -148,6 +152,7 @@ pub(super) fn initial_value_of(property: PropertyId) -> Option<ComputedValue> {
         | PropertyId::OutlineWidth
         | PropertyId::OutlineOffset
         | PropertyId::Gap => Some(ComputedValue::length(Length::px(0.0))),
+        PropertyId::RowGap | PropertyId::ColumnGap => None,
         // Sizing minimums and `flex-basis`: initial `auto`.
         PropertyId::MinWidth | PropertyId::MinHeight | PropertyId::FlexBasis => {
             Some(ComputedValue::length(Length::Auto))
@@ -156,11 +161,11 @@ pub(super) fn initial_value_of(property: PropertyId) -> Option<ComputedValue> {
         PropertyId::Top | PropertyId::Right | PropertyId::Bottom | PropertyId::Left => {
             Some(ComputedValue::length(Length::Auto))
         }
-        // `max-width` / `max-height` initial is `none`, which `Length` cannot
-        // yet represent; left unresolved until a `none` length lands.
+        // The absent maximum has the same layout behavior as authored `none`.
+        // Style queries reconstruct the keyword when comparing the initial.
         PropertyId::MaxWidth | PropertyId::MaxHeight => None,
         // Flex factors: `flex-grow` initial `0`, `flex-shrink` initial `1`.
-        PropertyId::FlexGrow => Some(ComputedValue::number(0.0)),
+        PropertyId::FlexGrow | PropertyId::Order => Some(ComputedValue::number(0.0)),
         PropertyId::FlexShrink => Some(ComputedValue::number(1.0)),
         // `font-size` initial is `medium` (~16px logical) — the same value the
         // root's implicit parent size takes, spelled once as `INITIAL_FONT_SIZE`.
@@ -197,7 +202,6 @@ pub(super) fn initial_value_of(property: PropertyId) -> Option<ComputedValue> {
         | PropertyId::OutlineColor
         // Keyword initials need the interner; deferred to a later phase.
         | PropertyId::Display
-        | PropertyId::Visibility
         // `box-sizing` initial is `content-box`; its keyword initial likewise
         // falls back to the runtime's default (`BoxSizing::ContentBox`) when
         // absent — byte-for-byte identical to today's behaviour.
@@ -311,9 +315,19 @@ pub(super) fn initial_value_of(property: PropertyId) -> Option<ComputedValue> {
         // property almost no node declares — and hit testing already reads an
         // absent value as `auto`, so the two are the same answer.
         | PropertyId::PointerEvents
+        | PropertyId::PixelSnap
+        | PropertyId::OverscrollBehaviorX
+        | PropertyId::OverscrollBehaviorY
         // `content` is never a real element's computed value (it decorates a
         // generated pseudo-element box only), so it has no element initial.
         | PropertyId::Content
+        // Absent container properties represent normal type and no name.
+        | PropertyId::ContainIntrinsicWidth
+        | PropertyId::ContainIntrinsicHeight
+        | PropertyId::ContainIntrinsicInlineSize
+        | PropertyId::ContainIntrinsicBlockSize
+        | PropertyId::ContainerType
+        | PropertyId::ContainerName
         // No painter. The initial value is the keyword `none`, which needs the
         // interner, so an absent value means the same thing: nothing to draw.
         | PropertyId::Painter => None,

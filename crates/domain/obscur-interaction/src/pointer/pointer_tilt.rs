@@ -1,22 +1,25 @@
-#![doc = include_str!("pointer_tilt.doc/_module.md")]
+//! The angle a stylus is held at, per axis (spec §2.4).
 
-#[doc = include_str!("pointer_tilt.doc/PointerTilt.md")]
+#[doc = include_str!("../../docs/api/pointer/pointer_tilt.doc/PointerTilt.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct PointerTilt {
-    #[doc = include_str!("pointer_tilt.doc/x_degrees.md")]
+    /// Tilt in the plane containing the Y axis, in `-90..=90` degrees; negative
+    /// leans left.
     pub x_degrees: f32,
-    #[doc = include_str!("pointer_tilt.doc/y_degrees.md")]
+    /// Tilt in the plane containing the X axis, in `-90..=90` degrees; negative
+    /// leans toward the top of the surface.
     pub y_degrees: f32,
 }
 
 impl PointerTilt {
-    #[doc = include_str!("pointer_tilt.doc/UPRIGHT.md")]
+    /// A device held perpendicular to the surface, and the reading for any device
+    /// that cannot report tilt.
     pub const UPRIGHT: Self = Self {
         x_degrees: 0.0,
         y_degrees: 0.0,
     };
 
-    #[doc = include_str!("pointer_tilt.doc/new.md")]
+    #[doc = include_str!("../../docs/api/pointer/pointer_tilt.doc/new.md")]
     #[must_use]
     pub fn new(x_degrees: f32, y_degrees: f32) -> Self {
         Self {
@@ -25,7 +28,8 @@ impl PointerTilt {
         }
     }
 
-    #[doc = include_str!("pointer_tilt.doc/is_upright.md")]
+    /// Returns whether the device is perpendicular to the surface (no lean on
+    /// either axis).
     #[must_use]
     pub fn is_upright(self) -> bool {
         self.x_degrees == 0.0 && self.y_degrees == 0.0

@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Component module: the runtime's live component instances (spec §2.1, §2.14).
 mod guarded_render;
 pub use guarded_render::GuardedRender;
 mod mounted_component;

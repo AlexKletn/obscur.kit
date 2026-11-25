@@ -1,27 +1,19 @@
-#![doc = include_str!("line_break.doc/_module.md")]
+//! Line-break opportunities discovered in a run of text (spec §5.10).
 
-use super::WhiteSpace;
+use super::{BreakKind, WhiteSpace};
 
-#[doc = include_str!("line_break.doc/BreakKind.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum BreakKind {
-    #[doc = include_str!("line_break.doc/Soft.md")]
-    Soft,
-    #[doc = include_str!("line_break.doc/Hard.md")]
-    Hard,
-}
-
-#[doc = include_str!("line_break.doc/LineBreak.md")]
+#[doc = include_str!("../../docs/api/layout/line_break.doc/LineBreak.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct LineBreak {
-    #[doc = include_str!("line_break.doc/offset.md")]
+    /// The byte offset in the source where the break may or must occur.
     offset: usize,
-    #[doc = include_str!("line_break.doc/kind.md")]
+    /// Whether the break is optional ([`BreakKind::Soft`]) or mandatory
+    /// ([`BreakKind::Hard`]).
     kind: BreakKind,
 }
 
 impl LineBreak {
-    #[doc = include_str!("line_break.doc/soft.md")]
+    /// Creates a [`Soft`](BreakKind::Soft) (permitted) break at byte `offset`.
     #[must_use]
     pub const fn soft(offset: usize) -> Self {
         Self {
@@ -30,7 +22,7 @@ impl LineBreak {
         }
     }
 
-    #[doc = include_str!("line_break.doc/hard.md")]
+    /// Creates a [`Hard`](BreakKind::Hard) (mandatory) break at byte `offset`.
     #[must_use]
     pub const fn hard(offset: usize) -> Self {
         Self {
@@ -39,25 +31,25 @@ impl LineBreak {
         }
     }
 
-    #[doc = include_str!("line_break.doc/offset_2.md")]
+    /// Returns the byte offset in the source where the break occurs.
     #[must_use]
     pub const fn offset(&self) -> usize {
         self.offset
     }
 
-    #[doc = include_str!("line_break.doc/kind_2.md")]
+    /// Returns the break's [`BreakKind`].
     #[must_use]
     pub const fn kind(&self) -> BreakKind {
         self.kind
     }
 
-    #[doc = include_str!("line_break.doc/is_mandatory.md")]
+    /// Returns whether this break is mandatory ([`BreakKind::Hard`]).
     #[must_use]
     pub const fn is_mandatory(&self) -> bool {
         matches!(self.kind, BreakKind::Hard)
     }
 
-    #[doc = include_str!("line_break.doc/opportunities.md")]
+    #[doc = include_str!("../../docs/api/layout/line_break.doc/opportunities.md")]
     #[must_use]
     pub fn opportunities(text: &str, white_space: WhiteSpace) -> Vec<Self> {
         let mut breaks = Vec::new();
@@ -81,59 +73,6 @@ impl LineBreak {
                 }
                 in_whitespace = false;
                 whitespace_had_hard_break = false;
-            }
-        }
-        breaks
-    }
-}
-
-#[doc = include_str!("line_break.doc/is_cjk_ideograph.md")]
-#[must_use]
-pub(crate) fn is_cjk_ideograph(ch: char) -> bool {
-    matches!(
-        ch as u32,
-        0x3400..=0x4DBF      // CJK Unified Ideographs Extension A
-        | 0x4E00..=0x9FFF    // CJK Unified Ideographs
-        | 0xF900..=0xFAFF    // CJK Compatibility Ideographs
-        | 0x2_0000..=0x2_A6DF // Extension B
-        | 0x2_A700..=0x2_EBEF // Extensions C–F
-        | 0x2_F800..=0x2_FA1F // CJK Compatibility Ideographs Supplement
-        | 0x3_0000..=0x3_134F // Extension G
-    )
-}
-
-#[doc = include_str!("line_break.doc/LineBreaker.md")]
-pub trait LineBreaker {
-    #[doc = include_str!("line_break.doc/opportunities_2.md")]
-    fn opportunities(&self, text: &str, white_space: WhiteSpace) -> Vec<LineBreak>;
-}
-
-#[doc = include_str!("line_break.doc/DefaultLineBreaker.md")]
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct DefaultLineBreaker;
-
-impl LineBreaker for DefaultLineBreaker {
-    fn opportunities(&self, text: &str, white_space: WhiteSpace) -> Vec<LineBreak> {
-        let mut breaks = LineBreak::opportunities(text, white_space);
-        // A break opportunity sits between two adjacent CJK ideographs, but only
-        // where soft wrapping is permitted (§3). This is additive: for text with
-        // no ideograph pair the loop pushes nothing and `breaks` is returned
-        // untouched (byte-identical to `LineBreak::opportunities`).
-        if white_space.wraps() {
-            let before = breaks.len();
-            let mut prev: Option<char> = None;
-            for (index, ch) in text.char_indices() {
-                if let Some(prev_ch) = prev
-                    && is_cjk_ideograph(prev_ch)
-                    && is_cjk_ideograph(ch)
-                {
-                    breaks.push(LineBreak::soft(index));
-                }
-                prev = Some(ch);
-            }
-            if breaks.len() != before {
-                breaks.sort_unstable();
-                breaks.dedup();
             }
         }
         breaks
@@ -219,60 +158,5 @@ mod tests {
         // `pre-wrap`: soft before "b" (byte 2) and hard after "\n" (byte 4).
         let breaks = LineBreak::opportunities("a b\nc", WhiteSpace::PreWrap);
         assert_eq!(breaks, vec![LineBreak::soft(2), LineBreak::hard(4)]);
-    }
-
-    #[test]
-    fn default_breaker_reproduces_opportunities_for_non_cjk_text() {
-        // Requirement (d): the port default is byte-identical to
-        // `LineBreak::opportunities` for every whitespace mode on Latin text.
-        for text in ["hello", "a b\nc", "aa bb cc", "é  x", "ab"] {
-            for mode in [
-                WhiteSpace::Normal,
-                WhiteSpace::Nowrap,
-                WhiteSpace::Pre,
-                WhiteSpace::PreWrap,
-                WhiteSpace::PreLine,
-            ] {
-                assert_eq!(
-                    DefaultLineBreaker.opportunities(text, mode),
-                    LineBreak::opportunities(text, mode),
-                    "{text:?} / {mode:?}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn default_breaker_adds_soft_break_between_adjacent_cjk_ideographs() {
-        // "中文字" — three CJK ideographs (3 bytes each): soft breaks before the
-        // 2nd (byte 3) and 3rd (byte 6) so unspaced CJK wraps out of the box.
-        let breaks = DefaultLineBreaker.opportunities("中文字", WhiteSpace::Normal);
-        assert_eq!(breaks, vec![LineBreak::soft(3), LineBreak::soft(6)]);
-        // A non-wrapping mode (`nowrap`) yields no CJK soft breaks.
-        assert!(
-            DefaultLineBreaker
-                .opportunities("中文字", WhiteSpace::Nowrap)
-                .is_empty()
-        );
-    }
-
-    #[test]
-    fn default_breaker_is_object_safe() {
-        let breaker: &dyn LineBreaker = &DefaultLineBreaker;
-        assert!(
-            breaker
-                .opportunities("hello", WhiteSpace::Normal)
-                .is_empty()
-        );
-    }
-
-    #[test]
-    fn cjk_ideograph_range() {
-        assert!(is_cjk_ideograph('中'));
-        assert!(is_cjk_ideograph('字'));
-        assert!(!is_cjk_ideograph('a'));
-        assert!(!is_cjk_ideograph('Я'));
-        // Hiragana is deliberately excluded from the simplified default set.
-        assert!(!is_cjk_ideograph('あ'));
     }
 }

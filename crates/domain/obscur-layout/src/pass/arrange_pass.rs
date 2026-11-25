@@ -1,34 +1,34 @@
-#![doc = include_str!("arrange_pass.doc/_module.md")]
+//! The arrange-phase input for a node.
 
 use obscur_geometry::{Point, Rect, Size};
 
-#[doc = include_str!("arrange_pass.doc/ArrangePass.md")]
+#[doc = include_str!("../../docs/api/pass/arrange_pass.doc/ArrangePass.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ArrangePass {
-    #[doc = include_str!("arrange_pass.doc/region.md")]
+    /// The parent-relative region assigned to the node.
     region: Rect,
 }
 
 impl ArrangePass {
-    #[doc = include_str!("arrange_pass.doc/new.md")]
+    /// Creates an arrange input carrying the assigned `region`.
     #[must_use]
     pub const fn new(region: Rect) -> Self {
         Self { region }
     }
 
-    #[doc = include_str!("arrange_pass.doc/region_2.md")]
+    /// The parent-relative region assigned to the node.
     #[must_use]
     pub const fn region(self) -> Rect {
         self.region
     }
 
-    #[doc = include_str!("arrange_pass.doc/size.md")]
+    /// The size of the assigned region.
     #[must_use]
     pub const fn size(self) -> Size {
         self.region.size
     }
 
-    #[doc = include_str!("arrange_pass.doc/origin.md")]
+    /// The origin of the assigned region, relative to the parent.
     #[must_use]
     pub const fn origin(self) -> Point {
         self.region.origin

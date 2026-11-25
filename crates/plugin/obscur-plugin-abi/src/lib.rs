@@ -1,12 +1,13 @@
-#![doc = include_str!("lib.doc/_module.md")]
+//! Native C ABI boundary (unsafe permitted behind guards).
+#![deny(unsafe_op_in_unsafe_fn)]
 
-#[doc = include_str!("lib.doc/boundary.md")]
+/// The ABI boundary crossing itself.
 pub mod boundary;
-#[doc = include_str!("lib.doc/conversion.md")]
+/// Converting values across the boundary.
 pub mod conversion;
-#[doc = include_str!("lib.doc/function_table.md")]
+/// The table of functions the two sides agree on.
 pub mod function_table;
-#[doc = include_str!("lib.doc/ownership.md")]
+/// Who owns a value once it has crossed.
 pub mod ownership;
-#[doc = include_str!("lib.doc/value.md")]
+/// The value representation on the wire.
 pub mod value;

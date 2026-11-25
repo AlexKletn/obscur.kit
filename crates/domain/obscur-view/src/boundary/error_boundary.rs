@@ -1,9 +1,9 @@
-#![doc = include_str!("error_boundary.doc/_module.md")]
+//! `ErrorBoundary`: the mechanism the runtime consults to contain failures.
 
 use crate::boundary::{ComponentFailure, ErrorBoundaryPolicy};
 use crate::view::View;
 
-#[doc = include_str!("error_boundary.doc/ErrorBoundary.md")]
+#[doc = include_str!("../../docs/api/boundary/error_boundary.doc/ErrorBoundary.md")]
 #[derive(Debug, Default)]
 pub struct ErrorBoundary {
     policy: ErrorBoundaryPolicy,
@@ -12,7 +12,8 @@ pub struct ErrorBoundary {
 }
 
 impl ErrorBoundary {
-    #[doc = include_str!("error_boundary.doc/new.md")]
+    /// Creates a boundary governed by `policy`, with no active failure and no
+    /// fallback view yet.
     #[must_use]
     pub fn new(policy: ErrorBoundaryPolicy) -> Self {
         Self {
@@ -22,13 +23,13 @@ impl ErrorBoundary {
         }
     }
 
-    #[doc = include_str!("error_boundary.doc/record.md")]
+    #[doc = include_str!("../../docs/api/boundary/error_boundary.doc/record.md")]
     pub fn record(&mut self, failure: ComponentFailure) -> bool {
         self.failure = Some(failure);
         self.policy.is_enabled()
     }
 
-    #[doc = include_str!("error_boundary.doc/should_retry.md")]
+    #[doc = include_str!("../../docs/api/boundary/error_boundary.doc/should_retry.md")]
     #[must_use]
     pub fn should_retry(&self) -> bool {
         if !self.policy.is_enabled() {
@@ -40,36 +41,36 @@ impl ErrorBoundary {
         }
     }
 
-    #[doc = include_str!("error_boundary.doc/reset.md")]
+    #[doc = include_str!("../../docs/api/boundary/error_boundary.doc/reset.md")]
     pub fn reset(&mut self) {
         self.failure = None;
     }
 
-    #[doc = include_str!("error_boundary.doc/failure.md")]
+    /// The current failure, if the boundary is holding one.
     #[must_use]
     pub fn failure(&self) -> Option<&ComponentFailure> {
         self.failure.as_ref()
     }
 
-    #[doc = include_str!("error_boundary.doc/is_tripped.md")]
+    /// Whether a failure is currently contained by this boundary.
     #[must_use]
     pub fn is_tripped(&self) -> bool {
         self.failure.is_some()
     }
 
-    #[doc = include_str!("error_boundary.doc/policy.md")]
+    /// The governing policy.
     #[must_use]
     pub const fn policy(&self) -> ErrorBoundaryPolicy {
         self.policy
     }
 
-    #[doc = include_str!("error_boundary.doc/fallback_view.md")]
+    /// The fallback view shown in place of a failed subtree, if one is set.
     #[must_use]
     pub fn fallback_view(&self) -> Option<&View> {
         self.fallback.as_ref()
     }
 
-    #[doc = include_str!("error_boundary.doc/set_fallback.md")]
+    /// Sets the fallback view shown when a failure is contained.
     pub fn set_fallback(&mut self, fallback: View) {
         self.fallback = Some(fallback);
     }

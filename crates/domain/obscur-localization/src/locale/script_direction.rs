@@ -1,8 +1,8 @@
-#![doc = include_str!("script_direction.doc/_module.md")]
+#![doc = include_str!("../../docs/api/locale/script_direction.doc/_module.md")]
 
 use obscur_text::shaping::TextDirection;
 
-#[doc = include_str!("script_direction.doc/RTL_SCRIPTS.md")]
+#[doc = include_str!("../../docs/api/locale/script_direction.doc/RTL_SCRIPTS.md")]
 static RTL_SCRIPTS: &[&str] = &[
     "Adlm", "Arab", "Armi", "Avst", "Chrs", "Cprt", "Elym", "Gara", "Hatr", "Hebr", "Hung", "Khar",
     "Lydi", "Mand", "Mani", "Mend", "Merc", "Mero", "Narb", "Nbat", "Nkoo", "Orkh", "Ougr", "Palm",
@@ -10,7 +10,7 @@ static RTL_SCRIPTS: &[&str] = &[
     "Yezi",
 ];
 
-#[doc = include_str!("script_direction.doc/RTL_LANGUAGES.md")]
+#[doc = include_str!("../../docs/api/locale/script_direction.doc/RTL_LANGUAGES.md")]
 static RTL_LANGUAGES: &[&str] = &[
     "aao", "abh", "abv", "acm", "acq", "acw", "acx", "adf", "ae", "aeb", "aec", "aee", "aeq",
     "afb", "aib", "aii", "aij", "aiq", "amw", "apc", "apd", "ar", "arc", "arq", "ars", "ary",
@@ -34,7 +34,7 @@ static RTL_LANGUAGES: &[&str] = &[
     "ydg", "yhd", "yi", "yih", "yud", "zba", "zdj", "zrp", "zum",
 ];
 
-#[doc = include_str!("script_direction.doc/script_direction.md")]
+#[doc = include_str!("../../docs/api/locale/script_direction.doc/script_direction.md")]
 #[must_use]
 pub fn script_direction(script: &str) -> TextDirection {
     if RTL_SCRIPTS.binary_search(&script).is_ok() {
@@ -44,7 +44,7 @@ pub fn script_direction(script: &str) -> TextDirection {
     }
 }
 
-#[doc = include_str!("script_direction.doc/language_direction.md")]
+#[doc = include_str!("../../docs/api/locale/script_direction.doc/language_direction.md")]
 #[must_use]
 pub fn language_direction(language: &str) -> TextDirection {
     if RTL_LANGUAGES.binary_search(&language).is_ok() {

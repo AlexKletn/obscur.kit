@@ -1,94 +1,60 @@
-#![doc = include_str!("ui_ir_decoder.doc/_module.md")]
+#![doc = include_str!("../../docs/api/codec/ui_ir_decoder.doc/_module.md")]
 
+mod decode_cursor;
+
+use decode_cursor::DecodeCursor;
 use obscur_capability::CapabilityId;
 
 use crate::codec::ui_ir_encoder::{FORMAT_VERSION, MAGIC};
 use crate::document::{UiIrDocument, UiIrEvent, UiIrExpression, UiIrNode, UiIrProperty, UiIrValue};
 use crate::version::{UiIrVersion, UiIrVersionRange};
 
-#[doc = include_str!("ui_ir_decoder.doc/UiIrDecodeError.md")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum UiIrDecodeError {
-    #[doc = include_str!("ui_ir_decoder.doc/BadMagic.md")]
-    BadMagic,
-    #[doc = include_str!("ui_ir_decoder.doc/UnexpectedEof.md")]
-    UnexpectedEof,
-    #[doc = include_str!("ui_ir_decoder.doc/UnsupportedFormatVersion.md")]
-    UnsupportedFormatVersion(u16),
-    #[doc = include_str!("ui_ir_decoder.doc/UnsupportedIrVersion.md")]
-    UnsupportedIrVersion {
-        #[doc = include_str!("ui_ir_decoder.doc/document.md")]
-        document: UiIrVersion,
-        #[doc = include_str!("ui_ir_decoder.doc/supported.md")]
-        supported: UiIrVersionRange,
-    },
-    #[doc = include_str!("ui_ir_decoder.doc/UnknownNodeKind.md")]
-    UnknownNodeKind(u8),
-    #[doc = include_str!("ui_ir_decoder.doc/UnknownExpressionTag.md")]
-    UnknownExpressionTag(u8),
-    #[doc = include_str!("ui_ir_decoder.doc/UnknownValueTag.md")]
-    UnknownValueTag(u8),
-    #[doc = include_str!("ui_ir_decoder.doc/InvalidUtf8.md")]
-    InvalidUtf8,
-    #[doc = include_str!("ui_ir_decoder.doc/UnsupportedNodeKind.md")]
-    UnsupportedNodeKind(u8),
-}
+use super::UiIrDecodeError;
 
-impl std::fmt::Display for UiIrDecodeError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::BadMagic => write!(f, "bad magic: not an OKIR stream"),
-            Self::UnexpectedEof => write!(f, "unexpected end of input"),
-            Self::UnsupportedFormatVersion(v) => {
-                write!(f, "unsupported format version: {v}")
-            }
-            Self::UnsupportedIrVersion {
-                document,
-                supported,
-            } => write!(
-                f,
-                "unsupported IR version {}.{}: this codec reads IR versions \
-                 {}.{} through {}.{}",
-                document.major(),
-                document.minor(),
-                supported.min().major(),
-                supported.min().minor(),
-                supported.max().major(),
-                supported.max().minor(),
-            ),
-            Self::UnknownNodeKind(tag) => write!(f, "unknown node kind tag: {tag}"),
-            Self::UnknownExpressionTag(tag) => {
-                write!(f, "unknown expression tag: {tag}")
-            }
-            Self::UnknownValueTag(tag) => write!(f, "unknown value tag: {tag}"),
-            Self::InvalidUtf8 => write!(f, "invalid UTF-8 in string"),
-            Self::UnsupportedNodeKind(tag) => {
-                write!(f, "unsupported node kind (no constructor): {tag}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for UiIrDecodeError {}
-
-#[doc = include_str!("ui_ir_decoder.doc/UiIrDecoder.md")]
+#[doc = include_str!("../../docs/api/codec/ui_ir_decoder.doc/UiIrDecoder.md")]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct UiIrDecoder;
 
 impl UiIrDecoder {
-    #[doc = include_str!("ui_ir_decoder.doc/SUPPORTED_VERSIONS.md")]
+    /// The inclusive range of IR schema versions this decoder can read: from
+    /// the first shipped version up to [`UiIrVersion::CURRENT`] (spec §2.15). A
+    /// document declaring a version outside this range is refused with
+    /// [`UiIrDecodeError::UnsupportedIrVersion`].
     pub const SUPPORTED_VERSIONS: UiIrVersionRange =
         UiIrVersionRange::new(UiIrVersion::new(1, 0), UiIrVersion::CURRENT);
 
-    #[doc = include_str!("ui_ir_decoder.doc/new.md")]
+    /// Creates a new decoder.
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    #[doc = include_str!("ui_ir_decoder.doc/decode.md")]
+    #[doc = include_str!("../../docs/api/codec/ui_ir_decoder.doc/decode.md")]
     pub fn decode(&self, bytes: &[u8]) -> Result<UiIrDocument, UiIrDecodeError> {
-        let mut cursor = Cursor::new(bytes);
+        Self::decode_with(bytes, None)
+    }
+
+    /// Decodes untrusted UI IR with a node budget and a maximum recursion depth of 64.
+    /// Requires the document to consume the entire input.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same decoding errors as [`Self::decode`], plus
+    /// [`UiIrDecodeError::LimitExceeded`] for an exhausted node or depth budget
+    /// and [`UiIrDecodeError::TrailingBytes`] for extra bytes after the document.
+    pub fn decode_bounded(
+        &self,
+        bytes: &[u8],
+        max_nodes: usize,
+    ) -> Result<UiIrDocument, UiIrDecodeError> {
+        Self::decode_with(bytes, Some(max_nodes))
+    }
+
+    fn decode_with(
+        bytes: &[u8],
+        max_nodes: Option<usize>,
+    ) -> Result<UiIrDocument, UiIrDecodeError> {
+        let mut cursor = DecodeCursor::new(bytes, max_nodes);
 
         let magic = cursor.take(MAGIC.len())?;
         if magic != MAGIC {
@@ -115,7 +81,10 @@ impl UiIrDecoder {
             caps.push(cursor.read_str()?.to_owned());
         }
 
-        let root = read_node(&mut cursor)?;
+        let root = read_node(&mut cursor, 0)?;
+        if max_nodes.is_some() && !cursor.is_at_end() {
+            return Err(UiIrDecodeError::TrailingBytes);
+        }
 
         let mut doc = UiIrDocument::new(root).with_version(version);
         for cap in caps {
@@ -125,8 +94,9 @@ impl UiIrDecoder {
     }
 }
 
-#[doc = include_str!("ui_ir_decoder.doc/read_node.md")]
-fn read_node(cursor: &mut Cursor<'_>) -> Result<UiIrNode, UiIrDecodeError> {
+/// Reads a node and its whole subtree from `cursor`.
+fn read_node(cursor: &mut DecodeCursor<'_>, depth: usize) -> Result<UiIrNode, UiIrDecodeError> {
+    cursor.consume_node(depth)?;
     let id = cursor.read_u64()?;
     let kind = cursor.read_u8()?;
     let tag = cursor.read_str()?.to_owned();
@@ -144,7 +114,7 @@ fn read_node(cursor: &mut Cursor<'_>) -> Result<UiIrNode, UiIrDecodeError> {
     let prop_count = cursor.read_u32()?;
     for _ in 0..prop_count {
         let name = cursor.read_str()?.to_owned();
-        let value = read_expr(cursor)?;
+        let value = read_expr(cursor, 0)?;
         node = node.with_property(UiIrProperty::new(name, value));
     }
 
@@ -157,14 +127,18 @@ fn read_node(cursor: &mut Cursor<'_>) -> Result<UiIrNode, UiIrDecodeError> {
 
     let child_count = cursor.read_u32()?;
     for _ in 0..child_count {
-        node = node.with_child(read_node(cursor)?);
+        node = node.with_child(read_node(cursor, depth + 1)?);
     }
 
     Ok(node)
 }
 
-#[doc = include_str!("ui_ir_decoder.doc/read_expr.md")]
-fn read_expr(cursor: &mut Cursor<'_>) -> Result<UiIrExpression, UiIrDecodeError> {
+/// Reads an expression and, recursively, any argument expressions.
+fn read_expr(
+    cursor: &mut DecodeCursor<'_>,
+    depth: usize,
+) -> Result<UiIrExpression, UiIrDecodeError> {
+    cursor.check_depth(depth)?;
     let tag = cursor.read_u8()?;
     match tag {
         0 => Ok(UiIrExpression::literal(read_value(cursor)?)),
@@ -174,7 +148,7 @@ fn read_expr(cursor: &mut Cursor<'_>) -> Result<UiIrExpression, UiIrDecodeError>
             let arg_count = cursor.read_u32()?;
             let mut args = Vec::new();
             for _ in 0..arg_count {
-                args.push(read_expr(cursor)?);
+                args.push(read_expr(cursor, depth + 1)?);
             }
             Ok(UiIrExpression::call(name, args))
         }
@@ -182,8 +156,8 @@ fn read_expr(cursor: &mut Cursor<'_>) -> Result<UiIrExpression, UiIrDecodeError>
     }
 }
 
-#[doc = include_str!("ui_ir_decoder.doc/read_value.md")]
-fn read_value(cursor: &mut Cursor<'_>) -> Result<UiIrValue, UiIrDecodeError> {
+/// Reads a literal value from `cursor`.
+fn read_value(cursor: &mut DecodeCursor<'_>) -> Result<UiIrValue, UiIrDecodeError> {
     let tag = cursor.read_u8()?;
     match tag {
         0 => Ok(UiIrValue::Null),
@@ -192,82 +166,6 @@ fn read_value(cursor: &mut Cursor<'_>) -> Result<UiIrValue, UiIrDecodeError> {
         3 => Ok(UiIrValue::Float(cursor.read_f64()?)),
         4 => Ok(UiIrValue::Text(cursor.read_str()?.into())),
         other => Err(UiIrDecodeError::UnknownValueTag(other)),
-    }
-}
-
-#[doc = include_str!("ui_ir_decoder.doc/Cursor.md")]
-struct Cursor<'a> {
-    data: &'a [u8],
-    pos: usize,
-}
-
-impl<'a> Cursor<'a> {
-    #[doc = include_str!("ui_ir_decoder.doc/new_2.md")]
-    const fn new(data: &'a [u8]) -> Self {
-        Self { data, pos: 0 }
-    }
-
-    #[doc = include_str!("ui_ir_decoder.doc/take.md")]
-    fn take(&mut self, n: usize) -> Result<&'a [u8], UiIrDecodeError> {
-        let end = self
-            .pos
-            .checked_add(n)
-            .ok_or(UiIrDecodeError::UnexpectedEof)?;
-        let slice = self
-            .data
-            .get(self.pos..end)
-            .ok_or(UiIrDecodeError::UnexpectedEof)?;
-        self.pos = end;
-        Ok(slice)
-    }
-
-    #[doc = include_str!("ui_ir_decoder.doc/read_u8.md")]
-    fn read_u8(&mut self) -> Result<u8, UiIrDecodeError> {
-        let bytes = self.take(1)?;
-        Ok(bytes[0])
-    }
-
-    #[doc = include_str!("ui_ir_decoder.doc/read_u16.md")]
-    fn read_u16(&mut self) -> Result<u16, UiIrDecodeError> {
-        let bytes = self.take(2)?;
-        let array = <[u8; 2]>::try_from(bytes).map_err(|_| UiIrDecodeError::UnexpectedEof)?;
-        Ok(u16::from_le_bytes(array))
-    }
-
-    #[doc = include_str!("ui_ir_decoder.doc/read_u32.md")]
-    fn read_u32(&mut self) -> Result<u32, UiIrDecodeError> {
-        let bytes = self.take(4)?;
-        let array = <[u8; 4]>::try_from(bytes).map_err(|_| UiIrDecodeError::UnexpectedEof)?;
-        Ok(u32::from_le_bytes(array))
-    }
-
-    #[doc = include_str!("ui_ir_decoder.doc/read_u64.md")]
-    fn read_u64(&mut self) -> Result<u64, UiIrDecodeError> {
-        let bytes = self.take(8)?;
-        let array = <[u8; 8]>::try_from(bytes).map_err(|_| UiIrDecodeError::UnexpectedEof)?;
-        Ok(u64::from_le_bytes(array))
-    }
-
-    #[doc = include_str!("ui_ir_decoder.doc/read_i64.md")]
-    fn read_i64(&mut self) -> Result<i64, UiIrDecodeError> {
-        let bytes = self.take(8)?;
-        let array = <[u8; 8]>::try_from(bytes).map_err(|_| UiIrDecodeError::UnexpectedEof)?;
-        Ok(i64::from_le_bytes(array))
-    }
-
-    #[doc = include_str!("ui_ir_decoder.doc/read_f64.md")]
-    fn read_f64(&mut self) -> Result<f64, UiIrDecodeError> {
-        let bytes = self.take(8)?;
-        let array = <[u8; 8]>::try_from(bytes).map_err(|_| UiIrDecodeError::UnexpectedEof)?;
-        Ok(f64::from_le_bytes(array))
-    }
-
-    #[doc = include_str!("ui_ir_decoder.doc/read_str.md")]
-    fn read_str(&mut self) -> Result<&'a str, UiIrDecodeError> {
-        let len = self.read_u32()?;
-        let n = usize::try_from(len).map_err(|_| UiIrDecodeError::UnexpectedEof)?;
-        let bytes = self.take(n)?;
-        std::str::from_utf8(bytes).map_err(|_| UiIrDecodeError::InvalidUtf8)
     }
 }
 

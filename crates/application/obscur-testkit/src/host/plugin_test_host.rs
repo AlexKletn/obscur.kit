@@ -1,5 +1,6 @@
-#![doc = include_str!("plugin_test_host.doc/_module.md")]
+//! `PluginTestHost` (skeleton stub for the spec-defined entity; not yet implemented).
 
-#[doc = include_str!("plugin_test_host.doc/PluginTestHost.md")]
+/// Placeholder for the `PluginTestHost` entity. See the Obscur Kit 2 specs for its
+/// contract; this stub exists to materialise the target source layout.
 #[derive(Debug)]
 pub struct PluginTestHost;

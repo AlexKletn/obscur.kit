@@ -1,69 +1,51 @@
-#![doc = include_str!("timeline.doc/_module.md")]
+//! The [`Timeline`] deterministic playable timeline (spec §4.17 "motion engine").
 
 use crate::timeline::{TimelineId, TimelinePosition, TimelineState};
 
-#[doc = include_str!("timeline.doc/PlaybackDirection.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum PlaybackDirection {
-    #[doc = include_str!("timeline.doc/Forward.md")]
-    Forward,
-    #[doc = include_str!("timeline.doc/Reverse.md")]
-    Reverse,
-}
+use super::{PlaybackDirection, RepeatCount};
 
-impl PlaybackDirection {
-    #[doc = include_str!("timeline.doc/flipped.md")]
-    #[must_use]
-    pub const fn flipped(self) -> Self {
-        match self {
-            Self::Forward => Self::Reverse,
-            Self::Reverse => Self::Forward,
-        }
-    }
-}
-
-#[doc = include_str!("timeline.doc/RepeatCount.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum RepeatCount {
-    #[doc = include_str!("timeline.doc/Finite.md")]
-    Finite(u32),
-    #[doc = include_str!("timeline.doc/Infinite.md")]
-    Infinite,
-}
-
-#[doc = include_str!("timeline.doc/Timeline.md")]
+#[doc = include_str!("../../docs/api/timeline/timeline.doc/Timeline.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Timeline {
-    #[doc = include_str!("timeline.doc/id.md")]
+    /// The stable identity of this timeline (spec §4.17 "stable identity").
     id: TimelineId,
-    #[doc = include_str!("timeline.doc/duration.md")]
+    /// Logical seconds for one iteration. Always strictly positive: a `0` or
+    /// negative duration passed to [`new`](Self::new) is clamped up to
+    /// [`MIN_DURATION`](Self::MIN_DURATION) to keep progress division safe.
     duration: f32,
-    #[doc = include_str!("timeline.doc/state.md")]
+    /// The current lifecycle state.
     state: TimelineState,
-    #[doc = include_str!("timeline.doc/position.md")]
+    /// The current raw linear position.
     position: TimelinePosition,
-    #[doc = include_str!("timeline.doc/direction.md")]
+    /// The direction the current iteration is playing.
     direction: PlaybackDirection,
-    #[doc = include_str!("timeline.doc/repeat.md")]
+    /// How many iterations this timeline plays.
     repeat: RepeatCount,
-    #[doc = include_str!("timeline.doc/alternates.md")]
+    /// Whether each iteration flips [`direction`](Self::direction) (ping-pong).
     alternates: bool,
-    #[doc = include_str!("timeline.doc/delay.md")]
+    /// The authored start delay, in logical seconds. Positive delays the first
+    /// iteration; negative seeks that far into the playback at
+    /// [`start`](Self::start).
     delay: f32,
-    #[doc = include_str!("timeline.doc/delay_remaining.md")]
+    /// Logical seconds of the (positive) delay still to elapse before the first
+    /// iteration advances. Always `0` once the delay is spent.
     delay_remaining: f32,
 }
 
 impl Timeline {
-    #[doc = include_str!("timeline.doc/MIN_DURATION.md")]
+    #[doc = include_str!("../../docs/api/timeline/timeline.doc/MIN_DURATION.md")]
     pub const MIN_DURATION: f32 = f32::EPSILON;
 
-    #[doc = include_str!("timeline.doc/new.md")]
+    #[doc = include_str!("../../docs/api/timeline/timeline.doc/new.md")]
     #[must_use]
     pub fn new(id: TimelineId, duration: f32) -> Self {
         Self {
             id,
-            duration: duration.max(Self::MIN_DURATION),
+            duration: if duration.is_finite() {
+                duration.max(Self::MIN_DURATION)
+            } else {
+                Self::MIN_DURATION
+            },
             state: TimelineState::Idle,
             position: TimelinePosition::start(),
             direction: PlaybackDirection::Forward,
@@ -74,35 +56,36 @@ impl Timeline {
         }
     }
 
-    #[doc = include_str!("timeline.doc/with_delay.md")]
+    #[doc = include_str!("../../docs/api/timeline/timeline.doc/with_delay.md")]
     #[must_use]
     pub fn with_delay(mut self, delay: f32) -> Self {
         self.delay = if delay.is_nan() { 0.0 } else { delay };
         self
     }
 
-    #[doc = include_str!("timeline.doc/with_repeat.md")]
+    /// Sets the repeat count, returning the updated timeline.
     #[must_use]
     pub fn with_repeat(mut self, repeat: RepeatCount) -> Self {
         self.repeat = repeat;
         self
     }
 
-    #[doc = include_str!("timeline.doc/with_direction.md")]
+    /// Sets the playback direction, returning the updated timeline.
     #[must_use]
     pub fn with_direction(mut self, direction: PlaybackDirection) -> Self {
         self.direction = direction;
         self
     }
 
-    #[doc = include_str!("timeline.doc/alternating.md")]
+    /// Sets whether the timeline alternates direction each iteration, returning
+    /// the updated timeline.
     #[must_use]
     pub fn alternating(mut self, alternates: bool) -> Self {
         self.alternates = alternates;
         self
     }
 
-    #[doc = include_str!("timeline.doc/start.md")]
+    #[doc = include_str!("../../docs/api/timeline/timeline.doc/start.md")]
     pub fn start(&mut self) {
         self.position = self.iteration_start_position();
         self.delay_remaining = self.delay.max(0.0);
@@ -116,21 +99,23 @@ impl Timeline {
         }
     }
 
-    #[doc = include_str!("timeline.doc/pause.md")]
+    /// Pauses a running timeline. Has no effect unless the timeline is
+    /// [`Running`](TimelineState::Running).
     pub fn pause(&mut self) {
         if self.state.is_running() {
             self.state = TimelineState::Paused;
         }
     }
 
-    #[doc = include_str!("timeline.doc/resume.md")]
+    /// Resumes a paused timeline. Has no effect unless the timeline is
+    /// [`Paused`](TimelineState::Paused).
     pub fn resume(&mut self) {
         if matches!(self.state, TimelineState::Paused) {
             self.state = TimelineState::Running;
         }
     }
 
-    #[doc = include_str!("timeline.doc/advance.md")]
+    #[doc = include_str!("../../docs/api/timeline/timeline.doc/advance.md")]
     pub fn advance(&mut self, delta: f32) {
         if !self.state.is_running() {
             return;
@@ -139,8 +124,8 @@ impl Timeline {
         // Remaining logical time still to consume this call (always the magnitude;
         // the current `direction` decides whether it grows or shrinks `elapsed`).
         let mut remaining = delta;
-        if remaining <= 0.0 {
-            // A zero/negative delta does not move a forward-integrating timeline;
+        if !remaining.is_finite() || remaining <= 0.0 {
+            // A non-finite or non-positive delta does not move the timeline;
             // reversal is expressed via `reverse`, not a negative advance.
             return;
         }
@@ -157,55 +142,78 @@ impl Timeline {
             self.delay_remaining = 0.0;
         }
 
-        loop {
-            let time_to_end = match self.direction {
-                PlaybackDirection::Forward => self.duration - self.position.elapsed(),
-                PlaybackDirection::Reverse => self.position.elapsed(),
+        let duration = f64::from(self.duration);
+        let elapsed = f64::from(self.position.elapsed());
+        let phase = match self.direction {
+            PlaybackDirection::Forward => elapsed,
+            PlaybackDirection::Reverse => duration - elapsed,
+        };
+        let remaining = f64::from(remaining);
+        if remaining < duration - phase {
+            let elapsed = match self.direction {
+                PlaybackDirection::Forward => elapsed + remaining,
+                PlaybackDirection::Reverse => elapsed - remaining,
             };
+            #[allow(clippy::cast_possible_truncation)]
+            let elapsed = elapsed as f32;
+            self.position = TimelinePosition::new(
+                elapsed,
+                (elapsed / self.duration).clamp(0.0, 1.0),
+                self.position.iteration(),
+            );
+            return;
+        }
+        // Reduce the delta before adding the current phase so a huge step cannot
+        // round away the partial iteration we started in.
+        let remainder = remaining % duration;
+        let whole = ((remaining - remainder) / duration).round();
+        let partial = remainder + phase;
+        let carry = partial >= duration;
+        let crossed = whole + f64::from(u8::from(carry));
+        let iteration = self.position.iteration();
 
-            if remaining < time_to_end {
+        if let RepeatCount::Finite(count) = self.repeat {
+            let left = count.saturating_sub(iteration).max(1);
+            if crossed >= f64::from(left) {
+                if self.alternates && left % 2 == 0 {
+                    self.direction = self.direction.flipped();
+                }
                 let elapsed = match self.direction {
-                    PlaybackDirection::Forward => self.position.elapsed() + remaining,
-                    PlaybackDirection::Reverse => self.position.elapsed() - remaining,
+                    PlaybackDirection::Forward => self.duration,
+                    PlaybackDirection::Reverse => 0.0,
                 };
                 self.position = TimelinePosition::new(
                     elapsed,
-                    (elapsed / self.duration).clamp(0.0, 1.0),
-                    self.position.iteration(),
+                    elapsed / self.duration,
+                    iteration.saturating_add(left),
                 );
-                return;
-            }
-
-            remaining -= time_to_end;
-            let completed = self.position.iteration().saturating_add(1);
-
-            let exhausted = match self.repeat {
-                RepeatCount::Infinite => false,
-                RepeatCount::Finite(count) => completed >= count,
-            };
-
-            if exhausted {
-                let (elapsed, progress) = match self.direction {
-                    PlaybackDirection::Forward => (self.duration, 1.0),
-                    PlaybackDirection::Reverse => (0.0, 0.0),
-                };
-                self.position = TimelinePosition::new(elapsed, progress, completed);
                 self.state = TimelineState::Finished;
                 return;
             }
-
-            if self.alternates {
-                self.direction = self.direction.flipped();
-            }
-            let (elapsed, progress) = match self.direction {
-                PlaybackDirection::Forward => (0.0, 0.0),
-                PlaybackDirection::Reverse => (self.duration, 1.0),
-            };
-            self.position = TimelinePosition::new(elapsed, progress, completed);
         }
+
+        // The modulo over two durations retains parity even when the quotient
+        // exceeds the precision of f64 or the iteration counter saturates.
+        if self.alternates && (remaining % (duration * 2.0) >= duration) != carry {
+            self.direction = self.direction.flipped();
+        }
+        let phase = if carry { partial - duration } else { partial };
+        let elapsed = match self.direction {
+            PlaybackDirection::Forward => phase,
+            PlaybackDirection::Reverse => duration - phase,
+        };
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let iterations = crossed as u32;
+        #[allow(clippy::cast_possible_truncation)]
+        let elapsed = elapsed as f32;
+        self.position = TimelinePosition::new(
+            elapsed,
+            (elapsed / self.duration).clamp(0.0, 1.0),
+            iteration.saturating_add(iterations),
+        );
     }
 
-    #[doc = include_str!("timeline.doc/reverse.md")]
+    #[doc = include_str!("../../docs/api/timeline/timeline.doc/reverse.md")]
     pub fn reverse(&mut self) {
         self.direction = self.direction.flipped();
         let elapsed = (self.duration - self.position.elapsed()).clamp(0.0, self.duration);
@@ -213,7 +221,17 @@ impl Timeline {
         self.position = TimelinePosition::new(elapsed, progress, self.position.iteration());
     }
 
-    #[doc = include_str!("timeline.doc/seek.md")]
+    /// Leaves the timeline paused at a normalized progress, skipping any pending start delay.
+    pub fn scrub(&mut self, progress: f32) {
+        if !progress.is_finite() || !self.state.is_active() {
+            return;
+        }
+        self.pause();
+        self.delay_remaining = 0.0;
+        self.seek(progress);
+    }
+
+    #[doc = include_str!("../../docs/api/timeline/timeline.doc/seek.md")]
     pub fn seek(&mut self, progress: f32) {
         let progress = progress.clamp(0.0, 1.0);
         self.position = TimelinePosition::new(
@@ -223,7 +241,9 @@ impl Timeline {
         );
     }
 
-    #[doc = include_str!("timeline.doc/iteration_start_position.md")]
+    /// Returns the position at the start of an iteration in the current
+    /// direction: progress `0` (elapsed `0`) forward, progress `1` (elapsed
+    /// `duration`) reverse.
     fn iteration_start_position(&self) -> TimelinePosition {
         match self.direction {
             PlaybackDirection::Forward => TimelinePosition::new(0.0, 0.0, 0),
@@ -231,67 +251,70 @@ impl Timeline {
         }
     }
 
-    #[doc = include_str!("timeline.doc/id_2.md")]
+    /// Returns the timeline's stable identity.
     #[must_use]
     pub const fn id(&self) -> TimelineId {
         self.id
     }
 
-    #[doc = include_str!("timeline.doc/duration_2.md")]
+    /// Returns the iteration duration in logical seconds (always strictly
+    /// positive).
     #[must_use]
     pub const fn duration(&self) -> f32 {
         self.duration
     }
 
-    #[doc = include_str!("timeline.doc/state_2.md")]
+    /// Returns the current lifecycle state.
     #[must_use]
     pub const fn state(&self) -> TimelineState {
         self.state
     }
 
-    #[doc = include_str!("timeline.doc/position_2.md")]
+    /// Returns the current raw linear position.
     #[must_use]
     pub const fn position(&self) -> TimelinePosition {
         self.position
     }
 
-    #[doc = include_str!("timeline.doc/progress.md")]
+    /// Returns the current normalized progress within the iteration
+    /// (`position().progress()`).
     #[must_use]
     pub const fn progress(&self) -> f32 {
         self.position.progress()
     }
 
-    #[doc = include_str!("timeline.doc/is_finished.md")]
+    /// Returns whether the timeline has finished all its iterations.
     #[must_use]
     pub const fn is_finished(&self) -> bool {
         self.state.is_finished()
     }
 
-    #[doc = include_str!("timeline.doc/direction_2.md")]
+    /// Returns the current playback direction.
     #[must_use]
     pub const fn direction(&self) -> PlaybackDirection {
         self.direction
     }
 
-    #[doc = include_str!("timeline.doc/repeat_2.md")]
+    /// Returns the repeat count.
     #[must_use]
     pub const fn repeat(&self) -> RepeatCount {
         self.repeat
     }
 
-    #[doc = include_str!("timeline.doc/alternates_2.md")]
+    /// Returns whether the timeline alternates direction each iteration.
     #[must_use]
     pub const fn alternates(&self) -> bool {
         self.alternates
     }
 
-    #[doc = include_str!("timeline.doc/delay_2.md")]
+    /// Returns the authored start delay in logical seconds (negative means the
+    /// timeline seeks into its playback at [`start`](Self::start)).
     #[must_use]
     pub const fn delay(&self) -> f32 {
         self.delay
     }
 
-    #[doc = include_str!("timeline.doc/is_delayed.md")]
+    #[doc = include_str!("../../docs/api/timeline/timeline.doc/is_delayed.md")]
     #[must_use]
     pub fn is_delayed(&self) -> bool {
         self.delay_remaining > 0.0
@@ -322,6 +345,10 @@ mod tests {
         assert!(Timeline::new(TimelineId::from_raw(1), 0.0).duration() > 0.0);
         assert!(Timeline::new(TimelineId::from_raw(1), -5.0).duration() > 0.0);
         assert!(Timeline::new(TimelineId::from_raw(1), f32::NAN).duration() > 0.0);
+        assert_eq!(
+            Timeline::new(TimelineId::from_raw(1), f32::INFINITY).duration(),
+            Timeline::MIN_DURATION,
+        );
     }
 
     #[test]
@@ -385,6 +412,59 @@ mod tests {
             t.advance(1.0);
             assert!(!t.is_finished());
         }
+    }
+
+    /// Checks that invalid steps leave finite and infinite repeats running at the same position.
+    #[test]
+    fn non_finite_steps_leave_a_repeating_timeline_unchanged() {
+        for repeat in [RepeatCount::Finite(2), RepeatCount::Infinite] {
+            let mut timeline = timeline().with_repeat(repeat);
+            timeline.start();
+            timeline.advance(0.25);
+            let position = timeline.position();
+            for delta in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+                timeline.advance(delta);
+                assert_eq!(timeline.position(), position);
+                assert_eq!(timeline.state(), TimelineState::Running);
+            }
+            timeline.advance(0.25);
+            assert_eq!(timeline.progress(), 0.5);
+        }
+    }
+
+    /// Exercises iteration skipping and alternating direction with a step large enough to saturate the counter.
+    #[test]
+    fn large_finite_steps_skip_repeats() {
+        let mut infinite = timeline()
+            .with_repeat(RepeatCount::Infinite)
+            .alternating(true);
+        infinite.start();
+        infinite.advance(0.25);
+        infinite.advance(f32::MAX);
+        assert_eq!(infinite.position().iteration(), u32::MAX);
+        assert_eq!(infinite.direction(), PlaybackDirection::Forward);
+        assert_eq!(infinite.progress(), 0.25);
+        infinite.advance(1.0);
+        assert_eq!(infinite.direction(), PlaybackDirection::Reverse);
+        assert_eq!(infinite.progress(), 0.75);
+
+        let mut odd = Timeline::new(TimelineId::from_raw(2), 11.0)
+            .with_repeat(RepeatCount::Infinite)
+            .alternating(true);
+        odd.start();
+        odd.advance(f32::MAX);
+        // f32::MAX modulo 22 is 20: one odd iteration and 9 seconds into it.
+        assert_eq!(odd.direction(), PlaybackDirection::Reverse);
+        assert_eq!(odd.position().elapsed(), 2.0);
+
+        let mut finite = timeline()
+            .with_repeat(RepeatCount::Finite(u32::MAX - 1))
+            .alternating(true);
+        finite.start();
+        finite.advance(f32::MAX);
+        assert!(finite.is_finished());
+        assert_eq!(finite.position().iteration(), u32::MAX - 1);
+        assert_eq!(finite.progress(), 0.0);
     }
 
     #[test]

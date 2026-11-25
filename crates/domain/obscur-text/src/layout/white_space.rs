@@ -1,35 +1,49 @@
-#![doc = include_str!("white_space.doc/_module.md")]
+#![doc = include_str!("../../docs/api/layout/white_space.doc/_module.md")]
 
-#[doc = include_str!("white_space.doc/WhiteSpace.md")]
+#[doc = include_str!("../../docs/api/layout/white_space.doc/WhiteSpace.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum WhiteSpace {
-    #[doc = include_str!("white_space.doc/Normal.md")]
+    /// `normal` (the initial): collapse whitespace runs to one space, collapse a
+    /// segment break to a space, and allow soft wrapping.
     #[default]
     Normal,
-    #[doc = include_str!("white_space.doc/Nowrap.md")]
+    /// `nowrap`: collapse like `normal`, but never soft-wrap (a single line).
     Nowrap,
-    #[doc = include_str!("white_space.doc/Pre.md")]
+    /// `pre`: preserve spaces, tabs, and segment breaks (forced breaks); no soft
+    /// wrapping.
     Pre,
-    #[doc = include_str!("white_space.doc/PreWrap.md")]
+    /// `pre-wrap`: preserve spaces, tabs, and segment breaks, and also soft-wrap.
     PreWrap,
-    #[doc = include_str!("white_space.doc/PreLine.md")]
+    /// `pre-line`: collapse whitespace runs to one space, but preserve segment
+    /// breaks as forced breaks, and soft-wrap.
     PreLine,
 }
 
 impl WhiteSpace {
-    #[doc = include_str!("white_space.doc/collapses_spaces.md")]
+    /// Whether runs of collapsible spaces/tabs collapse to a single space and
+    /// leading/trailing whitespace is trimmed at the pre-shape seam (§4.1.1) —
+    /// true for [`Normal`](Self::Normal), [`Nowrap`](Self::Nowrap), and
+    /// [`PreLine`](Self::PreLine); false for the preserving [`Pre`](Self::Pre) /
+    /// [`PreWrap`](Self::PreWrap).
     #[must_use]
     pub const fn collapses_spaces(self) -> bool {
         matches!(self, Self::Normal | Self::Nowrap | Self::PreLine)
     }
 
-    #[doc = include_str!("white_space.doc/preserves_segment_breaks.md")]
+    /// Whether a segment break (`\n`) is preserved as a **mandatory** line break
+    /// (§4.1.1) — true for [`Pre`](Self::Pre), [`PreWrap`](Self::PreWrap), and
+    /// [`PreLine`](Self::PreLine); false for [`Normal`](Self::Normal) /
+    /// [`Nowrap`](Self::Nowrap), where the break collapses to a space.
     #[must_use]
     pub const fn preserves_segment_breaks(self) -> bool {
         matches!(self, Self::Pre | Self::PreWrap | Self::PreLine)
     }
 
-    #[doc = include_str!("white_space.doc/wraps.md")]
+    /// Whether soft (optional) wrap opportunities exist for this mode (§3) — true
+    /// for [`Normal`](Self::Normal), [`PreWrap`](Self::PreWrap), and
+    /// [`PreLine`](Self::PreLine); false for the non-wrapping [`Nowrap`](Self::Nowrap)
+    /// / [`Pre`](Self::Pre), which lay each segment on a single (possibly
+    /// overflowing) line.
     #[must_use]
     pub const fn wraps(self) -> bool {
         matches!(self, Self::Normal | Self::PreWrap | Self::PreLine)

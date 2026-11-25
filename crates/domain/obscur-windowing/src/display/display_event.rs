@@ -1,22 +1,22 @@
-#![doc = include_str!("display_event.doc/_module.md")]
+//! Display hotplug and configuration events (spec §6.6).
 
 use crate::display::DisplayId;
 
-#[doc = include_str!("display_event.doc/DisplayEvent.md")]
+#[doc = include_str!("../../docs/api/display/display_event.doc/DisplayEvent.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DisplayEvent {
-    #[doc = include_str!("display_event.doc/Connected.md")]
+    /// A display was connected and is now available.
     Connected(DisplayId),
-    #[doc = include_str!("display_event.doc/Disconnected.md")]
+    /// A display was disconnected and is no longer available.
     Disconnected(DisplayId),
-    #[doc = include_str!("display_event.doc/ConfigurationChanged.md")]
+    /// A display's configuration changed (mode, scale, or bounds).
     ConfigurationChanged(DisplayId),
-    #[doc = include_str!("display_event.doc/PrimaryChanged.md")]
+    /// A display became the primary display.
     PrimaryChanged(DisplayId),
 }
 
 impl DisplayEvent {
-    #[doc = include_str!("display_event.doc/display_id.md")]
+    /// Returns the identifier of the display this event concerns.
     #[must_use]
     pub const fn display_id(&self) -> DisplayId {
         match self {
@@ -27,13 +27,13 @@ impl DisplayEvent {
         }
     }
 
-    #[doc = include_str!("display_event.doc/is_connected.md")]
+    /// Returns whether this event reports a display being connected.
     #[must_use]
     pub const fn is_connected(&self) -> bool {
         matches!(self, Self::Connected(_))
     }
 
-    #[doc = include_str!("display_event.doc/is_disconnected.md")]
+    /// Returns whether this event reports a display being disconnected.
     #[must_use]
     pub const fn is_disconnected(&self) -> bool {
         matches!(self, Self::Disconnected(_))

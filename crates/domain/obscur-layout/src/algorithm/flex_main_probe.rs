@@ -1,4 +1,4 @@
-#![doc = include_str!("flex_main_probe.doc/_module.md")]
+#![doc = include_str!("../../docs/api/algorithm/flex_main_probe.doc/_module.md")]
 
 use obscur_geometry::{BoxConstraints, Size};
 
@@ -6,7 +6,7 @@ use crate::model::Dimension;
 
 use super::ChildMeasurer;
 
-#[doc = include_str!("flex_main_probe.doc/content_max_main.md")]
+#[doc = include_str!("../../docs/api/algorithm/flex_main_probe.doc/content_max_main.md")]
 pub(super) fn content_max_main(
     measurer: &mut dyn ChildMeasurer,
     index: usize,
@@ -16,7 +16,7 @@ pub(super) fn content_max_main(
     probe_main(measurer, index, is_row, f32::INFINITY, container_cross)
 }
 
-#[doc = include_str!("flex_main_probe.doc/probe_main.md")]
+#[doc = include_str!("../../docs/api/algorithm/flex_main_probe.doc/probe_main.md")]
 fn probe_main(
     measurer: &mut dyn ChildMeasurer,
     index: usize,
@@ -69,11 +69,11 @@ fn probe_main(
     }
 }
 
-#[doc = include_str!("flex_main_probe.doc/intrinsic_main.md")]
+#[doc = include_str!("../../docs/api/algorithm/flex_main_probe.doc/intrinsic_main.md")]
 pub(super) fn intrinsic_main(
     measurer: &mut dyn ChildMeasurer,
     index: usize,
-    dim: Dimension,
+    dim: &Dimension,
     is_row: bool,
     container_main: f32,
     container_cross: f32,
@@ -86,6 +86,10 @@ pub(super) fn intrinsic_main(
             let max = content_max_main(measurer, index, is_row, container_cross);
             Some(max.min(container_main.max(min)))
         }
-        Dimension::Auto | Dimension::Px(_) | Dimension::Percent(_) => None,
+        Dimension::Auto
+        | Dimension::Px(_)
+        | Dimension::Percent(_)
+        | Dimension::Affine { .. }
+        | Dimension::Math(_) => None,
     }
 }

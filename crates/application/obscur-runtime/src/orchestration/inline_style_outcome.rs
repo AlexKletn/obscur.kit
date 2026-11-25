@@ -1,19 +1,23 @@
-#![doc = include_str!("inline_style_outcome.doc/_module.md")]
+//! What an inline-style compiler answered: the declarations it recovered, and the
+//! faults it recovered them *past*.
 
 use obscur_diagnostics::Diagnostic;
 use obscur_style::matching::InlineStyle;
 
-#[doc = include_str!("inline_style_outcome.doc/InlineStyleOutcome.md")]
+#[doc = include_str!("../../docs/api/orchestration/inline_style_outcome.doc/InlineStyleOutcome.md")]
 #[derive(Debug, Clone, Default)]
 pub struct InlineStyleOutcome {
-    #[doc = include_str!("inline_style_outcome.doc/style.md")]
+    /// The declarations that parsed. Empty is a legitimate answer — for an empty
+    /// attribute, and for one whose every declaration was dropped.
     style: InlineStyle,
-    #[doc = include_str!("inline_style_outcome.doc/faults.md")]
+    /// The diagnostics the compilation raised, already carrying the front end's own
+    /// codes and severities. The runtime forwards them; it does not classify them,
+    /// because the CSS grammar they are about lives a tier away from it.
     faults: Vec<Diagnostic>,
 }
 
 impl InlineStyleOutcome {
-    #[doc = include_str!("inline_style_outcome.doc/new.md")]
+    /// A clean compilation: the block, and nothing to report.
     #[must_use]
     pub fn new(style: InlineStyle) -> Self {
         Self {
@@ -22,14 +26,15 @@ impl InlineStyleOutcome {
         }
     }
 
-    #[doc = include_str!("inline_style_outcome.doc/with_faults.md")]
+    /// Attaches the diagnostics raised while compiling this block.
     #[must_use]
     pub fn with_faults(mut self, faults: Vec<Diagnostic>) -> Self {
         self.faults = faults;
         self
     }
 
-    #[doc = include_str!("inline_style_outcome.doc/into_parts.md")]
+    /// Takes both halves. Consuming rather than borrowing because the caller caches the
+    /// block and emits the faults once — neither is read from this value again.
     #[must_use]
     pub fn into_parts(self) -> (InlineStyle, Vec<Diagnostic>) {
         (self.style, self.faults)

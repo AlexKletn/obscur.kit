@@ -1,1 +1,0 @@
-The `G` scan position.

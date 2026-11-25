@@ -1,32 +1,46 @@
-#![doc = include_str!("view_property.doc/_module.md")]
+//! `ViewProperty`: one property set on a desired view node.
 
 use obscur_identity::InternedSymbol;
 
-use super::ViewValue;
+use super::{ViewValue, virtual_row_builder::VirtualRowBuilder};
 
-#[doc = include_str!("view_property.doc/ViewProperty.md")]
+#[doc = include_str!("../../docs/api/view/view_property.doc/ViewProperty.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ViewProperty {
-    #[doc = include_str!("view_property.doc/name.md")]
+    /// Interned name of the property.
     name: InternedSymbol,
-    #[doc = include_str!("view_property.doc/value.md")]
+    /// Concrete value assigned to the property.
     value: ViewValue,
+    virtual_rows: Option<VirtualRowBuilder>,
 }
 
 impl ViewProperty {
-    #[doc = include_str!("view_property.doc/new.md")]
+    /// Creates a property binding a `name` to a `value`.
     #[must_use]
     pub fn new(name: InternedSymbol, value: ViewValue) -> Self {
-        Self { name, value }
+        Self {
+            name,
+            value,
+            virtual_rows: None,
+        }
     }
 
-    #[doc = include_str!("view_property.doc/name_2.md")]
+    pub(super) fn with_virtual_rows(mut self, rows: VirtualRowBuilder) -> Self {
+        self.virtual_rows = Some(rows);
+        self
+    }
+
+    pub(super) fn virtual_rows(&self) -> Option<&VirtualRowBuilder> {
+        self.virtual_rows.as_ref()
+    }
+
+    /// Returns the interned property name.
     #[must_use]
     pub const fn name(&self) -> InternedSymbol {
         self.name
     }
 
-    #[doc = include_str!("view_property.doc/value_2.md")]
+    /// Returns the assigned value.
     #[must_use]
     pub const fn value(&self) -> &ViewValue {
         &self.value

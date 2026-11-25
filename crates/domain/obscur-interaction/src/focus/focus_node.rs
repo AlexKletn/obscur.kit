@@ -1,8 +1,8 @@
-#![doc = include_str!("focus_node.doc/_module.md")]
+//! The [`FocusNode`] describing a node's focus properties (spec §7.1 focus).
 
 use obscur_identity::NodeId;
 
-#[doc = include_str!("focus_node.doc/FocusNode.md")]
+#[doc = include_str!("../../docs/api/focus/focus_node.doc/FocusNode.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FocusNode {
     node: NodeId,
@@ -12,7 +12,8 @@ pub struct FocusNode {
 }
 
 impl FocusNode {
-    #[doc = include_str!("focus_node.doc/new.md")]
+    /// Creates focus properties for `node`: not focusable, `tab_index` `0`, and
+    /// not disabled.
     #[must_use]
     pub const fn new(node: NodeId) -> Self {
         Self {
@@ -23,46 +24,50 @@ impl FocusNode {
         }
     }
 
-    #[doc = include_str!("focus_node.doc/focusable.md")]
+    /// Sets whether this node can receive focus, returning the updated value.
     #[must_use]
     pub const fn focusable(mut self, focusable: bool) -> Self {
         self.focusable = focusable;
         self
     }
 
-    #[doc = include_str!("focus_node.doc/with_tab_index.md")]
+    /// Sets this node's tab index (HTML `tabindex` semantics), returning the
+    /// updated value.
     #[must_use]
     pub const fn with_tab_index(mut self, tab_index: i32) -> Self {
         self.tab_index = tab_index;
         self
     }
 
-    #[doc = include_str!("focus_node.doc/disabled.md")]
+    /// Sets whether this node is disabled, returning the updated value.
     #[must_use]
     pub const fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
 
-    #[doc = include_str!("focus_node.doc/node.md")]
+    /// Returns the identifier of the node these properties describe.
     #[must_use]
     pub const fn node(&self) -> NodeId {
         self.node
     }
 
-    #[doc = include_str!("focus_node.doc/tab_index.md")]
+    /// Returns this node's tab index.
     #[must_use]
     pub const fn tab_index(&self) -> i32 {
         self.tab_index
     }
 
-    #[doc = include_str!("focus_node.doc/is_focusable.md")]
+    /// Returns whether this node can receive focus at all: focusable and not
+    /// disabled. Programmatic focus (including a negative `tab_index`) is allowed
+    /// when this is `true`.
     #[must_use]
     pub const fn is_focusable(&self) -> bool {
         self.focusable && !self.disabled
     }
 
-    #[doc = include_str!("focus_node.doc/is_tab_focusable.md")]
+    /// Returns whether this node participates in tab navigation: focusable, not
+    /// disabled, and a non-negative `tab_index`.
     #[must_use]
     pub const fn is_tab_focusable(&self) -> bool {
         self.focusable && !self.disabled && self.tab_index >= 0

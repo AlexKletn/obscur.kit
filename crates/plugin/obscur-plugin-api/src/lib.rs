@@ -1,16 +1,16 @@
-#![doc = include_str!("lib.doc/_module.md")]
+//! Stable semantic Host/Plugin API boundary.
 #![forbid(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
-#[doc = include_str!("lib.doc/executor.md")]
+/// Running plugin code.
 pub mod executor;
-#[doc = include_str!("lib.doc/handle.md")]
+/// Opaque references to host-owned objects.
 pub mod handle;
-#[doc = include_str!("lib.doc/host.md")]
+/// The host side of the API, as a plugin sees it.
 pub mod host;
-#[doc = include_str!("lib.doc/plugin.md")]
+/// A plugin as the API models it.
 pub mod plugin;
-#[doc = include_str!("lib.doc/service.md")]
+/// Services exchanged across the boundary.
 pub mod service;
-#[doc = include_str!("lib.doc/status.md")]
+/// The status a call or a plugin reports.
 pub mod status;

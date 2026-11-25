@@ -1,29 +1,34 @@
-#![doc = include_str!("wheel_event.doc/_module.md")]
+#![doc = include_str!("../../docs/api/pointer/wheel_event.doc/_module.md")]
 
 use obscur_geometry::Point;
 
-use super::WheelDeltaMode;
+use super::{WheelDeltaMode, WheelPhase};
 use crate::event::EventTrust;
 
-#[doc = include_str!("wheel_event.doc/WheelEvent.md")]
+#[doc = include_str!("../../docs/api/pointer/wheel_event.doc/WheelEvent.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WheelEvent {
-    #[doc = include_str!("wheel_event.doc/position.md")]
+    /// Where the pointer was, in the same space a dispatched pointer event's position
+    /// is in — content space, folded through the scroll containers the point lies
+    /// within. That is the space the hit test that found the target ran in, so a handler
+    /// comparing this against a node's box is comparing like with like.
     pub position: Point,
-    #[doc = include_str!("wheel_event.doc/delta_y.md")]
+    #[doc = include_str!("../../docs/api/pointer/wheel_event.doc/delta_y.md")]
     pub delta_y: f32,
-    #[doc = include_str!("wheel_event.doc/delta_x.md")]
+    #[doc = include_str!("../../docs/api/pointer/wheel_event.doc/delta_x.md")]
     pub delta_x: f32,
-    #[doc = include_str!("wheel_event.doc/mode.md")]
+    /// What unit the deltas are in — a notched wheel reports lines, a trackpad pixels.
     pub mode: WheelDeltaMode,
-    #[doc = include_str!("wheel_event.doc/timestamp_micros.md")]
+    /// Microseconds on whatever monotonic origin the host chose, matching `PointerEvent` and `KeyEvent` exactly. Zero means unstamped.
     pub timestamp_micros: u64,
-    #[doc = include_str!("wheel_event.doc/trust.md")]
+    #[doc = include_str!("../../docs/api/pointer/wheel_event.doc/trust.md")]
     pub trust: EventTrust,
+    /// Contact phase reported by the window backend.
+    pub phase: WheelPhase,
 }
 
 impl WheelEvent {
-    #[doc = include_str!("wheel_event.doc/new.md")]
+    /// A notch of `delta_y` logical px aimed at `position`.
     #[must_use]
     pub const fn new(position: Point, delta_y: f32) -> Self {
         Self {
@@ -33,93 +38,101 @@ impl WheelEvent {
             mode: WheelDeltaMode::Pixels,
             timestamp_micros: 0,
             trust: EventTrust::Untrusted,
+            phase: WheelPhase::Unspecified,
         }
     }
 
-    #[doc = include_str!("wheel_event.doc/with_delta_x.md")]
+    /// Records the contact phase supplied by the window backend.
+    #[must_use]
+    pub const fn with_phase(mut self, phase: WheelPhase) -> Self {
+        self.phase = phase;
+        self
+    }
+
+    /// Returns the event with a horizontal delta.
     #[must_use]
     pub const fn with_delta_x(mut self, delta_x: f32) -> Self {
         self.delta_x = delta_x;
         self
     }
 
-    #[doc = include_str!("wheel_event.doc/in_lines.md")]
+    /// Returns the event with its deltas read as LINES rather than pixels.
     #[must_use]
     pub const fn in_lines(mut self) -> Self {
         self.mode = WheelDeltaMode::Lines;
         self
     }
 
-    #[doc = include_str!("wheel_event.doc/with_timestamp.md")]
+    /// Returns the event stamped with a host timestamp, in microseconds.
     #[must_use]
     pub const fn with_timestamp(mut self, timestamp_micros: u64) -> Self {
         self.timestamp_micros = timestamp_micros;
         self
     }
 
-    #[doc = include_str!("wheel_event.doc/as_trusted.md")]
+    /// Returns the event marked trusted. The only way to confer trust, and a platform adapter is what calls it.
     #[must_use]
     pub const fn as_trusted(mut self) -> Self {
         self.trust = EventTrust::Trusted;
         self
     }
 
-    #[doc = include_str!("wheel_event.doc/at.md")]
+    #[doc = include_str!("../../docs/api/pointer/wheel_event.doc/at.md")]
     #[must_use]
     pub const fn at(mut self, position: Point) -> Self {
         self.position = position;
         self
     }
 
-    #[doc = include_str!("wheel_event.doc/position_2.md")]
+    /// Where the pointer was.
     #[must_use]
     pub const fn position(&self) -> Point {
         self.position
     }
 
-    #[doc = include_str!("wheel_event.doc/delta_y_2.md")]
+    /// Logical pixels to scroll by; positive is toward the content's end.
     #[must_use]
     pub const fn delta_y(&self) -> f32 {
         self.delta_y
     }
 
-    #[doc = include_str!("wheel_event.doc/delta_x_2.md")]
+    /// The horizontal delta, in [`mode`](WheelEvent::mode)'s unit.
     #[must_use]
     pub const fn delta_x(&self) -> f32 {
         self.delta_x
     }
 
-    #[doc = include_str!("wheel_event.doc/mode_2.md")]
+    /// What unit the deltas are in.
     #[must_use]
     pub const fn mode(&self) -> WheelDeltaMode {
         self.mode
     }
 
-    #[doc = include_str!("wheel_event.doc/pixels_y.md")]
+    /// The vertical delta in pixels, given what a line is worth.
     #[must_use]
     pub fn pixels_y(&self, line_height: f32) -> f32 {
         self.mode.resolve(self.delta_y, line_height)
     }
 
-    #[doc = include_str!("wheel_event.doc/pixels_x.md")]
+    /// The horizontal delta in pixels, given what a line is worth.
     #[must_use]
     pub fn pixels_x(&self, line_height: f32) -> f32 {
         self.mode.resolve(self.delta_x, line_height)
     }
 
-    #[doc = include_str!("wheel_event.doc/timestamp.md")]
+    /// The host timestamp in microseconds, or zero if unstamped.
     #[must_use]
     pub const fn timestamp(&self) -> u64 {
         self.timestamp_micros
     }
 
-    #[doc = include_str!("wheel_event.doc/trust_2.md")]
+    /// Whether this notch came from a real device or was synthesised.
     #[must_use]
     pub const fn trust(&self) -> EventTrust {
         self.trust
     }
 
-    #[doc = include_str!("wheel_event.doc/is_trusted.md")]
+    /// Whether this notch came from a real device.
     #[must_use]
     pub const fn is_trusted(&self) -> bool {
         self.trust.is_trusted()

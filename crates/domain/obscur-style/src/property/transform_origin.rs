@@ -1,36 +1,36 @@
-#![doc = include_str!("transform_origin.doc/_module.md")]
+//! A style-local `transform-origin` (spec §5.2).
 
 use crate::property::Length;
 
-#[doc = include_str!("transform_origin.doc/TransformOrigin.md")]
+#[doc = include_str!("../../docs/api/property/transform_origin.doc/TransformOrigin.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TransformOrigin {
-    #[doc = include_str!("transform_origin.doc/x.md")]
+    /// The horizontal origin (a `px` or a percentage of the box width).
     x: Length,
-    #[doc = include_str!("transform_origin.doc/y.md")]
+    /// The vertical origin (a `px` or a percentage of the box height).
     y: Length,
 }
 
 impl TransformOrigin {
-    #[doc = include_str!("transform_origin.doc/CENTER.md")]
+    /// The initial `transform-origin`: `50% 50%` (the box center).
     pub const CENTER: Self = Self {
         x: Length::Percent(50.0),
         y: Length::Percent(50.0),
     };
 
-    #[doc = include_str!("transform_origin.doc/new.md")]
+    /// Creates a transform origin from its horizontal and vertical components.
     #[must_use]
     pub const fn new(x: Length, y: Length) -> Self {
         Self { x, y }
     }
 
-    #[doc = include_str!("transform_origin.doc/x_2.md")]
+    /// Returns the horizontal origin component.
     #[must_use]
     pub const fn x(&self) -> Length {
         self.x
     }
 
-    #[doc = include_str!("transform_origin.doc/y_2.md")]
+    /// Returns the vertical origin component.
     #[must_use]
     pub const fn y(&self) -> Length {
         self.y
@@ -38,7 +38,7 @@ impl TransformOrigin {
 }
 
 impl Default for TransformOrigin {
-    #[doc = include_str!("transform_origin.doc/default.md")]
+    /// The default is the CSS initial [`TransformOrigin::CENTER`].
     fn default() -> Self {
         Self::CENTER
     }

@@ -1,38 +1,38 @@
-#![doc = include_str!("window_state.doc/_module.md")]
+//! Presentation and lifecycle state of a window (spec §6.2).
 
-#[doc = include_str!("window_state.doc/WindowState.md")]
+#[doc = include_str!("../../docs/api/window/window_state.doc/WindowState.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WindowState {
-    #[doc = include_str!("window_state.doc/Normal.md")]
+    /// A regular, restored window sized by its properties.
     Normal,
-    #[doc = include_str!("window_state.doc/Minimized.md")]
+    /// Iconified/hidden to the taskbar or dock.
     Minimized,
-    #[doc = include_str!("window_state.doc/Maximized.md")]
+    /// Expanded to fill the available work area (excluding system chrome).
     Maximized,
-    #[doc = include_str!("window_state.doc/Fullscreen.md")]
+    /// Occupying the entire display, typically without decorations.
     Fullscreen,
 }
 
 impl WindowState {
-    #[doc = include_str!("window_state.doc/is_normal.md")]
+    /// Returns whether the window is in the [`WindowState::Normal`] state.
     #[must_use]
     pub const fn is_normal(self) -> bool {
         matches!(self, Self::Normal)
     }
 
-    #[doc = include_str!("window_state.doc/is_minimized.md")]
+    /// Returns whether the window is minimized.
     #[must_use]
     pub const fn is_minimized(self) -> bool {
         matches!(self, Self::Minimized)
     }
 
-    #[doc = include_str!("window_state.doc/is_maximized.md")]
+    /// Returns whether the window is maximized.
     #[must_use]
     pub const fn is_maximized(self) -> bool {
         matches!(self, Self::Maximized)
     }
 
-    #[doc = include_str!("window_state.doc/is_fullscreen.md")]
+    /// Returns whether the window is fullscreen.
     #[must_use]
     pub const fn is_fullscreen(self) -> bool {
         matches!(self, Self::Fullscreen)
@@ -40,7 +40,7 @@ impl WindowState {
 }
 
 impl Default for WindowState {
-    #[doc = include_str!("window_state.doc/default.md")]
+    /// The default presentation state is [`WindowState::Normal`].
     fn default() -> Self {
         Self::Normal
     }

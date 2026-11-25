@@ -1,4 +1,4 @@
-#![doc = include_str!("radio_factory.doc/_module.md")]
+//! The registry entry that mints `radio` components (spec §2.2).
 
 use obscur_identity::ComponentId;
 use obscur_view::component::{
@@ -7,27 +7,28 @@ use obscur_view::component::{
 
 use super::{Radio, RadioComponent, RadioProps};
 
-#[doc = include_str!("radio_factory.doc/RadioFactory.md")]
+#[doc = include_str!("../../docs/api/radio/radio_factory.doc/RadioFactory.md")]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RadioFactory;
 
 impl ComponentFactory for RadioFactory {
-    #[doc = include_str!("radio_factory.doc/component_id.md")]
+    #[doc = include_str!("../../docs/api/radio/radio_factory.doc/component_id.md")]
     fn component_id(&self) -> ComponentId {
         Radio::COMPONENT_ID
     }
 
-    #[doc = include_str!("radio_factory.doc/contract.md")]
+    #[doc = include_str!("../../docs/api/radio/radio_factory.doc/contract.md")]
     fn contract(&self) -> ComponentContract {
         RadioProps::contract()
     }
 
-    #[doc = include_str!("radio_factory.doc/create_instance.md")]
+    /// A fresh instance handle for one mounted `<radio>`.
     fn create_instance(&self, instance: InstanceId) -> ComponentInstance {
         ComponentInstance::new(instance, Radio::COMPONENT_ID)
     }
 
-    #[doc = include_str!("radio_factory.doc/create_component.md")]
+    /// A fresh [`RadioComponent`](super::RadioComponent) behind the erased handle the
+    /// registry stores.
     fn create_component(&self) -> Box<dyn ErasedComponent> {
         Box::new(RadioComponent)
     }

@@ -1,8 +1,8 @@
-#![doc = include_str!("local_state.doc/_module.md")]
+//! `LocalState`: a component's owned, mutable local view state.
 
 use crate::state::{ReadSignal, StateGeneration};
 
-#[doc = include_str!("local_state.doc/LocalState.md")]
+#[doc = include_str!("../../docs/api/state/local_state.doc/LocalState.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct LocalState<T> {
     value: T,
@@ -10,7 +10,7 @@ pub struct LocalState<T> {
 }
 
 impl<T> LocalState<T> {
-    #[doc = include_str!("local_state.doc/new.md")]
+    /// Creates local state seeded with `value` at the initial generation.
     #[must_use]
     pub const fn new(value: T) -> Self {
         Self {
@@ -19,38 +19,38 @@ impl<T> LocalState<T> {
         }
     }
 
-    #[doc = include_str!("local_state.doc/get.md")]
+    /// Borrows the current value without affecting the generation.
     #[must_use]
     pub const fn get(&self) -> &T {
         &self.value
     }
 
-    #[doc = include_str!("local_state.doc/generation.md")]
+    /// Returns the current generation. It advances on every mutation.
     #[must_use]
     pub const fn generation(&self) -> StateGeneration {
         self.generation
     }
 
-    #[doc = include_str!("local_state.doc/set.md")]
+    /// Replaces the value and advances the generation.
     pub fn set(&mut self, value: T) {
         self.value = value;
         self.bump();
     }
 
-    #[doc = include_str!("local_state.doc/update.md")]
+    #[doc = include_str!("../../docs/api/state/local_state.doc/update.md")]
     pub fn update(&mut self, f: impl FnOnce(&mut T)) {
         f(&mut self.value);
         self.bump();
     }
 
-    #[doc = include_str!("local_state.doc/bump.md")]
+    /// Advances the change generation. Wraps on overflow via [`StateGeneration`].
     fn bump(&mut self) {
         self.generation = self.generation.next();
     }
 }
 
 impl<T: Clone> LocalState<T> {
-    #[doc = include_str!("local_state.doc/read.md")]
+    #[doc = include_str!("../../docs/api/state/local_state.doc/read.md")]
     #[must_use]
     pub fn read(&self) -> ReadSignal<T> {
         ReadSignal::new(self.value.clone(), self.generation)

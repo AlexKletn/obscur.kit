@@ -1,5 +1,6 @@
-#![doc = include_str!("abi_call_guard.doc/_module.md")]
+//! `AbiCallGuard` (skeleton stub for the spec-defined entity; not yet implemented).
 
-#[doc = include_str!("abi_call_guard.doc/AbiCallGuard.md")]
+/// Placeholder for the `AbiCallGuard` entity. See the Obscur Kit 2 specs for its
+/// contract; this stub exists to materialise the target source layout.
 #[derive(Debug)]
 pub struct AbiCallGuard;

@@ -1,8 +1,8 @@
-#![doc = include_str!("embedded_source.doc/_module.md")]
+//! A compile-time-baked resource source (spec §5.15 embedded).
 
 use std::sync::Arc;
 
-#[doc = include_str!("embedded_source.doc/EmbeddedSource.md")]
+#[doc = include_str!("../../docs/api/source/embedded_source.doc/EmbeddedSource.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct EmbeddedSource {
     name: Box<str>,
@@ -10,7 +10,7 @@ pub struct EmbeddedSource {
 }
 
 impl EmbeddedSource {
-    #[doc = include_str!("embedded_source.doc/new.md")]
+    /// Creates an embedded source from a logical asset name and its baked bytes.
     #[must_use]
     pub fn new(name: impl Into<Box<str>>, bytes: impl Into<Arc<[u8]>>) -> Self {
         Self {
@@ -19,25 +19,25 @@ impl EmbeddedSource {
         }
     }
 
-    #[doc = include_str!("embedded_source.doc/name.md")]
+    /// Returns the logical asset name (spec §5.15).
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    #[doc = include_str!("embedded_source.doc/bytes.md")]
+    /// Returns the baked bytes (spec §5.15).
     #[must_use]
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
     }
 
-    #[doc = include_str!("embedded_source.doc/len.md")]
+    /// Returns the number of baked bytes.
     #[must_use]
     pub fn len(&self) -> usize {
         self.bytes.len()
     }
 
-    #[doc = include_str!("embedded_source.doc/is_empty.md")]
+    /// Returns whether there are no baked bytes.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.bytes.is_empty()

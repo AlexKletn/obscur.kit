@@ -1,42 +1,48 @@
-#![doc = include_str!("system_appearance.doc/_module.md")]
+//! Everything the desktop said about appearance, in one value.
 
 use obscur_scene::color::Color;
 
-use super::{ColorScheme, Contrast, SystemFont, SystemPalette};
+use super::{ColorScheme, Contrast, SystemFont, SystemPalette, WindowDecoration};
 
-#[doc = include_str!("system_appearance.doc/SystemAppearance.md")]
+#[doc = include_str!("../../docs/api/appearance/system_appearance.doc/SystemAppearance.md")]
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct SystemAppearance {
-    #[doc = include_str!("system_appearance.doc/color_scheme.md")]
+    /// Light or dark, if the desktop stated a preference.
     pub color_scheme: Option<ColorScheme>,
-    #[doc = include_str!("system_appearance.doc/contrast.md")]
+    /// Whether more contrast was asked for.
     pub contrast: Option<Contrast>,
-    #[doc = include_str!("system_appearance.doc/accent.md")]
+    #[doc = include_str!("../../docs/api/appearance/system_appearance.doc/accent.md")]
     pub accent: Option<Color>,
-    #[doc = include_str!("system_appearance.doc/palette.md")]
+    /// The named colours, which on some desktops is none of them.
     pub palette: SystemPalette,
-    #[doc = include_str!("system_appearance.doc/font.md")]
+    /// Ordinary window corner radius in logical pixels.
+    pub window_radius: Option<f32>,
+    /// Desktop title bar preferences for client-side decorations. The selected provider supplies the whole decoration so that icon conventions follow its button layout.
+    pub window_decoration: Option<WindowDecoration>,
+    /// The interface font.
     pub font: Option<SystemFont>,
-    #[doc = include_str!("system_appearance.doc/monospace_font.md")]
+    /// The fixed-width font, for code and terminals.
     pub monospace_font: Option<SystemFont>,
-    #[doc = include_str!("system_appearance.doc/text_scale.md")]
+    #[doc = include_str!("../../docs/api/appearance/system_appearance.doc/text_scale.md")]
     pub text_scale: Option<f32>,
-    #[doc = include_str!("system_appearance.doc/cursor_size.md")]
+    /// The pointer cursor's size in pixels.
     pub cursor_size: Option<u32>,
-    #[doc = include_str!("system_appearance.doc/icon_theme.md")]
+    #[doc = include_str!("../../docs/api/appearance/system_appearance.doc/icon_theme.md")]
     pub icon_theme: Option<Box<str>>,
-    #[doc = include_str!("system_appearance.doc/reduced_motion.md")]
+    #[doc = include_str!("../../docs/api/appearance/system_appearance.doc/reduced_motion.md")]
     pub reduced_motion: Option<bool>,
 }
 
 impl SystemAppearance {
-    #[doc = include_str!("system_appearance.doc/is_empty.md")]
+    /// Whether the desktop answered nothing at all.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.color_scheme.is_none()
             && self.contrast.is_none()
             && self.accent.is_none()
             && self.palette.is_empty()
+            && self.window_radius.is_none()
+            && self.window_decoration.is_none()
             && self.font.is_none()
             && self.monospace_font.is_none()
             && self.text_scale.is_none()
@@ -45,12 +51,16 @@ impl SystemAppearance {
             && self.reduced_motion.is_none()
     }
 
-    #[doc = include_str!("system_appearance.doc/merge_under.md")]
+    #[doc = include_str!("../../docs/api/appearance/system_appearance.doc/merge_under.md")]
     #[must_use]
     pub fn merge_under(mut self, weaker: &Self) -> Self {
         self.color_scheme = self.color_scheme.or(weaker.color_scheme);
         self.contrast = self.contrast.or(weaker.contrast);
         self.accent = self.accent.or(weaker.accent);
+        self.window_radius = self.window_radius.or(weaker.window_radius);
+        self.window_decoration = self
+            .window_decoration
+            .or_else(|| weaker.window_decoration.clone());
         self.font = self.font.take().or_else(|| weaker.font.clone());
         self.monospace_font = self
             .monospace_font
@@ -89,6 +99,36 @@ mod tests {
             color_scheme: Some(ColorScheme::Dark),
             ..SystemAppearance::default()
         }
+    }
+
+    #[test]
+    fn an_explicitly_empty_decoration_keeps_its_layout_during_merge() {
+        use super::super::{WindowButton, WindowButtonLayout};
+
+        let strong = SystemAppearance {
+            window_decoration: Some(WindowDecoration {
+                button_layout: WindowButtonLayout {
+                    left: Some(vec![]),
+                    right: Some(vec![]),
+                },
+                button_icons: Default::default(),
+            }),
+            ..SystemAppearance::default()
+        };
+        let weak = SystemAppearance {
+            window_decoration: Some(WindowDecoration {
+                button_layout: WindowButtonLayout {
+                    right: Some(vec![WindowButton::Close]),
+                    ..WindowButtonLayout::default()
+                },
+                button_icons: Default::default(),
+            }),
+            ..SystemAppearance::default()
+        };
+
+        assert!(!strong.is_empty());
+        assert_eq!(strong.clone().merge_under(&weak), strong);
+        assert_eq!(SystemAppearance::default().merge_under(&weak), weak);
     }
 
     #[test]

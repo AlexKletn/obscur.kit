@@ -1,23 +1,23 @@
-#![doc = include_str!("unmount_context.doc/_module.md")]
+//! `UnmountContext`: the per-hook context handed to `on_unmount`.
 
 use core::ops::{Deref, DerefMut};
 
 use crate::component::ComponentContext;
 
-#[doc = include_str!("unmount_context.doc/UnmountContext.md")]
+#[doc = include_str!("../../docs/api/lifecycle/unmount_context.doc/UnmountContext.md")]
 #[derive(Debug)]
 pub struct UnmountContext<'ctx, 'scope> {
     context: &'ctx mut ComponentContext<'scope>,
 }
 
 impl<'ctx, 'scope> UnmountContext<'ctx, 'scope> {
-    #[doc = include_str!("unmount_context.doc/new.md")]
+    /// Wraps a borrowed [`ComponentContext`] for the unmount hook.
     #[must_use]
     pub fn new(context: &'ctx mut ComponentContext<'scope>) -> Self {
         Self { context }
     }
 
-    #[doc = include_str!("unmount_context.doc/context.md")]
+    /// Mutable access to the underlying [`ComponentContext`].
     #[must_use]
     pub fn context(&mut self) -> &mut ComponentContext<'scope> {
         self.context

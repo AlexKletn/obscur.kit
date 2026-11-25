@@ -1,4 +1,5 @@
-#![doc = include_str!("accessibility_publisher.doc/_module.md")]
+//! [`AccessibilityPublisher`]: the installed §7.1 bridge, and the focus that
+//! bridge was last told about.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -8,44 +9,61 @@ use obscur_accessibility::port::AccessibilityBridge;
 use obscur_accessibility::tree::SemanticSnapshot;
 use obscur_identity::NodeId;
 
-#[doc = include_str!("accessibility_publisher.doc/AccessibilityPublisher.md")]
+#[doc = include_str!("../../docs/api/runtime/accessibility_publisher.doc/AccessibilityPublisher.md")]
 pub(crate) struct AccessibilityPublisher {
-    #[doc = include_str!("accessibility_publisher.doc/bridge.md")]
+    #[doc = include_str!("../../docs/api/runtime/accessibility_publisher.doc/bridge.md")]
     bridge: Option<Rc<RefCell<dyn AccessibilityBridge>>>,
-    #[doc = include_str!("accessibility_publisher.doc/published.md")]
+    #[doc = include_str!("../../docs/api/runtime/accessibility_publisher.doc/published.md")]
     published: Option<NodeId>,
+    /// The last snapshot sent to the installed bridge.
+    published_snapshot: Option<SemanticSnapshot>,
 }
 
 impl AccessibilityPublisher {
-    #[doc = include_str!("accessibility_publisher.doc/new.md")]
+    /// No bridge installed and nothing published: the state in which
+    /// [`should_publish`](Self::should_publish) answers `false` to everything.
     pub(crate) const fn new() -> Self {
         Self {
             bridge: None,
             published: None,
+            published_snapshot: None,
         }
     }
 
-    #[doc = include_str!("accessibility_publisher.doc/install.md")]
+    #[doc = include_str!("../../docs/api/runtime/accessibility_publisher.doc/install.md")]
     pub(crate) fn install(&mut self, bridge: Rc<RefCell<dyn AccessibilityBridge>>) {
         self.bridge = Some(bridge);
+        self.published_snapshot = None;
     }
 
-    #[doc = include_str!("accessibility_publisher.doc/is_installed.md")]
+    /// Whether a platform bridge is installed — i.e. whether frames publish a
+    /// semantic tree at all.
     pub(crate) const fn is_installed(&self) -> bool {
         self.bridge.is_some()
     }
 
-    #[doc = include_str!("accessibility_publisher.doc/installed.md")]
+    #[doc = include_str!("../../docs/api/runtime/accessibility_publisher.doc/installed.md")]
     pub(crate) fn installed(&self) -> Option<Rc<RefCell<dyn AccessibilityBridge>>> {
         self.bridge.clone()
     }
 
-    #[doc = include_str!("accessibility_publisher.doc/should_publish.md")]
+    #[doc = include_str!("../../docs/api/runtime/accessibility_publisher.doc/should_publish.md")]
     pub(crate) fn should_publish(&self, tree_changed: bool, focused: Option<NodeId>) -> bool {
         self.is_installed() && (tree_changed || self.published != focused)
     }
 
-    #[doc = include_str!("accessibility_publisher.doc/push.md")]
+    /// Publishes to the installed bridge when focus or semantic contents changed.
+    pub(crate) fn publish(&mut self, focused: Option<NodeId>, snapshot: SemanticSnapshot) {
+        if self.published == focused && self.published_snapshot.as_ref() == Some(&snapshot) {
+            return;
+        }
+        if let Some(bridge) = self.installed() {
+            self.push(&mut *bridge.borrow_mut(), focused, &snapshot);
+            self.published_snapshot = Some(snapshot);
+        }
+    }
+
+    #[doc = include_str!("../../docs/api/runtime/accessibility_publisher.doc/push.md")]
     pub(crate) fn push(
         &mut self,
         bridge: &mut dyn AccessibilityBridge,

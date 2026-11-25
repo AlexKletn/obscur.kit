@@ -1,22 +1,22 @@
-#![doc = include_str!("slot_contract.doc/_module.md")]
+//! `SlotContract`: a named slot exported by a component (spec §2.11, §2.12).
 
 use obscur_identity::InternedSymbol;
 
 use crate::contract::{ChildContract, SlotCardinality};
 
-#[doc = include_str!("slot_contract.doc/SlotContract.md")]
+#[doc = include_str!("../../docs/api/contract/slot_contract.doc/SlotContract.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SlotContract {
-    #[doc = include_str!("slot_contract.doc/name.md")]
+    /// Interned name of the slot.
     pub name: InternedSymbol,
-    #[doc = include_str!("slot_contract.doc/cardinality.md")]
+    /// How many children the slot may hold.
     pub cardinality: SlotCardinality,
-    #[doc = include_str!("slot_contract.doc/allowed_children.md")]
+    /// Which child components the slot accepts.
     pub allowed_children: ChildContract,
 }
 
 impl SlotContract {
-    #[doc = include_str!("slot_contract.doc/new.md")]
+    /// Creates a slot contract with the given name, cardinality and child rule.
     #[must_use]
     pub const fn new(
         name: InternedSymbol,

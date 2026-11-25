@@ -1,9 +1,9 @@
-#![doc = include_str!("resolve_flexible_lengths.doc/_module.md")]
+#![doc = include_str!("../../docs/api/algorithm/resolve_flexible_lengths.doc/_module.md")]
 
 use super::LayoutChild;
 use super::flex_axis_bounds::clamp_floor;
 
-#[doc = include_str!("resolve_flexible_lengths.doc/resolve_flexible_lengths.md")]
+#[doc = include_str!("../../docs/api/algorithm/resolve_flexible_lengths.doc/resolve_flexible_lengths.md")]
 // These are cohesive positional inputs to one internal freeze loop; grouping them
 // into a struct would not aid clarity.
 #[allow(clippy::too_many_arguments)]

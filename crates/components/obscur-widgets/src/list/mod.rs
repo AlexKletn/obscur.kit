@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! List collection widget (spec §2.6, §4.9).
 
 mod list;
 pub use list::List;

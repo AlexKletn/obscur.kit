@@ -1,4 +1,4 @@
-#![doc = include_str!("style_scoping.doc/_module.md")]
+#![doc = include_str!("../../docs/api/orchestration/style_scoping.doc/_module.md")]
 
 use obscur_style::selector::{
     ComplexSelector, CompoundSelector, MatchElement, SelectorMatcher, SelectorSpecificity,
@@ -11,7 +11,7 @@ use obscur_identity::NodeId;
 
 use super::TreeElement;
 
-#[doc = include_str!("style_scoping.doc/component_host.md")]
+#[doc = include_str!("../../docs/api/orchestration/style_scoping.doc/component_host.md")]
 #[must_use]
 pub(crate) fn component_host(tree: &RetainedTree, node: NodeId) -> Option<NodeId> {
     let mut current = tree.get(node)?.logical_parent().parent();
@@ -27,7 +27,9 @@ pub(crate) fn component_host(tree: &RetainedTree, node: NodeId) -> Option<NodeId
     None
 }
 
-#[doc = include_str!("style_scoping.doc/subject_part_name.md")]
+/// Returns the exported-part name a complex selector's subject compound targets
+/// (`Component::part(name)` → `name`), or [`None`] when the subject names no
+/// `::part()`.
 #[must_use]
 pub(crate) fn subject_part_name(selector: &ComplexSelector) -> Option<&str> {
     selector
@@ -37,13 +39,13 @@ pub(crate) fn subject_part_name(selector: &ComplexSelector) -> Option<&str> {
         .find_map(SimpleSelector::part_name)
 }
 
-#[doc = include_str!("style_scoping.doc/part_host_matches.md")]
+#[doc = include_str!("../../docs/api/orchestration/style_scoping.doc/part_host_matches.md")]
 #[must_use]
 pub(crate) fn part_host_matches(selector: &ComplexSelector, host: &TreeElement) -> bool {
     subject_simples_match_host(selector.subject(), host) && ancestor_prefix_matches(selector, host)
 }
 
-#[doc = include_str!("style_scoping.doc/subject_simples_match_host.md")]
+/// Matches the subject compound's host-constraining simples against `host`.
 fn subject_simples_match_host(subject: &CompoundSelector, host: &TreeElement) -> bool {
     subject.simples().iter().all(|simple| match simple {
         // Targets, not host constraints.
@@ -63,7 +65,9 @@ fn subject_simples_match_host(subject: &CompoundSelector, host: &TreeElement) ->
     })
 }
 
-#[doc = include_str!("style_scoping.doc/ancestor_prefix_matches.md")]
+/// Matches the combinator prefix to the left of the subject against `host`'s
+/// ancestors/siblings, by replacing the subject compound with the universal
+/// selector (which always matches the host) and running the ordinary matcher.
 fn ancestor_prefix_matches(selector: &ComplexSelector, host: &TreeElement) -> bool {
     let mut tail = selector.tail().to_vec();
     let head = if let Some(last) = tail.last_mut() {
@@ -75,7 +79,7 @@ fn ancestor_prefix_matches(selector: &ComplexSelector, host: &TreeElement) -> bo
     SelectorMatcher::matches_complex(&ComplexSelector::new(head, tail), host)
 }
 
-#[doc = include_str!("style_scoping.doc/part_specificity_for.md")]
+#[doc = include_str!("../../docs/api/orchestration/style_scoping.doc/part_specificity_for.md")]
 #[must_use]
 pub(crate) fn part_specificity_for(
     selector: &ComplexSelector,

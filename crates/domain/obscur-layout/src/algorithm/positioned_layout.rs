@@ -1,4 +1,4 @@
-#![doc = include_str!("positioned_layout.doc/_module.md")]
+//! `PositionedLayout`: absolute positioning of children within a container.
 
 use obscur_geometry::{BoxConstraints, Point, Rect, Size};
 
@@ -6,12 +6,12 @@ use crate::model::{LayoutBox, LayoutStyle};
 
 use super::{ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput};
 
-#[doc = include_str!("positioned_layout.doc/PositionedLayout.md")]
+#[doc = include_str!("../../docs/api/algorithm/positioned_layout.doc/PositionedLayout.md")]
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct PositionedLayout;
 
 impl PositionedLayout {
-    #[doc = include_str!("positioned_layout.doc/new.md")]
+    /// Creates an absolute-positioning layout.
     #[must_use]
     pub const fn new() -> Self {
         Self

@@ -1,4 +1,4 @@
-#![doc = include_str!("longhand_catalog.doc/_module.md")]
+#![doc = include_str!("../../docs/api/compiler/longhand_catalog.doc/_module.md")]
 
 use super::color_lowering::named_color;
 use super::value_lowering::css_wide_keyword;
@@ -6,10 +6,10 @@ use crate::parser::ParsedValue;
 use obscur_identity::InternedSymbol;
 use obscur_style::property::{PropertyId, layout_keyword};
 
-#[doc = include_str!("longhand_catalog.doc/property_id_from_name.md")]
+#[doc = include_str!("../../docs/api/compiler/longhand_catalog.doc/property_id_from_name.md")]
 #[must_use]
 pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
-    const ALL: [PropertyId; 121] = [
+    const ALL: [PropertyId; 139] = [
         // Logical box-model longhands (spec §4.13). They parse exactly like their
         // physical counterparts — a length — and resolve onto them at
         // computed-value time via `PropertyId::physical_under`.
@@ -87,13 +87,22 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::Transform,
         PropertyId::TransformOrigin,
         PropertyId::MixBlendMode,
+        PropertyId::BackgroundBlendMode,
+        PropertyId::BackgroundClip,
+        PropertyId::ClipPath,
+        PropertyId::BackgroundOrigin,
+        PropertyId::BackgroundAttachment,
+        PropertyId::Isolation,
         PropertyId::MinWidth,
         PropertyId::MinHeight,
         PropertyId::MaxWidth,
         PropertyId::MaxHeight,
         PropertyId::Gap,
+        PropertyId::RowGap,
+        PropertyId::ColumnGap,
         PropertyId::FlexBasis,
         PropertyId::FlexGrow,
+        PropertyId::Order,
         PropertyId::FlexShrink,
         PropertyId::FlexDirection,
         PropertyId::FlexWrap,
@@ -131,8 +140,17 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         PropertyId::TabSize,
         PropertyId::OverflowX,
         PropertyId::OverflowY,
+        PropertyId::ContainIntrinsicWidth,
+        PropertyId::ContainIntrinsicHeight,
+        PropertyId::ContainIntrinsicInlineSize,
+        PropertyId::ContainIntrinsicBlockSize,
+        PropertyId::ContainerType,
+        PropertyId::ContainerName,
         PropertyId::Content,
         PropertyId::PointerEvents,
+        PropertyId::PixelSnap,
+        PropertyId::OverscrollBehaviorX,
+        PropertyId::OverscrollBehaviorY,
         // The kit's own namespace. Its `name()` carries the `-obscur-` prefix,
         // so it is found by the same lookup as everything else — a vendor
         // property is a property, not a separate kind of thing.
@@ -146,7 +164,8 @@ pub(crate) fn property_id_from_name(name: &str) -> Option<PropertyId> {
         .find(|id| name.eq_ignore_ascii_case(id.name()))
 }
 
-#[doc = include_str!("longhand_catalog.doc/is_length_longhand.md")]
+/// Whether `property` takes a `<length>`/`<length-percentage>` value, for which a
+/// unitless `0` is accepted as `0px`.
 pub(super) fn is_length_longhand(property: PropertyId) -> bool {
     matches!(
         property,
@@ -195,6 +214,8 @@ pub(super) fn is_length_longhand(property: PropertyId) -> bool {
             | PropertyId::OutlineWidth
             | PropertyId::OutlineOffset
             | PropertyId::Gap
+            | PropertyId::RowGap
+            | PropertyId::ColumnGap
             | PropertyId::FlexBasis
             | PropertyId::FontSize
             // `letter-spacing` / `word-spacing` take a `<length>` (CSS Text 3
@@ -204,7 +225,8 @@ pub(super) fn is_length_longhand(property: PropertyId) -> bool {
     )
 }
 
-#[doc = include_str!("longhand_catalog.doc/layout_keyword_mapper.md")]
+/// Returns the keyword→reserved-symbol mapper for a closed-set layout property,
+/// or [`None`] for any property whose keywords are interned normally.
 pub(super) fn layout_keyword_mapper(
     property: PropertyId,
 ) -> Option<fn(&str) -> Option<InternedSymbol>> {
@@ -218,11 +240,9 @@ pub(super) fn layout_keyword_mapper(
         // `align-content` shares the `justify-content` distribution value grammar
         // (`start`/`end`/`center`/`space-*`).
         PropertyId::AlignContent => Some(layout_keyword::align_content_from_name),
-        // `align-items` and the grid container's `justify-items` share the closed
-        // start/end/center/stretch keyword set.
-        PropertyId::AlignItems | PropertyId::JustifyItems => {
-            Some(layout_keyword::align_items_from_name)
-        }
+        // The item alignment properties share the single-keyword grammar.
+        PropertyId::AlignItems => Some(layout_keyword::align_items_from_name),
+        PropertyId::JustifyItems => Some(layout_keyword::justify_items_from_name),
         // The per-item `*-self` properties additionally accept `auto`.
         PropertyId::AlignSelf | PropertyId::JustifySelf => {
             Some(layout_keyword::align_self_from_name)
@@ -254,12 +274,34 @@ pub(super) fn layout_keyword_mapper(
             Some(layout_keyword::overflow_from_name)
         }
         PropertyId::PointerEvents => Some(layout_keyword::pointer_events_from_name),
+        PropertyId::Visibility => Some(layout_keyword::visibility_from_name),
+        PropertyId::PixelSnap => Some(pixel_snap_keyword),
+        PropertyId::OverscrollBehaviorX | PropertyId::OverscrollBehaviorY => {
+            Some(overscroll_behavior_keyword)
+        }
         PropertyId::MixBlendMode => Some(layout_keyword::mix_blend_mode_from_name),
+        PropertyId::Isolation => Some(layout_keyword::isolation_from_name),
         _ => None,
     }
 }
 
-#[doc = include_str!("longhand_catalog.doc/keyword_value_is_foreign.md")]
+/// Recognizes the closed set of pixel-snap keywords.
+fn pixel_snap_keyword(name: &str) -> Option<InternedSymbol> {
+    ["auto", "none", "edges"]
+        .into_iter()
+        .find(|keyword| name.eq_ignore_ascii_case(keyword))
+        .map(InternedSymbol::named)
+}
+
+/// Lowers an overscroll behavior keyword to its canonical symbol.
+fn overscroll_behavior_keyword(name: &str) -> Option<InternedSymbol> {
+    ["auto", "contain", "none"]
+        .into_iter()
+        .find(|keyword| name.eq_ignore_ascii_case(keyword))
+        .map(InternedSymbol::named)
+}
+
+#[doc = include_str!("../../docs/api/compiler/longhand_catalog.doc/keyword_value_is_foreign.md")]
 #[must_use]
 pub(crate) fn keyword_value_is_foreign(property: PropertyId, values: &[ParsedValue]) -> bool {
     let [ParsedValue::Keyword(keyword)] = values else {
@@ -271,6 +313,22 @@ pub(crate) fn keyword_value_is_foreign(property: PropertyId, values: &[ParsedVal
     if is_color_longhand(property) {
         return named_color(keyword).is_none();
     }
+    if matches!(property, PropertyId::MaxWidth | PropertyId::MaxHeight)
+        && keyword.eq_ignore_ascii_case("none")
+    {
+        return false;
+    }
+    if matches!(
+        property,
+        PropertyId::Gap
+            | PropertyId::RowGap
+            | PropertyId::ColumnGap
+            | PropertyId::LetterSpacing
+            | PropertyId::WordSpacing
+    ) && keyword.eq_ignore_ascii_case("normal")
+    {
+        return false;
+    }
     if is_length_longhand(property) {
         return !keyword.eq_ignore_ascii_case("auto")
             && layout_keyword::sizing_from_name(keyword).is_none();
@@ -278,7 +336,8 @@ pub(crate) fn keyword_value_is_foreign(property: PropertyId, values: &[ParsedVal
     false
 }
 
-#[doc = include_str!("longhand_catalog.doc/is_color_longhand.md")]
+/// The colour-valued longhands, for which a bare keyword (other than a CSS-wide
+/// one) is never a valid value.
 #[must_use]
 const fn is_color_longhand(property: PropertyId) -> bool {
     matches!(
@@ -295,7 +354,7 @@ const fn is_color_longhand(property: PropertyId) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::super::property_compiler::CompiledDeclaration;
+    use super::super::CompiledDeclaration;
     use super::super::property_compiler::tests::{compile, standard, value_of};
     use super::*;
 

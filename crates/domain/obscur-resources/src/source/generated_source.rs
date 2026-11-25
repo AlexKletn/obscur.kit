@@ -1,6 +1,6 @@
-#![doc = include_str!("generated_source.doc/_module.md")]
+//! A procedurally generated resource source (spec §5.16 generated content).
 
-#[doc = include_str!("generated_source.doc/GeneratedSource.md")]
+#[doc = include_str!("../../docs/api/source/generated_source.doc/GeneratedSource.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct GeneratedSource {
     generator: Box<str>,
@@ -8,7 +8,7 @@ pub struct GeneratedSource {
 }
 
 impl GeneratedSource {
-    #[doc = include_str!("generated_source.doc/new.md")]
+    /// Creates a generated source from a generator kind and its descriptor.
     #[must_use]
     pub fn new(generator: impl Into<Box<str>>, descriptor: impl Into<Box<str>>) -> Self {
         Self {
@@ -17,19 +17,20 @@ impl GeneratedSource {
         }
     }
 
-    #[doc = include_str!("generated_source.doc/generator.md")]
+    /// Returns the generator's stable kind name (spec §5.16).
     #[must_use]
     pub fn generator(&self) -> &str {
         &self.generator
     }
 
-    #[doc = include_str!("generated_source.doc/descriptor.md")]
+    /// Returns the opaque descriptor the generator interprets (spec §5.16).
     #[must_use]
     pub fn descriptor(&self) -> &str {
         &self.descriptor
     }
 
-    #[doc = include_str!("generated_source.doc/dedup_key.md")]
+    /// Returns a key combining generator and descriptor so identical generated
+    /// requests deduplicate (spec §5.15).
     #[must_use]
     pub fn dedup_key(&self) -> String {
         format!("{}\u{1f}{}", self.generator, self.descriptor)

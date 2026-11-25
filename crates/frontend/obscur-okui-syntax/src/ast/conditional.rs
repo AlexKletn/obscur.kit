@@ -1,14 +1,16 @@
-#![doc = include_str!("conditional.doc/_module.md")]
+//! `Conditional`: the typed AST view of an `<If>`/`<ElseIf>`/`<Else>` element
+//! (spec §2.11).
 
 use crate::ast::{Element, Expression};
 use crate::syntax::{SyntaxKind, SyntaxNode};
 
-#[doc = include_str!("conditional.doc/Conditional.md")]
+#[doc = include_str!("../../docs/api/ast/conditional.doc/Conditional.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Conditional(SyntaxNode);
 
 impl Conditional {
-    #[doc = include_str!("conditional.doc/cast.md")]
+    /// Casts a syntax node to a `Conditional`, returning `Some` iff its kind is
+    /// [`Conditional`](SyntaxKind::Conditional).
     #[must_use]
     pub fn cast(node: SyntaxNode) -> Option<Self> {
         if node.kind() == SyntaxKind::Conditional {
@@ -18,30 +20,33 @@ impl Conditional {
         }
     }
 
-    #[doc = include_str!("conditional.doc/syntax.md")]
+    /// Returns the wrapped syntax node.
     #[must_use]
     pub const fn syntax(&self) -> &SyntaxNode {
         &self.0
     }
 
-    #[doc = include_str!("conditional.doc/as_element.md")]
+    #[doc = include_str!("../../docs/api/ast/conditional.doc/as_element.md")]
     fn as_element(&self) -> Element {
         Element::cast(self.0.clone()).expect("Conditional is element-shaped")
     }
 
-    #[doc = include_str!("conditional.doc/keyword.md")]
+    /// Returns the control-flow keyword — the tag name (`"If"`, `"ElseIf"` or
+    /// `"Else"`).
     #[must_use]
     pub fn keyword(&self) -> Option<String> {
         self.as_element().tag_name()
     }
 
-    #[doc = include_str!("conditional.doc/condition.md")]
+    /// Returns the branch condition — the value expression of the `cond`
+    /// attribute (`None` for a bare `<Else>`).
     #[must_use]
     pub fn condition(&self) -> Option<Expression> {
         self.as_element().attribute("cond")?.value_expression()
     }
 
-    #[doc = include_str!("conditional.doc/body.md")]
+    /// Iterates the conditional's body — its content children (see
+    /// [`Element::children`]).
     pub fn body(&self) -> impl Iterator<Item = SyntaxNode> + use<> {
         self.as_element().children()
     }

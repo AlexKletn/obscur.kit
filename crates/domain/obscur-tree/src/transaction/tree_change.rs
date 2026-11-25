@@ -1,4 +1,4 @@
-#![doc = include_str!("tree_change.doc/_module.md")]
+//! `TreeChange`: one staged tree-mutation operation.
 
 use obscur_identity::NodeId;
 
@@ -6,40 +6,46 @@ use crate::node::NodeKind;
 
 use super::StagedRef;
 
-#[doc = include_str!("tree_change.doc/TreeChange.md")]
+#[doc = include_str!("../../docs/api/transaction/tree_change.doc/TreeChange.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TreeChange {
-    #[doc = include_str!("tree_change.doc/CreateNode.md")]
+    /// Create a node of `kind` as a child of `parent` at child position
+    /// `index`. The created node is assigned the next
+    /// [`StagedRef::New`] index and may be referenced by later changes.
     CreateNode {
-        #[doc = include_str!("tree_change.doc/kind.md")]
+        /// The classification of the node to create.
         kind: NodeKind,
-        #[doc = include_str!("tree_change.doc/parent.md")]
+        /// The parent under which the new node is inserted.
         parent: StagedRef,
-        #[doc = include_str!("tree_change.doc/index.md")]
+        /// The child position within `parent` at which to insert (clamped on
+        /// apply).
         index: usize,
     },
-    #[doc = include_str!("tree_change.doc/RemoveSubtree.md")]
+    /// Remove an existing node and its whole subtree from the tree.
     RemoveSubtree {
-        #[doc = include_str!("tree_change.doc/target.md")]
+        /// The root of the subtree to remove; must be a live node.
         target: NodeId,
     },
-    #[doc = include_str!("tree_change.doc/MoveChild.md")]
+    /// Reposition an existing child to `index` within its current parent's
+    /// child list.
     MoveChild {
-        #[doc = include_str!("tree_change.doc/target_2.md")]
+        /// The child to reposition; must be a live node.
         target: NodeId,
-        #[doc = include_str!("tree_change.doc/index_2.md")]
+        /// The destination child position within the current parent (clamped
+        /// on apply).
         index: usize,
     },
-    #[doc = include_str!("tree_change.doc/SetText.md")]
+    /// Replace an existing text node's content.
     SetText {
-        #[doc = include_str!("tree_change.doc/target_3.md")]
+        /// The text node to update; must be a live [`NodeKind::Text`] node.
         target: NodeId,
-        #[doc = include_str!("tree_change.doc/content.md")]
+        /// The replacement text content.
         content: Box<str>,
     },
-    #[doc = include_str!("tree_change.doc/SetRoot.md")]
+    /// Designate the tree root.
     SetRoot {
-        #[doc = include_str!("tree_change.doc/target_4.md")]
+        /// The node to make the root; may be a node created earlier in this
+        /// transaction.
         target: StagedRef,
     },
 }

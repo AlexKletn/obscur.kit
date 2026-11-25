@@ -1,42 +1,92 @@
-#![doc = include_str!("dimension.doc/_module.md")]
+//! A single sizing input for a layout node (width, height, flex-basis, ...).
 
-#[doc = include_str!("dimension.doc/Dimension.md")]
-#[derive(Debug, Clone, Copy, PartialEq)]
+use std::sync::Arc;
+
+use obscur_geometry::saturating_f32;
+
+use super::TrackLimit;
+
+#[doc = include_str!("../../docs/api/model/dimension.doc/Dimension.md")]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Dimension {
-    #[doc = include_str!("dimension.doc/Auto.md")]
+    /// The length is determined by content/context rather than an explicit value.
     Auto,
-    #[doc = include_str!("dimension.doc/Px.md")]
+    /// An absolute length, in logical pixels.
     Px(f32),
-    #[doc = include_str!("dimension.doc/Percent.md")]
+    /// A percentage (`0.0..=100.0` style, e.g. `50.0` means 50%) of a base length.
     Percent(f32),
-    #[doc = include_str!("dimension.doc/MinContent.md")]
+    /// A nonnegative size given by a pixel offset and a fraction of the containing axis.
+    Affine {
+        /// The fixed pixel offset.
+        pixels: f32,
+        /// The fraction of the containing axis.
+        fraction: f32,
+    },
+    /// `min-content`: the smallest size the content can take without overflowing
+    /// — in the inline axis, the widest unbreakable run (CSS Sizing 3 §4.1).
     MinContent,
-    #[doc = include_str!("dimension.doc/MaxContent.md")]
+    /// A CSS size expression resolved against the containing axis.
+    Math(Arc<TrackLimit>),
+    /// `max-content`: the size the content wants given unbounded space — in the
+    /// inline axis, everything on one line (CSS Sizing 3 §4.1).
     MaxContent,
-    #[doc = include_str!("dimension.doc/FitContent.md")]
+    /// `fit-content`: `min(max-content, max(min-content, stretch-fit))` — the
+    /// classic shrink-to-fit (CSS Sizing 3 §4.1, CSS 2.1 §10.3.5).
     FitContent,
 }
 
 impl Dimension {
-    #[doc = include_str!("dimension.doc/resolve.md")]
+    #[doc = include_str!("../../docs/api/model/dimension.doc/resolve.md")]
     #[must_use]
-    pub fn resolve(self, base: f32) -> Option<f32> {
-        match self {
-            Self::Auto | Self::MinContent | Self::MaxContent | Self::FitContent => None,
-            Self::Px(value) => Some(value),
-            Self::Percent(percent) => base.is_finite().then(|| base * percent / 100.0),
-        }
+    pub fn resolve(&self, base: f32) -> Option<f32> {
+        let value = self.resolve_signed(base)?;
+        Some(match self {
+            Self::Affine { .. } | Self::Math(_) => value.max(0.0),
+            _ => value,
+        })
     }
 
-    #[doc = include_str!("dimension.doc/is_auto.md")]
+    /// Resolves signed offsets and saturates overflow to the nearest finite bound. Undefined results remain unresolved.
+    pub(crate) fn resolve_signed(&self, base: f32) -> Option<f32> {
+        let value = self.resolve_wide(base)?;
+        (!value.is_nan()).then(|| saturating_f32(value))
+    }
+
+    /// Resolves signed lengths in f64 so enclosing math can combine them before narrowing.
+    pub(super) fn resolve_wide(&self, base: f32) -> Option<f64> {
+        let value = match self {
+            Self::Auto | Self::MinContent | Self::MaxContent | Self::FitContent => return None,
+            Self::Px(value) => f64::from(*value),
+            Self::Percent(percent) if base.is_finite() => {
+                f64::from(base) * f64::from(*percent) / 100.0
+            }
+            Self::Affine { pixels, fraction } if base.is_finite() => {
+                f64::from(*pixels) + f64::from(*fraction) * f64::from(base)
+            }
+            Self::Math(expression) => expression.resolve_wide(base)?,
+            _ => return None,
+        };
+        Some(value)
+    }
+
+    /// Returns `true` if this dimension is [`Dimension::Auto`].
     #[must_use]
-    pub const fn is_auto(self) -> bool {
+    pub const fn is_auto(&self) -> bool {
         matches!(self, Self::Auto)
     }
 
-    #[doc = include_str!("dimension.doc/is_intrinsic.md")]
+    /// Whether evaluation reads a percentage basis.
+    pub(crate) fn uses_percentage(&self) -> bool {
+        match self {
+            Self::Percent(_) | Self::Affine { .. } => true,
+            Self::Math(expression) => expression.uses_percentage(),
+            _ => false,
+        }
+    }
+
+    #[doc = include_str!("../../docs/api/model/dimension.doc/is_intrinsic.md")]
     #[must_use]
-    pub const fn is_intrinsic(self) -> bool {
+    pub const fn is_intrinsic(&self) -> bool {
         matches!(self, Self::MinContent | Self::MaxContent | Self::FitContent)
     }
 }
@@ -53,6 +103,38 @@ mod tests {
     #[test]
     fn percent_resolves_against_base() {
         assert_eq!(Dimension::Percent(50.0).resolve(80.0), Some(40.0));
+    }
+
+    /// Checks full-scale percentages, signed saturation, and preservation of subnormal lengths.
+    #[test]
+    fn large_percentages_resolve_to_finite_lengths() {
+        assert_eq!(Dimension::Percent(100.0).resolve(f32::MAX), Some(f32::MAX));
+        assert_eq!(Dimension::Percent(200.0).resolve(f32::MAX), Some(f32::MAX));
+        assert_eq!(
+            Dimension::Percent(-200.0).resolve_signed(f32::MAX),
+            Some(f32::MIN)
+        );
+        assert_eq!(
+            Dimension::Percent(100.0).resolve(f32::from_bits(1)),
+            Some(f32::from_bits(1))
+        );
+    }
+
+    /// Verifies that a finite length survives cancellation of oversized intermediate values.
+    #[test]
+    fn length_math_preserves_cancellation_before_narrowing() {
+        use super::TrackLimit;
+        use std::sync::Arc;
+
+        let positive =
+            TrackLimit::Scale(Box::new(TrackLimit::Length(Dimension::Px(f32::MAX))), 3.0);
+        let negative =
+            TrackLimit::Scale(Box::new(TrackLimit::Length(Dimension::Px(f32::MAX))), 2.0);
+        let difference = Dimension::Math(Arc::new(TrackLimit::Difference(
+            Box::new(positive),
+            Box::new(negative),
+        )));
+        assert_eq!(difference.resolve(0.0), Some(f32::MAX));
     }
 
     #[test]

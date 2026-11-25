@@ -1,8 +1,10 @@
-#![doc = include_str!("style_phase.doc/_module.md")]
+//! The frame's style phase, whole: [`StylePhase`].
 
 use obscur_diagnostics::DiagnosticSink;
 use obscur_identity::{FastMap, NodeId};
-use obscur_style::matching::{MediaEnvironment, Stylesheet};
+use obscur_style::matching::{
+    ContainerQueryEnvironment, MediaEnvironment, MediaInput, MediaPreferences, Stylesheet,
+};
 use obscur_style::property::EnvironmentValues;
 use obscur_text::shaping::ParagraphShaper;
 use obscur_tree::tree::RetainedTree;
@@ -17,44 +19,55 @@ use crate::orchestration::{
     StyleMatchingCoordinator, resolve_generated_content,
 };
 
-#[doc = include_str!("style_phase.doc/StylePhase.md")]
+#[doc = include_str!("../../docs/api/runtime/style_phase.doc/StylePhase.md")]
 pub(crate) struct StylePhase<'a> {
-    #[doc = include_str!("style_phase.doc/tree.md")]
+    /// The retained tree the sheets are matched against.
     tree: &'a RetainedTree,
-    #[doc = include_str!("style_phase.doc/pseudo.md")]
+    /// The live per-node interaction state, so `:hover`/`:focus` participate.
     pseudo: &'a PseudoStates,
-    #[doc = include_str!("style_phase.doc/environment.md")]
+    /// The host-reported environment values `env()` resolves against (§6.15).
     environment: EnvironmentValues,
-    #[doc = include_str!("style_phase.doc/paragraph.md")]
+    media_preferences: MediaPreferences,
+    media_input: Option<MediaInput>,
+    device_scale: f32,
+    query_containers: &'a ContainerQueryEnvironment,
+    /// The shaper that folds `ch` during resolution — the same one layout and
+    /// compose measure and paint with.
     paragraph: &'a ParagraphShaper,
-    #[doc = include_str!("style_phase.doc/matcher.md")]
+    /// Matches authored stylesheets (pseudo-state aware) into cascade inputs.
     matcher: &'a mut StyleMatchingCoordinator,
-    #[doc = include_str!("style_phase.doc/style.md")]
+    /// Resolves computed styles over the retained tree.
     style: &'a mut StyleCoordinator,
-    #[doc = include_str!("style_phase.doc/inputs.md")]
+    /// The cascade inputs this frame produces and the runtime retains.
     inputs: &'a mut StyleInputs,
-    #[doc = include_str!("style_phase.doc/overlaid.md")]
+    /// The settled cascade value of every node the motion overlay has written
+    /// over, stashed before the overwrite so change detection and an incremental
+    /// restyle both see the resolver's own output.
     overlaid: &'a mut ComputedStyles,
-    #[doc = include_str!("style_phase.doc/inline.md")]
+    /// The `style` attributes, compiled and cached.
     inline: &'a mut InlineStyles,
-    #[doc = include_str!("style_phase.doc/retained.md")]
+    /// The computed styles retained from the last styled frame: read as the
+    /// incremental path's baseline, and **moved out** when it takes that path.
     retained: &'a mut ComputedStyles,
-    #[doc = include_str!("style_phase.doc/last_style.md")]
+    /// What the retained inputs/styles were produced from, rewritten here so the
+    /// next frame can tell whether interaction state is all that moved.
     last_style: &'a mut Option<StyleKey>,
-    #[doc = include_str!("style_phase.doc/generated_content.md")]
+    #[doc = include_str!("../../docs/api/runtime/style_phase.doc/generated_content.md")]
     generated_content: &'a mut FastMap<NodeId, GeneratedContent>,
-    #[doc = include_str!("style_phase.doc/sheets.md")]
+    /// Every source a frame's stylesheets come from; the only thing that may put
+    /// the UA sheet and the author sheets into one ordered list.
     sheets: &'a CascadeSheets,
-    #[doc = include_str!("style_phase.doc/motion.md")]
+    /// The timelines whose CSS rules are driven here and whose samples are laid
+    /// over the resolved styles.
     motion: &'a mut MotionDriver,
-    #[doc = include_str!("style_phase.doc/telemetry.md")]
+    /// Where the style phase's span and resolved-style count land (spec §7.9).
     telemetry: &'a mut FrameTelemetry,
-    #[doc = include_str!("style_phase.doc/diagnostics.md")]
+    /// Where a cascade diagnostic is reported (spec §1.6).
     diagnostics: &'a dyn DiagnosticSink,
 }
 
 impl<'a> StylePhase<'a> {
-    #[doc = include_str!("style_phase.doc/new.md")]
+    /// Bundles the state one style phase reads and writes.
     // A borrow bundle's constructor is exactly as wide as the state the phase
     // touches, and this phase is the widest of the four: the cascade tier, the two
     // retained maps, the two records that justify the next frame's reuse, and
@@ -64,6 +77,10 @@ impl<'a> StylePhase<'a> {
         tree: &'a RetainedTree,
         pseudo: &'a PseudoStates,
         environment: EnvironmentValues,
+        media_preferences: MediaPreferences,
+        media_input: Option<MediaInput>,
+        device_scale: f32,
+        query_containers: &'a ContainerQueryEnvironment,
         paragraph: &'a ParagraphShaper,
         matcher: &'a mut StyleMatchingCoordinator,
         style: &'a mut StyleCoordinator,
@@ -82,6 +99,10 @@ impl<'a> StylePhase<'a> {
             tree,
             pseudo,
             environment,
+            media_preferences,
+            media_input,
+            device_scale,
+            query_containers,
             paragraph,
             matcher,
             style,
@@ -98,26 +119,31 @@ impl<'a> StylePhase<'a> {
         }
     }
 
-    #[doc = include_str!("style_phase.doc/run.md")]
+    #[doc = include_str!("../../docs/api/runtime/style_phase.doc/run.md")]
     pub(crate) fn run(
         &mut self,
         ctx: &FrameContext,
         restyle: bool,
         author_sheets: AuthorSheets,
         reconcile_roots: Option<&[NodeId]>,
+        reconciled: bool,
         phase_clock: &FramePhaseClock,
-    ) -> (ComputedStyles, bool, StyleDelta, bool) {
+    ) -> (ComputedStyles, bool, StyleDelta) {
         if !restyle {
             // Reuse the retained computed styles; re-apply the motion overlay so
             // a motion-only frame still advances its animated values.
             let mut computed = self.retained.clone();
             self.motion.apply_overlay(&mut computed, self.overlaid);
-            return (computed, false, StyleDelta::Full, false);
+            return (computed, false, StyleDelta::Full);
         }
         // Match authored sheets against the tree, honouring live interaction
         // state so `:hover`/`:focus` participate and gating `@media`/
-        // `@container` rules by this frame's viewport (§4.13).
-        let environment = MediaEnvironment::viewport(ctx.viewport().width, ctx.viewport().height);
+        // `@container` rules by the latest arranged ancestor sizes (§4.13).
+        let environment = MediaEnvironment::viewport(ctx.viewport().width, ctx.viewport().height)
+            .with_preferences(self.media_preferences)
+            .with_input(self.media_input)
+            .with_resolution_dppx(self.device_scale)
+            .with_query_containers(self.query_containers);
         // The list this frame cascades: the UA default sheet (if installed)
         // first — below every author sheet, since it carries the lowest cascade
         // origin (`SystemDefault`) and any author declaration overrides it
@@ -168,6 +194,7 @@ impl<'a> StylePhase<'a> {
                     ctx.viewport(),
                     &dirty,
                     self.diagnostics,
+                    reconciled,
                 );
                 (computed, resolved, delta, Some(dirty))
             } else {
@@ -180,8 +207,8 @@ impl<'a> StylePhase<'a> {
         // and the input placeholder) is resolved from the SAME sheets (UA +
         // author) and environment the cascade used, so compose can paint it and
         // `inspect_snapshot` can project the synthetic placeholder part. It is
-        // pure decoration — it never becomes a tree / a11y / hit node — so it
-        // is computed here rather than materialised into the tree. It is scoped
+        // pure decoration. Arrange and compose project it privately, out of the
+        // application tree, accessibility and hit testing. It is scoped
         // the same way the cascade above was: an incremental frame resolves the
         // dirty nodes and keeps the previous frame's answer for the rest, and
         // the pass skips the selector engine entirely for a sheet set that
@@ -192,6 +219,7 @@ impl<'a> StylePhase<'a> {
             &sheets,
             &environment,
             dirty.as_ref(),
+            self.pseudo,
         );
         // Remember what these inputs/styles were produced from, so the next
         // frame can tell whether interaction state is all that moved.
@@ -205,7 +233,16 @@ impl<'a> StylePhase<'a> {
         //     rules against the tree over the *resolved* (pre-overlay) values,
         //     starting a timeline for any transitioned property that changed
         //     or any newly-matched animation (spec §4.17 S4).
-        let wants_animation_frame = self.motion.drive_css(&computed, self.tree, self.pseudo);
+        let style_inputs_changed = reconciled
+            || resolved_count != 0
+            || dirty.as_ref().is_none_or(|dirty| !dirty.is_empty());
+        self.motion.drive_css(
+            &computed,
+            self.tree,
+            self.pseudo,
+            &environment,
+            style_inputs_changed,
+        );
         // 3b. Motion: overlay every active animation's sampled value onto the
         //     computed style *before* layout/paint (spec §4.17 style →
         //     motion → paint). This now includes the CSS-started timelines.
@@ -217,7 +254,7 @@ impl<'a> StylePhase<'a> {
         // incremental path those differ, and the whole point is which one.
         let count = resolved_count as u64;
         self.telemetry
-            .record_phase(FramePhase::Style, count, ctx.id());
-        (computed, restyled, delta, wants_animation_frame)
+            .record_phase(FramePhase::Style, count, ctx.id(), self.diagnostics);
+        (computed, restyled, delta)
     }
 }

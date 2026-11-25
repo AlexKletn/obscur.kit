@@ -1,14 +1,14 @@
-#![doc = include_str!("control_request.doc/_module.md")]
+//! [`ControlRequest`] — one queued instruction from application code to the runtime.
 
 use crate::runtime::UiRuntime;
 
-#[doc = include_str!("control_request.doc/ControlRequest.md")]
+#[doc = include_str!("../../docs/api/control/control_request.doc/ControlRequest.md")]
 pub(crate) enum ControlRequest {
-    #[doc = include_str!("control_request.doc/Stylesheets.md")]
+    /// Replace the authored stylesheet set with these sources, in order.
     Stylesheets(Vec<String>),
-    #[doc = include_str!("control_request.doc/Runtime.md")]
+    /// Run this once against the runtime.
     Runtime(Box<dyn FnOnce(&mut UiRuntime)>),
-    #[doc = include_str!("control_request.doc/Frame.md")]
+    /// Schedule a frame, for a state change the runtime cannot have noticed.
     Frame,
 }
 

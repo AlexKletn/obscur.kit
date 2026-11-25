@@ -1,13 +1,13 @@
-#![doc = include_str!("web_shell_provider.doc/_module.md")]
+#![doc = include_str!("../../docs/api/provider/web_shell_provider.doc/_module.md")]
 
 use obscur_system::shell::{ShellProvider, ShellResult, ShellTarget};
 
-#[doc = include_str!("web_shell_provider.doc/WebShellProvider.md")]
+#[doc = include_str!("../../docs/api/provider/web_shell_provider.doc/WebShellProvider.md")]
 #[derive(Debug, Clone, Default)]
 pub struct WebShellProvider;
 
 impl WebShellProvider {
-    #[doc = include_str!("web_shell_provider.doc/new.md")]
+    /// Creates a web shell provider (spec §6.11).
     #[must_use]
     pub const fn new() -> Self {
         Self
@@ -49,7 +49,7 @@ impl ShellProvider for WebShellProvider {
     }
 }
 
-#[doc = include_str!("web_shell_provider.doc/target_url.md")]
+#[doc = include_str!("../../docs/api/provider/web_shell_provider.doc/target_url.md")]
 #[cfg(target_arch = "wasm32")]
 fn target_url(target: &ShellTarget) -> String {
     match target {

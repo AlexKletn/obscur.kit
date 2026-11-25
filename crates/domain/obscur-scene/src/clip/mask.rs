@@ -1,15 +1,15 @@
-#![doc = include_str!("mask.doc/_module.md")]
+//! A mask clip: coverage derived from separate source content.
 
 use super::MaskKind;
 
-#[doc = include_str!("mask.doc/Mask.md")]
+#[doc = include_str!("../../docs/api/clip/mask.doc/Mask.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Mask {
     kind: MaskKind,
 }
 
 impl Mask {
-    #[doc = include_str!("mask.doc/alpha.md")]
+    /// Creates a mask whose coverage comes from the source's alpha channel.
     #[must_use]
     pub const fn alpha() -> Self {
         Self {
@@ -17,7 +17,7 @@ impl Mask {
         }
     }
 
-    #[doc = include_str!("mask.doc/luminance.md")]
+    /// Creates a mask whose coverage comes from the source's luminance.
     #[must_use]
     pub const fn luminance() -> Self {
         Self {
@@ -25,7 +25,7 @@ impl Mask {
         }
     }
 
-    #[doc = include_str!("mask.doc/kind.md")]
+    /// The mask kind: how the source's coverage is interpreted.
     #[must_use]
     pub const fn kind(self) -> MaskKind {
         self.kind

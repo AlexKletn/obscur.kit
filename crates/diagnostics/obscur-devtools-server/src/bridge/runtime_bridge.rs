@@ -1,41 +1,49 @@
-#![doc = include_str!("runtime_bridge.doc/_module.md")]
+//! Runtime bridge: serves `Inspect` commands into snapshots (spec §7.6/§7.8).
 
-use obscur_devtools_protocol::message::{CommandId, Inspectable, SnapshotMessage, SnapshotPayload};
+use obscur_devtools_protocol::message::{CommandId, Inspectable, SnapshotMessage, StableSelector};
 
-#[doc = include_str!("runtime_bridge.doc/InspectSource.md")]
-pub trait InspectSource {
-    #[doc = include_str!("runtime_bridge.doc/snapshot.md")]
-    fn snapshot(&self, target: Inspectable) -> SnapshotPayload;
-}
+use super::InspectSource;
 
-#[doc = include_str!("runtime_bridge.doc/NullInspectSource.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct NullInspectSource;
-
-impl InspectSource for NullInspectSource {
-    fn snapshot(&self, target: Inspectable) -> SnapshotPayload {
-        SnapshotPayload::summary(format!("no live inspect source for {target:?}"))
-    }
-}
-
-#[doc = include_str!("runtime_bridge.doc/RuntimeBridge.md")]
+#[doc = include_str!("../../docs/api/bridge/runtime_bridge.doc/RuntimeBridge.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RuntimeBridge<S> {
     source: S,
 }
 
 impl<S: InspectSource> RuntimeBridge<S> {
-    #[doc = include_str!("runtime_bridge.doc/new.md")]
+    /// Returns stable ID matches through the tree snapshot response.
+    pub fn select_stable(&self, command: CommandId, selector: &StableSelector) -> SnapshotMessage {
+        SnapshotMessage::new(
+            command,
+            Inspectable::Tree,
+            self.source.select_stable(selector),
+        )
+    }
+    /// Creates a bridge over the given inspect `source`.
     pub const fn new(source: S) -> Self {
         Self { source }
     }
 
-    #[doc = include_str!("runtime_bridge.doc/inspect.md")]
+    /// Builds the snapshot for `target`, correlated with `command`.
     pub fn inspect(&self, command: CommandId, target: Inspectable) -> SnapshotMessage {
         SnapshotMessage::new(command, target, self.source.snapshot(target))
     }
 
-    #[doc = include_str!("runtime_bridge.doc/source.md")]
+    /// Returns semantic matches through the accessibility snapshot response.
+    pub fn select_semantic(
+        &self,
+        command: CommandId,
+        role: &str,
+        name: Option<&str>,
+    ) -> SnapshotMessage {
+        SnapshotMessage::new(
+            command,
+            Inspectable::Accessibility,
+            self.source.select_semantic(role, name),
+        )
+    }
+
+    /// Returns a reference to the underlying inspect source.
     pub const fn source(&self) -> &S {
         &self.source
     }
@@ -43,7 +51,9 @@ impl<S: InspectSource> RuntimeBridge<S> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::NullInspectSource;
     use super::*;
+    use obscur_devtools_protocol::message::SnapshotPayload;
 
     /// A test source returning a fixed payload tagged with the requested target.
     #[derive(Debug, Default)]

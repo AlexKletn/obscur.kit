@@ -1,22 +1,23 @@
-#![doc = include_str!("fullscreen_mode.doc/_module.md")]
+//! The fullscreen and presentation display modes a window can take (spec §6.5).
 
-#[doc = include_str!("fullscreen_mode.doc/FullscreenMode.md")]
+#[doc = include_str!("../../docs/api/presentation/fullscreen_mode.doc/FullscreenMode.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FullscreenMode {
-    #[doc = include_str!("fullscreen_mode.doc/Normal.md")]
+    /// A normal windowed presentation; not fullscreen.
     Normal,
-    #[doc = include_str!("fullscreen_mode.doc/Borderless.md")]
+    /// A borderless window covering the display.
     Borderless,
-    #[doc = include_str!("fullscreen_mode.doc/Exclusive.md")]
+    /// True exclusive fullscreen, where the platform makes it available.
     Exclusive,
-    #[doc = include_str!("fullscreen_mode.doc/Kiosk.md")]
+    /// A locked-down kiosk presentation.
     Kiosk,
-    #[doc = include_str!("fullscreen_mode.doc/Presentation.md")]
+    /// A presentation mode intended for slideshows and similar full-screen
+    /// content.
     Presentation,
 }
 
 impl FullscreenMode {
-    #[doc = include_str!("fullscreen_mode.doc/is_fullscreen.md")]
+    #[doc = include_str!("../../docs/api/presentation/fullscreen_mode.doc/is_fullscreen.md")]
     #[must_use]
     pub const fn is_fullscreen(self) -> bool {
         !matches!(self, Self::Normal)
@@ -24,7 +25,7 @@ impl FullscreenMode {
 }
 
 impl Default for FullscreenMode {
-    #[doc = include_str!("fullscreen_mode.doc/default.md")]
+    /// The default mode is [`FullscreenMode::Normal`], the windowed baseline.
     fn default() -> Self {
         Self::Normal
     }

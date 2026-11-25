@@ -1,1 +1,0 @@
-Scene/paint and rendering.

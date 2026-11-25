@@ -1,4 +1,4 @@
-#![doc = include_str!("lib.doc/_module.md")]
+#![doc = include_str!("../docs/api/lib.doc/_module.md")]
 #![forbid(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
@@ -16,6 +16,8 @@ pub mod bootstrap;
 // host that embeds a `UiRuntime` itself uses the same types.
 pub mod control;
 pub mod default_stylesheet;
+#[cfg(feature = "plugins")]
+pub mod plugins;
 pub mod prelude;
 pub mod screen;
 pub mod system_theme;
@@ -23,10 +25,12 @@ pub mod system_theme;
 #[cfg(all(feature = "render-vello", feature = "shell-layer"))]
 pub use app::LayerControl;
 #[cfg(all(feature = "render-vello", feature = "surface"))]
-pub use app::{App, AppError, FrameInfo};
-pub use control::AppControl;
+pub use app::{App, AppError, FrameInfo, RenderBackend};
+pub use control::{
+    AppControl, WindowAction, WindowMode, WindowPlacement, WindowResizeDirection, WindowState,
+};
 pub use default_stylesheet::{ua_css, ua_stylesheet};
-pub use screen::{OkuiScreen, ScreenData, ScreenError};
+pub use screen::{OkuiScreen, ScreenData, ScreenError, ScreenRow};
 pub use system_theme::ThemeVars;
 
 // --- foundation ---

@@ -1,4 +1,4 @@
-#![doc = include_str!("computed_style.doc/_module.md")]
+#![doc = include_str!("../../docs/api/computed/computed_style.doc/_module.md")]
 
 use crate::computed::ComputedValue;
 use crate::property::{PropertyId, PropertyValue};
@@ -7,7 +7,7 @@ use std::rc::Rc;
 use obscur_identity::{FastBuildHasher, FastMap, InternedSymbol};
 use std::collections::hash_map::Iter;
 
-#[doc = include_str!("computed_style.doc/ComputedStyle.md")]
+#[doc = include_str!("../../docs/api/computed/computed_style.doc/ComputedStyle.md")]
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ComputedStyle {
     values: FastMap<PropertyId, ComputedValue>,
@@ -15,7 +15,7 @@ pub struct ComputedStyle {
 }
 
 impl ComputedStyle {
-    #[doc = include_str!("computed_style.doc/new.md")]
+    #[doc = include_str!("../../docs/api/computed/computed_style.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -24,7 +24,7 @@ impl ComputedStyle {
         }
     }
 
-    #[doc = include_str!("computed_style.doc/with_capacity.md")]
+    #[doc = include_str!("../../docs/api/computed/computed_style.doc/with_capacity.md")]
     #[must_use]
     pub fn with_capacity(properties: usize) -> Self {
         Self {
@@ -36,29 +36,40 @@ impl ComputedStyle {
         }
     }
 
-    #[doc = include_str!("computed_style.doc/get.md")]
+    /// Returns the computed value for `property`, if the resolver produced one.
     #[must_use]
     pub fn get(&self, property: PropertyId) -> Option<&ComputedValue> {
         self.values.get(&property)
     }
 
-    #[doc = include_str!("computed_style.doc/set.md")]
+    /// Returns whether the node’s computed CSS visibility is hidden.
+    #[must_use]
+    pub fn is_visibility_hidden(&self) -> bool {
+        matches!(
+            self.get(PropertyId::Visibility).map(ComputedValue::value),
+            Some(&PropertyValue::Keyword(
+                crate::property::layout_keyword::VISIBILITY_HIDDEN
+            ))
+        )
+    }
+
+    #[doc = include_str!("../../docs/api/computed/computed_style.doc/set.md")]
     pub fn set(&mut self, property: PropertyId, value: ComputedValue) -> Option<ComputedValue> {
         self.values.insert(property, value)
     }
 
-    #[doc = include_str!("computed_style.doc/remove.md")]
+    #[doc = include_str!("../../docs/api/computed/computed_style.doc/remove.md")]
     pub fn remove(&mut self, property: PropertyId) -> Option<ComputedValue> {
         self.values.remove(&property)
     }
 
-    #[doc = include_str!("computed_style.doc/custom_property.md")]
+    #[doc = include_str!("../../docs/api/computed/computed_style.doc/custom_property.md")]
     #[must_use]
     pub fn custom_property(&self, name: InternedSymbol) -> Option<&PropertyValue> {
         self.custom_properties.get(&name)
     }
 
-    #[doc = include_str!("computed_style.doc/set_custom_property.md")]
+    #[doc = include_str!("../../docs/api/computed/computed_style.doc/set_custom_property.md")]
     pub fn set_custom_property(
         &mut self,
         name: InternedSymbol,
@@ -69,13 +80,13 @@ impl ComputedStyle {
         Rc::make_mut(&mut self.custom_properties).insert(name, value)
     }
 
-    #[doc = include_str!("computed_style.doc/shared_custom_properties.md")]
+    #[doc = include_str!("../../docs/api/computed/computed_style.doc/shared_custom_properties.md")]
     #[must_use]
     pub fn shared_custom_properties(&self) -> Rc<FastMap<InternedSymbol, PropertyValue>> {
         Rc::clone(&self.custom_properties)
     }
 
-    #[doc = include_str!("computed_style.doc/set_shared_custom_properties.md")]
+    #[doc = include_str!("../../docs/api/computed/computed_style.doc/set_shared_custom_properties.md")]
     pub fn set_shared_custom_properties(
         &mut self,
         properties: Rc<FastMap<InternedSymbol, PropertyValue>>,
@@ -83,37 +94,38 @@ impl ComputedStyle {
         self.custom_properties = properties;
     }
 
-    #[doc = include_str!("computed_style.doc/iter.md")]
+    /// Iterates over the `(property, computed value)` pairs in unspecified order.
     #[must_use]
     pub fn iter(&self) -> Iter<'_, PropertyId, ComputedValue> {
         self.values.iter()
     }
 
-    #[doc = include_str!("computed_style.doc/custom_properties.md")]
+    /// Iterates over the effective `(name, custom property value)` pairs in
+    /// unspecified order.
     #[must_use]
     pub fn custom_properties(&self) -> Iter<'_, InternedSymbol, PropertyValue> {
         self.custom_properties.iter()
     }
 
-    #[doc = include_str!("computed_style.doc/len.md")]
+    /// Returns the number of computed properties stored.
     #[must_use]
     pub fn len(&self) -> usize {
         self.values.len()
     }
 
-    #[doc = include_str!("computed_style.doc/is_empty.md")]
+    /// Returns `true` when no property has a computed value.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.values.is_empty()
     }
 
-    #[doc = include_str!("computed_style.doc/uses_ch.md")]
+    #[doc = include_str!("../../docs/api/computed/computed_style.doc/uses_ch.md")]
     #[must_use]
     pub fn uses_ch(&self) -> bool {
         self.values.values().any(|value| value.value().uses_ch())
     }
 
-    #[doc = include_str!("computed_style.doc/opacity.md")]
+    #[doc = include_str!("../../docs/api/computed/computed_style.doc/opacity.md")]
     #[must_use]
     pub fn opacity(&self) -> Option<f32> {
         match self.get(PropertyId::Opacity)?.value() {

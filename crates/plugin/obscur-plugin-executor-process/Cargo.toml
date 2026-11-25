@@ -7,5 +7,16 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[dependencies]
+obscur-plugin-host = { workspace = true }
+obscur-plugin-model = { workspace = true }
+serde = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+rustix = { version = "1", features = ["process"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
 [lints]
 workspace = true

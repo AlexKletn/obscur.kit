@@ -257,7 +257,8 @@ Otherwise the library remains loaded until process termination.
 
 ## 8.14 Extension points
 
-The host publishes typed points such as:
+The application publishes typed points and defines their identifiers and contracts.
+Examples of application-defined identifiers include:
 
 - `panel.left`;
 - `panel.status`;
@@ -285,8 +286,10 @@ Core contribution types:
 - `WidgetContribution`;
 - `ScreenContribution`;
 - `RouteContribution`;
-- `MenuContribution`;
-- `SettingsPageContribution`.
+- `MenuContribution`.
+
+Applications can define their own contribution contracts over the kit’s
+registration and UI integration mechanisms.
 
 ## 8.15 Non-UI contributions
 
@@ -773,7 +776,8 @@ Plugin declares a versioned typed schema:
 
 Host may auto-generate settings UI.
 
-A plugin may supply `SettingsContribution` for complex UX, but changes still use:
+An application can publish a view integration point for plugin-owned settings UI.
+Settings changes in that application can follow:
 
 `draft → validate → apply → commit/cancel`
 

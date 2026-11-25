@@ -1,4 +1,23 @@
-#![doc = include_str!("runner.doc/_module.md")]
+#![doc = include_str!("../../docs/api/app/runner.doc/_module.md")]
+
+mod frame_preparation;
+#[cfg(target_os = "linux")]
+mod opaque_scene;
+mod touchpad_transform;
+mod transform_component;
+#[cfg(target_os = "linux")]
+mod wayland_pacing;
+#[cfg(feature = "accesskit-window")]
+mod window_accessibility;
+mod window_actions;
+mod window_capture;
+mod window_commit;
+mod window_event_handler;
+mod window_pointer_input;
+mod window_resize;
+mod window_text_input;
+use frame_preparation::PreparedFrame;
+use window_commit::WindowCommit;
 
 use obscur_diagnostics::{Diagnostic, DiagnosticCode, DiagnosticSeverity, DiagnosticSubsystem};
 
@@ -6,81 +25,33 @@ use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use winit::application::ApplicationHandler;
-use winit::dpi::{LogicalSize, PhysicalPosition};
-use winit::event::{ElementState, Ime, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, EventLoop, EventLoopProxy};
-use winit::keyboard::PhysicalKey as WinitPhysicalKey;
-use winit::window::{Window, WindowAttributes, WindowId};
+use winit::event_loop::{EventLoop, EventLoopProxy};
+use winit::window::Window;
 
-use super::AppError;
-use super::app::FrameInfo;
+use super::FrameInfo;
 use super::app_parts::AppParts;
+use super::frame_stats::FrameStats;
+#[cfg(target_os = "linux")]
+use super::presentation_stats::{PresentationStats, unpaced_wayland_redraw};
+use super::window_size_limits::WindowSizeLimits;
+use super::window_wake::WindowWake;
+use super::{AppError, RenderBackend};
 use crate::bootstrap::{CssPipeline, KitBootstrap};
-use crate::control::AppControl;
+use crate::control::{AppControl, WindowState};
 use crate::geometry::{Point, Size};
-use crate::interaction::command::KeyEvent;
-use crate::interaction::pointer::{PointerButton, PointerButtons, PointerEvent, PointerId};
+use crate::interaction::pointer::PointerButtons;
 use crate::render::frame::{FrameSubmission, RenderFrame};
-use crate::render::renderer::RendererId;
-use crate::render_vello::renderer::{
-    AcquireWake, SurfaceAcquirer, VelloDevice, VelloRenderer, VelloSurface,
-};
+use crate::render_vello::renderer::{SurfaceAcquirer, VelloRenderer};
 use crate::runtime::UiRuntime;
 use crate::runtime::frame::FrameReason;
-use crate::text::ime::{CompositionEvent, Preedit};
+use crate::runtime::lifecycle::ShutdownConcern;
 use crate::view::view::View;
-use crate::window_winit::conversion::{KeyboardConverter, PointerConverter};
 
-#[doc = include_str!("runner.doc/MAX_FRAME_DELTA.md")]
+#[doc = include_str!("../../docs/api/app/runner.doc/MAX_FRAME_DELTA.md")]
 const MAX_FRAME_DELTA: f32 = 0.1;
 
-#[doc = include_str!("runner.doc/FrameStats.md")]
-#[derive(Default)]
-struct FrameStats {
-    frames: u32,
-    build: std::time::Duration,
-    snapshot: std::time::Duration,
-    present: std::time::Duration,
-    worst: std::time::Duration,
-}
-
-#[doc = include_str!("runner.doc/REPORT_EVERY.md")]
-const REPORT_EVERY: u32 = 60;
-
-impl FrameStats {
-    #[doc = include_str!("runner.doc/record.md")]
-    fn record(
-        &mut self,
-        build: std::time::Duration,
-        snapshot: std::time::Duration,
-        present: std::time::Duration,
-    ) {
-        self.frames += 1;
-        self.build += build;
-        self.snapshot += snapshot;
-        self.present += present;
-        self.worst = self.worst.max(build + snapshot + present);
-        if self.frames < REPORT_EVERY {
-            return;
-        }
-        let n = f64::from(self.frames);
-        let ms = |total: std::time::Duration| total.as_secs_f64() * 1000.0 / n;
-        let total = ms(self.build) + ms(self.snapshot) + ms(self.present);
-        println!(
-            "[frame-stats] {n:.0} frames | build {:.2}ms | snapshot {:.2}ms | present {:.2}ms | \
-             total {total:.2}ms (~{:.0} fps if saturated) | worst {:.2}ms",
-            ms(self.build),
-            ms(self.snapshot),
-            ms(self.present),
-            1000.0 / total.max(0.001),
-            self.worst.as_secs_f64() * 1000.0,
-        );
-        *self = Self::default();
-    }
-}
-
-#[doc = include_str!("runner.doc/run.md")]
+/// Builds the runtime, forwards the app's root builder + command handlers + CSS,
+/// then opens the window and runs the event loop to completion.
 pub(super) fn run(
     parts: AppParts,
     builder: Box<dyn FnMut() -> View + 'static>,
@@ -88,7 +59,7 @@ pub(super) fn run(
     run_inner(parts, builder, None)
 }
 
-#[doc = include_str!("runner.doc/run_with_frame.md")]
+#[doc = include_str!("../../docs/api/app/runner.doc/run_with_frame.md")]
 pub(super) fn run_with_frame(
     parts: AppParts,
     mut builder: Box<dyn FnMut(&FrameInfo) -> View + 'static>,
@@ -103,7 +74,7 @@ pub(super) fn run_with_frame(
 }
 
 fn run_inner(
-    parts: AppParts,
+    mut parts: AppParts,
     builder: Box<dyn FnMut() -> View + 'static>,
     frame_info: Option<Rc<Cell<FrameInfo>>>,
 ) -> Result<(), AppError> {
@@ -111,27 +82,102 @@ fn run_inner(
     // requested size — the platform decides both — so these belong to the window
     // runner rather than to the shared `BootedApp`, where they would sit unread in
     // a build with no windowing backend.
-    let (title, app_id, size) = (parts.title.clone(), parts.app_id.clone(), parts.size);
-    let (width, height) = size;
-    let booted = parts.boot(builder, Size::new(width, height));
+    let (title, app_id) = (parts.title.clone(), parts.app_id.clone());
+    let size_limits = parts.size_limits;
+    let window_mode = parts.window_mode;
+    let size = size_limits.constrain_initial(parts.size)?;
+    let viewport = Size::new(size.0, size.1);
+    if let Some(info) = &frame_info {
+        info.set(FrameInfo {
+            viewport,
+            scale: 1.0,
+        });
+    }
+    let decorated = parts.decorated;
+    let resize = parts.resize;
+    let prefer_opengl = parts.prefer_opengl;
+    let render_backend = RenderBackend::resolve(parts.render_backend)?;
+    let background_blur = parts.background_blur;
+    let window_waker = parts.window_waker.take();
+    let mut booted = parts.boot(builder, viewport)?;
 
     // Built before the runner: the acquire thread needs something to wake this
     // loop with, and `Window::request_redraw` is not it — it marks the window
     // dirty without promising to rouse a loop parked in `wait`, which is exactly
     // where a frame skipped for want of a swapchain image leaves it.
-    let event_loop = EventLoop::new().map_err(|error| AppError::EventLoop(error.to_string()))?;
+    let event_loop = match EventLoop::<WindowWake>::with_user_event().build() {
+        Ok(event_loop) => event_loop,
+        Err(error) => {
+            booted
+                .runtime
+                .lifecycle_mut()
+                .report_critical_stop(ShutdownConcern::EventLoop);
+            booted
+                .control
+                .publish_lifecycle_events(booted.runtime.release().into_events());
+            return Err(AppError::EventLoop(error));
+        }
+    };
     let proxy = event_loop.create_proxy();
+    if let Some(ready) = window_waker {
+        let frame_proxy = proxy.clone();
+        ready(Box::new(move || {
+            frame_proxy.send_event(WindowWake::ViewChanged).is_ok()
+        }));
+    }
+
+    if let Some(appearance) = &mut booted.appearance {
+        let proxy = proxy.clone();
+        appearance.start(move || {
+            let _ = proxy.send_event(WindowWake::AppearanceChanged);
+        });
+    }
 
     let mut app = AppRunner {
+        touchpad_transform: touchpad_transform::TouchpadTransform::default(),
+        render_backend,
+        background_blur,
+        #[cfg(target_os = "linux")]
+        blur_request: None,
+        #[cfg(target_os = "linux")]
+        blur_commit_pending: None,
+        #[cfg(target_os = "linux")]
+        presentation: None,
+        #[cfg(target_os = "linux")]
+        wayland_gestures: None,
+        #[cfg(target_os = "linux")]
+        shown_sample: PresentationStats::default(),
+        #[cfg(target_os = "linux")]
+        wayland_pacer: None,
+        detailed_stats: std::env::var_os("OBSCUR_FRAME_STATS").is_some_and(|mode| mode == "each"),
+        frame_sequence: 0,
+        last_commit: None,
         title,
         app_id,
+        decorated,
+        resize,
+        prefer_opengl,
+        resize_cursor: None,
         size,
+        size_limits,
+        window_mode,
         runtime: booted.runtime,
+        appearance: booted.appearance,
         css: booted.css,
         control: booted.control,
+        #[cfg(feature = "accesskit-window")]
+        accessibility: None,
         window: None,
+        #[cfg(all(feature = "gamepad", target_os = "linux"))]
+        gamepad_source: None,
         acquirer: None,
         extent: (0, 0),
+        resize_acquire_pending: false,
+        queued_resize: None,
+        pending_commit: None,
+        threaded_present: false,
+        #[cfg(target_os = "linux")]
+        resize_frame_pending: false,
         proxy: Some(proxy),
         renderer: None,
         scale_factor: 1.0,
@@ -142,6 +188,8 @@ fn run_inner(
         entry_pending: true,
         epoch: std::time::Instant::now(),
         last_frame: None,
+        prepared_frame: None,
+        prepare_ahead: std::env::var_os("OBSCUR_PREPARE_FRAME").is_some_and(|value| value == "1"),
         init_failure: None,
         scroll: booted.scroll,
         ime_allowed: false,
@@ -150,19 +198,52 @@ fn run_inner(
         fonts: None,
     };
 
-    event_loop
-        .run_app(&mut app)
-        .map_err(|error| AppError::EventLoop(error.to_string()))?;
+    let result = event_loop.run_app(&mut app).map_err(AppError::EventLoop);
+    for (_, complete) in app.control.take_frame_captures() {
+        complete(crate::system::capture::CaptureResult::Failed(
+            "window closed before the requested capture".into(),
+        ));
+    }
+    let init_failure = app.init_failure.take();
+    if let Some(error) = result.as_ref().err().or(init_failure.as_ref()) {
+        let concern = match error {
+            AppError::EventLoop(_) => ShutdownConcern::EventLoop,
+            AppError::Window(_) | AppError::WindowCreation(_) => ShutdownConcern::Window,
+            AppError::Gpu(_)
+            | AppError::GpuSurface(_)
+            | AppError::GpuAdapter(_)
+            | AppError::GpuDevice(_)
+            | AppError::GpuRenderer(_) => ShutdownConcern::Renderer,
+            _ => ShutdownConcern::Runtime,
+        };
+        app.runtime.lifecycle_mut().report_critical_stop(concern);
+    }
+    if let Some(window) = &app.window {
+        app.runtime
+            .lifecycle_mut()
+            .window_closed(crate::identity::WindowId::from_raw(window.id().into()));
+    }
+    let runtime = app.runtime.id();
+    let mut events = app.runtime.lifecycle_mut().take_events();
+    let control = app.control.clone();
+    drop(app);
+    events.push(crate::runtime::lifecycle::LifecycleEvent::ResourceReleaseComplete(runtime));
+    control.update_window_state(None);
+    control.publish_lifecycle_events(events);
+    result?;
 
     // A GPU/window failure exits the loop cleanly on `resumed`, recording the
     // reason so `run` can report it rather than returning `Ok` on a blank window.
-    match app.init_failure {
+    match init_failure {
         Some(error) => Err(error),
         None => Ok(()),
     }
 }
 
-#[doc = include_str!("runner.doc/install_text.md")]
+/// Installs the real text stack over the host's system fonts (bundled last-resort
+/// fallback appended by [`install_text_stack`](KitBootstrap::install_text_stack)),
+/// and hands the renderer the *same* id→bytes assignment so scene font handles
+/// line up with what it rasterizes — the codified fix for the id-matching problem.
 #[cfg(all(feature = "text-harfrust", feature = "text-unicode"))]
 fn install_text(
     boot: &KitBootstrap,
@@ -175,7 +256,7 @@ fn install_text(
 
     let installed = boot.install_text_stack(runtime, &font_set);
     for (handle, bytes) in installed.iter() {
-        renderer.register_font(handle, bytes.to_vec());
+        renderer.register_font(handle, std::sync::Arc::clone(bytes));
     }
     installed
 }
@@ -189,64 +270,131 @@ fn install_text(
     crate::bootstrap::InstalledFonts::default()
 }
 
-#[doc = include_str!("runner.doc/AppRunner.md")]
+/// The winit application the runner drives: the window, the GPU renderer, the
+/// swapchain surface, and the embeddable runtime, all created lazily on `resumed`.
 struct AppRunner {
+    touchpad_transform: touchpad_transform::TouchpadTransform,
+    render_backend: RenderBackend,
+    background_blur: bool,
+    #[cfg(target_os = "linux")]
+    blur_request: Option<obscur_wayland_effects::WindowBlur<Arc<Window>>>,
+    #[cfg(target_os = "linux")]
+    blur_commit_pending: Option<(bool, &'static str)>,
+    #[cfg(target_os = "linux")]
+    presentation: Option<obscur_wayland_effects::WindowPresentation<Arc<Window>>>,
+    #[cfg(target_os = "linux")]
+    wayland_gestures: Option<obscur_wayland_effects::WindowGestures<Arc<Window>>>,
+    #[cfg(target_os = "linux")]
+    shown_sample: PresentationStats,
+    #[cfg(target_os = "linux")]
+    wayland_pacer: Option<wayland_pacing::WaylandPacer>,
+    detailed_stats: bool,
+    frame_sequence: u64,
+    last_commit: Option<std::time::Instant>,
     title: String,
     app_id: String,
+    decorated: bool,
+    resize: bool,
+    prefer_opengl: bool,
+    resize_cursor: Option<winit::window::ResizeDirection>,
     size: (f32, f32),
+    size_limits: WindowSizeLimits,
+    window_mode: crate::WindowMode,
     runtime: UiRuntime,
-    #[doc = include_str!("runner.doc/css.md")]
+    appearance: Option<super::appearance_subscription::AppearanceSubscription>,
+    /// The CSS pipeline, alive for the app's lifetime because it owns the §4.12 parse
+    /// cache: a replacement through [`AppControl::set_stylesheets`] re-parses only what
+    /// changed identity, and a fresh pipeline per install would throw that away.
     css: CssPipeline,
-    #[doc = include_str!("runner.doc/control.md")]
+    /// The application's handle onto this runtime. Everything it queued is applied
+    /// once per committed frame — see [`AppRunner::render_frame`] for where, and
+    /// [`AppControl`] for why it is a queue rather than an accessor.
     control: AppControl,
+    #[cfg(feature = "accesskit-window")]
+    accessibility: Option<window_accessibility::WindowAccessibility>,
     window: Option<Arc<Window>>,
-    #[doc = include_str!("runner.doc/acquirer.md")]
+    #[cfg(all(feature = "gamepad", target_os = "linux"))]
+    gamepad_source: Option<obscur_window_winit::gamepad::GamepadSource>,
+    #[doc = include_str!("../../docs/api/app/runner.doc/acquirer.md")]
     acquirer: Option<SurfaceAcquirer>,
-    #[doc = include_str!("runner.doc/extent.md")]
+    #[doc = include_str!("../../docs/api/app/runner.doc/extent.md")]
     extent: (u32, u32),
-    #[doc = include_str!("runner.doc/proxy.md")]
-    proxy: Option<EventLoopProxy<()>>,
+    resize_acquire_pending: bool,
+    queued_resize: Option<(u32, u32)>,
+    pending_commit: Option<WindowCommit>,
+    threaded_present: bool,
+    #[cfg(target_os = "linux")]
+    resize_frame_pending: bool,
+    #[doc = include_str!("../../docs/api/app/runner.doc/proxy.md")]
+    proxy: Option<EventLoopProxy<WindowWake>>,
     renderer: Option<VelloRenderer>,
-    #[doc = include_str!("runner.doc/scale_factor.md")]
+    /// The display's HiDPI device-pixel ratio (winit `scale_factor`).
     scale_factor: f64,
-    #[doc = include_str!("runner.doc/cursor.md")]
+    /// Last cursor position in physical px, so a `MouseInput` (which carries none)
+    /// dispatches at the cursor.
     cursor: (f64, f64),
-    #[doc = include_str!("runner.doc/held_buttons.md")]
+    #[doc = include_str!("../../docs/api/app/runner.doc/held_buttons.md")]
     held_buttons: PointerButtons,
-    #[doc = include_str!("runner.doc/entry_pending.md")]
+    #[doc = include_str!("../../docs/api/app/runner.doc/entry_pending.md")]
     entry_pending: bool,
-    #[doc = include_str!("runner.doc/epoch.md")]
+    /// The instant the app started, and the origin of every pointer event's
+    /// logical timestamp — see [`now_micros`](AppRunner::now_micros).
     epoch: std::time::Instant,
-    #[doc = include_str!("runner.doc/last_frame.md")]
+    /// When the previous frame ran, so the next one can advance motion by the
+    /// time that actually elapsed. `None` until the first frame.
     last_frame: Option<std::time::Instant>,
-    #[doc = include_str!("runner.doc/init_failure.md")]
+    prepared_frame: Option<PreparedFrame>,
+    prepare_ahead: bool,
+    /// A window/GPU failure recorded on `resumed` (which cannot return a `Result`)
+    /// so [`run`] can surface it instead of returning `Ok` on a blank window.
     init_failure: Option<AppError>,
-    #[doc = include_str!("runner.doc/scroll.md")]
+    /// The app's leftover-wheel handler, if it registered one.
     scroll: Option<Box<dyn FnMut(f32) + 'static>>,
-    #[doc = include_str!("runner.doc/ime_allowed.md")]
+    #[doc = include_str!("../../docs/api/app/runner.doc/ime_allowed.md")]
     ime_allowed: bool,
-    #[doc = include_str!("runner.doc/frame_info.md")]
+    /// The viewport snapshot a frame-aware builder reads, refreshed on every
+    /// surface change.
     frame_info: Option<Rc<Cell<FrameInfo>>>,
-    #[doc = include_str!("runner.doc/stats.md")]
+    /// Per-phase frame timings, present only when `OBSCUR_FRAME_STATS=1` is set.
     stats: Option<FrameStats>,
-    #[doc = include_str!("runner.doc/fonts.md")]
+    /// The renderer's font hand-off table, kept so faces the text stack pulls in
+    /// from the host mid-run can be handed over too — see
+    /// [`InstalledFonts::take_discovered`](crate::bootstrap::InstalledFonts::take_discovered).
     fonts: Option<crate::bootstrap::InstalledFonts>,
 }
 
 impl AppRunner {
-    #[doc = include_str!("runner.doc/now_micros.md")]
+    fn native_touchpad_transform(
+        &mut self,
+        component: transform_component::TransformComponent,
+        phase: winit::event::TouchPhase,
+    ) {
+        let position = Point::new(self.cursor.0 as f32, self.cursor.1 as f32);
+        let now = self.now_micros();
+        if let Some(event) = self
+            .touchpad_transform
+            .update(component, phase, position, now)
+            && self.runtime.handle_touchpad_gesture(event)
+        {
+            self.request_redraw();
+        }
+    }
+
+    #[doc = include_str!("../../docs/api/app/runner.doc/now_micros.md")]
     #[allow(clippy::cast_possible_truncation)]
     fn now_micros(&self) -> u64 {
         self.epoch.elapsed().as_micros() as u64
     }
 
-    #[doc = include_str!("runner.doc/scale.md")]
+    /// The device-pixel scale the runtime renders at: the display density, floored
+    /// so a degenerate `0` never divides the viewport.
     #[allow(clippy::cast_possible_truncation)]
     fn scale(&self) -> f32 {
         (self.scale_factor as f32).max(0.05)
     }
 
-    #[doc = include_str!("runner.doc/sync_surface.md")]
+    /// Points the runtime's viewport + device scale at the swapchain's physical
+    /// extent and the display density — the kit's HiDPI mapping in one call.
     #[allow(clippy::cast_possible_truncation)]
     fn sync_surface(&mut self) {
         // The extent is tracked here rather than read off the surface: the
@@ -269,37 +417,91 @@ impl AppRunner {
         }
     }
 
-    #[doc = include_str!("runner.doc/render_frame.md")]
+    /// Publish native window state and redraw views on changes to window mode or focus.
+    fn sync_window_state(&mut self) {
+        let Some(window) = &self.window else {
+            return;
+        };
+        let scale_factor = window.scale_factor();
+        let size = window.inner_size().to_logical::<f32>(scale_factor);
+        self.control
+            .update_window_screen_origin(window.inner_position().ok().map(|position| {
+                crate::geometry::space::PointIn::new(Point::new(
+                    position.x as f32,
+                    position.y as f32,
+                ))
+            }));
+        let next = WindowState {
+            size: Size::new(size.width, size.height),
+            scale_factor,
+            maximized: window.is_maximized(),
+            fullscreen: window.fullscreen().is_some(),
+            minimized: window.is_minimized(),
+            focused: window.has_focus(),
+            resizable: window.is_resizable(),
+        };
+        let previous = self.control.window_state();
+        if self.control.update_window_state(Some(next))
+            && previous.is_none_or(|previous| {
+                WindowState {
+                    size: next.size,
+                    scale_factor,
+                    ..previous
+                } != next
+            })
+        {
+            self.runtime.request_frame(FrameReason::UiCommit);
+            self.request_redraw();
+        }
+    }
+
+    /// Select a new surface size and schedule a frame for it.
+    fn apply_resize(&mut self, extent: (u32, u32)) {
+        if self.extent == extent {
+            return;
+        }
+        self.extent = extent;
+        self.resize_acquire_pending = true;
+        #[cfg(target_os = "linux")]
+        {
+            self.resize_frame_pending = true;
+        }
+        if let Some(acquirer) = self.acquirer.as_mut() {
+            acquirer.resize(extent.0, extent.1);
+        }
+        self.sync_surface();
+        self.runtime.request_frame(FrameReason::WindowChange);
+        self.request_redraw();
+    }
+
+    /// Runs a scheduler-gated reactive frame, reads the committed scene, and
+    /// presents it on-screen via the Vello offscreen-render + blit path. A lost
+    /// swapchain is reconfigured and the frame skipped (the next redraw recovers).
     #[allow(clippy::cast_precision_loss)]
     fn render_frame(&mut self) {
-        // Only present when a frame was actually produced. A redraw request that
-        // finds nothing due — a bare cursor move over unchanged UI, which winit
-        // delivers continuously — would otherwise rebuild the view, re-snapshot and
-        // re-present an identical scene on every pointer twitch. The runtime is the
-        // authority on whether anything changed: it schedules a frame itself when
-        // hover, focus, animation or a landed resource makes one necessary.
-        // Time passes here or nowhere. The interaction and motion domains take
-        // the clock as data, so a host must supply it, and this one never did:
-        // `advance_motion` had no caller in any windowed path, which left every
-        // CSS transition and `@keyframes` animation frozen in a real window while
-        // passing every headless test (the test harnesses tick it themselves).
-        // §4.17's "active animations keep requesting frames" was half-true — the
-        // runtime asked for the frames, and nothing moved the clock they were for.
-        // The swapchain image BEFORE anything else. Acquiring it blocks until the
-        // compositor releases a buffer, and this is the thread winit delivers
-        // input on — so acquiring here would stop the application hearing the
-        // pointer for as long as the wait lasts (audit 1-D, and core principle 5:
-        // platform calls are to be asynchronous and synchronous work
-        // frame-bounded). A `SurfaceAcquirer` does the waiting elsewhere.
-        //
-        // No image yet means no frame this turn. The pending frame stays pending
-        // because nothing below has run, and the acquire thread asks winit for a
-        // redraw when one lands — so nothing spins and nothing is lost. §3.5
-        // permits the skip in so many words.
-        let image = if self.runtime.has_pending_frame() {
-            let Some(image) = self.acquirer.as_mut().and_then(SurfaceAcquirer::try_take) else {
+        if self.pending_commit.is_some() {
+            return;
+        }
+        #[cfg(target_os = "linux")]
+        if self.wayland_frame_blocked() {
+            return;
+        }
+        // The worker acquires the swapchain image without blocking event dispatch.
+        let (image, acquire) = if self.frame_due() {
+            let Some((image, acquire)) = self
+                .acquirer
+                .as_mut()
+                .and_then(SurfaceAcquirer::try_take_timed)
+            else {
                 if let Some(acquirer) = self.acquirer.as_mut() {
                     acquirer.request();
+                    if self.detailed_stats {
+                        println!(
+                            "[window-acquire-wait] next_id={} at_us={}",
+                            self.frame_sequence + 1,
+                            self.now_micros()
+                        );
+                    }
                 }
                 return;
             };
@@ -313,58 +515,51 @@ impl AppRunner {
                 drop(image);
                 if let Some(acquirer) = self.acquirer.as_mut() {
                     acquirer.resize(width, height);
+                    acquirer.request();
                 }
                 return;
             }
-            image
+            (image, acquire)
         } else {
             return;
         };
 
-        let started = std::time::Instant::now();
-        let delta = self
-            .last_frame
-            .replace(started)
-            // Clamped: a window that was occluded, dragged between monitors or
-            // simply starved must not resume by jumping an animation forward by
-            // however many seconds the gap was.
-            .map_or(0.0, |prev| {
-                (started - prev).as_secs_f32().min(MAX_FRAME_DELTA)
-            });
-        if delta > 0.0 {
-            self.runtime.advance_motion(delta);
-        }
-        // A request queued since the last frame — a replaced stylesheet, a queued
-        // runtime action — reaches the frame that is about to be built rather than the
-        // one after it. Guarded because the steady state is "nothing queued", and this
-        // runs on every redraw.
-        if self.control.has_pending() {
-            self.control.apply(&mut self.runtime, &mut self.css);
-        }
-        if self.runtime.run_due_frame_reactive().is_none() {
-            // Nothing was due, but the tick above may have scheduled the *next*
-            // animation frame; without asking for it the loop would sleep and the
-            // animation would stall on its first idle turn.
-            if self.runtime.has_pending_frame() {
-                self.request_redraw();
-            }
+        let prepared = self.prepared_frame.take();
+        let prepared_ahead = prepared.is_some() && !self.prepared_frame_stale();
+        let Some(PreparedFrame {
+            snapshot,
+            built,
+            snapshotted,
+            work,
+        }) = (if prepared_ahead {
+            prepared
+        } else {
+            self.prepare_frame()
+        })
+        else {
             return;
-        }
-        let built = started.elapsed();
-        // The one point in the frame where application code may touch the runtime
-        // (spec §2.6, §4.12): the frame has committed, so the tree exists and a
-        // `test-id` can resolve to a real node, and the next frame has not started, so
-        // nothing is mid-propagation. A no-op with nothing queued and every name
-        // already bound, which is the steady state.
-        self.control.apply(&mut self.runtime, &mut self.css);
-        let snapshot_at = std::time::Instant::now();
-        let snapshot = self.runtime.snapshot();
-        let snapshotted = snapshot_at.elapsed();
+        };
         let present_at = std::time::Instant::now();
+
+        #[cfg(target_os = "linux")]
+        self.stage_window_occlusion(&snapshot);
 
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
+
+        if super::gpu_instance::apply_renderer_request(
+            &self.control,
+            &mut self.runtime,
+            renderer,
+            &mut self.render_backend,
+        ) {
+            self.last_commit = None;
+            self.stats = self.stats.take().map(|_| FrameStats::default());
+            #[cfg(target_os = "linux")]
+            self.shown_sample.restart(self.frame_sequence + 2);
+        }
+        let warmup = self.last_commit.is_none();
 
         // A character outside every registered face pulls one in from the host
         // while the frame is being built. The renderer rasterizes from its own
@@ -374,7 +569,9 @@ impl AppRunner {
         // all of them.
         if let Some(fonts) = self.fonts.as_ref() {
             for (handle, bytes) in fonts.take_discovered() {
-                renderer.register_font(handle, bytes.to_vec());
+                // The face itself, not a copy of it — see `layer_runner::init_gpu`'s
+                // sibling loop and `VelloRenderer::register_font`.
+                renderer.register_font(handle, bytes);
             }
         }
 
@@ -383,30 +580,212 @@ impl AppRunner {
         // new numbers.
         let physical = Size::new(image.width as f32, image.height as f32);
         let submission = FrameSubmission::new(RenderFrame::new(snapshot, physical));
-        if let Err(error) = renderer.present_to_texture(&submission, image) {
-            // A lost surface is reconfigured by the acquire thread on its next
-            // attempt; there is nothing to reconfigure from here.
-            eprintln!("present failed: {error:?}");
+        window_capture::capture_frame(
+            &self.control,
+            self.window.as_deref(),
+            &self.runtime,
+            renderer,
+            &submission,
+            (image.width, image.height),
+        );
+        let window = self.window.as_ref();
+        let frame = self.frame_sequence + 1;
+        #[cfg(target_os = "linux")]
+        let presentation = self.presentation.as_ref();
+        #[cfg(target_os = "linux")]
+        let pace_redraw = presentation.is_none()
+            || self
+                .wayland_pacer
+                .as_ref()
+                .map_or_else(|| !unpaced_wayland_redraw(), |pacer| pacer.is_suspended());
+        #[cfg(not(target_os = "linux"))]
+        let pace_redraw = true;
+        let commit = WindowCommit {
+            extent: self.extent,
+            frame,
+            present_at,
+            acquire,
+            built,
+            snapshotted,
+            work,
+            warmup,
+            prepared_ahead,
+        };
+        let acquirer = self.acquirer.as_mut();
+        let mut queued = false;
+        let outcome = renderer.present_to_texture_using(
+            &submission,
+            image,
+            || {
+                if pace_redraw && let Some(window) = window {
+                    window.pre_present_notify();
+                }
+                #[cfg(target_os = "linux")]
+                if let Some(presentation) = presentation {
+                    presentation.request(frame);
+                }
+            },
+            |texture| {
+                if self.threaded_present
+                    && let Some(acquirer) = acquirer
+                {
+                    match acquirer.queue_present(texture) {
+                        Ok(()) => queued = true,
+                        Err(texture) => texture.present(),
+                    }
+                } else {
+                    texture.present();
+                }
+                !queued
+            },
+        );
+        if queued {
+            if self.detailed_stats {
+                println!(
+                    "[window-present-queued] id={frame} at_us={}",
+                    self.now_micros()
+                );
+            }
+            self.pending_commit = Some(commit);
+        } else {
+            if let Err(ref error) = outcome {
+                eprintln!("present failed: {error:?}");
+            }
+            self.finish_commit(commit, std::time::Instant::now(), outcome.is_ok());
+        }
+    }
+
+    /// Record a completed presentation and schedule any newer frame the runtime owes.
+    fn finish_commit(
+        &mut self,
+        commit: WindowCommit,
+        committed: std::time::Instant,
+        succeeded: bool,
+    ) {
+        let WindowCommit {
+            extent,
+            frame,
+            present_at,
+            acquire,
+            built,
+            snapshotted,
+            work,
+            warmup,
+            prepared_ahead,
+        } = commit;
+        #[cfg(not(target_os = "linux"))]
+        let _ = extent;
+        #[cfg(target_os = "linux")]
+        {
+            self.resize_frame_pending = self.extent != extent;
+        }
+        if succeeded {
+            self.frame_sequence = frame;
+            #[cfg(target_os = "linux")]
+            if let Some(pacer) = self.wayland_pacer.as_mut() {
+                pacer.committed(frame, present_at, committed, work);
+            }
+            if self.detailed_stats {
+                let ms = |duration: std::time::Duration| duration.as_secs_f64() * 1000.0;
+                let interval = self
+                    .last_commit
+                    .replace(committed)
+                    .map_or(0.0, |previous| ms(committed - previous));
+                let blur = if self.background_blur { "on" } else { "off" };
+                let backend = self.render_backend.name();
+                println!(
+                    "[window-frame] id={frame} blur={blur} renderer={backend} warmup={warmup} prepared_ahead={prepared_ahead} commit_us={} acquire_ms={:.3} build_ms={:.3} \
+                     snapshot_ms={:.3} present_ms={:.3} work_ms={:.3} interval_ms={interval:.3}",
+                    committed.duration_since(self.epoch).as_micros(),
+                    ms(acquire),
+                    ms(built),
+                    ms(snapshotted),
+                    ms(committed - present_at),
+                    ms(acquire + work + (committed - present_at)),
+                );
+            }
+            #[cfg(target_os = "linux")]
+            if let Some((enabled, protocol)) = self.blur_commit_pending.take() {
+                self.runtime.report_diagnostic(&Diagnostic::new(
+                    DiagnosticCode::new("window.background-blur.committed"),
+                    DiagnosticSeverity::Info,
+                    DiagnosticSubsystem::Render,
+                    format!("{protocol}: {}", if enabled { "on" } else { "off" }),
+                ));
+            }
         }
         if let Some(stats) = self.stats.as_mut() {
-            stats.record(built, snapshotted, present_at.elapsed());
+            if self.last_commit.is_none() && succeeded {
+                self.last_commit = Some(committed);
+            }
+            if !warmup && succeeded {
+                stats.record(built, snapshotted, committed - present_at);
+            }
         }
         // While motion (or a fling) remains, keep the loop turning. The runtime is
         // the authority on whether another frame is owed, so an idle UI still
         // sleeps — this is not a render-forever loop.
-        if self.runtime.has_pending_frame() {
+        if self.frame_due() {
             self.request_redraw();
         }
     }
 
-    #[doc = include_str!("runner.doc/request_redraw.md")]
-    fn request_redraw(&self) {
-        if let Some(window) = self.window.as_ref() {
-            window.request_redraw();
+    /// Stages the compositor blur change and records it for the next successful buffer commit.
+    fn set_background_blur(&mut self, window: &Arc<Window>, enabled: bool) {
+        #[cfg(target_os = "linux")]
+        let previous = self.background_blur;
+        self.background_blur = enabled;
+
+        #[cfg(not(target_os = "linux"))]
+        let _ = window;
+        #[cfg(target_os = "linux")]
+        {
+            let protocol = if let Some(request) = self.blur_request.as_mut() {
+                if enabled == previous {
+                    return;
+                }
+                request.set_enabled(enabled);
+                request.protocol()
+            } else if enabled {
+                match obscur_wayland_effects::WindowBlur::request(Arc::clone(window)) {
+                    Ok(Some(request)) => {
+                        let protocol = request.protocol();
+                        self.blur_request = Some(request);
+                        protocol
+                    }
+                    Ok(None) => {
+                        self.runtime.report_diagnostic(&Diagnostic::new(
+                            DiagnosticCode::new("window.background-blur.unavailable"),
+                            DiagnosticSeverity::Info,
+                            DiagnosticSubsystem::Render,
+                            "No compositor blur protocol available for this window",
+                        ));
+                        return;
+                    }
+                    Err(error) => {
+                        self.runtime.report_diagnostic(&Diagnostic::new(
+                            DiagnosticCode::new("window.background-blur"),
+                            DiagnosticSeverity::Warning,
+                            DiagnosticSubsystem::Render,
+                            error,
+                        ));
+                        return;
+                    }
+                }
+            } else {
+                return;
+            };
+            self.blur_commit_pending = Some((enabled, protocol));
+            self.runtime.report_diagnostic(&Diagnostic::new(
+                DiagnosticCode::new("window.background-blur.staged"),
+                DiagnosticSeverity::Info,
+                DiagnosticSubsystem::Render,
+                format!("{protocol}: {}", if enabled { "on" } else { "off" }),
+            ));
         }
     }
 
-    #[doc = include_str!("runner.doc/sync_ime.md")]
+    #[doc = include_str!("../../docs/api/app/runner.doc/sync_ime.md")]
     fn sync_ime(&mut self) {
         let wanted = self.runtime.focus_accepts_text();
         if wanted == self.ime_allowed {
@@ -417,333 +796,12 @@ impl AppRunner {
             window.set_ime_allowed(wanted);
         }
     }
-
-    #[doc = include_str!("runner.doc/pointer_button_event.md")]
-    #[allow(clippy::cast_possible_truncation)]
-    #[doc = include_str!("runner.doc/pointer_button_event_2.md")]
-    fn pointer_button_event(&mut self, button: PointerButton, state: ElementState) -> PointerEvent {
-        let at = PhysicalPosition::new(self.cursor.0, self.cursor.1);
-        let converter = PointerConverter::new();
-        self.held_buttons = held_after(self.held_buttons, button, state);
-        match state {
-            ElementState::Pressed => {
-                converter.pressed(PointerId::MOUSE, at, button, self.held_buttons)
-            }
-            ElementState::Released => {
-                converter.released(PointerId::MOUSE, at, button, self.held_buttons)
-            }
-        }
-        .with_timestamp(self.now_micros())
-    }
 }
 
-impl ApplicationHandler for AppRunner {
-    #[doc = include_str!("runner.doc/resumed.md")]
-    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.window.is_some() {
-            return;
-        }
-
-        #[cfg_attr(not(all(unix, not(target_os = "macos"))), allow(unused_mut))]
-        let mut attributes = WindowAttributes::default()
-            .with_title(self.title.clone())
-            .with_transparent(true)
-            .with_inner_size(LogicalSize::new(
-                f64::from(self.size.0),
-                f64::from(self.size.1),
-            ));
-        // The Wayland `app_id` / X11 `WM_CLASS` — the stable identity a compositor
-        // matches window rules on (Hyprland's `class`, sway's `app_id`) and the one
-        // a taskbar keys off. winit exposes it only through the per-backend
-        // extension traits, and setting both is correct: they write different
-        // platform fields, so an X11 session and a Wayland one each get the id.
-        #[cfg(all(unix, not(target_os = "macos")))]
-        {
-            {
-                use winit::platform::wayland::WindowAttributesExtWayland as _;
-                attributes = attributes.with_name(self.app_id.clone(), String::new());
-            }
-            {
-                use winit::platform::x11::WindowAttributesExtX11 as _;
-                attributes = attributes.with_name(self.app_id.clone(), String::new());
-            }
-        }
-        let window = match event_loop.create_window(attributes) {
-            Ok(window) => Arc::new(window),
-            Err(error) => {
-                self.init_failure = Some(AppError::Window(error.to_string()));
-                event_loop.exit();
-                return;
-            }
-        };
-        // Text entry starts OFF and is offered per focus by `sync_ime` below. It
-        // used to be switched on here, once, for the window's whole life — which
-        // reads as "IME composition works out of the box" on a desktop and as "the
-        // on-screen keyboard covers half the tablet" on a tablet, in an app with
-        // no field to type into.
-        window.set_ime_allowed(false);
-
-        let (surface, config, device, queue, gpu) = match init_gpu(&window) {
-            Ok(gpu) => gpu,
-            Err(error) => {
-                self.init_failure = Some(AppError::Gpu(error));
-                event_loop.exit();
-                return;
-            }
-        };
-        self.runtime.report_diagnostic(&gpu_diagnostic(&gpu));
-        let vello_surface = VelloSurface::new(surface, config);
-        vello_surface.configure(&device);
-        let vello_device = match VelloDevice::new(device.clone(), queue) {
-            Ok(vello_device) => vello_device,
-            Err(error) => {
-                self.init_failure = Some(AppError::Gpu(error.to_string()));
-                event_loop.exit();
-                return;
-            }
-        };
-        let mut renderer = VelloRenderer::new(RendererId::from_raw(1)).with_device(vello_device);
-        self.fonts = Some(install_text(
-            &KitBootstrap::new(),
-            &mut self.runtime,
-            &mut renderer,
-        ));
-
-        self.scale_factor = window.scale_factor();
-        self.extent = (vello_surface.config().width, vello_surface.config().height);
-
-        // The surface moves onto the acquire thread, and its wake is an
-        // `EventLoopProxy`: a user event both rouses a parked loop and lands on
-        // this thread, which `request_redraw` alone does not promise.
-        let wake: Option<AcquireWake> = self.proxy.clone().map(|proxy| {
-            Arc::new(move || {
-                let _ = proxy.send_event(());
-            }) as AcquireWake
-        });
-        self.acquirer = Some(SurfaceAcquirer::spawn(vello_surface, device, wake));
-
-        self.renderer = Some(renderer);
-        self.window = Some(window);
-        self.sync_surface();
-        self.runtime.request_frame(FrameReason::UiCommit);
-        self.request_redraw();
-    }
-
-    fn window_event(
-        &mut self,
-        event_loop: &ActiveEventLoop,
-        _window_id: WindowId,
-        event: WindowEvent,
-    ) {
-        match event {
-            WindowEvent::Resized(new_size) => {
-                self.extent = (new_size.width, new_size.height);
-                if let Some(acquirer) = self.acquirer.as_mut() {
-                    // Also discards anything already acquired: an image fetched
-                    // at the old extent would present stretched.
-                    acquirer.resize(new_size.width, new_size.height);
-                }
-                self.sync_surface();
-                self.runtime.request_frame(FrameReason::WindowChange);
-                self.request_redraw();
-            }
-            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-                self.scale_factor = scale_factor;
-                self.sync_surface();
-                self.runtime.request_frame(FrameReason::WindowChange);
-                self.request_redraw();
-            }
-            WindowEvent::CursorMoved { position, .. } => {
-                self.cursor = (position.x, position.y);
-                let converter = PointerConverter::new();
-                // The entry winit could not place: `CursorEntered` carries no
-                // position, and this is the first event that knows one. See
-                // `entry_pending` — synthesising the crossing back there would
-                // enter whatever node sat where the pointer *left*.
-                let event = if std::mem::take(&mut self.entry_pending) {
-                    converter.entered(PointerId::MOUSE, position, self.held_buttons)
-                } else {
-                    converter.moved(PointerId::MOUSE, position, self.held_buttons)
-                };
-                self.runtime
-                    .handle_pointer(event.with_timestamp(self.now_micros()));
-                self.request_redraw();
-            }
-            WindowEvent::CursorEntered { .. } => {
-                self.entry_pending = true;
-            }
-            WindowEvent::CursorLeft { .. } => {
-                // Unhandled until now, which is why `:hover` never cleared when
-                // the pointer left the window: the last row it was over stayed
-                // highlighted for the rest of the session. A leave needs no
-                // fresh position — the runtime treats it as "nothing is under
-                // the pointer" whatever the hit test says — so the tracked
-                // cursor is a record of where it went out, not a guess.
-                let at = PhysicalPosition::new(self.cursor.0, self.cursor.1);
-                let left = PointerConverter::new()
-                    .left(PointerId::MOUSE, at, self.held_buttons)
-                    .with_timestamp(self.now_micros());
-                self.runtime.handle_pointer(left);
-                self.request_redraw();
-            }
-            WindowEvent::MouseInput { state, button, .. } => {
-                // Every modelled button, not just the left one. `Other(_)` is
-                // the only one dropped, and dropped rather than folded onto a
-                // modelled neighbour: a mouse's fourth thumb button is not a
-                // middle click, and claiming it were would be a press the user
-                // never made.
-                if let Some(button) = PointerConverter::button(button) {
-                    let event = self.pointer_button_event(button, state);
-                    self.runtime.handle_pointer(event);
-                    self.request_redraw();
-                }
-            }
-            WindowEvent::Focused(_) => {
-                // Deliberately nothing, and named here so it reads as a decision
-                // rather than an oversight. Window activation is a concept the
-                // runtime does not have: `UiRuntime` models NODE focus, and the
-                // only door into it moves focus, fires `blur`/`focus` and
-                // commits the outgoing field's `change`. Routing a deactivated
-                // window through that door would empty the field's caret and
-                // commit it because the user alt-tabbed — the browsers this
-                // toolkit takes its vocabulary from keep `activeElement` across
-                // exactly that.
-                //
-                // Doing it right needs a window-activation state on the runtime
-                // and a selector that reads it (a `:window-inactive`-shaped
-                // one), so an inactive window can dim its selection and rest its
-                // caret without losing either. None of that exists, and
-                // inventing it here would put the state in the adapter, which is
-                // the one place it must not live.
-                //
-                // The one cost of ignoring this that would have bitten is
-                // already paid elsewhere: a modifier released while the window
-                // was unfocused is corrected by `ModifiersChanged` below.
-            }
-            WindowEvent::Touch(contact) => {
-                // A finger enters through the same door as the mouse: the runtime's
-                // hit-testing, hover, focus and activation are device-agnostic and
-                // already read `PointerDevice`, so touch needs the conversion and
-                // nothing else. The contact carries its own location, so — unlike
-                // `MouseInput`, which carries none — it never consults or updates
-                // the tracked cursor; a tap must not teleport the wheel's target.
-                let event = PointerConverter::new()
-                    .touch(contact)
-                    .with_timestamp(self.now_micros());
-                self.runtime.handle_pointer(event);
-                self.request_redraw();
-            }
-            WindowEvent::MouseWheel { delta, .. } => {
-                // A wheel notch scrolls the `overflow: scroll` container under the
-                // cursor. winit reports whole lines or raw pixels; normalize both to
-                // a pixel step, and invert so that wheel-down (negative lines)
-                // increases scroll_top — i.e. reveals content further down. The
-                // cursor is passed in the same (physical) space the pointer
-                // converter uses, so the hit that finds the container matches the
-                // one a click would make.
-                #[allow(clippy::cast_possible_truncation)]
-                let at = Point::new(self.cursor.0 as f32, self.cursor.1 as f32);
-                // Converted whole — both axes, the platform's own unit, and the
-                // trust this boundary confers — rather than flattened to one
-                // float. The line-to-pixel policy lives on the runtime now, so
-                // the fallback below asks for the same answer instead of
-                // keeping a second copy of the constant.
-                let wheel = PointerConverter::wheel(delta, at).with_timestamp(self.now_micros());
-                let step = wheel.pixels_y(UiRuntime::WHEEL_LINE_STEP);
-                if self.runtime.handle_wheel(wheel).is_some() {
-                    self.runtime.request_frame(FrameReason::WindowChange);
-                    self.request_redraw();
-                } else if let Some(handler) = self.scroll.as_mut() {
-                    // No `overflow: scroll` container took it, so the app may want
-                    // it: an app that windows its own list owns its scroll position.
-                    handler(step / self.scale_factor.max(0.05) as f32);
-                    self.runtime.request_frame(FrameReason::UiCommit);
-                    self.request_redraw();
-                }
-            }
-            WindowEvent::ModifiersChanged(state) => {
-                // The platform's own answer, which beats the runtime's folded
-                // one: a modifier released while this window was unfocused
-                // produces no key event here, so the fold would keep believing
-                // it is held. Alt-tab away, let go of Alt, come back.
-                self.runtime
-                    .set_modifiers(KeyboardConverter::modifiers(state.state()));
-            }
-            WindowEvent::KeyboardInput { event, .. } => {
-                if let WinitPhysicalKey::Code(code) = event.physical_key {
-                    if let Some(physical) = KeyboardConverter::physical_key(code) {
-                        let logical = KeyboardConverter::logical_key(&event.logical_key);
-                        let pressed = event.state == ElementState::Pressed;
-                        // Trusted here and nowhere else, the way the pointer
-                        // converter is the single `as_trusted` call site for a
-                        // pointer: this is the platform boundary, the OS event is
-                        // on the other side of it, and everything that reaches
-                        // `handle_key` by any other road stays untrusted.
-                        let mut key = KeyEvent::new(physical, logical, pressed)
-                            .with_timestamp(self.now_micros())
-                            .as_trusted();
-                        if event.repeat {
-                            key = key.as_repeat();
-                        }
-                        self.runtime.handle_key(key);
-                        self.request_redraw();
-                    }
-                }
-            }
-            WindowEvent::Ime(ime) => {
-                let event = match ime {
-                    Ime::Enabled => Some(CompositionEvent::Start),
-                    Ime::Preedit(text, cursor) => {
-                        let mut preedit = Preedit::new(text);
-                        if let Some((start, _end)) = cursor {
-                            preedit = preedit.with_caret(start);
-                        }
-                        Some(CompositionEvent::Update(preedit))
-                    }
-                    Ime::Commit(text) => Some(CompositionEvent::Commit(text.into())),
-                    Ime::Disabled => Some(CompositionEvent::Cancel),
-                };
-                if let Some(event) = event {
-                    self.runtime.handle_ime(event);
-                    self.request_redraw();
-                }
-            }
-            WindowEvent::RedrawRequested => self.render_frame(),
-            WindowEvent::CloseRequested => event_loop.exit(),
-            _ => {}
-        }
-        self.sync_ime();
-    }
-
-    #[doc = include_str!("runner.doc/about_to_wait.md")]
-    #[doc = include_str!("runner.doc/user_event.md")]
-    fn user_event(&mut self, _event_loop: &ActiveEventLoop, (): ()) {
-        // The acquire thread has an image. The frame this loop skipped for want
-        // of one can now be drawn.
-        self.request_redraw();
-    }
-
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        if self.runtime.poll_resource_tasks() > 0 {
-            self.runtime.request_frame(FrameReason::UiCommit);
-            self.request_redraw();
-        }
-        // A request queued from outside the input path — a stylesheet replaced when a
-        // timer fired, or a background task's result — has to reach the runtime even
-        // though no event arrived, and `apply` runs inside a frame. So an idle loop
-        // owes a turn exactly when something is queued. Deliberately not "when a
-        // registration is still unresolved": a name that matches nothing never
-        // resolves, and waking for that would spin forever over one typo.
-        if self.control.has_pending() {
-            self.runtime.request_frame(FrameReason::UiCommit);
-            self.request_redraw();
-        }
-    }
-}
-
-#[doc = include_str!("runner.doc/init_gpu.md")]
+#[doc = include_str!("../../docs/api/app/runner.doc/init_gpu.md")]
 fn init_gpu(
     window: &Arc<Window>,
+    prefer_opengl: bool,
 ) -> Result<
     (
         wgpu::Surface<'static>,
@@ -752,30 +810,38 @@ fn init_gpu(
         wgpu::Queue,
         wgpu::AdapterInfo,
     ),
-    String,
+    AppError,
 > {
-    let instance = wgpu::Instance::default();
-    let surface = instance
-        .create_surface(window.clone())
-        .map_err(|error| error.to_string())?;
-    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-        compatible_surface: Some(&surface),
-        ..Default::default()
-    }))
-    .map_err(|error| error.to_string())?;
-    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-        // Not `Limits::default()`: those are the desktop tier, and asking for
-        // them on a device that cannot meet one of them fails the whole
-        // request with nothing on screen and nothing to read. The renderer
-        // needs what the adapter has, so ask for exactly that.
-        required_limits: adapter.limits(),
-        ..Default::default()
-    }))
-    .map_err(|error| error.to_string())?;
+    // `layer_runner::init_gpu` carries the full note: what `InstanceFlags`
+    // costs a frame and why it stays on, and what asking for every backend
+    // costs in resident memory and DRM handles. Both decisions live in
+    // `gpu_instance::open`, and with no environment variable set the flags are
+    // bit-for-bit the ones this had.
+    let open_default =
+        || super::gpu_instance::open(|instance| instance.create_surface(window.clone()));
+    let (_instance, surface, adapter) = if prefer_opengl {
+        super::gpu_instance::open_with(
+            [wgpu::Backends::GL],
+            || wgpu::InstanceDescriptor::new_with_display_handle(Box::new(window.clone())),
+            |instance| instance.create_surface(window.clone()),
+        )
+        .ok()
+        .filter(|(_, _, adapter)| adapter.get_info().device_type != wgpu::DeviceType::Cpu)
+        .map_or_else(open_default, Ok)
+    } else {
+        open_default()
+    }?;
+    let (device, queue) = super::gpu_instance::request_device(&adapter)?;
     let size = window.inner_size();
     let mut config = surface
         .get_default_config(&adapter, size.width.max(1), size.height.max(1))
-        .ok_or_else(|| "surface unsupported by adapter".to_owned())?;
+        .ok_or_else(|| AppError::Gpu("surface unsupported by adapter".to_owned()))?;
+    if adapter.get_info().backend == wgpu::Backend::Gl {
+        // OpenGL can use a linear view only when the surface itself uses
+        // the matching unorm format.
+        config.format = config.format.remove_srgb_suffix();
+    }
+    super::gpu_instance::apply_frame_latency(&mut config);
     // Let the root's own `background-color` decide whether the window is see-through,
     // with no API to opt into: `get_default_config` picks `Opaque`, which throws the
     // alpha away at composite time, so an `rgba(…, 0.7)` root would paint correctly
@@ -814,83 +880,7 @@ fn init_gpu(
     Ok((surface, config, device, queue, adapter.get_info()))
 }
 
-#[doc = include_str!("runner.doc/held_after.md")]
-fn held_after(held: PointerButtons, button: PointerButton, state: ElementState) -> PointerButtons {
-    let mut held = held;
-    match state {
-        ElementState::Pressed => held.press(button),
-        ElementState::Released => held.release(button),
-    }
-    held
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A chord is a real state, and winit never reports one: it sends a
-    /// transition per button and leaves the set to whoever is counting. Before
-    /// this the runner counted nothing — a press was always exactly
-    /// `{PRIMARY}` and a release always `{}` — so two buttons held at once was
-    /// unrepresentable and, since the guard dropped every button but the left,
-    /// unreachable as well.
-    #[test]
-    fn two_buttons_held_at_once_are_two_buttons_held_at_once() {
-        let mut held = PointerButtons::new();
-
-        held = held_after(held, PointerButton::Primary, ElementState::Pressed);
-        assert!(held.contains(PointerButton::Primary));
-        assert!(!held.contains(PointerButton::Secondary));
-
-        held = held_after(held, PointerButton::Secondary, ElementState::Pressed);
-        assert!(
-            held.contains(PointerButton::Primary) && held.contains(PointerButton::Secondary),
-            "the second press must join the first, not replace it"
-        );
-
-        // And releasing one leaves the other, which is the half a per-event
-        // guess gets wrong: the set is not "the button that just moved".
-        held = held_after(held, PointerButton::Primary, ElementState::Released);
-        assert!(!held.contains(PointerButton::Primary));
-        assert!(
-            held.contains(PointerButton::Secondary),
-            "the button still down is still down"
-        );
-
-        held = held_after(held, PointerButton::Secondary, ElementState::Released);
-        assert!(held.is_empty());
-    }
-
-    /// The set an event carries is the one held *after* the transition — a
-    /// press includes itself, a release excludes itself. That is what
-    /// `PointerEvent::buttons` means, and it is why the press half of the old
-    /// hardcoding (`{PRIMARY}`, then `{}`) looked right for one button.
-    #[test]
-    fn the_set_is_taken_after_the_transition_not_before() {
-        let pressed = held_after(
-            PointerButtons::new(),
-            PointerButton::Middle,
-            ElementState::Pressed,
-        );
-        assert!(pressed.contains(PointerButton::Middle));
-
-        let released = held_after(pressed, PointerButton::Middle, ElementState::Released);
-        assert!(released.is_empty());
-    }
-
-    /// A release of a button that was never pressed — the window was not
-    /// focused when it went down, or the fold started mid-chord — must not
-    /// corrupt the set. It clears a bit that is already clear.
-    #[test]
-    fn releasing_an_unheld_button_is_inert() {
-        let mut held = PointerButtons::new();
-        held.press(PointerButton::Primary);
-        let after = held_after(held, PointerButton::Forward, ElementState::Released);
-        assert_eq!(after, held);
-    }
-}
-
-#[doc = include_str!("runner.doc/gpu_diagnostic.md")]
+/// An informational diagnostic naming the adapter and backend wgpu chose.
 fn gpu_diagnostic(info: &wgpu::AdapterInfo) -> Diagnostic {
     // Reported on success, because "which backend did wgpu settle on" is the
     // first question behind a slow or blank surface and nothing else answers it:

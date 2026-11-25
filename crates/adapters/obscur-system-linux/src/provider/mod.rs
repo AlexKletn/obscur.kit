@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+#![doc = include_str!("../../docs/api/provider/mod.doc/_module.md")]
 mod appearance_source;
 pub use appearance_source::AppearanceSource;
 mod gtk_appearance_provider;
@@ -16,3 +16,6 @@ mod portal_appearance_provider;
 pub use portal_appearance_provider::PortalAppearanceProvider;
 mod qt_appearance_provider;
 pub use qt_appearance_provider::QtAppearanceProvider;
+
+mod adwaita_stylesheet;
+mod adwaita_theme;

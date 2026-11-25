@@ -1,42 +1,72 @@
-#![doc = include_str!("canvas.doc/_module.md")]
+#![doc = include_str!("../../docs/api/view/canvas.doc/_module.md")]
 
+use obscur_diagnostics::Diagnostic;
 use obscur_identity::InternedSymbol;
 
 use super::{ViewProperty, ViewValue};
 
-#[doc = include_str!("canvas.doc/CanvasPaint.md")]
-#[derive(Debug, Clone, Copy)]
+#[doc = include_str!("../../docs/api/view/canvas.doc/CanvasPaint.md")]
+#[derive(Clone, Copy)]
 pub struct CanvasPaint<'a> {
-    #[doc = include_str!("canvas.doc/paint_props.md")]
+    /// The properties of the node being drawn.
     props: &'a [ViewProperty],
-    #[doc = include_str!("canvas.doc/paint_elapsed.md")]
+    /// Seconds since the host started driving the clock.
     elapsed: f32,
+    /// Optional diagnostic callback supplied by the host.
+    report: Option<&'a (dyn Fn(Diagnostic) + Sync)>,
+}
+
+impl std::fmt::Debug for CanvasPaint<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CanvasPaint")
+            .field("props", &self.props)
+            .field("elapsed", &self.elapsed)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<'a> CanvasPaint<'a> {
-    #[doc = include_str!("canvas.doc/paint_new.md")]
+    /// The context for one node's paint.
     #[must_use]
     pub const fn new(props: &'a [ViewProperty], elapsed: f32) -> Self {
-        Self { props, elapsed }
+        Self {
+            props,
+            elapsed,
+            report: None,
+        }
     }
 
-    #[doc = include_str!("canvas.doc/paint_props_2.md")]
+    /// Installs a callback for diagnostics emitted by this paint invocation.
+    #[must_use]
+    pub fn with_report_handler(mut self, report: &'a (dyn Fn(Diagnostic) + Sync)) -> Self {
+        self.report = Some(report);
+        self
+    }
+
+    /// Reports a diagnostic to the host when a callback is installed.
+    pub fn report(&self, diagnostic: Diagnostic) {
+        if let Some(report) = self.report {
+            report(diagnostic);
+        }
+    }
+
+    /// The properties of the node being drawn — one painter serves every node that names it, and this is how it tells them apart.
     #[must_use]
     pub const fn props(&self) -> &'a [ViewProperty] {
         self.props
     }
 
-    #[doc = include_str!("canvas.doc/paint_elapsed_2.md")]
+    /// Seconds since the host started driving the clock, for a canvas that draws a moving thing.
     #[must_use]
     pub const fn elapsed(&self) -> f32 {
         self.elapsed
     }
 }
 
-#[doc = include_str!("canvas.doc/CANVAS_PAINTER.md")]
+/// The reserved property naming a node's painter.
 pub const CANVAS_PAINTER: InternedSymbol = InternedSymbol::from_raw(0x0000_0401);
 
-#[doc = include_str!("canvas.doc/canvas_painter.md")]
+/// The painter a node names, or [`None`] when it names none or names it wrongly.
 #[must_use]
 pub fn canvas_painter(props: &[ViewProperty]) -> Option<InternedSymbol> {
     props.iter().find_map(|prop| {
@@ -47,7 +77,7 @@ pub fn canvas_painter(props: &[ViewProperty]) -> Option<InternedSymbol> {
     })
 }
 
-#[doc = include_str!("canvas.doc/canvas_painter_prop.md")]
+/// The property that names `painter` — the writing half of the join [`canvas_painter`] reads.
 #[must_use]
 pub fn canvas_painter_prop(painter: InternedSymbol) -> ViewProperty {
     ViewProperty::new(CANVAS_PAINTER, ViewValue::Int(i64::from(painter.raw())))

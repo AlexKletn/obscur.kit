@@ -1,10 +1,14 @@
-#![doc = include_str!("grid_placement.doc/_module.md")]
+#![doc = include_str!("../../docs/api/compiler/grid_placement.doc/_module.md")]
 
 use super::value_lowering::css_wide_keyword;
 use crate::parser::ParsedValue;
 use obscur_style::property::{GridLineValue, PropertyValue, layout_keyword};
 
-#[doc = include_str!("grid_placement.doc/grid_line_edge.md")]
+/// Lowers one `<grid-line>` edge from a component group: `auto`, a non-zero
+/// integer line index (`3`, `-1`), `span N` (`N` a positive integer, in either
+/// order `span 2` / `2 span`), or a `<custom-ident>` line name
+/// (`sidebar-start`) with an optional non-zero occurrence in either order
+/// (`sidebar-start 2` or `-2 sidebar-start`). Returns [`None`] for anything else.
 pub(super) fn grid_line_edge(group: &[ParsedValue]) -> Option<GridLineValue> {
     match group {
         [ParsedValue::Keyword(keyword)] if keyword.eq_ignore_ascii_case("auto") => {
@@ -19,16 +23,30 @@ pub(super) fn grid_line_edge(group: &[ParsedValue]) -> Option<GridLineValue> {
             Some(GridLineValue::Named((**keyword).into()))
         }
         [one] => grid_line_integer(one).map(GridLineValue::Line),
-        // `span N` / `N span`: exactly one `span` keyword and one positive integer.
+        // Two tokens describe a numeric span or a numbered line name.
         [a, b] => {
-            let span = grid_line_span(a, b).or_else(|| grid_line_span(b, a))?;
-            Some(GridLineValue::Span(span))
+            if let Some(span) = grid_line_span(a, b).or_else(|| grid_line_span(b, a)) {
+                return Some(GridLineValue::Span(span));
+            }
+            match (a, b) {
+                (ParsedValue::Keyword(name), index) | (index, ParsedValue::Keyword(name))
+                    if css_wide_keyword(name).is_none()
+                        && !name.eq_ignore_ascii_case("auto")
+                        && !name.eq_ignore_ascii_case("span")
+                        && !name.eq_ignore_ascii_case("default") =>
+                {
+                    let occurrence = std::num::NonZeroI32::new(grid_line_integer(index)?)?;
+                    Some(GridLineValue::NamedOccurrence((**name).into(), occurrence))
+                }
+                _ => None,
+            }
         }
         _ => None,
     }
 }
 
-#[doc = include_str!("grid_placement.doc/grid_line_integer.md")]
+/// Reads a non-zero integer line index from a single component (`3`, `-1`); a
+/// zero or non-integral number is not a valid line and yields [`None`].
 #[allow(clippy::cast_possible_truncation)]
 fn grid_line_integer(value: &ParsedValue) -> Option<i32> {
     match value {
@@ -37,7 +55,8 @@ fn grid_line_integer(value: &ParsedValue) -> Option<i32> {
     }
 }
 
-#[doc = include_str!("grid_placement.doc/grid_line_span.md")]
+/// Reads a `span N` count when `keyword` is `span` and `count` is a positive
+/// integer, as a `u16`; [`None`] otherwise.
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn grid_line_span(keyword: &ParsedValue, count: &ParsedValue) -> Option<u16> {
     let ParsedValue::Keyword(keyword) = keyword else {
@@ -54,7 +73,9 @@ fn grid_line_span(keyword: &ParsedValue, count: &ParsedValue) -> Option<u16> {
     }
 }
 
-#[doc = include_str!("grid_placement.doc/lower_grid_line.md")]
+/// Lowers a `grid-column-start` / `-end` / `grid-row-start` / `-end` longhand into
+/// a [`PropertyValue::GridLine`]. The CSS-wide keywords (`inherit` / `initial` /
+/// `unset`) take priority; otherwise the value is a single `<grid-line>` edge.
 pub(super) fn lower_grid_line(values: &[ParsedValue]) -> Option<PropertyValue> {
     if let [ParsedValue::Keyword(keyword)] = values
         && let Some(wide) = css_wide_keyword(keyword)
@@ -64,7 +85,7 @@ pub(super) fn lower_grid_line(values: &[ParsedValue]) -> Option<PropertyValue> {
     grid_line_edge(values).map(PropertyValue::GridLine)
 }
 
-#[doc = include_str!("grid_placement.doc/lower_grid_auto_flow.md")]
+#[doc = include_str!("../../docs/api/compiler/grid_placement.doc/lower_grid_auto_flow.md")]
 pub(super) fn lower_grid_auto_flow(values: &[ParsedValue]) -> Option<PropertyValue> {
     // A lone CSS-wide keyword (`inherit` / `initial` / `unset`) wins.
     if let [ParsedValue::Keyword(keyword)] = values
@@ -95,7 +116,7 @@ pub(crate) mod tests {
 
     use obscur_style::property::{GridLineValue, PropertyId, PropertyValue, layout_keyword};
 
-    #[doc = include_str!("grid_placement.doc/grid_lines.md")]
+    /// The `(PropertyId, GridLineValue)` pairs a compiled declaration list carries.
     pub(crate) fn grid_lines(compiled: &[CompiledDeclaration]) -> Vec<(PropertyId, GridLineValue)> {
         compiled
             .iter()

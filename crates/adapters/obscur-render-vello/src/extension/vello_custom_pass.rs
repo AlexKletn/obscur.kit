@@ -1,6 +1,6 @@
-#![doc = include_str!("vello_custom_pass.doc/_module.md")]
+//! The adapter-side descriptor of a trusted custom render pass (spec §5.3).
 
-#[doc = include_str!("vello_custom_pass.doc/VelloCustomPass.md")]
+#[doc = include_str!("../../docs/api/extension/vello_custom_pass.doc/VelloCustomPass.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VelloCustomPass {
     name: Box<str>,
@@ -8,7 +8,7 @@ pub struct VelloCustomPass {
 }
 
 impl VelloCustomPass {
-    #[doc = include_str!("vello_custom_pass.doc/new.md")]
+    #[doc = include_str!("../../docs/api/extension/vello_custom_pass.doc/new.md")]
     #[must_use]
     pub fn new(name: impl Into<Box<str>>) -> Self {
         Self {
@@ -17,7 +17,7 @@ impl VelloCustomPass {
         }
     }
 
-    #[doc = include_str!("vello_custom_pass.doc/device_free.md")]
+    /// Creates a custom pass that does not require a GPU device.
     #[must_use]
     pub fn device_free(name: impl Into<Box<str>>) -> Self {
         Self {
@@ -26,19 +26,19 @@ impl VelloCustomPass {
         }
     }
 
-    #[doc = include_str!("vello_custom_pass.doc/name.md")]
+    /// The pass's name.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    #[doc = include_str!("vello_custom_pass.doc/requires_device.md")]
+    /// Whether this pass needs a GPU device to run.
     #[must_use]
     pub const fn requires_device(&self) -> bool {
         self.requires_device
     }
 
-    #[doc = include_str!("vello_custom_pass.doc/is_permitted.md")]
+    #[doc = include_str!("../../docs/api/extension/vello_custom_pass.doc/is_permitted.md")]
     #[must_use]
     pub const fn is_permitted(&self, has_device: bool) -> bool {
         !self.requires_device || has_device

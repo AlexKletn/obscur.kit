@@ -1,4 +1,6 @@
-#![doc = include_str!("layout_classifier.doc/_module.md")]
+//! Deciding what this frame's layout phase must touch: [`LayoutClassifier`].
+
+use super::layout_phase::LayoutPhase;
 
 use obscur_identity::NodeId;
 use obscur_layout::invalidation::LayoutInvalidation;
@@ -11,30 +13,22 @@ use crate::frame::{FrameContext, FrameReason};
 use crate::invalidation::{Invalidation, InvalidationReason, InvalidationRouter};
 use crate::orchestration::ComputedStyles;
 
-#[doc = include_str!("layout_classifier.doc/LayoutPhase.md")]
-pub(crate) enum LayoutPhase {
-    #[doc = include_str!("layout_classifier.doc/Skip.md")]
-    Skip,
-    #[doc = include_str!("layout_classifier.doc/Full.md")]
-    Full,
-    #[doc = include_str!("layout_classifier.doc/Invalidated.md")]
-    Invalidated(LayoutInvalidation),
-}
-
-#[doc = include_str!("layout_classifier.doc/LayoutClassifier.md")]
+#[doc = include_str!("../../docs/api/runtime/layout_classifier.doc/LayoutClassifier.md")]
 pub(crate) struct LayoutClassifier<'a> {
-    #[doc = include_str!("layout_classifier.doc/last_inputs.md")]
+    /// The non-style inputs the retained boxes were arranged under, or `None`
+    /// until the first layout runs.
     last_inputs: Option<&'a LayoutInputs>,
-    #[doc = include_str!("layout_classifier.doc/current_inputs.md")]
+    /// This frame's non-style inputs, to compare them against.
     current_inputs: &'a LayoutInputs,
-    #[doc = include_str!("layout_classifier.doc/retained.md")]
+    /// The computed styles the retained boxes were laid out from.
     retained: &'a ComputedStyles,
-    #[doc = include_str!("layout_classifier.doc/overlaid.md")]
+    /// The pure cascade values the motion overlay stashed before overwriting
+    /// them, which for an overlay-only node *is* its previous style.
     overlaid: &'a ComputedStyles,
 }
 
 impl<'a> LayoutClassifier<'a> {
-    #[doc = include_str!("layout_classifier.doc/new.md")]
+    /// Bundles what one classification compares this frame against.
     pub(crate) fn new(
         last_inputs: Option<&'a LayoutInputs>,
         current_inputs: &'a LayoutInputs,
@@ -49,7 +43,7 @@ impl<'a> LayoutClassifier<'a> {
         }
     }
 
-    #[doc = include_str!("layout_classifier.doc/classify.md")]
+    #[doc = include_str!("../../docs/api/runtime/layout_classifier.doc/classify.md")]
     pub(crate) fn classify(
         &self,
         plan: FramePlan,
@@ -164,7 +158,7 @@ impl<'a> LayoutClassifier<'a> {
     }
 }
 
-#[doc = include_str!("layout_classifier.doc/scroll_reaches_layout.md")]
+#[doc = include_str!("../../docs/api/runtime/layout_classifier.doc/scroll_reaches_layout.md")]
 fn scroll_reaches_layout(computed: &ComputedStyles) -> bool {
     computed.values().any(|style| {
         matches!(
@@ -174,7 +168,7 @@ fn scroll_reaches_layout(computed: &ComputedStyles) -> bool {
     })
 }
 
-#[doc = include_str!("layout_classifier.doc/layout_affecting_changed.md")]
+#[doc = include_str!("../../docs/api/runtime/layout_classifier.doc/layout_affecting_changed.md")]
 fn layout_affecting_changed(old: Option<&ComputedStyle>, new: &ComputedStyle) -> bool {
     let Some(old) = old else {
         return true;

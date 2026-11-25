@@ -1,51 +1,54 @@
-#![doc = include_str!("grid_template.doc/_module.md")]
+//! `GridTemplate`: the column and row track lists of a grid.
 
-use super::{TrackList, TrackSize};
+use obscur_identity::{FastMap, NodeId};
 
-#[doc = include_str!("grid_template.doc/GridTemplate.md")]
+use super::{RepeatedGridLine, TrackList, TrackSize};
+
+#[doc = include_str!("../../../docs/api/algorithm/grid/grid_template.doc/GridTemplate.md")]
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct GridTemplate {
     columns: TrackList,
     rows: TrackList,
     auto_columns: Vec<TrackSize>,
     auto_rows: Vec<TrackSize>,
+    area_columns: usize,
+    area_rows: usize,
+    repeated_lines: FastMap<NodeId, [Option<RepeatedGridLine>; 4]>,
 }
 
 impl GridTemplate {
-    #[doc = include_str!("grid_template.doc/new.md")]
+    #[doc = include_str!("../../../docs/api/algorithm/grid/grid_template.doc/new.md")]
     #[must_use]
     pub fn new(columns: Vec<TrackSize>, rows: Vec<TrackSize>) -> Self {
         Self {
             columns: TrackList::from_tracks(columns),
             rows: TrackList::from_tracks(rows),
-            auto_columns: Vec::new(),
-            auto_rows: Vec::new(),
+            ..Self::default()
         }
     }
 
-    #[doc = include_str!("grid_template.doc/from_track_lists.md")]
+    /// Builds a template from column and row [`TrackList`]s (each of which may
+    /// carry an auto-repeat).
     #[must_use]
     pub fn from_track_lists(columns: TrackList, rows: TrackList) -> Self {
         Self {
             columns,
             rows,
-            auto_columns: Vec::new(),
-            auto_rows: Vec::new(),
+            ..Self::default()
         }
     }
 
-    #[doc = include_str!("grid_template.doc/columns_only.md")]
+    /// Builds a columns-only template; every row is implicit (auto).
     #[must_use]
     pub fn columns_only(columns: Vec<TrackSize>) -> Self {
         Self {
             columns: TrackList::from_tracks(columns),
             rows: TrackList::default(),
-            auto_columns: Vec::new(),
-            auto_rows: Vec::new(),
+            ..Self::default()
         }
     }
 
-    #[doc = include_str!("grid_template.doc/with_auto_tracks.md")]
+    #[doc = include_str!("../../../docs/api/algorithm/grid/grid_template.doc/with_auto_tracks.md")]
     #[must_use]
     pub fn with_auto_tracks(
         mut self,
@@ -57,25 +60,96 @@ impl GridTemplate {
         self
     }
 
-    #[doc = include_str!("grid_template.doc/columns.md")]
+    /// Sets the explicit grid dimensions established by its named areas.
+    #[must_use]
+    pub const fn with_area_dimensions(mut self, columns: usize, rows: usize) -> Self {
+        self.area_columns = columns;
+        self.area_rows = rows;
+        self
+    }
+
+    /// Returns the explicit column and row counts required by named areas.
+    #[must_use]
+    pub const fn area_dimensions(&self) -> (usize, usize) {
+        (self.area_columns, self.area_rows)
+    }
+
+    /// Sets deferred column-start, column-end, row-start and row-end lookups.
+    pub fn set_repeated_lines(&mut self, item: NodeId, lines: [Option<RepeatedGridLine>; 4]) {
+        self.repeated_lines.insert(item, lines);
+    }
+
+    pub(in crate::algorithm) fn resolve_repeated_lines(
+        &self,
+        items: &[crate::algorithm::LayoutChild],
+        expanded_columns: usize,
+        expanded_rows: usize,
+    ) -> Option<Vec<crate::algorithm::LayoutChild>> {
+        if self.repeated_lines.is_empty() {
+            return None;
+        }
+        let resolve = |line: &RepeatedGridLine, axis: &TrackList, expanded: usize| {
+            let pattern = axis.auto_repeat()?.tracks().len();
+            let expanded_repeat =
+                expanded.checked_sub(axis.leading().len() + axis.trailing().len())?;
+            line.resolve(axis.leading().len(), pattern, expanded_repeat)
+        };
+        let mut resolved = items.to_vec();
+        for item in &mut resolved {
+            let Some([col_start, col_end, row_start, row_end]) =
+                self.repeated_lines.get(&item.node)
+            else {
+                continue;
+            };
+            let placement = &mut item.style.grid_placement;
+            for (line, edge, axis, expanded) in [
+                (
+                    col_start,
+                    &mut placement.column_start,
+                    &self.columns,
+                    expanded_columns,
+                ),
+                (
+                    col_end,
+                    &mut placement.column_end,
+                    &self.columns,
+                    expanded_columns,
+                ),
+                (
+                    row_start,
+                    &mut placement.row_start,
+                    &self.rows,
+                    expanded_rows,
+                ),
+                (row_end, &mut placement.row_end, &self.rows, expanded_rows),
+            ] {
+                if let Some(value) = line.as_ref().and_then(|line| resolve(line, axis, expanded)) {
+                    *edge = value;
+                }
+            }
+        }
+        Some(resolved)
+    }
+
+    /// The column track list.
     #[must_use]
     pub const fn columns(&self) -> &TrackList {
         &self.columns
     }
 
-    #[doc = include_str!("grid_template.doc/rows.md")]
+    /// The row track list (may be empty → all rows implicit/auto).
     #[must_use]
     pub const fn rows(&self) -> &TrackList {
         &self.rows
     }
 
-    #[doc = include_str!("grid_template.doc/auto_columns.md")]
+    /// The `grid-auto-columns` sizes for implicit column tracks (empty → `auto`).
     #[must_use]
     pub fn auto_columns(&self) -> &[TrackSize] {
         &self.auto_columns
     }
 
-    #[doc = include_str!("grid_template.doc/auto_rows.md")]
+    /// The `grid-auto-rows` sizes for implicit row tracks (empty → `auto`).
     #[must_use]
     pub fn auto_rows(&self) -> &[TrackSize] {
         &self.auto_rows

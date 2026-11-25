@@ -1,4 +1,4 @@
-#![doc = include_str!("flex_cross_size.doc/_module.md")]
+#![doc = include_str!("../../docs/api/algorithm/flex_cross_size.doc/_module.md")]
 
 use obscur_geometry::{BoxConstraints, Size};
 
@@ -7,7 +7,7 @@ use crate::model::LayoutStyle;
 use super::ChildMeasurer;
 use super::flex_axis_bounds::{axis_bp, clamp_cross};
 
-#[doc = include_str!("flex_cross_size.doc/cross_item_size.md")]
+#[doc = include_str!("../../docs/api/algorithm/flex_cross_size.doc/cross_item_size.md")]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn cross_item_size(
     stretch: bool,
@@ -22,9 +22,9 @@ pub(super) fn cross_item_size(
 ) -> f32 {
     let raw = if stretch {
         let cross_dim = if is_row {
-            cross_style.height
+            cross_style.height.clone()
         } else {
-            cross_style.width
+            cross_style.width.clone()
         };
         cross_dim
             .resolve(container_cross)

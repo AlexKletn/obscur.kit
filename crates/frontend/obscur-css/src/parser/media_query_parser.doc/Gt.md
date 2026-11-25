@@ -1,1 +1,0 @@
-`>` strictly greater than.

@@ -86,7 +86,7 @@ fn auto_fill_repetition_count_accounts_for_the_gap() {
         VW,
         VW,
         ".g{display:grid;width:500px;height:200px;\
-            grid-template-columns:repeat(auto-fill,100px);gap:20px} \
+            grid-template-columns:repeat(auto-fill,100px);column-gap:20px} \
          .a,.b,.c,.d,.e{height:10px}",
         &grid(&["a", "b", "c", "d", "e"]),
     );
@@ -238,4 +238,23 @@ fn an_infinitely_growable_track_absorbs_the_whole_max_content_remainder() {
     approx(gw, 100.0, "the grid's used inline size is 100px");
     approx(x2, 0.0, "item 2 starts at column 1");
     approx(w2, 100.0, "item 2 spans both columns: 10 + 90");
+}
+
+#[doc = include_str!("spec_ch4_grid.doc/normal_and_flex_start_distribute_auto_rows_differently.md")]
+#[test]
+fn normal_and_flex_start_distribute_auto_rows_differently() {
+    for (alignment, second_row) in [("normal", 150.0), ("flex-start", 50.0)] {
+        let rt = drive(
+            VW,
+            VW,
+            &format!(
+                ".g{{display:grid;grid-template-rows:auto auto;width:100px;height:300px;
+                      align-content:{alignment}}}
+                 .a,.b{{height:50px}}"
+            ),
+            &grid(&["a", "b"]),
+        );
+        let (_, y, _, _) = geom(&rt, at(&rt, &[0, 1]));
+        approx(y, second_row, alignment);
+    }
 }

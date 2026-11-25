@@ -1,17 +1,17 @@
-#![doc = include_str!("view_value.doc/_module.md")]
+#![doc = include_str!("../../docs/api/view/view_value.doc/_module.md")]
 
-#[doc = include_str!("view_value.doc/ViewValue.md")]
+#[doc = include_str!("../../docs/api/view/view_value.doc/ViewValue.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum ViewValue {
-    #[doc = include_str!("view_value.doc/Null.md")]
+    /// Absence of a value.
     Null,
-    #[doc = include_str!("view_value.doc/Bool.md")]
+    /// A boolean value.
     Bool(bool),
-    #[doc = include_str!("view_value.doc/Int.md")]
+    /// A signed integer value.
     Int(i64),
-    #[doc = include_str!("view_value.doc/Float.md")]
+    /// A floating-point value. Prevents deriving `Eq`/`Hash` on this enum.
     Float(f64),
-    #[doc = include_str!("view_value.doc/Text.md")]
+    /// An owned text value.
     Text(Box<str>),
 }
 

@@ -1,4 +1,5 @@
-#![doc = include_str!("virtual_lists.doc/_module.md")]
+//! [`VirtualLists`]: the registered `<VirtualFor>` row builders, and what each
+//! list realized on the last frame.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -8,53 +9,75 @@ use obscur_layout::model::Dimension;
 use obscur_layout::virtualization::{OverscanPolicy, SizeEstimator, VirtualLayout};
 use obscur_tree::tree::RetainedTree;
 use obscur_view::view::{
-    VIRTUAL_SPACER, View, ViewNode, realize_virtual_collections, realize_virtual_lists,
-    virtual_scroll_resets,
+    VIRTUAL_SPACER, View, ViewNode, has_inline_virtual_rows, realize_virtual_collections,
+    realize_virtual_lists, virtual_scroll_resets,
 };
 
 use super::ScrollOffsets;
 use crate::orchestration::{LayoutBoxes, LayoutStyles};
 use obscur_geometry::Point;
 
-#[doc = include_str!("virtual_lists.doc/VIRTUAL_OVERSCAN.md")]
+/// Overscan for a realized `<VirtualFor>` window — extra rows materialized past
+/// each viewport edge so a scroll reveals laid-out rows rather than blanks (spec
+/// §4.9 *overscan*).
 const VIRTUAL_OVERSCAN: usize = 3;
 
-#[doc = include_str!("virtual_lists.doc/ASSUMED_VIRTUAL_ITEM_COUNT.md")]
+/// The item count a `<VirtualFor>` window is sized against when the collection's
+/// real length is unknown at build time (spec §4.9). Deliberately far larger
+/// than any viewport can show, so it never bounds the window: the window is
+/// bounded by the viewport, which is the whole point of virtualization.
 const ASSUMED_VIRTUAL_ITEM_COUNT: usize = 1_000_000;
 
-#[doc = include_str!("virtual_lists.doc/VirtualLists.md")]
+#[doc = include_str!("../../docs/api/runtime/virtual_lists.doc/VirtualLists.md")]
 pub(crate) struct VirtualLists {
-    #[doc = include_str!("virtual_lists.doc/builders.md")]
+    /// Row builders for registered virtual lists, keyed by the name a marker names.
+    /// They live here rather than in the `View` because a `View` is plain data.
     builders: FastMap<InternedSymbol, Box<dyn FnMut(usize) -> ViewNode>>,
-    #[doc = include_str!("virtual_lists.doc/containers.md")]
+    #[doc = include_str!("../../docs/api/runtime/virtual_lists.doc/containers.md")]
     containers: FastMap<InternedSymbol, NodeId>,
-    #[doc = include_str!("virtual_lists.doc/windows.md")]
+    /// The window each virtual list realized last frame, so a host can ask what is
+    /// actually built.
     windows: FastMap<InternedSymbol, core::ops::Range<usize>>,
-    #[doc = include_str!("virtual_lists.doc/row_extents.md")]
+    #[doc = include_str!("../../docs/api/runtime/virtual_lists.doc/row_extents.md")]
     row_extents: FastMap<InternedSymbol, f32>,
-    #[doc = include_str!("virtual_lists.doc/scroll_reset_seen.md")]
+    /// The latest logical item count for each realized list.
+    item_counts: FastMap<InternedSymbol, usize>,
+    /// The scroll-reset token each virtual list last presented. When a frame's marker
+    /// carries a different token, the list's content has been replaced, so its
+    /// container's `scroll_top` is zeroed before the window is computed — the offset
+    /// belonged to the old content. The app is the only party that can know the model
+    /// changed, and the view is its only channel here, so it drives this.
     scroll_reset_seen: FastMap<InternedSymbol, u64>,
-    #[doc = include_str!("virtual_lists.doc/row_click_handlers.md")]
+    /// A click handler per virtual list, run when a trusted click lands on one of its
+    /// rows with the resolved model index and the click count (1 single, 2 double).
+    /// This is how a virtualized row becomes clickable at all: every row realized from
+    /// one builder shares a single command symbol, so a symbol cannot say *which* row
+    /// was hit — only the geometry can, and only the runtime has it.
     row_click_handlers: FastMap<InternedSymbol, Box<dyn FnMut(usize, u32)>>,
-    #[doc = include_str!("virtual_lists.doc/row_hold_handlers.md")]
+    /// Long-press handlers for the rows of each virtual list, keyed by list id
+    /// (spec §4.9, §6.16). Same reason the click handlers exist: a realized row
+    /// cannot carry a per-row binding, so only the runtime can say which row a
+    /// held finger is on.
     row_hold_handlers: FastMap<InternedSymbol, Box<dyn FnMut(usize)>>,
 }
 
 impl VirtualLists {
-    #[doc = include_str!("virtual_lists.doc/new.md")]
+    /// No registered lists and nothing realized — the state of a runtime whose
+    /// view has never carried a `<VirtualFor>` marker.
     pub(crate) fn new() -> Self {
         Self {
             builders: HashMap::default(),
             containers: HashMap::default(),
             windows: HashMap::default(),
             row_extents: HashMap::default(),
+            item_counts: HashMap::default(),
             scroll_reset_seen: HashMap::default(),
             row_click_handlers: HashMap::default(),
             row_hold_handlers: HashMap::default(),
         }
     }
 
-    #[doc = include_str!("virtual_lists.doc/register.md")]
+    /// Registers the row builder list `id` realizes through.
     pub(crate) fn register(
         &mut self,
         id: InternedSymbol,
@@ -63,27 +86,60 @@ impl VirtualLists {
         self.builders.insert(id, build);
     }
 
-    #[doc = include_str!("virtual_lists.doc/on_row_click.md")]
+    /// Registers the handler run when a trusted click resolves to a row of list
+    /// `id`.
     pub(crate) fn on_row_click(&mut self, id: InternedSymbol, handler: Box<dyn FnMut(usize, u32)>) {
         self.row_click_handlers.insert(id, handler);
     }
 
-    #[doc = include_str!("virtual_lists.doc/on_row_long_press.md")]
+    /// Registers the handler run when a recognized long press resolves to a row of
+    /// list `id`.
     pub(crate) fn on_row_long_press(&mut self, id: InternedSymbol, handler: Box<dyn FnMut(usize)>) {
         self.row_hold_handlers.insert(id, handler);
     }
 
-    #[doc = include_str!("virtual_lists.doc/container.md")]
+    #[doc = include_str!("../../docs/api/runtime/virtual_lists.doc/container.md")]
     pub(crate) fn container(&self, id: InternedSymbol) -> Option<NodeId> {
         self.containers.get(&id).copied()
     }
 
-    #[doc = include_str!("virtual_lists.doc/window.md")]
+    /// The item range list `id` realized on the last frame.
     pub(crate) fn window(&self, id: InternedSymbol) -> Option<core::ops::Range<usize>> {
         self.windows.get(&id).cloned()
     }
 
-    #[doc = include_str!("virtual_lists.doc/fire_row_click.md")]
+    /// Reports whether scrolling the container changes its materialized range.
+    pub(crate) fn window_changes_at(&self, node: NodeId, offset: f32, viewport: f32) -> bool {
+        self.containers.iter().any(|(&id, &container)| {
+            if container != node {
+                return false;
+            }
+            let (Some(&extent), Some(&count), Some(current)) = (
+                self.row_extents.get(&id),
+                self.item_counts.get(&id),
+                self.windows.get(&id),
+            ) else {
+                return false;
+            };
+            *current != Self::window_for(offset, viewport, count, extent)
+        })
+    }
+
+    fn window_for(
+        offset: f32,
+        viewport: f32,
+        count: usize,
+        extent: f32,
+    ) -> core::ops::Range<usize> {
+        let layout = VirtualLayout::new(
+            SizeEstimator::new(extent),
+            OverscanPolicy::symmetric(VIRTUAL_OVERSCAN),
+        );
+        let range = layout.visible_range(offset, viewport, count);
+        range.start()..range.end()
+    }
+
+    #[doc = include_str!("../../docs/api/runtime/virtual_lists.doc/fire_row_click.md")]
     pub(crate) fn fire_row_click(&mut self, id: InternedSymbol, index: usize, clicks: u32) -> bool {
         if let Some(handler) = self.row_click_handlers.get_mut(&id) {
             handler(index, clicks);
@@ -92,14 +148,15 @@ impl VirtualLists {
         false
     }
 
-    #[doc = include_str!("virtual_lists.doc/fire_row_hold.md")]
+    /// Runs list `id`'s long-press handler for model `index`, if one is
+    /// registered.
     pub(crate) fn fire_row_hold(&mut self, id: InternedSymbol, index: usize) {
         if let Some(handler) = self.row_hold_handlers.get_mut(&id) {
             handler(index);
         }
     }
 
-    #[doc = include_str!("virtual_lists.doc/index_at.md")]
+    #[doc = include_str!("../../docs/api/runtime/virtual_lists.doc/index_at.md")]
     pub(crate) fn index_at(
         &self,
         screen: Point,
@@ -138,7 +195,7 @@ impl VirtualLists {
         None
     }
 
-    #[doc = include_str!("virtual_lists.doc/holdable_row_at.md")]
+    #[doc = include_str!("../../docs/api/runtime/virtual_lists.doc/holdable_row_at.md")]
     pub(crate) fn holdable_row_at(
         &self,
         screen: Point,
@@ -149,7 +206,7 @@ impl VirtualLists {
             .filter(|(id, _)| self.row_hold_handlers.contains_key(id))
     }
 
-    #[doc = include_str!("virtual_lists.doc/track_containers.md")]
+    #[doc = include_str!("../../docs/api/runtime/virtual_lists.doc/track_containers.md")]
     pub(crate) fn track_containers(&mut self, tree: &RetainedTree) {
         for (_, node) in tree.iter() {
             if node.kind().component_id() != Some(VIRTUAL_SPACER) {
@@ -166,7 +223,7 @@ impl VirtualLists {
         }
     }
 
-    #[doc = include_str!("virtual_lists.doc/realize.md")]
+    #[doc = include_str!("../../docs/api/runtime/virtual_lists.doc/realize.md")]
     pub(crate) fn realize(
         &mut self,
         view: &View,
@@ -198,23 +255,21 @@ impl VirtualLists {
         // The row extent each list realizes against, captured here so a later click
         // on a row can be resolved to a model index.
         let mut extents: FastMap<InternedSymbol, f32> = HashMap::default();
-        let with_lists = if builders.is_empty() {
+        let mut counts: FastMap<InternedSymbol, usize> = HashMap::default();
+        let with_lists = if builders.is_empty() && !has_inline_virtual_rows(view.root().nodes()) {
             view.clone()
         } else {
             let picked = RefCell::new(&mut chosen);
             let sized = RefCell::new(&mut extents);
+            let counted = RefCell::new(&mut counts);
             realize_virtual_lists(
                 view.clone(),
                 &|id, count, extent| {
                     let offset = scrolls.get(&id).copied().unwrap_or(0.0);
-                    let layout = VirtualLayout::new(
-                        SizeEstimator::new(extent),
-                        OverscanPolicy::symmetric(VIRTUAL_OVERSCAN),
-                    );
-                    let range = layout.visible_range(offset, viewport_height, count);
-                    let range = range.start()..range.end();
+                    let range = Self::window_for(offset, viewport_height, count, extent);
                     picked.borrow_mut().insert(id, range.clone());
                     sized.borrow_mut().insert(id, extent);
+                    counted.borrow_mut().insert(id, count);
                     range
                 },
                 &mut |id, index| builders.get_mut(&id).map(|build| build(index)),
@@ -223,12 +278,13 @@ impl VirtualLists {
         self.builders = builders;
         self.windows.extend(chosen);
         self.row_extents.extend(extents);
+        self.item_counts.extend(counts);
         realize_virtual_collections(with_lists, &|extent| {
             Self::template_window_len(extent, viewport_height, viewport_scroll_y)
         })
     }
 
-    #[doc = include_str!("virtual_lists.doc/size_spacers.md")]
+    #[doc = include_str!("../../docs/api/runtime/virtual_lists.doc/size_spacers.md")]
     pub(crate) fn size_spacers(tree: &RetainedTree, layout_styles: &mut LayoutStyles) {
         let spacers: Vec<(NodeId, f32)> = tree
             .iter()
@@ -245,7 +301,7 @@ impl VirtualLists {
         }
     }
 
-    #[doc = include_str!("virtual_lists.doc/dump_geometry.md")]
+    #[doc = include_str!("../../docs/api/runtime/virtual_lists.doc/dump_geometry.md")]
     pub(crate) fn dump_geometry(
         &self,
         tree: &RetainedTree,
@@ -290,10 +346,9 @@ impl VirtualLists {
         }
     }
 
-    #[doc = include_str!("virtual_lists.doc/template_window_len.md")]
+    #[doc = include_str!("../../docs/api/runtime/virtual_lists.doc/template_window_len.md")]
     fn template_window_len(extent: f32, viewport_height: f32, scroll_y: f32) -> usize {
-        // A non-positive estimate would make the size walk never advance; fall
-        // back to the shared default rather than loop.
+        // The template still needs a window when its estimate is zero.
         let row_extent = if extent > 0.0 {
             extent
         } else {

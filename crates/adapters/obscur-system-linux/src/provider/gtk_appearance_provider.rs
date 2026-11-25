@@ -1,4 +1,4 @@
-#![doc = include_str!("gtk_appearance_provider.doc/_module.md")]
+//! Reading appearance from GNOME's interface settings.
 
 use std::process::Command;
 
@@ -6,51 +6,57 @@ use obscur_capability::SupportLevel;
 use obscur_scene::color::Color;
 use obscur_system::appearance::{
     AppearanceCallback, AppearanceProvider, AppearanceWatch, ColorScheme, SystemAppearance,
-    SystemFont,
+    SystemFont, WindowButton, WindowButtonIcons, WindowButtonLayout, WindowDecoration,
 };
 
 use super::monitor_watch::MonitorWatch;
 
-#[doc = include_str!("gtk_appearance_provider.doc/SCHEMA.md")]
+/// The settings schema every key here comes from.
 const SCHEMA: &str = "org.gnome.desktop.interface";
+const WINDOW_SCHEMA: &str = "org.gnome.desktop.wm.preferences";
+const BUTTON_LAYOUT: &str = "button-layout";
 
-#[doc = include_str!("gtk_appearance_provider.doc/GtkAppearanceProvider.md")]
+#[doc = include_str!("../../docs/api/provider/gtk_appearance_provider.doc/GtkAppearanceProvider.md")]
 #[derive(Debug, Clone)]
 pub struct GtkAppearanceProvider {
     tool: Box<str>,
 }
 
 impl GtkAppearanceProvider {
-    #[doc = include_str!("gtk_appearance_provider.doc/new.md")]
+    /// Read through `gsettings`.
     #[must_use]
     pub fn new() -> Self {
         Self::with_tool("gsettings")
     }
 
-    #[doc = include_str!("gtk_appearance_provider.doc/with_tool.md")]
+    /// Read through a nominated tool, for a session that renames it, and for tests.
     #[must_use]
     pub fn with_tool(tool: impl Into<Box<str>>) -> Self {
         Self { tool: tool.into() }
     }
 
-    #[doc = include_str!("gtk_appearance_provider.doc/tool.md")]
+    /// The tool this provider shells out to.
     #[must_use]
     pub fn tool(&self) -> &str {
         &self.tool
     }
 
-    #[doc = include_str!("gtk_appearance_provider.doc/read.md")]
+    #[doc = include_str!("../../docs/api/provider/gtk_appearance_provider.doc/read.md")]
     fn read(&self, key: &str) -> Option<String> {
+        self.read_setting(SCHEMA, key)
+            .filter(|value| !value.is_empty())
+    }
+
+    fn read_setting(&self, schema: &str, key: &str) -> Option<String> {
         let output = Command::new(&*self.tool)
-            .args(["get", SCHEMA, key])
+            .args(["get", schema, key])
             .output()
             .ok()?;
         if !output.status.success() {
             return None;
         }
         let text = String::from_utf8(output.stdout).ok()?;
-        let value = unquote(text.trim());
-        (!value.is_empty()).then(|| value.to_owned())
+        Some(unquote(text.trim()).to_owned())
     }
 }
 
@@ -71,6 +77,14 @@ impl AppearanceProvider for GtkAppearanceProvider {
             // live inside GTK. Reading them means linking GTK, which this
             // adapter does not do, so it says nothing rather than guessing.
             palette: obscur_system::appearance::SystemPalette::default(),
+            window_radius: self
+                .read("gtk-theme")
+                .as_deref()
+                .and_then(super::adwaita_theme::window_radius),
+            window_decoration: self
+                .read_setting(WINDOW_SCHEMA, BUTTON_LAYOUT)
+                .as_deref()
+                .and_then(parse_decoration),
             font: self.read("font-name").and_then(|v| parse_font(&v)),
             monospace_font: self
                 .read("monospace-font-name")
@@ -98,7 +112,7 @@ impl AppearanceProvider for GtkAppearanceProvider {
         SupportLevel::Limited
     }
 
-    #[doc = include_str!("gtk_appearance_provider.doc/watch_support.md")]
+    #[doc = include_str!("../../docs/api/provider/gtk_appearance_provider.doc/watch_support.md")]
     fn watch_support(&self) -> SupportLevel {
         if tool_available(&self.tool) {
             // `gsettings monitor` streams a line per changed key for the whole
@@ -109,15 +123,61 @@ impl AppearanceProvider for GtkAppearanceProvider {
         }
     }
 
-    #[doc = include_str!("gtk_appearance_provider.doc/watch.md")]
+    /// Subscribe through `gsettings monitor` on the interface schema and the window
+    /// manager's button-layout key. Dropping the returned guard stops both monitors.
     fn watch(&self, on_change: AppearanceCallback) -> Option<AppearanceWatch> {
-        // Every line the monitor prints for this schema is a change to a setting
-        // this source reads, so the marker is the schema itself.
-        MonitorWatch::spawn(&self.tool, &["monitor", SCHEMA], SCHEMA, on_change)
+        let interface =
+            MonitorWatch::spawn(&self.tool, &["monitor", SCHEMA], ":", on_change.clone());
+        let layout = MonitorWatch::spawn(
+            &self.tool,
+            &["monitor", WINDOW_SCHEMA, BUTTON_LAYOUT],
+            ":",
+            on_change,
+        );
+        if interface.is_none() && layout.is_none() {
+            return None;
+        }
+        Some(AppearanceWatch::new(move || drop((interface, layout))))
     }
 }
 
-#[doc = include_str!("gtk_appearance_provider.doc/unquote.md")]
+fn parse_decoration(value: &str) -> Option<WindowDecoration> {
+    fn buttons(group: &str) -> Vec<WindowButton> {
+        group
+            .split(',')
+            .filter_map(|name| {
+                Some(match name.trim() {
+                    "menu" => WindowButton::WindowMenu,
+                    "appmenu" => WindowButton::ApplicationMenu,
+                    "icon" => WindowButton::WindowIcon,
+                    "minimize" => WindowButton::Minimize,
+                    "maximize" => WindowButton::Maximize,
+                    "close" => WindowButton::Close,
+                    "spacer" => WindowButton::Spacer,
+                    _ => return None,
+                })
+            })
+            .collect()
+    }
+    let (left, right) = value.split_once(':').unwrap_or((value, ""));
+    if right.contains(':') {
+        return None;
+    }
+    Some(WindowDecoration {
+        button_layout: WindowButtonLayout {
+            left: Some(buttons(left)),
+            right: Some(buttons(right)),
+        },
+        button_icons: WindowButtonIcons {
+            minimize: Some("window-minimize-symbolic".into()),
+            maximize: Some("window-maximize-symbolic".into()),
+            restore: Some("window-restore-symbolic".into()),
+            close: Some("window-close-symbolic".into()),
+        },
+    })
+}
+
+/// `gsettings` prints strings quoted; numbers and booleans it does not.
 fn unquote(value: &str) -> &str {
     value
         .strip_prefix('\'')
@@ -126,7 +186,7 @@ fn unquote(value: &str) -> &str {
         .unwrap_or(value)
 }
 
-#[doc = include_str!("gtk_appearance_provider.doc/parse_scheme.md")]
+#[doc = include_str!("../../docs/api/provider/gtk_appearance_provider.doc/parse_scheme.md")]
 fn parse_scheme(value: &str) -> Option<ColorScheme> {
     match value {
         "prefer-dark" => Some(ColorScheme::Dark),
@@ -137,7 +197,7 @@ fn parse_scheme(value: &str) -> Option<ColorScheme> {
     }
 }
 
-#[doc = include_str!("gtk_appearance_provider.doc/parse_font.md")]
+#[doc = include_str!("../../docs/api/provider/gtk_appearance_provider.doc/parse_font.md")]
 fn parse_font(value: &str) -> Option<SystemFont> {
     // Pango writes "Family Style Size", and only the trailing size is
     // unambiguous: everything before it is the family and its style words,
@@ -155,7 +215,7 @@ fn parse_font(value: &str) -> Option<SystemFont> {
     }
 }
 
-#[doc = include_str!("gtk_appearance_provider.doc/accent_hex.md")]
+#[doc = include_str!("../../docs/api/provider/gtk_appearance_provider.doc/accent_hex.md")]
 fn accent_hex(name: &str) -> Option<Color> {
     // GNOME 47 states the accent as one of nine NAMES, not as a colour. These
     // are the values Adwaita publishes for them, so this is a lookup of the
@@ -176,7 +236,7 @@ fn accent_hex(name: &str) -> Option<Color> {
     Some(from_hex(hex))
 }
 
-#[doc = include_str!("gtk_appearance_provider.doc/from_hex.md")]
+/// A packed `0xRRGGBB` as a colour.
 fn from_hex(hex: u32) -> Color {
     #[allow(clippy::cast_precision_loss)]
     Color::rgb(
@@ -186,7 +246,7 @@ fn from_hex(hex: u32) -> Color {
     )
 }
 
-#[doc = include_str!("gtk_appearance_provider.doc/tool_available.md")]
+/// Whether the tool is on `PATH` at all.
 fn tool_available(tool: &str) -> bool {
     Command::new("sh")
         .args(["-c", &format!("command -v {tool}")])
@@ -197,6 +257,31 @@ fn tool_available(tool: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decoration_preserves_button_order_and_has_a_restore_icon() {
+        let decoration = parse_decoration("icon:close,maximize,minimize").unwrap();
+        assert_eq!(
+            decoration.button_layout.left,
+            Some(vec![WindowButton::WindowIcon])
+        );
+        assert_eq!(
+            decoration.button_layout.right,
+            Some(vec![
+                WindowButton::Close,
+                WindowButton::Maximize,
+                WindowButton::Minimize,
+            ])
+        );
+        assert_eq!(
+            decoration.button_icons.restore.as_deref(),
+            Some("window-restore-symbolic")
+        );
+        assert_eq!(
+            parse_decoration(":").unwrap().button_layout.right,
+            Some(vec![])
+        );
+    }
 
     #[test]
     fn the_default_tool_is_gsettings() {

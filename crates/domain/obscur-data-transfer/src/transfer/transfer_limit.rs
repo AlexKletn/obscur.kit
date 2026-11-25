@@ -1,6 +1,6 @@
-#![doc = include_str!("transfer_limit.doc/_module.md")]
+//! Capability limits applied to a data transfer (spec §6.20 limits).
 
-#[doc = include_str!("transfer_limit.doc/TransferLimit.md")]
+#[doc = include_str!("../../docs/api/transfer/transfer_limit.doc/TransferLimit.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct TransferLimit {
     max_bytes: Option<u64>,
@@ -8,7 +8,7 @@ pub struct TransferLimit {
 }
 
 impl TransferLimit {
-    #[doc = include_str!("transfer_limit.doc/unlimited.md")]
+    /// Creates a limit that constrains nothing (spec §6.20).
     #[must_use]
     pub const fn unlimited() -> Self {
         Self {
@@ -17,7 +17,7 @@ impl TransferLimit {
         }
     }
 
-    #[doc = include_str!("transfer_limit.doc/bytes.md")]
+    /// Creates a limit that caps only the total byte volume (spec §6.20).
     #[must_use]
     pub const fn bytes(max_bytes: u64) -> Self {
         Self {
@@ -26,7 +26,7 @@ impl TransferLimit {
         }
     }
 
-    #[doc = include_str!("transfer_limit.doc/items.md")]
+    /// Creates a limit that caps only the item count (spec §6.20).
     #[must_use]
     pub const fn items(max_items: usize) -> Self {
         Self {
@@ -35,33 +35,33 @@ impl TransferLimit {
         }
     }
 
-    #[doc = include_str!("transfer_limit.doc/with_max_bytes.md")]
+    /// Returns this limit with its maximum byte volume set (spec §6.20).
     #[must_use]
     pub const fn with_max_bytes(mut self, max_bytes: u64) -> Self {
         self.max_bytes = Some(max_bytes);
         self
     }
 
-    #[doc = include_str!("transfer_limit.doc/with_max_items.md")]
+    /// Returns this limit with its maximum item count set (spec §6.20).
     #[must_use]
     pub const fn with_max_items(mut self, max_items: usize) -> Self {
         self.max_items = Some(max_items);
         self
     }
 
-    #[doc = include_str!("transfer_limit.doc/max_bytes.md")]
+    /// Returns the maximum byte volume, if bounded (spec §6.20).
     #[must_use]
     pub const fn max_bytes(&self) -> Option<u64> {
         self.max_bytes
     }
 
-    #[doc = include_str!("transfer_limit.doc/max_items.md")]
+    /// Returns the maximum item count, if bounded (spec §6.20).
     #[must_use]
     pub const fn max_items(&self) -> Option<usize> {
         self.max_items
     }
 
-    #[doc = include_str!("transfer_limit.doc/admits.md")]
+    #[doc = include_str!("../../docs/api/transfer/transfer_limit.doc/admits.md")]
     #[must_use]
     pub const fn admits(&self, total_bytes: u64, item_count: usize) -> bool {
         let bytes_ok = match self.max_bytes {
@@ -75,7 +75,8 @@ impl TransferLimit {
         bytes_ok && items_ok
     }
 
-    #[doc = include_str!("transfer_limit.doc/exceeds_bytes.md")]
+    /// Returns whether `total_bytes` exceeds the byte cap (always `false` when
+    /// unbounded) (spec §6.20).
     #[must_use]
     pub const fn exceeds_bytes(&self, total_bytes: u64) -> bool {
         match self.max_bytes {

@@ -1,85 +1,94 @@
-#![doc = include_str!("synthetic_input.doc/_module.md")]
+//! Typed synthetic input events a test injects into a headless run (spec §7.4).
 
 use crate::input::pointer_button::PointerButton;
 use crate::input::selector_target::SelectorTarget;
+use obscur_interaction::command::KeyEvent;
 
-#[doc = include_str!("synthetic_input.doc/SyntheticInput.md")]
+#[doc = include_str!("../../docs/api/input/synthetic_input.doc/SyntheticInput.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum SyntheticInput {
-    #[doc = include_str!("synthetic_input.doc/PointerMove.md")]
+    /// A normalized keyboard event with logical and physical key information.
+    Key(KeyEvent),
+    /// A pointer movement over the given target.
     PointerMove {
-        #[doc = include_str!("synthetic_input.doc/target.md")]
+        /// Where the pointer moves to.
         target: SelectorTarget,
     },
-    #[doc = include_str!("synthetic_input.doc/PointerDown.md")]
+    /// A pointer button press over the given target.
     PointerDown {
-        #[doc = include_str!("synthetic_input.doc/target_2.md")]
+        /// Where the press lands.
         target: SelectorTarget,
-        #[doc = include_str!("synthetic_input.doc/button.md")]
+        /// Which button is pressed.
         button: PointerButton,
     },
-    #[doc = include_str!("synthetic_input.doc/PointerUp.md")]
+    /// A pointer button release over the given target.
     PointerUp {
-        #[doc = include_str!("synthetic_input.doc/target_3.md")]
+        /// Where the release lands.
         target: SelectorTarget,
-        #[doc = include_str!("synthetic_input.doc/button_2.md")]
+        /// Which button is released.
         button: PointerButton,
     },
-    #[doc = include_str!("synthetic_input.doc/KeyDown.md")]
+    /// A key press, identified by an opaque key code.
     KeyDown {
-        #[doc = include_str!("synthetic_input.doc/key.md")]
+        /// The opaque key code being pressed.
         key: u32,
     },
-    #[doc = include_str!("synthetic_input.doc/KeyUp.md")]
+    /// A key release, identified by an opaque key code.
     KeyUp {
-        #[doc = include_str!("synthetic_input.doc/key_2.md")]
+        /// The opaque key code being released.
         key: u32,
     },
 }
 
 impl SyntheticInput {
-    #[doc = include_str!("synthetic_input.doc/pointer_move.md")]
+    /// Builds a synthetic input from a normalized keyboard event.
+    #[must_use]
+    pub const fn key(event: KeyEvent) -> Self {
+        Self::Key(event)
+    }
+    /// Builds a [`SyntheticInput::PointerMove`] over `target`.
     #[must_use]
     pub const fn pointer_move(target: SelectorTarget) -> Self {
         Self::PointerMove { target }
     }
 
-    #[doc = include_str!("synthetic_input.doc/pointer_down.md")]
+    /// Builds a [`SyntheticInput::PointerDown`] of `button` over `target`.
     #[must_use]
     pub const fn pointer_down(target: SelectorTarget, button: PointerButton) -> Self {
         Self::PointerDown { target, button }
     }
 
-    #[doc = include_str!("synthetic_input.doc/pointer_up.md")]
+    /// Builds a [`SyntheticInput::PointerUp`] of `button` over `target`.
     #[must_use]
     pub const fn pointer_up(target: SelectorTarget, button: PointerButton) -> Self {
         Self::PointerUp { target, button }
     }
 
-    #[doc = include_str!("synthetic_input.doc/key_down.md")]
+    /// Builds a [`SyntheticInput::KeyDown`] for the opaque `key` code.
     #[must_use]
     pub const fn key_down(key: u32) -> Self {
         Self::KeyDown { key }
     }
 
-    #[doc = include_str!("synthetic_input.doc/key_up.md")]
+    /// Builds a [`SyntheticInput::KeyUp`] for the opaque `key` code.
     #[must_use]
     pub const fn key_up(key: u32) -> Self {
         Self::KeyUp { key }
     }
 
-    #[doc = include_str!("synthetic_input.doc/target_4.md")]
+    /// Returns the targeted node selector for a pointer event, or `None` for a
+    /// key event (which carries no [`SelectorTarget`]).
     #[must_use]
     pub const fn target(&self) -> Option<&SelectorTarget> {
         match self {
             Self::PointerMove { target }
             | Self::PointerDown { target, .. }
             | Self::PointerUp { target, .. } => Some(target),
-            Self::KeyDown { .. } | Self::KeyUp { .. } => None,
+            Self::Key(_) | Self::KeyDown { .. } | Self::KeyUp { .. } => None,
         }
     }
 
-    #[doc = include_str!("synthetic_input.doc/is_pointer.md")]
+    /// Returns `true` if this is a pointer event (move, down, or up).
     #[must_use]
     pub const fn is_pointer(&self) -> bool {
         matches!(
@@ -88,10 +97,13 @@ impl SyntheticInput {
         )
     }
 
-    #[doc = include_str!("synthetic_input.doc/is_key.md")]
+    /// Returns `true` if this is a key event (down or up).
     #[must_use]
     pub const fn is_key(&self) -> bool {
-        matches!(self, Self::KeyDown { .. } | Self::KeyUp { .. })
+        matches!(
+            self,
+            Self::Key(_) | Self::KeyDown { .. } | Self::KeyUp { .. }
+        )
     }
 }
 

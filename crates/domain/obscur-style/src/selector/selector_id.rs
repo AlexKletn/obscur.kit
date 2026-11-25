@@ -1,17 +1,17 @@
-#![doc = include_str!("selector_id.doc/_module.md")]
+//! Opaque handle to a compiled selector: [`SelectorId`].
 
-#[doc = include_str!("selector_id.doc/SelectorId.md")]
+#[doc = include_str!("../../docs/api/selector/selector_id.doc/SelectorId.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SelectorId(u64);
 
 impl SelectorId {
-    #[doc = include_str!("selector_id.doc/from_raw.md")]
+    /// Wraps a raw handle value into a `SelectorId`.
     #[must_use]
     pub const fn from_raw(raw: u64) -> Self {
         Self(raw)
     }
 
-    #[doc = include_str!("selector_id.doc/raw.md")]
+    /// Returns the raw handle value backing this identifier.
     #[must_use]
     pub const fn raw(self) -> u64 {
         self.0

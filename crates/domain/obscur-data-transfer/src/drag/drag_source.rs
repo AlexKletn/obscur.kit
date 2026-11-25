@@ -1,10 +1,11 @@
-#![doc = include_str!("drag_source.doc/_module.md")]
+//! The origin of a drag and the data it carries (spec §6.21 drag and drop —
+//! typed source).
 
 use crate::drag::{DragEffect, DragPreview};
 use crate::transfer::TransferPayload;
 use obscur_identity::NodeId;
 
-#[doc = include_str!("drag_source.doc/DragSource.md")]
+#[doc = include_str!("../../docs/api/drag/drag_source.doc/DragSource.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct DragSource {
     payload: TransferPayload,
@@ -14,7 +15,9 @@ pub struct DragSource {
 }
 
 impl DragSource {
-    #[doc = include_str!("drag_source.doc/new.md")]
+    /// Creates a source dragging `payload` from `origin`, permitting
+    /// [`Copy`](DragEffect::Copy) and [`Move`](DragEffect::Move) with no preview
+    /// (spec §6.21).
     #[must_use]
     pub fn new(origin: NodeId, payload: TransferPayload) -> Self {
         Self {
@@ -25,45 +28,47 @@ impl DragSource {
         }
     }
 
-    #[doc = include_str!("drag_source.doc/with_effects.md")]
+    /// Returns this source with its permitted effects replaced by `effects`
+    /// (spec §6.21).
     #[must_use]
     pub fn with_effects(mut self, effects: Vec<DragEffect>) -> Self {
         self.allowed_effects = effects;
         self
     }
 
-    #[doc = include_str!("drag_source.doc/with_preview.md")]
+    /// Returns this source with `preview` attached as its drag image (spec
+    /// §6.21).
     #[must_use]
     pub fn with_preview(mut self, preview: DragPreview) -> Self {
         self.preview = Some(preview);
         self
     }
 
-    #[doc = include_str!("drag_source.doc/payload.md")]
+    /// Returns the payload being dragged (spec §6.21).
     #[must_use]
     pub fn payload(&self) -> &TransferPayload {
         &self.payload
     }
 
-    #[doc = include_str!("drag_source.doc/allowed_effects.md")]
+    /// Returns the effects this source permits (spec §6.21).
     #[must_use]
     pub fn allowed_effects(&self) -> &[DragEffect] {
         &self.allowed_effects
     }
 
-    #[doc = include_str!("drag_source.doc/preview.md")]
+    /// Returns the drag preview descriptor, if one was set (spec §6.21).
     #[must_use]
     pub fn preview(&self) -> Option<&DragPreview> {
         self.preview.as_ref()
     }
 
-    #[doc = include_str!("drag_source.doc/origin.md")]
+    /// Returns the node the drag started from (spec §6.21).
     #[must_use]
     pub const fn origin(&self) -> NodeId {
         self.origin
     }
 
-    #[doc = include_str!("drag_source.doc/is_empty.md")]
+    /// Returns whether the dragged payload carries nothing (spec §6.21).
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.payload.is_empty()

@@ -1,9 +1,9 @@
-#![doc = include_str!("canvas.doc/_module.md")]
+//! `Canvas`: a custom-rendering surface primitive (spec §2.6, §5.3).
 
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_view::view::{LOCAL_NAME, View, ViewNode, ViewProperty, ViewValue, canvas_painter_prop};
 
-#[doc = include_str!("canvas.doc/Canvas.md")]
+#[doc = include_str!("../docs/api/canvas.doc/Canvas.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Canvas {
     width: f32,
@@ -12,15 +12,15 @@ pub struct Canvas {
 }
 
 impl Canvas {
-    #[doc = include_str!("canvas.doc/COMPONENT_ID.md")]
+    #[doc = include_str!("../docs/api/canvas.doc/COMPONENT_ID.md")]
     pub const COMPONENT_ID: ComponentId = ComponentId::from_raw(0x00C0_0005);
 
-    #[doc = include_str!("canvas.doc/PROP_WIDTH.md")]
+    #[doc = include_str!("../docs/api/canvas.doc/PROP_WIDTH.md")]
     pub const PROP_WIDTH: InternedSymbol = InternedSymbol::from_raw(0x00C1_0501);
-    #[doc = include_str!("canvas.doc/PROP_HEIGHT.md")]
+    /// Property name for the intrinsic height hint.
     pub const PROP_HEIGHT: InternedSymbol = InternedSymbol::from_raw(0x00C1_0502);
 
-    #[doc = include_str!("canvas.doc/new.md")]
+    /// Creates a canvas with the given intrinsic size hint in logical pixels.
     #[must_use]
     pub const fn new(width: f32, height: f32) -> Self {
         Self {
@@ -30,14 +30,14 @@ impl Canvas {
         }
     }
 
-    #[doc = include_str!("canvas.doc/named.md")]
+    #[doc = include_str!("../docs/api/canvas.doc/named.md")]
     #[must_use]
     pub const fn named(mut self, painter: InternedSymbol) -> Self {
         self.painter = Some(painter);
         self
     }
 
-    #[doc = include_str!("canvas.doc/props.md")]
+    /// This canvas's properties: its size hints, and the painter it names if it names one.
     #[must_use]
     pub fn props(&self) -> Vec<ViewProperty> {
         let mut props = vec![
@@ -50,7 +50,7 @@ impl Canvas {
         props
     }
 
-    #[doc = include_str!("canvas.doc/into_view_node.md")]
+    #[doc = include_str!("../docs/api/canvas.doc/into_view_node.md")]
     #[must_use]
     pub fn into_view_node(self) -> ViewNode {
         let props = self.props();
@@ -71,7 +71,7 @@ impl Canvas {
         node
     }
 
-    #[doc = include_str!("canvas.doc/view.md")]
+    /// Lowers this canvas into a single-node [`View`].
     #[must_use]
     pub fn view(self) -> View {
         View::single(self.into_view_node())

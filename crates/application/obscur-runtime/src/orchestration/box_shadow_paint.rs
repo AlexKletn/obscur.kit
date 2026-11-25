@@ -1,25 +1,23 @@
-#![doc = include_str!("box_shadow_paint.doc/_module.md")]
+//! A node's `box-shadow` list and the scene shadow each entry paints
+//! (css-backgrounds-3 §6.1, spec §5.2).
 
 use obscur_geometry::{CornerRadii, Point, Rect, Size};
-use obscur_identity::NodeId;
 use obscur_scene::clip::Clip;
 use obscur_scene::command::DisplayListBuilder;
 use obscur_scene::path::Path;
-use obscur_style::computed::ComputedValue;
+use obscur_style::computed::{ComputedStyle, ComputedValue};
 use obscur_style::property::{BoxShadow, Length, PropertyId, StyleColor};
 
-use super::ComputedStyles;
 use super::paint_color::scene_color_from;
 
-#[doc = include_str!("box_shadow_paint.doc/box_shadows_of.md")]
-pub(super) fn box_shadows_of(computed: &ComputedStyles, node: NodeId) -> Option<&[BoxShadow]> {
-    computed
-        .get(&node)
+#[doc = include_str!("../../docs/api/orchestration/box_shadow_paint.doc/box_shadows_of.md")]
+pub(super) fn box_shadows_of(style: Option<&ComputedStyle>) -> Option<&[BoxShadow]> {
+    style
         .and_then(|style| style.get(PropertyId::BoxShadow))
         .and_then(ComputedValue::as_box_shadows)
 }
 
-#[doc = include_str!("box_shadow_paint.doc/emit_box_shadow.md")]
+#[doc = include_str!("../../docs/api/orchestration/box_shadow_paint.doc/emit_box_shadow.md")]
 pub(super) fn emit_box_shadow(
     builder: &mut DisplayListBuilder,
     bounds: Rect,

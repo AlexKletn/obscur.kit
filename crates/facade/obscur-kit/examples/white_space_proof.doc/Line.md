@@ -1,3 +1,1 @@
-One wrapped visual line: its y-origin and total width (summed glyph advances
-of every `DrawText` run sharing that y), plus the per-glyph advances of the
-first run on the line (enough to inspect a tab's advance).
+One visual line, with its origin, the sum of its run advances, and its painted glyph positions relative to the line.

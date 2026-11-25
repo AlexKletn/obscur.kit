@@ -7,5 +7,16 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[dependencies]
+obscur-plugin-model = { workspace = true }
+semver = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tar = { workspace = true }
+flate2 = { workspace = true }
+zip = { workspace = true }
+zstd = { workspace = true }
+tempfile = { workspace = true }
+
 [lints]
 workspace = true

@@ -1,1 +1,0 @@
-Absence of a value.

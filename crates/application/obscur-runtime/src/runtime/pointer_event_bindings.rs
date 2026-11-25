@@ -1,44 +1,60 @@
-#![doc = include_str!("pointer_event_bindings.doc/_module.md")]
+#![doc = include_str!("../../docs/api/runtime/pointer_event_bindings.doc/_module.md")]
 
 use obscur_identity::InternedSymbol;
 use obscur_interaction::pointer::PointerEventKind;
 use obscur_tree::tree::RetainedTree;
 use obscur_view::view::{
     EVENT_POINTER_CANCEL, EVENT_POINTER_DOWN, EVENT_POINTER_ENTER, EVENT_POINTER_LEAVE,
-    EVENT_POINTER_MOVE, EVENT_POINTER_UP, EVENT_WHEEL,
+    EVENT_POINTER_MOVE, EVENT_POINTER_UP, EVENT_SCROLL_GESTURE, EVENT_TOUCH_GESTURE,
+    EVENT_TOUCHPAD_GESTURE, EVENT_WHEEL,
 };
 
-#[doc = include_str!("pointer_event_bindings.doc/DOWN_BIT.md")]
-const DOWN_BIT: u8 = 0b0000_0001;
-#[doc = include_str!("pointer_event_bindings.doc/UP_BIT.md")]
-const UP_BIT: u8 = 0b0000_0010;
-#[doc = include_str!("pointer_event_bindings.doc/MOVE_BIT.md")]
-const MOVE_BIT: u8 = 0b0000_0100;
-#[doc = include_str!("pointer_event_bindings.doc/CANCEL_BIT.md")]
-const CANCEL_BIT: u8 = 0b0000_1000;
-#[doc = include_str!("pointer_event_bindings.doc/ENTER_BIT.md")]
-const ENTER_BIT: u8 = 0b0001_0000;
-#[doc = include_str!("pointer_event_bindings.doc/LEAVE_BIT.md")]
-const LEAVE_BIT: u8 = 0b0010_0000;
-#[doc = include_str!("pointer_event_bindings.doc/WHEEL_BIT.md")]
-const WHEEL_BIT: u8 = 0b0100_0000;
-#[doc = include_str!("pointer_event_bindings.doc/ALL_BITS.md")]
-const ALL_BITS: u8 = DOWN_BIT | UP_BIT | MOVE_BIT | CANCEL_BIT | ENTER_BIT | LEAVE_BIT | WHEEL_BIT;
+/// The `pointerdown` bit.
+const DOWN_BIT: u16 = 0b0000_0001;
+/// The `pointerup` bit.
+const UP_BIT: u16 = 0b0000_0010;
+/// The `pointermove` bit.
+const MOVE_BIT: u16 = 0b0000_0100;
+/// The `pointercancel` bit.
+const CANCEL_BIT: u16 = 0b0000_1000;
+/// The `pointerenter` bit.
+const ENTER_BIT: u16 = 0b0001_0000;
+/// The `pointerleave` bit.
+const LEAVE_BIT: u16 = 0b0010_0000;
+/// The `wheel` bit.
+const WHEEL_BIT: u16 = 0b0100_0000;
+/// The cached presence bit for native touchpad bindings.
+const TOUCHPAD_GESTURE_BIT: u16 = 0b1000_0000;
+/// The cached presence bit for application touch gesture candidates.
+const TOUCH_GESTURE_BIT: u16 = 1 << 8;
+/// Cached presence bit for phased pixel-scroll candidates.
+const SCROLL_GESTURE_BIT: u16 = 1 << 9;
+#[doc = include_str!("../../docs/api/runtime/pointer_event_bindings.doc/ALL_BITS.md")]
+const ALL_BITS: u16 = DOWN_BIT
+    | UP_BIT
+    | MOVE_BIT
+    | CANCEL_BIT
+    | ENTER_BIT
+    | LEAVE_BIT
+    | WHEEL_BIT
+    | TOUCHPAD_GESTURE_BIT
+    | TOUCH_GESTURE_BIT
+    | SCROLL_GESTURE_BIT;
 
-#[doc = include_str!("pointer_event_bindings.doc/PointerEventBindings.md")]
+#[doc = include_str!("../../docs/api/runtime/pointer_event_bindings.doc/PointerEventBindings.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) struct PointerEventBindings {
-    #[doc = include_str!("pointer_event_bindings.doc/bound.md")]
-    bound: u8,
+    #[doc = include_str!("../../docs/api/runtime/pointer_event_bindings.doc/bound.md")]
+    bound: u16,
 }
 
 impl PointerEventBindings {
-    #[doc = include_str!("pointer_event_bindings.doc/none.md")]
+    /// A tree that binds none of the seven.
     pub(crate) const fn none() -> Self {
         Self { bound: 0 }
     }
 
-    #[doc = include_str!("pointer_event_bindings.doc/name_for.md")]
+    #[doc = include_str!("../../docs/api/runtime/pointer_event_bindings.doc/name_for.md")]
     pub(crate) const fn name_for(kind: PointerEventKind) -> Option<InternedSymbol> {
         match kind {
             PointerEventKind::Down => Some(EVENT_POINTER_DOWN),
@@ -62,7 +78,7 @@ impl PointerEventBindings {
         // `handle_scroll`, which asks for the bit by name.
     }
 
-    #[doc = include_str!("pointer_event_bindings.doc/scan.md")]
+    #[doc = include_str!("../../docs/api/runtime/pointer_event_bindings.doc/scan.md")]
     pub(crate) fn scan(tree: &RetainedTree) -> Self {
         let mut bound = 0;
         for (_, node) in tree.iter() {
@@ -78,15 +94,16 @@ impl PointerEventBindings {
         Self { bound }
     }
 
-    #[doc = include_str!("pointer_event_bindings.doc/binds.md")]
+    /// Whether any node binds this name. A name that is not one of the seven is never
+    /// bound here, whatever else the tree carries.
     pub(crate) const fn binds(self, name: InternedSymbol) -> bool {
         let bit = bit_for(name);
         bit != 0 && self.bound & bit != 0
     }
 }
 
-#[doc = include_str!("pointer_event_bindings.doc/bit_for.md")]
-const fn bit_for(name: InternedSymbol) -> u8 {
+/// The bit a raw pointer event name occupies, or `0` for any other symbol.
+const fn bit_for(name: InternedSymbol) -> u16 {
     let raw = name.raw();
     if raw == EVENT_POINTER_DOWN.raw() {
         DOWN_BIT
@@ -102,6 +119,12 @@ const fn bit_for(name: InternedSymbol) -> u8 {
         LEAVE_BIT
     } else if raw == EVENT_WHEEL.raw() {
         WHEEL_BIT
+    } else if raw == EVENT_TOUCHPAD_GESTURE.raw() {
+        TOUCHPAD_GESTURE_BIT
+    } else if raw == EVENT_TOUCH_GESTURE.raw() {
+        TOUCH_GESTURE_BIT
+    } else if raw == EVENT_SCROLL_GESTURE.raw() {
+        SCROLL_GESTURE_BIT
     } else {
         0
     }
@@ -246,58 +269,7 @@ mod tests {
     }
 
     #[test]
-    fn the_seven_names_occupy_seven_distinct_bits() {
-        // A shared bit would make one binding answer for another — the gate would
-        // open for a name nothing bound and, worse, stay shut for one something
-        // did.
-        //
-        // 2026-08-03. This asserted four bits, when the gate covered the four raw
-        // kinds only. The crossings joined it, so the count went to six, and then
-        // `wheel` joined it, so it is seven. The rule itself — one bit per name,
-        // none shared — is unchanged, and the OR below is what actually pins it;
-        // the count is only there so a name added without a bit cannot pass.
-        assert_eq!(
-            DOWN_BIT | UP_BIT | MOVE_BIT | CANCEL_BIT | ENTER_BIT | LEAVE_BIT | WHEEL_BIT,
-            ALL_BITS,
-            "the bits must not overlap"
-        );
-        assert_eq!(u32::from(ALL_BITS).count_ones(), 7);
-    }
-
-    /// 2026-08-04. The word is nearly full and nothing said so out loud, which
-    /// is the only reason this test exists: seven of `u8`'s eight bits are
-    /// spent, so **one** gated name is still affordable and the one after it has
-    /// nowhere to go.
-    ///
-    /// A name added without a bit does not fail — it fails *silently*. `bit_for`
-    /// answers `0` for a name it does not know and `binds` reads `0` as "not
-    /// bound", so the gate simply stays shut and the event is never dispatched:
-    /// exactly the vocabulary-with-nothing-behind-it defect this whole gate was
-    /// built alongside. Nothing else in the workspace would notice.
-    ///
-    /// So this fails one name EARLY — at the eighth, not the ninth — because the
-    /// commit that spends the last bit is the one that has to decide, and
-    /// widening `bound` to `u16` is that decision. It is not hypothetical:
-    /// `contextmenu`, `focus` and `blur` are outside the gate today partly on
-    /// this budget (the module docs say why), and any one of them joining it
-    /// takes the bit.
-    #[test]
-    fn the_gate_has_one_bit_left_and_the_eighth_name_must_widen_the_word() {
-        assert_eq!(
-            u8::BITS - ALL_BITS.count_ones(),
-            1,
-            "the gate has spent {} of {} bits. If a name was ADDED, widen \
-             `bound` to `u16` in the same commit — `bit_for`'s `0` sentinel \
-             makes a name with no bit fail closed and silent. If one was \
-             REMOVED, this note is the budget it freed.",
-            ALL_BITS.count_ones(),
-            u8::BITS
-        );
-
-        // And the budget has to be measured against what `bit_for` actually
-        // hands out, not only against the constants. The test above ORs the
-        // seven constants and compares them to `ALL_BITS` — constants against a
-        // constant, which cannot see the function. This walks the names.
+    fn every_gated_name_has_its_own_bit_and_the_scan_knows_the_complete_set() {
         let mut handed_out = 0;
         for name in [
             EVENT_POINTER_DOWN,
@@ -307,17 +279,16 @@ mod tests {
             EVENT_POINTER_ENTER,
             EVENT_POINTER_LEAVE,
             EVENT_WHEEL,
+            EVENT_TOUCHPAD_GESTURE,
+            EVENT_TOUCH_GESTURE,
+            EVENT_SCROLL_GESTURE,
         ] {
             let bit = bit_for(name);
-            assert!(bit.is_power_of_two(), "one bit per name, never two");
+            assert!(bit.is_power_of_two());
+            assert_eq!(handed_out & bit, 0, "bindings must have independent bits");
             handed_out |= bit;
         }
-        assert_eq!(
-            handed_out, ALL_BITS,
-            "`ALL_BITS` is what stops the scan early, so it must be exactly the \
-             set `bit_for` can return: a bit in one and not the other means \
-             either a name whose binding never stops the walk, or a walk that \
-             stops before a name is seen"
-        );
+        assert_eq!(handed_out, ALL_BITS);
+        assert!(ALL_BITS.count_ones() < u16::BITS);
     }
 }

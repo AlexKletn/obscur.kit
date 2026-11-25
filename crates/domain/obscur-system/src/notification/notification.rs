@@ -1,26 +1,29 @@
-#![doc = include_str!("notification.doc/_module.md")]
+//! A system notification the app asks the host to present (spec §6.12).
 
 use crate::notification::NotificationAction;
 
-#[doc = include_str!("notification.doc/Notification.md")]
+#[doc = include_str!("../../docs/api/notification/notification.doc/Notification.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Notification {
-    #[doc = include_str!("notification.doc/title.md")]
+    /// The notification's headline text.
     title: Box<str>,
-    #[doc = include_str!("notification.doc/body.md")]
+    /// The notification's body / detail text.
     body: Box<str>,
-    #[doc = include_str!("notification.doc/badge.md")]
+    /// Optional app-icon badge count to display alongside this notification.
     badge: Option<u32>,
-    #[doc = include_str!("notification.doc/progress.md")]
+    /// Optional determinate progress in `0.0..=1.0`; `None` is no/indeterminate
+    /// progress.
     progress: Option<f32>,
-    #[doc = include_str!("notification.doc/actions.md")]
+    /// Actionable buttons offered on the notification.
     actions: Vec<NotificationAction>,
-    #[doc = include_str!("notification.doc/request_attention.md")]
+    /// Whether to request user attention (bounce the dock icon / flash the task
+    /// entry).
     request_attention: bool,
 }
 
 impl Notification {
-    #[doc = include_str!("notification.doc/new.md")]
+    /// Creates a notification with `title` and `body`; badge, progress, and
+    /// actions start empty and attention is not requested (spec §6.12).
     #[must_use]
     pub fn new(title: impl Into<Box<str>>, body: impl Into<Box<str>>) -> Self {
         Self {
@@ -33,71 +36,74 @@ impl Notification {
         }
     }
 
-    #[doc = include_str!("notification.doc/with_badge.md")]
+    /// Returns this notification with the app-icon badge `count` set (spec §6.12).
     #[must_use]
     pub fn with_badge(mut self, count: u32) -> Self {
         self.badge = Some(count);
         self
     }
 
-    #[doc = include_str!("notification.doc/with_progress.md")]
+    /// Returns this notification with determinate `progress`, clamped into
+    /// `0.0..=1.0` (spec §6.12).
     #[must_use]
     pub fn with_progress(mut self, progress: f32) -> Self {
         self.progress = Some(progress.clamp(0.0, 1.0));
         self
     }
 
-    #[doc = include_str!("notification.doc/with_action.md")]
+    /// Returns this notification with `action` appended to its actions
+    /// (spec §6.12).
     #[must_use]
     pub fn with_action(mut self, action: NotificationAction) -> Self {
         self.actions.push(action);
         self
     }
 
-    #[doc = include_str!("notification.doc/requesting_attention.md")]
+    /// Returns this notification with the request-attention flag set to
+    /// `request` (spec §6.12).
     #[must_use]
     pub fn requesting_attention(mut self, request: bool) -> Self {
         self.request_attention = request;
         self
     }
 
-    #[doc = include_str!("notification.doc/title_2.md")]
+    /// Returns the headline text (spec §6.12).
     #[must_use]
     pub fn title(&self) -> &str {
         &self.title
     }
 
-    #[doc = include_str!("notification.doc/body_2.md")]
+    /// Returns the body / detail text (spec §6.12).
     #[must_use]
     pub fn body(&self) -> &str {
         &self.body
     }
 
-    #[doc = include_str!("notification.doc/badge_2.md")]
+    /// Returns the app-icon badge count, if any (spec §6.12).
     #[must_use]
     pub const fn badge(&self) -> Option<u32> {
         self.badge
     }
 
-    #[doc = include_str!("notification.doc/progress_2.md")]
+    /// Returns the determinate progress in `0.0..=1.0`, if any (spec §6.12).
     #[must_use]
     pub const fn progress(&self) -> Option<f32> {
         self.progress
     }
 
-    #[doc = include_str!("notification.doc/actions_2.md")]
+    /// Returns the actionable buttons offered on this notification (spec §6.12).
     #[must_use]
     pub fn actions(&self) -> &[NotificationAction] {
         &self.actions
     }
 
-    #[doc = include_str!("notification.doc/request_attention_2.md")]
+    /// Returns whether this notification requests user attention (spec §6.12).
     #[must_use]
     pub const fn request_attention(&self) -> bool {
         self.request_attention
     }
 
-    #[doc = include_str!("notification.doc/has_actions.md")]
+    /// Returns whether this notification carries any actions (spec §6.12).
     #[must_use]
     pub fn has_actions(&self) -> bool {
         !self.actions.is_empty()

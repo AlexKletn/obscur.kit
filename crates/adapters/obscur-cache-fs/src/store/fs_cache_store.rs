@@ -1,5 +1,6 @@
-#![doc = include_str!("fs_cache_store.doc/_module.md")]
+#![doc = include_str!("../../docs/api/store/fs_cache_store.doc/_module.md")]
 
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -7,40 +8,33 @@ use obscur_resources::cache::CacheKey;
 use obscur_resources::port::CacheStore;
 use obscur_resources::state::ResourceVersion;
 
-#[doc = include_str!("fs_cache_store.doc/VERSION_HEADER_LEN.md")]
-const VERSION_HEADER_LEN: usize = 8;
-
-#[doc = include_str!("fs_cache_store.doc/ENTRY_EXTENSION.md")]
+/// The filename extension marking a file as one of this adapter's cache entries.
 const ENTRY_EXTENSION: &str = "oc";
 
-#[doc = include_str!("fs_cache_store.doc/FsCacheStore.md")]
+#[doc = include_str!("../../docs/api/store/fs_cache_store.doc/FsCacheStore.md")]
 #[derive(Debug, Clone)]
 pub struct FsCacheStore {
-    #[doc = include_str!("fs_cache_store.doc/root.md")]
+    /// The cache directory holding the `.oc` entry files.
     root: PathBuf,
 }
 
 impl FsCacheStore {
-    #[doc = include_str!("fs_cache_store.doc/new.md")]
+    #[doc = include_str!("../../docs/api/store/fs_cache_store.doc/new.md")]
     #[must_use]
     pub fn new(root: impl Into<PathBuf>) -> Self {
         let root = root.into();
-        if let Err(err) = std::fs::create_dir_all(&root) {
-            debug_assert!(
-                err.kind() == std::io::ErrorKind::AlreadyExists,
-                "cache dir create_dir_all failed: {err}"
-            );
-        }
+        // An unavailable cache directory is equivalent to a cache miss.
+        let _ = std::fs::create_dir_all(&root);
         Self { root }
     }
 
-    #[doc = include_str!("fs_cache_store.doc/root_2.md")]
+    /// Returns the cache directory this store writes its entry files into.
     #[must_use]
     pub fn root(&self) -> &Path {
         &self.root
     }
 
-    #[doc = include_str!("fs_cache_store.doc/entry_path.md")]
+    #[doc = include_str!("../../docs/api/store/fs_cache_store.doc/entry_path.md")]
     fn entry_path(&self, key: &CacheKey) -> PathBuf {
         self.root.join(format!(
             "{}-{}.{ENTRY_EXTENSION}",
@@ -49,174 +43,278 @@ impl FsCacheStore {
         ))
     }
 
-    #[doc = include_str!("fs_cache_store.doc/is_entry.md")]
-    fn is_entry(path: &Path) -> bool {
-        path.extension().is_some_and(|ext| ext == ENTRY_EXTENSION)
+    fn entry_paths(&self) -> impl Iterator<Item = PathBuf> {
+        std::fs::read_dir(&self.root)
+            .into_iter()
+            .flatten()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.extension().is_some_and(|ext| ext == ENTRY_EXTENSION)
+                    && path
+                        .file_stem()
+                        .and_then(|stem| stem.to_str())
+                        .and_then(|stem| stem.split_once('-'))
+                        .is_some_and(|(resource, variant)| {
+                            canonical_number(resource) && canonical_number(variant)
+                        })
+            })
+    }
+
+    fn publish(&self, key: &CacheKey, version: ResourceVersion, bytes: &[u8]) -> io::Result<()> {
+        // Staging beside the destination gives each writer its own file on the same filesystem.
+        let mut staged = match tempfile::NamedTempFile::new_in(&self.root) {
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                // A cache directory removed between writes can be recreated.
+                std::fs::create_dir_all(&self.root)?;
+                tempfile::NamedTempFile::new_in(&self.root)?
+            }
+            creation => creation?,
+        };
+        staged.write_all(&version.stamp().raw().to_le_bytes())?;
+        staged.write_all(bytes)?;
+        staged
+            .persist(self.entry_path(key))
+            .map_err(|error| error.error)?;
+        Ok(())
     }
 }
 
 impl CacheStore for FsCacheStore {
     fn get(&self, key: &CacheKey, version: ResourceVersion) -> Option<Arc<[u8]>> {
-        let bytes = std::fs::read(self.entry_path(key)).ok()?;
-        // A well-formed entry is at least the version header; a shorter file is
-        // corrupt and treated as a miss.
-        let (header, payload) = bytes.split_at_checked(VERSION_HEADER_LEN)?;
-        let stored = u64::from_le_bytes(header.try_into().ok()?);
-        // Compatibility-aware (spec §5.20): a version mismatch is stale, so it
-        // yields None rather than incompatible bytes.
-        if stored != version.stamp().raw() {
+        let path = self.entry_path(key);
+        if !regular_file(&path) {
             return None;
         }
+        // Read the header and payload from the same open file because a writer
+        // may atomically replace the path between reads.
+        let mut entry = std::fs::File::open(path).ok()?;
+        let expected_header = version.stamp().raw().to_le_bytes();
+        let mut header = [0; size_of::<u64>()];
+        entry.read_exact(&mut header).ok()?;
+        if header != expected_header {
+            return None;
+        }
+        let mut payload = Vec::new();
+        entry.read_to_end(&mut payload).ok()?;
         Some(Arc::from(payload))
     }
 
     fn put(&mut self, key: CacheKey, version: ResourceVersion, bytes: Arc<[u8]>) {
-        let final_path = self.entry_path(&key);
-        let tmp_path = final_path.with_extension("tmp");
-
-        // Assemble the header + payload, then write it whole to a temp file and
-        // rename it over the destination. The rename is atomic on the same
-        // filesystem, so a crash mid-write leaves either the old entry or the new
-        // one — never a torn file. Every failure is swallowed: a cache miss and
-        // recompute is the correct fallback (spec §5.20 disposable / best-effort).
-        let mut buffer = Vec::with_capacity(VERSION_HEADER_LEN + bytes.len());
-        buffer.extend_from_slice(&version.stamp().raw().to_le_bytes());
-        buffer.extend_from_slice(&bytes);
-
-        if std::fs::write(&tmp_path, &buffer).is_err() {
-            let _ = std::fs::remove_file(&tmp_path);
-            return;
-        }
-        if std::fs::rename(&tmp_path, &final_path).is_err() {
-            let _ = std::fs::remove_file(&tmp_path);
-        }
+        // Cache entries are disposable, so a failed publish can be retried by recomputation.
+        let _ = self.publish(&key, version, &bytes);
     }
 
     fn contains(&self, key: &CacheKey) -> bool {
-        self.entry_path(key).try_exists().unwrap_or(false)
+        regular_file(&self.entry_path(key))
     }
 
     fn remove(&mut self, key: &CacheKey) -> bool {
-        // Ok => the entry existed and was deleted; NotFound (or any other error)
-        // => nothing removed.
-        std::fs::remove_file(self.entry_path(key)).is_ok()
+        let path = self.entry_path(key);
+        regular_file(&path) && std::fs::remove_file(path).is_ok()
     }
 
     fn clear(&mut self) {
-        // Only this adapter's own `.oc` files are removed; unrelated files sharing
-        // the directory are left alone (spec §5.20 disposable). Errors are
-        // swallowed — a residual file just means a later `get` may still hit.
-        let Ok(entries) = std::fs::read_dir(&self.root) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if Self::is_entry(&path) {
-                let _ = std::fs::remove_file(&path);
-            }
+        for path in self.entry_paths() {
+            let _ = std::fs::remove_file(path);
         }
     }
 
     fn len(&self) -> usize {
-        // Count only our own `.oc` entry files; an unreadable directory reads as
-        // empty.
-        let Ok(entries) = std::fs::read_dir(&self.root) else {
-            return 0;
-        };
-        entries
-            .flatten()
-            .filter(|entry| Self::is_entry(&entry.path()))
-            .count()
+        self.entry_paths().count()
     }
 
     fn is_empty(&self) -> bool {
-        self.len() == 0
+        self.entry_paths().next().is_none()
     }
+}
+
+fn canonical_number(value: &str) -> bool {
+    !value.is_empty()
+        && (value.len() == 1 || !value.starts_with('0'))
+        && value.bytes().all(|byte| byte.is_ascii_digit())
+        && value.parse::<u64>().is_ok()
+}
+
+fn regular_file(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.is_file())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicU32, Ordering};
-
-    use obscur_identity::ResourceId;
-
-    /// Process-unique counter so concurrent tests never collide on a temp name.
-    static COUNTER: AtomicU32 = AtomicU32::new(0);
-
-    /// Creates a fresh, empty temp directory unique to this process and test.
-    fn unique_temp_dir() -> PathBuf {
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!("obscur-cache-fs-{}-{n}", std::process::id()));
-        std::fs::create_dir_all(&dir).expect("create temp dir");
-        dir
-    }
-
-    /// Removes a temp directory tree, ignoring absence.
-    fn cleanup(dir: &Path) {
-        let _ = std::fs::remove_dir_all(dir);
-    }
+    use obscur_identity::{ResourceId, VersionStamp};
 
     fn key(raw: u64) -> CacheKey {
         CacheKey::for_resource(ResourceId::from_raw(raw))
     }
 
     #[test]
+    fn clearing_ignores_other_oc_files_and_non_file_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = FsCacheStore::new(dir.path());
+        let version = ResourceVersion::initial();
+        let foreign = dir.path().join("notes.oc");
+        std::fs::write(&foreign, b"unrelated").unwrap();
+        let noncanonical_entries = ["01-0.oc", "1-+0.oc", "18446744073709551616-0.oc"];
+        for name in noncanonical_entries {
+            std::fs::write(dir.path().join(name), b"unrelated").unwrap();
+        }
+        let directory_key = key(2);
+        let directory = store.entry_path(&directory_key);
+        std::fs::create_dir(&directory).unwrap();
+        store.put(key(1), version, Arc::from(&b"entry"[..]));
+
+        assert_eq!(store.len(), 1);
+        assert!(!store.contains(&directory_key));
+        assert!(!store.remove(&directory_key));
+        assert!(store.get(&directory_key, version).is_none());
+        store.clear();
+        assert!(store.is_empty());
+        assert_eq!(std::fs::read(foreign).unwrap(), b"unrelated");
+        for name in noncanonical_entries {
+            assert_eq!(std::fs::read(dir.path().join(name)).unwrap(), b"unrelated");
+        }
+        assert!(directory.is_dir());
+    }
+
+    #[test]
+    fn failed_publication_cleans_staging_and_leaves_other_files_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = FsCacheStore::new(dir.path());
+        let key = key(1);
+        let destination = store.entry_path(&key);
+        std::fs::create_dir(&destination).unwrap();
+        let other = destination.with_extension("tmp");
+        std::fs::write(&other, b"another writer").unwrap();
+
+        store.put(key, ResourceVersion::initial(), Arc::from(&b"entry"[..]));
+
+        assert!(destination.is_dir());
+        assert_eq!(std::fs::read(other).unwrap(), b"another writer");
+        assert_eq!(dir.path().read_dir().unwrap().count(), 2);
+    }
+
+    #[test]
+    fn unavailable_cache_directory_degrades_to_a_miss() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("blocked");
+        std::fs::write(&path, b"not a directory").unwrap();
+        let mut store = FsCacheStore::new(&path);
+        let key = key(1);
+        let version = ResourceVersion::initial();
+        store.put(key, version, Arc::from(&b"entry"[..]));
+        assert!(store.get(&key, version).is_none());
+        assert_eq!(std::fs::read(path).unwrap(), b"not a directory");
+    }
+
+    #[test]
+    fn publishing_recovers_if_the_cache_directory_was_removed() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("cache");
+        let mut store = FsCacheStore::new(&root);
+        std::fs::remove_dir(&root).unwrap();
+
+        let version = ResourceVersion::initial();
+        store.put(key(1), version, Arc::from(&b"recomputed"[..]));
+
+        assert_eq!(
+            store.get(&key(1), version).as_deref(),
+            Some(&b"recomputed"[..])
+        );
+        assert_eq!(root.read_dir().unwrap().count(), 1);
+    }
+
+    #[test]
+    fn concurrent_writers_publish_complete_entries_and_leave_no_staging_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = FsCacheStore::new(directory.path());
+        let start = std::sync::Barrier::new(2);
+        let version = ResourceVersion::initial();
+        let first = vec![0x5a; 8192];
+        let second = vec![0x7b; 16384];
+
+        std::thread::scope(|threads| {
+            for payload in [&first, &second] {
+                let mut writer = store.clone();
+                let start = &start;
+                threads.spawn(move || {
+                    start.wait();
+                    writer.put(key(1), version, Arc::from(payload.as_slice()));
+                });
+            }
+        });
+
+        let stored = store.get(&key(1), version).unwrap();
+        assert!(stored.as_ref() == first || stored.as_ref() == second);
+        assert_eq!(directory.path().read_dir().unwrap().count(), 1);
+    }
+
+    #[test]
+    fn reads_and_writes_the_little_endian_cache_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = FsCacheStore::new(dir.path());
+        let key = key(1);
+        let version = ResourceVersion {
+            stamp: VersionStamp::from_raw(0x0807_0605_0403_0201),
+        };
+        let entry = store.entry_path(&key);
+        let encoded = b"\x01\x02\x03\x04\x05\x06\x07\x08entry";
+        std::fs::write(&entry, encoded).unwrap();
+        assert_eq!(store.get(&key, version).as_deref(), Some(&b"entry"[..]));
+        store.put(key, version, Arc::from(&b"entry"[..]));
+        assert_eq!(std::fs::read(entry).unwrap(), encoded);
+    }
+
+    #[test]
     fn put_then_get_matching_version_returns_bytes() {
-        let dir = unique_temp_dir();
-        let mut store = FsCacheStore::new(&dir);
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = FsCacheStore::new(dir.path());
         let version = ResourceVersion::initial();
 
         store.put(key(1), version, Arc::from(&b"artifact bytes"[..]));
         let fetched = store.get(&key(1), version).expect("matching version hits");
         assert_eq!(&*fetched, b"artifact bytes");
-
-        cleanup(&dir);
     }
 
     #[test]
     fn get_with_different_version_is_a_miss() {
-        let dir = unique_temp_dir();
-        let mut store = FsCacheStore::new(&dir);
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = FsCacheStore::new(dir.path());
         let version = ResourceVersion::initial();
 
         store.put(key(2), version, Arc::from(&b"artifact"[..]));
         // Compatibility-aware (spec §5.20): a newer version supersedes the stored
         // one, so the stale bytes are withheld.
         assert_eq!(store.get(&key(2), version.next()), None);
-
-        cleanup(&dir);
     }
 
     #[test]
     fn contains_true_after_put() {
-        let dir = unique_temp_dir();
-        let mut store = FsCacheStore::new(&dir);
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = FsCacheStore::new(dir.path());
 
         assert!(!store.contains(&key(3)));
         store.put(key(3), ResourceVersion::initial(), Arc::from(&[7u8][..]));
         assert!(store.contains(&key(3)));
-
-        cleanup(&dir);
     }
 
     #[test]
     fn remove_reports_whether_present() {
-        let dir = unique_temp_dir();
-        let mut store = FsCacheStore::new(&dir);
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = FsCacheStore::new(dir.path());
 
         store.put(key(4), ResourceVersion::initial(), Arc::from(&[1u8][..]));
         assert!(store.remove(&key(4)));
         assert!(!store.remove(&key(4)));
         assert!(!store.contains(&key(4)));
-
-        cleanup(&dir);
     }
 
     #[test]
     fn second_put_at_new_version_replaces_entry() {
-        let dir = unique_temp_dir();
-        let mut store = FsCacheStore::new(&dir);
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = FsCacheStore::new(dir.path());
         let v1 = ResourceVersion::initial();
         let v2 = v1.next();
 
@@ -228,14 +326,12 @@ mod tests {
         assert_eq!(&*store.get(&key(5), v2).expect("new version hits"), b"new");
         // Replacement, not accumulation.
         assert_eq!(store.len(), 1);
-
-        cleanup(&dir);
     }
 
     #[test]
     fn clear_empties_the_store() {
-        let dir = unique_temp_dir();
-        let mut store = FsCacheStore::new(&dir);
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = FsCacheStore::new(dir.path());
         store.put(key(6), ResourceVersion::initial(), Arc::from(&[1u8][..]));
         store.put(key(7), ResourceVersion::initial(), Arc::from(&[2u8][..]));
         assert_eq!(store.len(), 2);
@@ -243,62 +339,54 @@ mod tests {
         store.clear();
         assert!(store.is_empty());
         assert_eq!(store.len(), 0);
-
-        cleanup(&dir);
     }
 
     #[test]
     fn persists_across_two_store_instances_on_same_dir() {
-        let dir = unique_temp_dir();
+        let dir = tempfile::tempdir().unwrap();
         let version = ResourceVersion::initial();
 
         // First instance writes; it is then dropped.
         {
-            let mut writer = FsCacheStore::new(&dir);
+            let mut writer = FsCacheStore::new(dir.path());
             writer.put(key(8), version, Arc::from(&b"persisted"[..]));
         }
 
         // A fresh instance over the SAME directory reads what the first wrote —
         // the artifact survives across "runs" (spec §5.20 persistent).
-        let reader = FsCacheStore::new(&dir);
+        let reader = FsCacheStore::new(dir.path());
         assert!(reader.contains(&key(8)));
         let fetched = reader.get(&key(8), version).expect("persisted entry hits");
         assert_eq!(&*fetched, b"persisted");
         // Version-awareness still holds against the persisted header.
         assert_eq!(reader.get(&key(8), version.next()), None);
-
-        cleanup(&dir);
     }
 
     #[test]
     fn len_counts_only_entry_files() {
-        let dir = unique_temp_dir();
-        let mut store = FsCacheStore::new(&dir);
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = FsCacheStore::new(dir.path());
         store.put(key(9), ResourceVersion::initial(), Arc::from(&[1u8][..]));
         assert_eq!(store.len(), 1);
 
         // A stray non-entry file must not be counted or cleared.
-        std::fs::write(dir.join("stray.txt"), b"not ours").expect("write stray file");
+        std::fs::write(dir.path().join("stray.txt"), b"not ours").expect("write stray file");
         assert_eq!(store.len(), 1);
 
         store.clear();
         assert_eq!(store.len(), 0);
         assert!(
-            dir.join("stray.txt").exists(),
+            dir.path().join("stray.txt").exists(),
             "clear left foreign file alone"
         );
-
-        cleanup(&dir);
     }
 
     #[test]
     fn truncated_entry_file_is_a_miss() {
-        let dir = unique_temp_dir();
-        let store = FsCacheStore::new(&dir);
+        let dir = tempfile::tempdir().unwrap();
+        let store = FsCacheStore::new(dir.path());
         // A file shorter than the 8-byte version header is corrupt → miss, no panic.
         std::fs::write(store.entry_path(&key(10)), b"abc").expect("write short file");
         assert_eq!(store.get(&key(10), ResourceVersion::initial()), None);
-
-        cleanup(&dir);
     }
 }

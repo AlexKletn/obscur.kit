@@ -1,16 +1,16 @@
-#![doc = include_str!("diagnostic_severity.doc/_module.md")]
+//! Diagnostic severity levels.
 
-#[doc = include_str!("diagnostic_severity.doc/DiagnosticSeverity.md")]
+/// Severity of a diagnostic (spec §1.6).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DiagnosticSeverity {
-    #[doc = include_str!("diagnostic_severity.doc/Trace.md")]
+    /// Fine-grained tracing detail.
     Trace,
-    #[doc = include_str!("diagnostic_severity.doc/Info.md")]
+    /// Informational message.
     Info,
-    #[doc = include_str!("diagnostic_severity.doc/Warning.md")]
+    /// A recoverable concern worth surfacing.
     Warning,
-    #[doc = include_str!("diagnostic_severity.doc/Error.md")]
+    /// A recoverable error handled by fallback.
     Error,
-    #[doc = include_str!("diagnostic_severity.doc/Critical.md")]
+    /// An internal invariant failure.
     Critical,
 }

@@ -1,9 +1,10 @@
-#![doc = include_str!("block_declaration.doc/_module.md")]
+//! One authored declaration inside a rule block, before cascade context:
+//! [`BlockDeclaration`].
 
 use crate::cascade::ImportantFlag;
 use crate::property::{PropertyId, PropertyValue};
 
-#[doc = include_str!("block_declaration.doc/BlockDeclaration.md")]
+#[doc = include_str!("../../docs/api/matching/block_declaration.doc/BlockDeclaration.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct BlockDeclaration {
     property: PropertyId,
@@ -12,7 +13,8 @@ pub struct BlockDeclaration {
 }
 
 impl BlockDeclaration {
-    #[doc = include_str!("block_declaration.doc/new.md")]
+    /// Creates an authored declaration from its property, value and
+    /// `!important` flag.
     #[must_use]
     pub const fn new(property: PropertyId, value: PropertyValue, important: ImportantFlag) -> Self {
         Self {
@@ -22,31 +24,31 @@ impl BlockDeclaration {
         }
     }
 
-    #[doc = include_str!("block_declaration.doc/normal.md")]
+    /// Creates a normal (non-`!important`) authored declaration.
     #[must_use]
     pub const fn normal(property: PropertyId, value: PropertyValue) -> Self {
         Self::new(property, value, ImportantFlag::Normal)
     }
 
-    #[doc = include_str!("block_declaration.doc/important.md")]
+    /// Creates an `!important` authored declaration.
     #[must_use]
     pub const fn important(property: PropertyId, value: PropertyValue) -> Self {
         Self::new(property, value, ImportantFlag::Important)
     }
 
-    #[doc = include_str!("block_declaration.doc/property.md")]
+    /// Returns the property this declaration assigns.
     #[must_use]
     pub const fn property(&self) -> PropertyId {
         self.property
     }
 
-    #[doc = include_str!("block_declaration.doc/value.md")]
+    /// Returns the value this declaration assigns.
     #[must_use]
     pub const fn value(&self) -> &PropertyValue {
         &self.value
     }
 
-    #[doc = include_str!("block_declaration.doc/important_flag.md")]
+    /// Returns whether this declaration was written `!important`.
     #[must_use]
     pub const fn important_flag(&self) -> ImportantFlag {
         self.important

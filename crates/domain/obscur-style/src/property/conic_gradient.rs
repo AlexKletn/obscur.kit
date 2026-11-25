@@ -1,22 +1,24 @@
-#![doc = include_str!("conic_gradient.doc/_module.md")]
+//! A style-local `conic-gradient(...)` value (spec §5.2).
 
 use crate::property::{GradientStop, Length};
 
-#[doc = include_str!("conic_gradient.doc/ConicGradient.md")]
+#[doc = include_str!("../../docs/api/property/conic_gradient.doc/ConicGradient.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConicGradient {
-    #[doc = include_str!("conic_gradient.doc/from_angle_deg.md")]
+    /// The starting angle in degrees (CSS convention: `0` = up, increasing
+    /// clockwise); the default is `0`.
     pub from_angle_deg: f32,
-    #[doc = include_str!("conic_gradient.doc/center_x.md")]
+    /// The center's horizontal position, box-relative (default `50%`).
     pub center_x: Length,
-    #[doc = include_str!("conic_gradient.doc/center_y.md")]
+    /// The center's vertical position, box-relative (default `50%`).
     pub center_y: Length,
-    #[doc = include_str!("conic_gradient.doc/stops.md")]
+    /// The gradient's color stops, in authored order around the sweep.
     pub stops: Box<[GradientStop]>,
 }
 
 impl ConicGradient {
-    #[doc = include_str!("conic_gradient.doc/new.md")]
+    /// Creates a conic gradient with the given starting angle, center position,
+    /// and stops.
     #[must_use]
     pub fn new(
         from_angle_deg: f32,
@@ -32,31 +34,31 @@ impl ConicGradient {
         }
     }
 
-    #[doc = include_str!("conic_gradient.doc/from_angle_deg_2.md")]
+    /// Returns the starting angle in degrees (CSS convention).
     #[must_use]
     pub const fn from_angle_deg(&self) -> f32 {
         self.from_angle_deg
     }
 
-    #[doc = include_str!("conic_gradient.doc/center_x_2.md")]
+    /// Returns the center's horizontal position (box-relative).
     #[must_use]
     pub const fn center_x(&self) -> Length {
         self.center_x
     }
 
-    #[doc = include_str!("conic_gradient.doc/center_y_2.md")]
+    /// Returns the center's vertical position (box-relative).
     #[must_use]
     pub const fn center_y(&self) -> Length {
         self.center_y
     }
 
-    #[doc = include_str!("conic_gradient.doc/uses_ch.md")]
+    #[doc = include_str!("../../docs/api/property/conic_gradient.doc/uses_ch.md")]
     #[must_use]
     pub const fn uses_ch(&self) -> bool {
         self.center_x().is_ch() || self.center_y().is_ch()
     }
 
-    #[doc = include_str!("conic_gradient.doc/stops_2.md")]
+    /// Returns the gradient's color stops.
     #[must_use]
     pub const fn stops(&self) -> &[GradientStop] {
         &self.stops

@@ -296,3 +296,40 @@ fn an_absolute_containing_block_is_the_ancestors_padding_box() {
     approx(w, 140.0, "100% of the 140px padding box");
     approx(h, 35.0, "25% of the 140px padding box");
 }
+
+#[test]
+fn overflow_scrollport_and_descendant_clip_use_the_padding_box() {
+    use obscur_kit::scene::command::PaintCommand;
+
+    let rt = drive(
+        VW,
+        VW,
+        ".port { position: relative; box-sizing: border-box; width: 100px; height: 80px;
+                  overflow: auto; border: 10px solid black; background-color: white }
+         .child { position: absolute; left: -10px; top: 0; width: 160px; height: 120px;
+                  background-color: red }",
+        &view(vec![el(1, "port", vec![el(2, "child", vec![])])]),
+    );
+    let port = at(&rt, &[0]);
+    let child = at(&rt, &[0, 0]);
+    let padding = Rect::new(Point::new(10.0, 10.0), Size::new(80.0, 60.0));
+    assert_eq!(rt.scroll_metrics(port).unwrap().viewport, padding.size);
+    assert_eq!(
+        rt.hit_test(Point::new(5.0, 20.0)).target().unwrap().node(),
+        port
+    );
+    assert_eq!(
+        rt.hit_test(Point::new(15.0, 20.0)).target().unwrap().node(),
+        child
+    );
+
+    let snapshot = rt.snapshot();
+    let commands = snapshot.display_list().commands();
+    let clip = commands
+        .iter()
+        .position(|command| matches!(command, PaintCommand::PushClip(clip) if clip.bounds() == Some(padding)))
+        .expect("padding box clip");
+    assert!(commands[..clip].iter().any(|command| matches!(
+        command, PaintCommand::DrawPath { path, .. } if path.bounds() == Some(Rect::new(Point::ORIGIN, Size::new(100.0, 80.0)))
+    )));
+}

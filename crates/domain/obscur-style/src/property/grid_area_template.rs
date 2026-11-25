@@ -1,20 +1,20 @@
-#![doc = include_str!("grid_area_template.doc/_module.md")]
+//! `GridAreaTemplate`: a parsed `grid-template-areas` grid of named cells.
 
 use crate::property::GridAreaRect;
 
-#[doc = include_str!("grid_area_template.doc/GridAreaTemplate.md")]
+#[doc = include_str!("../../docs/api/property/grid_area_template.doc/GridAreaTemplate.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GridAreaTemplate {
-    #[doc = include_str!("grid_area_template.doc/rows.md")]
+    /// The number of rows (strings) in the template.
     rows: u32,
-    #[doc = include_str!("grid_area_template.doc/columns.md")]
+    /// The number of columns (cells per row) in the template.
     columns: u32,
-    #[doc = include_str!("grid_area_template.doc/areas.md")]
+    /// The resolved named areas, sorted by name for determinism.
     areas: Box<[(Box<str>, GridAreaRect)]>,
 }
 
 impl GridAreaTemplate {
-    #[doc = include_str!("grid_area_template.doc/from_rows.md")]
+    #[doc = include_str!("../../docs/api/property/grid_area_template.doc/from_rows.md")]
     #[must_use]
     pub fn from_rows(rows: &[Vec<Option<Box<str>>>]) -> Option<Self> {
         let row_count = rows.len();
@@ -76,7 +76,8 @@ impl GridAreaTemplate {
         })
     }
 
-    #[doc = include_str!("grid_area_template.doc/area.md")]
+    /// Returns the line-number [`GridAreaRect`] of the area named `name`, or
+    /// [`None`] when no such area exists in the template.
     #[must_use]
     pub fn area(&self, name: &str) -> Option<GridAreaRect> {
         self.areas
@@ -85,20 +86,21 @@ impl GridAreaTemplate {
             .map(|(_, rect)| *rect)
     }
 
-    #[doc = include_str!("grid_area_template.doc/rows_2.md")]
+    /// The number of rows in the template.
     #[must_use]
     pub const fn rows(&self) -> u32 {
         self.rows
     }
 
-    #[doc = include_str!("grid_area_template.doc/columns_2.md")]
+    /// The number of columns in the template.
     #[must_use]
     pub const fn columns(&self) -> u32 {
         self.columns
     }
 }
 
-#[doc = include_str!("grid_area_template.doc/to_line.md")]
+/// Narrows a 0-based `usize` index into the 1-based `u32` line number `index + 1`,
+/// saturating so a pathologically large grid cannot overflow.
 fn to_line(index: usize) -> u32 {
     u32::try_from(index)
         .unwrap_or(u32::MAX - 1)

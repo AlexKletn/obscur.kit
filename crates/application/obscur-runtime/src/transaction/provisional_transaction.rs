@@ -1,4 +1,4 @@
-#![doc = include_str!("provisional_transaction.doc/_module.md")]
+//! [`ProvisionalTransaction`]: commit/cancel semantics for provisional systems (spec §3.2).
 
 use obscur_identity::VersionStamp;
 
@@ -8,20 +8,20 @@ use super::transaction_validator::TransactionValidator;
 use super::ui_operation::UiOperation;
 use super::ui_transaction::UiTransaction;
 
-#[doc = include_str!("provisional_transaction.doc/ProvisionalTransaction.md")]
+#[doc = include_str!("../../docs/api/transaction/provisional_transaction.doc/ProvisionalTransaction.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProvisionalTransaction {
     pending: UiTransaction,
 }
 
 impl ProvisionalTransaction {
-    #[doc = include_str!("provisional_transaction.doc/begin.md")]
+    /// Begins a provisional transaction from an already-staged [`UiTransaction`].
     #[must_use]
     pub fn begin(tx: UiTransaction) -> Self {
         Self { pending: tx }
     }
 
-    #[doc = include_str!("provisional_transaction.doc/new.md")]
+    /// Creates an empty provisional transaction with no pending operations.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -29,19 +29,20 @@ impl ProvisionalTransaction {
         }
     }
 
-    #[doc = include_str!("provisional_transaction.doc/stage.md")]
+    /// Stages one more operation onto the pending transaction and returns
+    /// `&mut self` for chaining. Nothing is applied — the op only accumulates.
     pub fn stage(&mut self, op: UiOperation) -> &mut Self {
         self.pending.push(op);
         self
     }
 
-    #[doc = include_str!("provisional_transaction.doc/transaction.md")]
+    /// Returns the pending, not-yet-applied transaction.
     #[must_use]
     pub const fn transaction(&self) -> &UiTransaction {
         &self.pending
     }
 
-    #[doc = include_str!("provisional_transaction.doc/commit.md")]
+    #[doc = include_str!("../../docs/api/transaction/provisional_transaction.doc/commit.md")]
     pub fn commit(
         self,
         validator: &TransactionValidator,
@@ -54,7 +55,7 @@ impl ProvisionalTransaction {
         ))
     }
 
-    #[doc = include_str!("provisional_transaction.doc/cancel.md")]
+    #[doc = include_str!("../../docs/api/transaction/provisional_transaction.doc/cancel.md")]
     pub fn cancel(self) {
         // Dropping `self` discards the pending transaction; nothing to undo.
     }

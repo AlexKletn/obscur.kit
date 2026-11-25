@@ -1,32 +1,12 @@
-#![doc = include_str!("resize_observer.doc/_module.md")]
+#![doc = include_str!("../../docs/api/observer/resize_observer.doc/_module.md")]
 
 use obscur_geometry::Size;
 use obscur_identity::NodeId;
 
-#[doc = include_str!("resize_observer.doc/ResizeChange.md")]
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct ResizeChange {
-    #[doc = include_str!("resize_observer.doc/node.md")]
-    pub node: NodeId,
-    #[doc = include_str!("resize_observer.doc/previous.md")]
-    pub previous: Option<Size>,
-    #[doc = include_str!("resize_observer.doc/current.md")]
-    pub current: Size,
-}
+use super::ResizeChange;
 
-impl ResizeChange {
-    #[doc = include_str!("resize_observer.doc/new.md")]
-    #[must_use]
-    pub const fn new(node: NodeId, previous: Option<Size>, current: Size) -> Self {
-        Self {
-            node,
-            previous,
-            current,
-        }
-    }
-}
-
-#[doc = include_str!("resize_observer.doc/ResizeObserver.md")]
+/// Watches one node's [`Size`], firing when the size changes and ignoring
+/// position-only moves (spec §4.4).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ResizeObserver {
     node: NodeId,
@@ -34,25 +14,26 @@ pub struct ResizeObserver {
 }
 
 impl ResizeObserver {
-    #[doc = include_str!("resize_observer.doc/new_2.md")]
+    /// Creates an observer for `node`. It has not yet observed any size, so the
+    /// first [`observe`](Self::observe) fires with the initial value.
     #[must_use]
     pub const fn new(node: NodeId) -> Self {
         Self { node, last: None }
     }
 
-    #[doc = include_str!("resize_observer.doc/node_2.md")]
+    /// The observed node.
     #[must_use]
     pub const fn node(self) -> NodeId {
         self.node
     }
 
-    #[doc = include_str!("resize_observer.doc/last.md")]
+    /// The last observed size, or `None` before the first observation.
     #[must_use]
     pub const fn last(self) -> Option<Size> {
         self.last
     }
 
-    #[doc = include_str!("resize_observer.doc/observe.md")]
+    #[doc = include_str!("../../docs/api/observer/resize_observer.doc/observe.md")]
     #[must_use]
     pub fn observe(&mut self, current: Size) -> Option<ResizeChange> {
         if self.last == Some(current) {
@@ -63,7 +44,7 @@ impl ResizeObserver {
         Some(ResizeChange::new(self.node, previous, current))
     }
 
-    #[doc = include_str!("resize_observer.doc/reset.md")]
+    /// Forgets the last observed size, so the next observation fires afresh.
     pub const fn reset(&mut self) {
         self.last = None;
     }

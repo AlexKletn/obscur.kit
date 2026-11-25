@@ -334,6 +334,14 @@ CSS module mode:
 - keeps normal cascade/inheritance/variables inside the scope;
 - is reusable without global side effects.
 
+### Local portal targets
+
+A portal resolves its visual host within the retained tree, through the
+host resolver or by unique element id. Projection preserves the logical
+parent for style and command routing. Layout, paint, clipping, transforms
+and hit testing follow visual ancestry. Unresolved and cyclic projections
+use their original placement.
+
 ## 4.16 Generated and synthetic parts
 
 `::before` and `::after` are supported for decoration only.

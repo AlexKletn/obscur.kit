@@ -1,5 +1,6 @@
-#![doc = include_str!("host_api_wrapper.doc/_module.md")]
+//! HostApiWrapper (skeleton stub for the spec-defined entity; not yet implemented).
 
-#[doc = include_str!("host_api_wrapper.doc/HostApiWrapper.md")]
+/// Placeholder for the `HostApiWrapper` entity. See the Obscur Kit 2 specs for its
+/// contract; this stub exists to materialise the target source layout.
 #[derive(Debug)]
 pub struct HostApiWrapper;

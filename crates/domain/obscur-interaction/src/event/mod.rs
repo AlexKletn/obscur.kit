@@ -1,8 +1,10 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Event module.
 mod dispatch_result;
 pub use dispatch_result::DispatchResult;
 mod event_dispatcher;
-pub use event_dispatcher::{DispatchStep, EventDispatcher};
+pub use event_dispatcher::EventDispatcher;
+mod dispatch_step;
+pub use dispatch_step::DispatchStep;
 mod event_origin;
 pub use event_origin::EventOrigin;
 mod event_payload;

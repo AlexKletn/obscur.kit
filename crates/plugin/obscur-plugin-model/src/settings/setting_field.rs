@@ -1,5 +1,6 @@
-#![doc = include_str!("setting_field.doc/_module.md")]
+//! `SettingField` (skeleton stub for the spec-defined entity; not yet implemented).
 
-#[doc = include_str!("setting_field.doc/SettingField.md")]
+/// Placeholder for the `SettingField` entity. See the Obscur Kit 2 specs for its
+/// contract; this stub exists to materialise the target source layout.
 #[derive(Debug)]
 pub struct SettingField;

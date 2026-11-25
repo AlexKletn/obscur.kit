@@ -1,4 +1,4 @@
-#![doc = include_str!("completion_queue.doc/_module.md")]
+//! A queue of controlled async completions (spec §7.4).
 
 use std::collections::VecDeque;
 
@@ -6,15 +6,15 @@ use obscur_identity::OperationId;
 
 use super::completion::Completion;
 
-#[doc = include_str!("completion_queue.doc/CompletionQueue.md")]
+#[doc = include_str!("../../docs/api/deterministic/completion_queue.doc/CompletionQueue.md")]
 #[derive(Debug, Clone)]
 pub struct CompletionQueue<T> {
-    #[doc = include_str!("completion_queue.doc/entries.md")]
+    /// Pending completions, delivered front-to-back (FIFO).
     entries: VecDeque<Completion<T>>,
 }
 
 impl<T> CompletionQueue<T> {
-    #[doc = include_str!("completion_queue.doc/new.md")]
+    /// Creates an empty completion queue.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -22,30 +22,30 @@ impl<T> CompletionQueue<T> {
         }
     }
 
-    #[doc = include_str!("completion_queue.doc/push.md")]
+    /// Enqueues a completion pairing `operation` with its result `value`.
     pub fn push(&mut self, operation: OperationId, value: T) {
         self.entries.push_back(Completion::new(operation, value));
     }
 
-    #[doc = include_str!("completion_queue.doc/take_next.md")]
+    /// Delivers the front (oldest) pending completion, or `None` if empty.
     #[must_use]
     pub fn take_next(&mut self) -> Option<Completion<T>> {
         self.entries.pop_front()
     }
 
-    #[doc = include_str!("completion_queue.doc/drain.md")]
+    /// Delivers all pending completions in FIFO order, leaving the queue empty.
     #[must_use]
     pub fn drain(&mut self) -> Vec<Completion<T>> {
         self.entries.drain(..).collect()
     }
 
-    #[doc = include_str!("completion_queue.doc/len.md")]
+    /// Returns the number of pending completions.
     #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
-    #[doc = include_str!("completion_queue.doc/is_empty.md")]
+    /// Returns `true` when no completions are pending.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()

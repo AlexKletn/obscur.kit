@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Constraint module.
 mod box_constraints;
 
 pub use box_constraints::BoxConstraints;

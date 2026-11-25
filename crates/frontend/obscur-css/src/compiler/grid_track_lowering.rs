@@ -1,42 +1,234 @@
-#![doc = include_str!("grid_track_lowering.doc/_module.md")]
+#![doc = include_str!("../../docs/api/compiler/grid_track_lowering.doc/_module.md")]
 
+use super::calc_lowering::lower_math_function;
 use super::property_compiler::narrow_f32;
-use super::value_lowering::dimension_length;
+use super::value_lowering::{css_wide_keyword, dimension_length};
 use crate::parser::ParsedValue;
-use obscur_style::property::{GridAreaTemplate, GridTrack, GridTrackList, Length, PropertyValue};
+use obscur_style::property::{
+    GridAreaTemplate, GridTrack, GridTrackList, Length, PropertyValue, layout_keyword,
+};
 
-#[doc = include_str!("grid_track_lowering.doc/MAX_REPEAT.md")]
+/// The largest number of tracks a single `repeat(N, …)` is allowed to expand to,
+/// so a pathological repetition count cannot blow up the track list.
 const MAX_REPEAT: usize = 1024;
 
-#[doc = include_str!("grid_track_lowering.doc/lower_grid_template.md")]
+#[doc = include_str!("../../docs/api/compiler/grid_track_lowering.doc/lower_grid_template.md")]
 pub(super) fn lower_grid_template(values: &[ParsedValue]) -> Option<PropertyValue> {
-    let (tracks, line_names) = track_list_from_components(values)?;
-    if tracks.is_empty() {
+    if let [ParsedValue::Keyword(keyword)] = values
+        && keyword.eq_ignore_ascii_case("none")
+    {
+        return Some(PropertyValue::Initial);
+    }
+    let (tracks, line_names) = track_list_from_components(values, true)?;
+    if tracks.is_empty() || !valid_auto_track_list(&tracks) {
         return None;
     }
-    // A template with no authored `[name]` group carries an empty `line_names`,
-    // keeping the value byte-identical to the pre-named-lines list; otherwise the
-    // buckets are one per grid line (`tracks.len() + 1`).
-    let line_names = if line_names.iter().all(Vec::is_empty) {
-        Box::from([])
-    } else {
-        line_names
-            .into_iter()
-            .map(Vec::into_boxed_slice)
-            .collect::<Vec<_>>()
-            .into_boxed_slice()
-    };
     Some(PropertyValue::grid_track_list(GridTrackList::new(
         tracks.into_boxed_slice(),
-        line_names,
+        compact_line_names(line_names),
     )))
 }
 
-#[doc = include_str!("grid_track_lowering.doc/ParsedTrackList.md")]
+/// Omits the boundary buckets when the track list contains no authored names.
+fn compact_line_names(names: Vec<Vec<Box<str>>>) -> Box<[Box<[Box<str>]>]> {
+    if names.iter().all(Vec::is_empty) {
+        Box::from([])
+    } else {
+        names.into_iter().map(Vec::into_boxed_slice).collect()
+    }
+}
+
+/// Lowers the rows, columns and areas of the grid-template shorthand.
+pub(super) fn lower_grid_template_shorthand(values: &[ParsedValue]) -> Option<[PropertyValue; 3]> {
+    if let [ParsedValue::Keyword(keyword)] = values {
+        let value = css_wide_keyword(keyword).or_else(|| {
+            keyword
+                .eq_ignore_ascii_case("none")
+                .then_some(PropertyValue::Initial)
+        })?;
+        return Some([value.clone(), value.clone(), value]);
+    }
+
+    let mut axes = values.split(|value| matches!(value, ParsedValue::Delimiter('/')));
+    let rows = axes.next()?;
+    let columns = axes.next();
+    if axes.next().is_some() {
+        return None;
+    }
+    if !rows
+        .iter()
+        .any(|value| matches!(value, ParsedValue::String(_)))
+    {
+        return Some([
+            lower_grid_template(rows)?,
+            lower_grid_template(columns?)?,
+            PropertyValue::Initial,
+        ]);
+    }
+
+    let mut row_tracks = Vec::new();
+    let mut area_rows = Vec::new();
+    let mut tokens = rows.iter().peekable();
+    while let Some(token) = tokens.next() {
+        match token {
+            ParsedValue::LineNames(_) => row_tracks.push(token.clone()),
+            ParsedValue::String(_) => {
+                area_rows.push(token.clone());
+                let size = match tokens.peek() {
+                    None | Some(ParsedValue::LineNames(_) | ParsedValue::String(_)) => {
+                        ParsedValue::Keyword("auto".into())
+                    }
+                    Some(size) => {
+                        grid_track_scalar(size)?;
+                        tokens.next()?.clone()
+                    }
+                };
+                row_tracks.push(size);
+            }
+            _ => return None,
+        }
+    }
+    let columns = match columns {
+        Some(values) => {
+            for value in values {
+                if !matches!(value, ParsedValue::LineNames(_)) {
+                    grid_track_scalar(value)?;
+                }
+            }
+            lower_grid_template(values)?
+        }
+        None => PropertyValue::Initial,
+    };
+    Some([
+        lower_grid_template(&row_tracks)?,
+        columns,
+        lower_grid_template_areas(&area_rows)?,
+    ])
+}
+
+/// Lowers the explicit and implicit longhands of the grid shorthand.
+pub(super) fn lower_grid_shorthand(values: &[ParsedValue]) -> Option<[PropertyValue; 6]> {
+    if let [ParsedValue::Keyword(keyword)] = values
+        && let Some(value) = css_wide_keyword(keyword)
+    {
+        return Some(std::array::from_fn(|_| value.clone()));
+    }
+    if let Some([rows, columns, areas]) = lower_grid_template_shorthand(values) {
+        return Some([
+            rows,
+            columns,
+            areas,
+            PropertyValue::Initial,
+            PropertyValue::Initial,
+            PropertyValue::Initial,
+        ]);
+    }
+
+    let mut axes = values.split(|value| matches!(value, ParsedValue::Delimiter('/')));
+    let rows = axes.next()?;
+    let columns = axes.next()?;
+    if axes.next().is_some() {
+        return None;
+    }
+    let initial = PropertyValue::Initial;
+    match (auto_flow_prefix(rows), auto_flow_prefix(columns)) {
+        (Some((dense, implicit)), None) => Some([
+            initial.clone(),
+            lower_grid_template(columns)?,
+            initial.clone(),
+            lower_implicit_sizes(implicit)?,
+            initial,
+            flow_value(false, dense),
+        ]),
+        (None, Some((dense, implicit))) => Some([
+            lower_grid_template(rows)?,
+            initial.clone(),
+            initial.clone(),
+            initial,
+            lower_implicit_sizes(implicit)?,
+            flow_value(true, dense),
+        ]),
+        _ => None,
+    }
+}
+
+/// Reads the auto-flow marker, an optional dense modifier, and the remaining tracks.
+fn auto_flow_prefix(values: &[ParsedValue]) -> Option<(bool, &[ParsedValue])> {
+    let keyword = |token: &ParsedValue, name: &str| matches!(token, ParsedValue::Keyword(value) if value.eq_ignore_ascii_case(name));
+    match values {
+        [first, second, rest @ ..]
+            if keyword(first, "auto-flow") && keyword(second, "dense")
+                || keyword(first, "dense") && keyword(second, "auto-flow") =>
+        {
+            Some((true, rest))
+        }
+        [first, rest @ ..] if keyword(first, "auto-flow") => Some((false, rest)),
+        _ => None,
+    }
+}
+
+fn lower_implicit_sizes(values: &[ParsedValue]) -> Option<PropertyValue> {
+    if values.is_empty() {
+        return Some(PropertyValue::Initial);
+    }
+    let tracks = values
+        .iter()
+        .map(grid_track_scalar)
+        .collect::<Option<Vec<_>>>()?;
+    Some(PropertyValue::grid_tracks(tracks))
+}
+
+fn flow_value(column: bool, dense: bool) -> PropertyValue {
+    let symbol = match (column, dense) {
+        (false, false) => layout_keyword::GRID_AUTO_FLOW_ROW,
+        (false, true) => layout_keyword::GRID_AUTO_FLOW_ROW_DENSE,
+        (true, false) => layout_keyword::GRID_AUTO_FLOW_COLUMN,
+        (true, true) => layout_keyword::GRID_AUTO_FLOW_COLUMN_DENSE,
+    };
+    PropertyValue::Keyword(symbol)
+}
+
+/// Checks the fixed-size grammar when the template contains an auto-repeat.
+fn valid_auto_track_list(tracks: &[GridTrack]) -> bool {
+    let mut repeats = tracks.iter().filter_map(|track| match track {
+        GridTrack::AutoRepeat { tracks, .. } => Some(tracks),
+        _ => None,
+    });
+    let Some(pattern) = repeats.next() else {
+        return true;
+    };
+    repeats.next().is_none()
+        && pattern.iter().all(is_fixed_track_size)
+        && tracks.iter().all(|track| {
+            matches!(track, GridTrack::AutoRepeat { .. }) || is_fixed_track_size(track)
+        })
+}
+
+/// A fixed breadth or a minmax with at least one fixed breadth.
+fn is_fixed_track_size(track: &GridTrack) -> bool {
+    match track {
+        GridTrack::Fixed(_) => true,
+        GridTrack::MinMax(min, max) => {
+            matches!(min.as_ref(), GridTrack::Fixed(_))
+                || matches!(max.as_ref(), GridTrack::Fixed(_))
+        }
+        _ => false,
+    }
+}
+
+/// The parsed track list of a `grid-template-*` value: the flat [`GridTrack`]
+/// sizing functions plus one name bucket per grid line (`tracks.len() + 1`).
 type ParsedTrackList = (Vec<GridTrack>, Vec<Vec<Box<str>>>);
 
-#[doc = include_str!("grid_track_lowering.doc/track_list_from_components.md")]
-fn track_list_from_components(values: &[ParsedValue]) -> Option<ParsedTrackList> {
+/// Parses the tracks and names of a grid track list. Each name group applies
+/// to the current boundary, producing one bucket per grid line. Numeric
+/// repeats expand their tracks and merge the names at shared boundaries.
+/// Automatic repeats retain names on their pattern boundaries for later
+/// expansion. A repeat pattern cannot contain another repeat.
+fn track_list_from_components(
+    values: &[ParsedValue],
+    allow_repeat: bool,
+) -> Option<ParsedTrackList> {
     let mut tracks = Vec::new();
     // Start with the bucket for line 0 (before the first track).
     let mut line_names: Vec<Vec<Box<str>>> = vec![Vec::new()];
@@ -49,11 +241,14 @@ fn track_list_from_components(values: &[ParsedValue]) -> Option<ParsedTrackList>
                     bucket.extend(names.iter().cloned());
                 }
             }
-            ParsedValue::Function { name, args } if name.eq_ignore_ascii_case("repeat") => {
-                for track in expand_repeat(args)? {
-                    tracks.push(track);
-                    line_names.push(Vec::new());
-                }
+            ParsedValue::Function { name, args }
+                if allow_repeat && name.eq_ignore_ascii_case("repeat") =>
+            {
+                let (repeated_tracks, repeated_names) = expand_repeat(args)?;
+                let mut names = repeated_names.into_iter();
+                line_names.last_mut()?.extend(names.next()?);
+                line_names.extend(names);
+                tracks.extend(repeated_tracks);
             }
             other => {
                 tracks.push(grid_track_scalar(other)?);
@@ -64,9 +259,9 @@ fn track_list_from_components(values: &[ParsedValue]) -> Option<ParsedTrackList>
     Some((tracks, line_names))
 }
 
-#[doc = include_str!("grid_track_lowering.doc/lower_grid_auto_tracks.md")]
+#[doc = include_str!("../../docs/api/compiler/grid_track_lowering.doc/lower_grid_auto_tracks.md")]
 pub(super) fn lower_grid_auto_tracks(values: &[ParsedValue]) -> Option<PropertyValue> {
-    let tracks = tracks_from_components(values)?;
+    let (tracks, _) = track_list_from_components(values, true)?;
     if tracks.is_empty() {
         return None;
     }
@@ -80,8 +275,13 @@ pub(super) fn lower_grid_auto_tracks(values: &[ParsedValue]) -> Option<PropertyV
     Some(PropertyValue::grid_tracks(tracks))
 }
 
-#[doc = include_str!("grid_track_lowering.doc/lower_grid_template_areas.md")]
+#[doc = include_str!("../../docs/api/compiler/grid_track_lowering.doc/lower_grid_template_areas.md")]
 pub(super) fn lower_grid_template_areas(values: &[ParsedValue]) -> Option<PropertyValue> {
+    if let [ParsedValue::Keyword(keyword)] = values
+        && keyword.eq_ignore_ascii_case("none")
+    {
+        return Some(PropertyValue::Initial);
+    }
     let mut rows: Vec<Vec<Option<Box<str>>>> = Vec::new();
     for value in values {
         let ParsedValue::String(row) = value else {
@@ -103,27 +303,7 @@ pub(super) fn lower_grid_template_areas(values: &[ParsedValue]) -> Option<Proper
     GridAreaTemplate::from_rows(&rows).map(PropertyValue::GridAreas)
 }
 
-#[doc = include_str!("grid_track_lowering.doc/tracks_from_components.md")]
-fn tracks_from_components(values: &[ParsedValue]) -> Option<Vec<GridTrack>> {
-    let mut out = Vec::new();
-    for value in values {
-        match value {
-            // A comma has no meaning inside a track list; reject rather than drop.
-            ParsedValue::Comma => return None,
-            // `[name]` line-name groups carry no sizing; they are captured by
-            // `track_list_from_components` on the `grid-template-*` path and simply
-            // skipped here (the `grid-auto-*` / inner-`repeat` paths keep no names).
-            ParsedValue::LineNames(_) => {}
-            ParsedValue::Function { name, args } if name.eq_ignore_ascii_case("repeat") => {
-                out.extend(expand_repeat(args)?);
-            }
-            other => out.push(grid_track_scalar(other)?),
-        }
-    }
-    Some(out)
-}
-
-#[doc = include_str!("grid_track_lowering.doc/grid_track_scalar.md")]
+#[doc = include_str!("../../docs/api/compiler/grid_track_lowering.doc/grid_track_scalar.md")]
 fn grid_track_scalar(value: &ParsedValue) -> Option<GridTrack> {
     match value {
         ParsedValue::Keyword(keyword) if keyword.eq_ignore_ascii_case("auto") => {
@@ -143,6 +323,22 @@ fn grid_track_scalar(value: &ParsedValue) -> Option<GridTrack> {
             dimension_length(*value, unit).map(GridTrack::Fixed)
         }
         ParsedValue::Percentage(p) => Some(GridTrack::Fixed(Length::Percent(narrow_f32(*p)))),
+        ParsedValue::Function { name, args } if name.eq_ignore_ascii_case("fit-content") => {
+            let limit = match single_component(args)? {
+                ParsedValue::Number(value) if *value == 0.0 => Length::px(0.0),
+                ParsedValue::Dimension { value, unit } if *value >= 0.0 => {
+                    dimension_length(*value, unit)?
+                }
+                ParsedValue::Percentage(value) if *value >= 0.0 => {
+                    Length::Percent(narrow_f32(*value))
+                }
+                ParsedValue::Function { name, args } => {
+                    return lower_math_function(name, args).map(GridTrack::FitContentMath);
+                }
+                _ => return None,
+            };
+            Some(GridTrack::FitContent(limit))
+        }
         ParsedValue::Function { name, args } if name.eq_ignore_ascii_case("minmax") => {
             lower_minmax(args)
         }
@@ -150,7 +346,9 @@ fn grid_track_scalar(value: &ParsedValue) -> Option<GridTrack> {
     }
 }
 
-#[doc = include_str!("grid_track_lowering.doc/lower_minmax.md")]
+/// Lowers `minmax(min, max)` into a [`GridTrack::MinMax`]; each bound is a single
+/// non-`repeat` track. Returns [`None`] unless exactly two comma-separated,
+/// single-component bounds are present.
 fn lower_minmax(args: &[ParsedValue]) -> Option<GridTrack> {
     let groups: Vec<&[ParsedValue]> = args.split(|v| matches!(v, ParsedValue::Comma)).collect();
     let [min_group, max_group] = groups.as_slice() else {
@@ -158,33 +356,58 @@ fn lower_minmax(args: &[ParsedValue]) -> Option<GridTrack> {
     };
     let min = grid_track_scalar(single_component(min_group)?)?;
     let max = grid_track_scalar(single_component(max_group)?)?;
+    if matches!(
+        min,
+        GridTrack::Fr(_)
+            | GridTrack::MinMax(..)
+            | GridTrack::FitContent(_)
+            | GridTrack::FitContentMath(_)
+    ) || matches!(
+        max,
+        GridTrack::MinMax(..) | GridTrack::FitContent(_) | GridTrack::FitContentMath(_)
+    ) {
+        return None;
+    }
     Some(GridTrack::minmax(min, max))
 }
 
-#[doc = include_str!("grid_track_lowering.doc/expand_repeat.md")]
-fn expand_repeat(args: &[ParsedValue]) -> Option<Vec<GridTrack>> {
+/// Expands numerical repeats into tracks and line-name buckets. Names at shared
+/// boundaries are merged. Automatic repeats retain their track sizing pattern.
+fn expand_repeat(args: &[ParsedValue]) -> Option<ParsedTrackList> {
     let comma = args.iter().position(|v| matches!(v, ParsedValue::Comma))?;
     let (count_part, rest) = args.split_at(comma);
-    let inner = tracks_from_components(&rest[1..])?;
+    let (inner, names) = track_list_from_components(&rest[1..], false)?;
     if inner.is_empty() {
         return None;
     }
-    // `auto-fill` / `auto-fit`: keep the pattern as an auto-repeat resolved later.
+    // Automatic repeats retain a single sizing pattern for layout expansion.
     if let Some(fill) = auto_repeat_fill(count_part) {
-        return Some(vec![GridTrack::AutoRepeat {
-            fill,
-            tracks: inner.into_boxed_slice(),
-        }]);
+        return Some((
+            vec![GridTrack::AutoRepeat {
+                fill,
+                tracks: inner.into_boxed_slice(),
+                line_names: compact_line_names(names),
+            }],
+            vec![Vec::new(), Vec::new()],
+        ));
     }
+
     let count = repeat_count(count_part)?;
-    let mut out = Vec::with_capacity(inner.len().saturating_mul(count));
+    let mut tracks = Vec::with_capacity(inner.len().saturating_mul(count));
+    let mut line_names = vec![Vec::new()];
+    let (first, rest) = names.split_first()?;
     for _ in 0..count {
-        out.extend(inner.iter().cloned());
+        // The last line of one copy is also the first line of the next.
+        line_names.last_mut()?.extend(first.iter().cloned());
+        line_names.extend(rest.iter().cloned());
+        tracks.extend(inner.iter().cloned());
     }
-    Some(out)
+    Some((tracks, line_names))
 }
 
-#[doc = include_str!("grid_track_lowering.doc/auto_repeat_fill.md")]
+/// Reads the `auto-fill` / `auto-fit` keyword of a `repeat(…)` count: `Some(true)`
+/// for `auto-fill`, `Some(false)` for `auto-fit`, and [`None`] for any other count
+/// (a numeric repetition or an invalid keyword).
 fn auto_repeat_fill(part: &[ParsedValue]) -> Option<bool> {
     match single_component(part)? {
         ParsedValue::Keyword(keyword) if keyword.eq_ignore_ascii_case("auto-fill") => Some(true),
@@ -193,7 +416,9 @@ fn auto_repeat_fill(part: &[ParsedValue]) -> Option<bool> {
     }
 }
 
-#[doc = include_str!("grid_track_lowering.doc/repeat_count.md")]
+/// Resolves the numeric count component of an integer `repeat(N, …)`: a positive
+/// integer clamped to [`MAX_REPEAT`]. [`None`] for any non-numeric count (the
+/// `auto-fill` / `auto-fit` keywords are handled by [`auto_repeat_fill`]).
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn repeat_count(part: &[ParsedValue]) -> Option<usize> {
     match single_component(part)? {
@@ -202,7 +427,8 @@ fn repeat_count(part: &[ParsedValue]) -> Option<usize> {
     }
 }
 
-#[doc = include_str!("grid_track_lowering.doc/single_component.md")]
+/// Returns the sole component of a group, or [`None`] when it has zero or more
+/// than one component.
 fn single_component(group: &[ParsedValue]) -> Option<&ParsedValue> {
     match group {
         [one] => Some(one),
@@ -312,11 +538,36 @@ mod tests {
     }
 
     #[test]
+    fn lowers_fit_content_track_caps_and_checks_the_track_grammar() {
+        assert_eq!(
+            tracks("grid-template-columns: fit-content(2em) repeat(2, fit-content(25%))"),
+            [
+                GridTrack::FitContent(Length::Em(2.0)),
+                GridTrack::FitContent(Length::Percent(25.0)),
+                GridTrack::FitContent(Length::Percent(25.0)),
+            ],
+        );
+        for value in [
+            "fit-content(-10px)",
+            "fit-content(1fr)",
+            "fit-content(auto)",
+            "minmax(auto, fit-content(10px))",
+            "repeat(auto-fill, fit-content(10px))",
+        ] {
+            assert!(
+                matches!(
+                    compile(&format!("grid-template-columns: {value}")).0,
+                    CompiledDeclaration::Unsupported(_)
+                ),
+                "{value}",
+            );
+        }
+    }
+
+    #[test]
     fn a_bare_fit_content_track_is_still_unsupported() {
         // CSS Grid has no bare `fit-content` track — it is
-        // `fit-content(<length-percentage>)`, whose argument this crate does not
-        // model — so it stays an unsupported-feature diagnostic rather than being
-        // quietly accepted as something else.
+        // `fit-content(<length-percentage>)`.
         assert!(matches!(
             compile("grid-template-columns: fit-content").0,
             CompiledDeclaration::Unsupported(_)
@@ -368,6 +619,28 @@ mod tests {
     }
 
     #[test]
+    fn numeric_repeat_merges_names_at_each_shared_line() {
+        let list = track_list(
+            "grid-template-columns: [outer] repeat(2, [a] 40px [middle] 60px [b]) [tail]",
+        );
+        let names: Vec<Vec<&str>> = list
+            .line_names()
+            .iter()
+            .map(|bucket| bucket.iter().map(Box::as_ref).collect())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                vec!["outer", "a"],
+                vec!["middle"],
+                vec!["b", "a"],
+                vec!["middle"],
+                vec!["b", "tail"],
+            ]
+        );
+    }
+
+    #[test]
     fn line_can_carry_multiple_names() {
         // `[sidebar-end main-start]` names one line twice.
         let list =
@@ -413,6 +686,7 @@ mod tests {
         assert_eq!(
             tracks("grid-template-columns: repeat(auto-fill, 100px)"),
             vec![GridTrack::AutoRepeat {
+                line_names: Box::from([]),
                 fill: true,
                 tracks: Box::from([GridTrack::Fixed(Length::px(100.0))]),
             }]
@@ -420,14 +694,67 @@ mod tests {
     }
 
     #[test]
+    fn automatic_repeat_preserves_pattern_boundaries_for_layout() {
+        let list = track_list(
+            "grid-template-columns: [outer] repeat(auto-fill, [start] 40px [end]) [tail]",
+        );
+        let [GridTrack::AutoRepeat { line_names, .. }] = list.tracks() else {
+            panic!("expected one automatic repeat");
+        };
+        assert_eq!(line_names[0].as_ref(), [Box::<str>::from("start")]);
+        assert_eq!(line_names[1].as_ref(), [Box::<str>::from("end")]);
+        assert_eq!(list.line_names()[0].as_ref(), [Box::<str>::from("outer")]);
+        assert_eq!(list.line_names()[1].as_ref(), [Box::<str>::from("tail")]);
+    }
+
+    #[test]
     fn auto_fit_repeat_lowers_to_auto_repeat() {
         assert_eq!(
-            tracks("grid-template-columns: repeat(auto-fit, 100px 1fr)"),
+            tracks("grid-template-columns: repeat(auto-fit, 100px minmax(20px, 1fr))"),
             vec![GridTrack::AutoRepeat {
+                line_names: Box::from([]),
                 fill: false,
-                tracks: Box::from([GridTrack::Fixed(Length::px(100.0)), GridTrack::Fr(1.0)]),
+                tracks: Box::from([
+                    GridTrack::Fixed(Length::px(100.0)),
+                    GridTrack::minmax(GridTrack::Fixed(Length::px(20.0)), GridTrack::Fr(1.0)),
+                ]),
             }]
         );
+    }
+
+    #[test]
+    fn grid_shorthand_rejects_invalid_auto_flow_forms() {
+        for value in [
+            "auto-flow 20px / auto-flow 30px",
+            "auto-flow dense dense / 50px",
+            "auto-flow /",
+            "none / auto-flow repeat(2, 20px)",
+        ] {
+            let (result, _) = compile(&format!("grid: {value}"));
+            assert!(
+                matches!(result, CompiledDeclaration::Unsupported(_)),
+                "{value}"
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_auto_repeat_track_lists_are_rejected() {
+        for value in [
+            "repeat(auto-fit, 100px 1fr)",
+            "repeat(auto-fill, auto)",
+            "repeat(auto-fill, minmax(1fr, 100px))",
+            "repeat(auto-fill, minmax(20px, minmax(30px, 40px)))",
+            "repeat(auto-fill, 100px) 1fr",
+            "repeat(auto-fill, 100px) repeat(auto-fit, 100px)",
+            "repeat(2, repeat(auto-fill, 100px))",
+        ] {
+            let (result, _) = compile(&format!("grid-template-columns: {value}"));
+            assert!(
+                matches!(result, CompiledDeclaration::Unsupported(_)),
+                "{value}"
+            );
+        }
     }
 
     #[test]
@@ -438,6 +765,7 @@ mod tests {
             vec![
                 GridTrack::Fixed(Length::px(50.0)),
                 GridTrack::AutoRepeat {
+                    line_names: Box::from([]),
                     fill: true,
                     tracks: Box::from([GridTrack::Fixed(Length::px(100.0))]),
                 },

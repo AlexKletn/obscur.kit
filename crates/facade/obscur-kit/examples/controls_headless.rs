@@ -256,7 +256,7 @@ fn click(
 
 #[doc = include_str!("controls_headless.doc/pointer.md")]
 fn pointer(kind: PointerEventKind, p: Point) -> PointerEvent {
-    PointerEvent::new(PointerId::MOUSE, PointerDevice::Mouse, kind, p)
+    PointerEvent::new(PointerId::MOUSE, PointerDevice::Mouse, kind, p).as_trusted()
 }
 
 #[doc = include_str!("controls_headless.doc/type_text.md")]

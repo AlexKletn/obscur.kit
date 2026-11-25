@@ -1,21 +1,21 @@
-#![doc = include_str!("appearance_source.doc/_module.md")]
+//! Which desktop setting store to read appearance from.
 
-#[doc = include_str!("appearance_source.doc/AppearanceSource.md")]
+#[doc = include_str!("../../docs/api/provider/appearance_source.doc/AppearanceSource.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum AppearanceSource {
-    #[doc = include_str!("appearance_source.doc/Auto.md")]
+    #[doc = include_str!("../../docs/api/provider/appearance_source.doc/Auto.md")]
     #[default]
     Auto,
-    #[doc = include_str!("appearance_source.doc/Portal.md")]
+    #[doc = include_str!("../../docs/api/provider/appearance_source.doc/Portal.md")]
     Portal,
-    #[doc = include_str!("appearance_source.doc/Gtk.md")]
+    #[doc = include_str!("../../docs/api/provider/appearance_source.doc/Gtk.md")]
     Gtk,
-    #[doc = include_str!("appearance_source.doc/Qt.md")]
+    #[doc = include_str!("../../docs/api/provider/appearance_source.doc/Qt.md")]
     Qt,
 }
 
 impl AppearanceSource {
-    #[doc = include_str!("appearance_source.doc/order.md")]
+    #[doc = include_str!("../../docs/api/provider/appearance_source.doc/order.md")]
     #[must_use]
     pub const fn order(self) -> &'static [Self] {
         match self {
@@ -31,7 +31,7 @@ impl AppearanceSource {
         }
     }
 
-    #[doc = include_str!("appearance_source.doc/is_auto.md")]
+    /// Whether this asks everything rather than one named store.
     #[must_use]
     pub const fn is_auto(self) -> bool {
         matches!(self, Self::Auto)

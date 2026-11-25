@@ -1,21 +1,21 @@
-#![doc = include_str!("consumer.doc/_module.md")]
+#![doc = include_str!("../docs/api/consumer.doc/_module.md")]
 
 use std::path::Path;
 use std::process::Command;
 
 use crate::violation::Violation;
 
-#[doc = include_str!("consumer.doc/ConsumerProfile.md")]
+#[doc = include_str!("../docs/api/consumer.doc/ConsumerProfile.md")]
 struct ConsumerProfile {
-    #[doc = include_str!("consumer.doc/rule.md")]
+    /// The name a violation is reported under.
     rule: &'static str,
-    #[doc = include_str!("consumer.doc/manifest.md")]
+    /// The fixture's manifest, relative to the repository root.
     manifest: &'static str,
-    #[doc = include_str!("consumer.doc/watched.md")]
+    #[doc = include_str!("../docs/api/consumer.doc/watched.md")]
     watched: &'static [&'static str],
 }
 
-#[doc = include_str!("consumer.doc/PROFILES.md")]
+#[doc = include_str!("../docs/api/consumer.doc/PROFILES.md")]
 const PROFILES: [ConsumerProfile; 2] = [
     ConsumerProfile {
         rule: "facade-consumer",
@@ -29,7 +29,7 @@ const PROFILES: [ConsumerProfile; 2] = [
     },
 ];
 
-#[doc = include_str!("consumer.doc/check.md")]
+/// Run every profile and collect what each found.
 pub(crate) fn check(root: &Path) -> Vec<Violation> {
     PROFILES
         .iter()
@@ -37,7 +37,7 @@ pub(crate) fn check(root: &Path) -> Vec<Violation> {
         .collect()
 }
 
-#[doc = include_str!("consumer.doc/check_profile.md")]
+#[doc = include_str!("../docs/api/consumer.doc/check_profile.md")]
 fn check_profile(root: &Path, profile: &ConsumerProfile) -> Vec<Violation> {
     let manifest = root.join(profile.manifest);
     if !manifest.is_file() {
@@ -104,7 +104,7 @@ fn check_profile(root: &Path, profile: &ConsumerProfile) -> Vec<Violation> {
         .collect()
 }
 
-#[doc = include_str!("consumer.doc/watched_warnings.md")]
+#[doc = include_str!("../docs/api/consumer.doc/watched_warnings.md")]
 fn watched_warnings(stderr: &str, watched: &[&str]) -> Vec<String> {
     if watched.is_empty() {
         return Vec::new();

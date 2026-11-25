@@ -1,24 +1,24 @@
-#![doc = include_str!("margin_edges.doc/_module.md")]
+//! A box's four margin edges.
 
 use obscur_geometry::Insets;
 
 use crate::model::Margin;
 
-#[doc = include_str!("margin_edges.doc/MarginEdges.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[doc = include_str!("../../docs/api/model/margin_edges.doc/MarginEdges.md")]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct MarginEdges {
-    #[doc = include_str!("margin_edges.doc/top.md")]
+    /// The top edge.
     pub top: Margin,
-    #[doc = include_str!("margin_edges.doc/right.md")]
+    /// The right edge.
     pub right: Margin,
-    #[doc = include_str!("margin_edges.doc/bottom.md")]
+    /// The bottom edge.
     pub bottom: Margin,
-    #[doc = include_str!("margin_edges.doc/left.md")]
+    /// The left edge.
     pub left: Margin,
 }
 
 impl MarginEdges {
-    #[doc = include_str!("margin_edges.doc/ZERO.md")]
+    /// Edges that are all zero — the initial value.
     pub const ZERO: Self = Self {
         top: Margin::ZERO,
         right: Margin::ZERO,
@@ -26,7 +26,7 @@ impl MarginEdges {
         left: Margin::ZERO,
     };
 
-    #[doc = include_str!("margin_edges.doc/px.md")]
+    /// Edges built from four lengths, none of them `auto`.
     #[must_use]
     pub const fn px(top: f32, right: f32, bottom: f32, left: f32) -> Self {
         Self {
@@ -37,15 +37,15 @@ impl MarginEdges {
         }
     }
 
-    #[doc = include_str!("margin_edges.doc/uniform.md")]
+    /// The same margin on all four edges.
     #[must_use]
     pub const fn uniform(value: f32) -> Self {
         Self::px(value, value, value, value)
     }
 
-    #[doc = include_str!("margin_edges.doc/resolve.md")]
+    #[doc = include_str!("../../docs/api/model/margin_edges.doc/resolve.md")]
     #[must_use]
-    pub fn resolve(self, basis: f32) -> Insets {
+    pub fn resolve(&self, basis: f32) -> Insets {
         Insets {
             top: self.top.resolve(basis),
             right: self.right.resolve(basis),
@@ -54,9 +54,10 @@ impl MarginEdges {
         }
     }
 
-    #[doc = include_str!("margin_edges.doc/has_auto_inline.md")]
+    /// Whether either **inline**-axis edge is `auto` — the pair that centres a box
+    /// (`margin: 0 auto`).
     #[must_use]
-    pub const fn has_auto_inline(self) -> bool {
+    pub const fn has_auto_inline(&self) -> bool {
         self.left.is_auto() || self.right.is_auto()
     }
 }

@@ -1,23 +1,23 @@
-#![doc = include_str!("web_notification_provider.doc/_module.md")]
+#![doc = include_str!("../../docs/api/provider/web_notification_provider.doc/_module.md")]
 
 use obscur_capability::SupportLevel;
 use obscur_system::notification::{Notification, NotificationProvider, NotificationResult};
 
-#[doc = include_str!("web_notification_provider.doc/WebNotificationProvider.md")]
+#[doc = include_str!("../../docs/api/provider/web_notification_provider.doc/WebNotificationProvider.md")]
 #[derive(Debug, Clone, Default)]
 pub struct WebNotificationProvider {
-    #[doc = include_str!("web_notification_provider.doc/badge.md")]
+    /// The last app-icon badge count set; recorded but not surfaced.
     badge: Option<u32>,
 }
 
 impl WebNotificationProvider {
-    #[doc = include_str!("web_notification_provider.doc/new.md")]
+    /// Creates a web notification provider with no badge set (spec §6.12).
     #[must_use]
     pub const fn new() -> Self {
         Self { badge: None }
     }
 
-    #[doc = include_str!("web_notification_provider.doc/badge_2.md")]
+    #[doc = include_str!("../../docs/api/provider/web_notification_provider.doc/badge_2.md")]
     #[must_use]
     pub const fn badge(&self) -> Option<u32> {
         self.badge

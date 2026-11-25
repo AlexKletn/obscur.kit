@@ -1,17 +1,18 @@
-#![doc = include_str!("motion_scheduler.doc/_module.md")]
+//! The [`MotionScheduler`] domain motion scheduler (spec §4.17 "motion engine",
+//! event-driven scheduling / frame demand).
 
 use crate::scheduler::ActiveMotionSet;
-use crate::timeline::{Timeline, TimelineId};
+use crate::timeline::{Timeline, TimelineId, TimelineState};
 
-#[doc = include_str!("motion_scheduler.doc/MotionScheduler.md")]
+#[doc = include_str!("../../docs/api/scheduler/motion_scheduler.doc/MotionScheduler.md")]
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct MotionScheduler {
-    #[doc = include_str!("motion_scheduler.doc/active.md")]
+    /// The set of currently-tracked timelines.
     active: ActiveMotionSet,
 }
 
 impl MotionScheduler {
-    #[doc = include_str!("motion_scheduler.doc/new.md")]
+    /// Creates an empty scheduler with no active motions.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -19,12 +20,12 @@ impl MotionScheduler {
         }
     }
 
-    #[doc = include_str!("motion_scheduler.doc/register.md")]
+    #[doc = include_str!("../../docs/api/scheduler/motion_scheduler.doc/register.md")]
     pub fn register(&mut self, timeline: Timeline) {
         self.active.insert(timeline);
     }
 
-    #[doc = include_str!("motion_scheduler.doc/advance.md")]
+    #[doc = include_str!("../../docs/api/scheduler/motion_scheduler.doc/advance.md")]
     pub fn advance(&mut self, delta: f32) -> Vec<Timeline> {
         // Collect ids first (deterministic ascending order) so each timeline can
         // be advanced through the set's `get_mut`; the borrow of `iter` ends
@@ -44,30 +45,37 @@ impl MotionScheduler {
         finished
     }
 
-    #[doc = include_str!("motion_scheduler.doc/needs_frame.md")]
+    /// Whether the scheduler has work that needs a clock tick. Paused timelines still present their current sample and require no ticks.
     #[must_use]
     pub fn needs_frame(&self) -> bool {
-        !self.active.is_empty()
+        self.active
+            .iter()
+            .any(|(_, timeline)| timeline.state() != TimelineState::Paused)
     }
 
-    #[doc = include_str!("motion_scheduler.doc/active_2.md")]
+    /// Returns the active motion set.
     #[must_use]
     pub const fn active(&self) -> &ActiveMotionSet {
         &self.active
     }
 
-    #[doc = include_str!("motion_scheduler.doc/active_count.md")]
+    /// Returns a live timeline by identifier for playback control.
+    pub fn timeline_mut(&mut self, id: TimelineId) -> Option<&mut Timeline> {
+        self.active.get_mut(id)
+    }
+
+    /// Returns the number of active timelines.
     #[must_use]
     pub fn active_count(&self) -> usize {
         self.active.len()
     }
 
-    #[doc = include_str!("motion_scheduler.doc/remove.md")]
+    #[doc = include_str!("../../docs/api/scheduler/motion_scheduler.doc/remove.md")]
     pub fn remove(&mut self, id: TimelineId) -> Option<Timeline> {
         self.active.remove(id)
     }
 
-    #[doc = include_str!("motion_scheduler.doc/clear.md")]
+    /// Removes every tracked timeline, leaving the scheduler idle.
     pub fn clear(&mut self) {
         self.active = ActiveMotionSet::new();
     }

@@ -1,28 +1,32 @@
-#![doc = include_str!("svg_vectorizer.doc/_module.md")]
+//! `SvgVectorizer`: SVG source → a [`SceneVector`], keeping `currentColor` deferred.
 
-use obscur_geometry::{Point, Size};
+mod raw_shape;
+
+use raw_shape::collect;
+
+use obscur_geometry::Size;
 use obscur_resources::port::VectorDecoder;
 use obscur_resources::state::ResourceError;
 use obscur_scene::color::Color;
 use obscur_scene::paint::{SceneVector, VectorPaint, VectorShape};
-use obscur_scene::path::Path;
 
-#[doc = include_str!("svg_vectorizer.doc/PROBE_A.md")]
+/// Two improbable, *distinct* colours injected as the document's `color` on two
+/// separate parses. See [`SvgVectorizer`] for why there are two.
 const PROBE_A: &str = "#010203";
 const PROBE_B: &str = "#fdfeff";
 
-#[doc = include_str!("svg_vectorizer.doc/SvgVectorizer.md")]
+#[doc = include_str!("../../docs/api/decoder/svg_vectorizer.doc/SvgVectorizer.md")]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct SvgVectorizer;
 
 impl SvgVectorizer {
-    #[doc = include_str!("svg_vectorizer.doc/new.md")]
+    /// Creates a vectorizer.
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    #[doc = include_str!("svg_vectorizer.doc/vectorize.md")]
+    #[doc = include_str!("../../docs/api/decoder/svg_vectorizer.doc/vectorize.md")]
     pub fn vectorize(self, bytes: &[u8]) -> Result<SceneVector, ResourceError> {
         let a = parse_with(bytes, PROBE_A)?;
         let b = parse_with(bytes, PROBE_B)?;
@@ -68,93 +72,22 @@ impl SvgVectorizer {
     }
 }
 
-#[doc = include_str!("svg_vectorizer.doc/resolve_paint.md")]
+/// Classifies one paint by whether it responded to the injected colour.
 fn resolve_paint(from_a: Color, from_b: Option<Color>) -> VectorPaint {
     match from_b {
-        Some(other) if other != from_a => VectorPaint::CurrentColor,
+        Some(other) if other != from_a && from_a.a == 1.0 => VectorPaint::CurrentColor,
+        Some(other) if other != from_a => VectorPaint::CurrentColorWithOpacity(from_a.a),
         _ => VectorPaint::Solid(from_a),
     }
 }
 
-#[doc = include_str!("svg_vectorizer.doc/parse_with.md")]
+#[doc = include_str!("../../docs/api/decoder/svg_vectorizer.doc/parse_with.md")]
 fn parse_with(bytes: &[u8], color: &str) -> Result<usvg::Tree, ResourceError> {
     let options = usvg::Options {
         style_sheet: Some(format!("svg {{ color: {color} }}")),
         ..usvg::Options::default()
     };
-    usvg::Tree::from_data(bytes, &options)
-        .map_err(|err| ResourceError::DecodeFailed(err.to_string().into()))
-}
-
-#[doc = include_str!("svg_vectorizer.doc/RawShape.md")]
-struct RawShape {
-    path: Path,
-    fill: Option<Color>,
-    stroke: Option<(Color, f32)>,
-}
-
-#[doc = include_str!("svg_vectorizer.doc/collect.md")]
-fn collect(group: &usvg::Group, out: &mut Vec<RawShape>) {
-    for node in group.children() {
-        match node {
-            usvg::Node::Path(path) => {
-                let fill = path.fill().and_then(|fill| solid(fill.paint()));
-                let stroke = path
-                    .stroke()
-                    .and_then(|s| solid(s.paint()).map(|color| (color, s.width().get())));
-                out.push(RawShape {
-                    path: convert_path(path.data()),
-                    fill,
-                    stroke,
-                });
-            }
-            usvg::Node::Group(inner) => collect(inner, out),
-            // Images and text carry no vector paint this layer models.
-            usvg::Node::Image(_) | usvg::Node::Text(_) => {}
-        }
-    }
-}
-
-#[doc = include_str!("svg_vectorizer.doc/solid.md")]
-fn solid(paint: &usvg::Paint) -> Option<Color> {
-    match paint {
-        usvg::Paint::Color(color) => Some(Color::rgba(
-            f32::from(color.red) / 255.0,
-            f32::from(color.green) / 255.0,
-            f32::from(color.blue) / 255.0,
-            1.0,
-        )),
-        _ => None,
-    }
-}
-
-#[doc = include_str!("svg_vectorizer.doc/convert_path.md")]
-fn convert_path(data: &usvg::tiny_skia_path::Path) -> Path {
-    let mut path = Path::new();
-    for segment in data.segments() {
-        match segment {
-            usvg::tiny_skia_path::PathSegment::MoveTo(p) => {
-                path.move_to(Point::new(p.x, p.y));
-            }
-            usvg::tiny_skia_path::PathSegment::LineTo(p) => {
-                path.line_to(Point::new(p.x, p.y));
-            }
-            usvg::tiny_skia_path::PathSegment::QuadTo(c, p) => {
-                path.quad_to(Point::new(c.x, c.y), Point::new(p.x, p.y));
-            }
-            usvg::tiny_skia_path::PathSegment::CubicTo(c1, c2, p) => {
-                path.cubic_to(
-                    Point::new(c1.x, c1.y),
-                    Point::new(c2.x, c2.y),
-                    Point::new(p.x, p.y),
-                );
-            }
-            usvg::tiny_skia_path::PathSegment::Close => {
-                path.close();
-            }
-        }
-    }
-    path
+    super::SvgDecoder::parse(bytes, &options)
 }
 
 impl VectorDecoder for SvgVectorizer {

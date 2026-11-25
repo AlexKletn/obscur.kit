@@ -1,4 +1,5 @@
-#![doc = include_str!("outlet_validator.doc/_module.md")]
+//! `OutletValidator`: the **file** front end's adapter onto the §2.12 outlet
+//! rule.
 
 use obscur_okui_syntax::ast::{Attribute, Document, Element};
 use obscur_okui_syntax::syntax::SyntaxKind;
@@ -6,18 +7,19 @@ use obscur_okui_syntax::syntax::SyntaxKind;
 use crate::validation::ValidationDiagnostic;
 use crate::validation::outlet_rule::{OutletName, OutletUse, check_outlet, is_outlet_tag};
 
-#[doc = include_str!("outlet_validator.doc/OutletValidator.md")]
+#[doc = include_str!("../../docs/api/validation/outlet_validator.doc/OutletValidator.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct OutletValidator;
 
 impl OutletValidator {
-    #[doc = include_str!("outlet_validator.doc/new.md")]
+    /// Creates a validator.
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    #[doc = include_str!("outlet_validator.doc/validate.md")]
+    /// Validates every element in `doc`, recursively, reporting each outlet
+    /// violation at that element's byte offset.
     #[must_use]
     pub fn validate(&self, doc: &Document) -> Vec<ValidationDiagnostic> {
         let mut diagnostics = Vec::new();
@@ -27,7 +29,7 @@ impl OutletValidator {
         diagnostics
     }
 
-    #[doc = include_str!("outlet_validator.doc/validate_element.md")]
+    #[doc = include_str!("../../docs/api/validation/outlet_validator.doc/validate_element.md")]
     fn validate_element(element: &Element, diagnostics: &mut Vec<ValidationDiagnostic>) {
         if let Some(tag) = element.tag_name()
             && is_outlet_tag(&tag)
@@ -65,7 +67,7 @@ impl OutletValidator {
     }
 }
 
-#[doc = include_str!("outlet_validator.doc/authored_spelling.md")]
+#[doc = include_str!("../../docs/api/validation/outlet_validator.doc/authored_spelling.md")]
 fn authored_spelling(attribute: &Attribute) -> String {
     let name = attribute.name().unwrap_or_default();
     if !attribute.is_event() {

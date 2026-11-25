@@ -1,23 +1,24 @@
-#![doc = include_str!("event_trust.doc/_module.md")]
+//! Whether an event came from a real user gesture or was injected (spec §2.3).
 
-#[doc = include_str!("event_trust.doc/EventTrust.md")]
+#[doc = include_str!("../../docs/api/event/event_trust.doc/EventTrust.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum EventTrust {
-    #[doc = include_str!("event_trust.doc/Untrusted.md")]
+    #[doc = include_str!("../../docs/api/event/event_trust.doc/Untrusted.md")]
     #[default]
     Untrusted,
-    #[doc = include_str!("event_trust.doc/Trusted.md")]
+    /// Produced by a real user gesture on a real device, as reported by the
+    /// platform and vouched for by the adapter that received it.
     Trusted,
 }
 
 impl EventTrust {
-    #[doc = include_str!("event_trust.doc/is_trusted.md")]
+    /// Returns whether this is a real user gesture ([`Trusted`](Self::Trusted)).
     #[must_use]
     pub const fn is_trusted(self) -> bool {
         matches!(self, Self::Trusted)
     }
 
-    #[doc = include_str!("event_trust.doc/is_untrusted.md")]
+    /// Returns whether this event was synthesized ([`Untrusted`](Self::Untrusted)).
     #[must_use]
     pub const fn is_untrusted(self) -> bool {
         matches!(self, Self::Untrusted)

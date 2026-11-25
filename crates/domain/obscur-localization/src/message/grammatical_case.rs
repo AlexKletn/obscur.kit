@@ -1,61 +1,61 @@
-#![doc = include_str!("grammatical_case.doc/_module.md")]
+//! `GrammaticalCase`: a CLDR grammatical-case value (spec §7.2 case variants).
 
 use std::fmt;
 
-#[doc = include_str!("grammatical_case.doc/GrammaticalCase.md")]
+#[doc = include_str!("../../docs/api/message/grammatical_case.doc/GrammaticalCase.md")]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct GrammaticalCase(Box<str>);
 
 impl GrammaticalCase {
-    #[doc = include_str!("grammatical_case.doc/new.md")]
+    /// Creates a case from a CLDR value name.
     #[must_use]
     pub fn new(value: impl Into<Box<str>>) -> Self {
         Self(value.into())
     }
 
-    #[doc = include_str!("grammatical_case.doc/as_str.md")]
+    /// Returns the value name, as a message arm is spelled.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
-    #[doc = include_str!("grammatical_case.doc/nominative.md")]
+    /// `nominative` — the dictionary form.
     #[must_use]
     pub fn nominative() -> Self {
         Self::new("nominative")
     }
 
-    #[doc = include_str!("grammatical_case.doc/genitive.md")]
+    /// `genitive`.
     #[must_use]
     pub fn genitive() -> Self {
         Self::new("genitive")
     }
 
-    #[doc = include_str!("grammatical_case.doc/dative.md")]
+    /// `dative`.
     #[must_use]
     pub fn dative() -> Self {
         Self::new("dative")
     }
 
-    #[doc = include_str!("grammatical_case.doc/accusative.md")]
+    /// `accusative`.
     #[must_use]
     pub fn accusative() -> Self {
         Self::new("accusative")
     }
 
-    #[doc = include_str!("grammatical_case.doc/instrumental.md")]
+    /// `instrumental`.
     #[must_use]
     pub fn instrumental() -> Self {
         Self::new("instrumental")
     }
 
-    #[doc = include_str!("grammatical_case.doc/prepositional.md")]
+    /// `prepositional`.
     #[must_use]
     pub fn prepositional() -> Self {
         Self::new("prepositional")
     }
 
-    #[doc = include_str!("grammatical_case.doc/russian_values.md")]
+    #[doc = include_str!("../../docs/api/message/grammatical_case.doc/russian_values.md")]
     #[must_use]
     pub fn russian_values() -> [Self; 8] {
         [

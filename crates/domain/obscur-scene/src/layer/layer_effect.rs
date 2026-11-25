@@ -1,73 +1,75 @@
-#![doc = include_str!("layer_effect.doc/_module.md")]
+//! An effect applied to a layer's composited content.
 
 use crate::paint::BlendMode;
 
-#[doc = include_str!("layer_effect.doc/LayerEffect.md")]
+#[doc = include_str!("../../docs/api/layer/layer_effect.doc/LayerEffect.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LayerEffect {
-    #[doc = include_str!("layer_effect.doc/Opacity.md")]
+    /// Scales the layer's coverage by an opacity factor (nominally `0.0..=1.0`).
     Opacity(f32),
-    #[doc = include_str!("layer_effect.doc/Blur.md")]
+    /// Blurs the layer's content with the given radius in logical pixels.
     Blur {
-        #[doc = include_str!("layer_effect.doc/radius.md")]
+        /// The blur radius in logical pixels.
         radius: f32,
     },
-    #[doc = include_str!("layer_effect.doc/Blend.md")]
+    /// Blends the layer against its backdrop with the given blend mode.
     Blend(BlendMode),
-    #[doc = include_str!("layer_effect.doc/ColorMatrix.md")]
+    #[doc = include_str!("../../docs/api/layer/layer_effect.doc/ColorMatrix.md")]
     ColorMatrix([f32; 20]),
 }
 
 impl LayerEffect {
-    #[doc = include_str!("layer_effect.doc/opacity.md")]
+    /// Creates an opacity effect with the given factor.
     #[must_use]
     pub const fn opacity(factor: f32) -> Self {
         Self::Opacity(factor)
     }
 
-    #[doc = include_str!("layer_effect.doc/blur.md")]
+    /// Creates a blur effect with the given radius in logical pixels.
     #[must_use]
     pub const fn blur(radius: f32) -> Self {
         Self::Blur { radius }
     }
 
-    #[doc = include_str!("layer_effect.doc/blend.md")]
+    /// Creates a blend effect with the given blend mode.
     #[must_use]
     pub const fn blend(mode: BlendMode) -> Self {
         Self::Blend(mode)
     }
 
-    #[doc = include_str!("layer_effect.doc/color_matrix.md")]
+    /// Creates a color-matrix effect from a folded 4×5 affine color matrix (20
+    /// entries: a row-major 4×4 linear part followed by a 4-entry bias).
     #[must_use]
     pub const fn color_matrix(matrix: [f32; 20]) -> Self {
         Self::ColorMatrix(matrix)
     }
 
-    #[doc = include_str!("layer_effect.doc/is_opacity.md")]
+    /// Returns whether this is an [`LayerEffect::Opacity`] effect.
     #[must_use]
     pub const fn is_opacity(self) -> bool {
         matches!(self, Self::Opacity(_))
     }
 
-    #[doc = include_str!("layer_effect.doc/is_blur.md")]
+    /// Returns whether this is a [`LayerEffect::Blur`] effect.
     #[must_use]
     pub const fn is_blur(self) -> bool {
         matches!(self, Self::Blur { .. })
     }
 
-    #[doc = include_str!("layer_effect.doc/is_blend.md")]
+    /// Returns whether this is a [`LayerEffect::Blend`] effect.
     #[must_use]
     pub const fn is_blend(self) -> bool {
         matches!(self, Self::Blend(_))
     }
 
-    #[doc = include_str!("layer_effect.doc/is_color_matrix.md")]
+    /// Returns whether this is a [`LayerEffect::ColorMatrix`] effect.
     #[must_use]
     pub const fn is_color_matrix(self) -> bool {
         matches!(self, Self::ColorMatrix(_))
     }
 
-    #[doc = include_str!("layer_effect.doc/as_color_matrix.md")]
+    /// Returns the folded 4×5 color matrix if this is a
+    /// [`LayerEffect::ColorMatrix`] effect.
     #[must_use]
     pub const fn as_color_matrix(self) -> Option<[f32; 20]> {
         match self {

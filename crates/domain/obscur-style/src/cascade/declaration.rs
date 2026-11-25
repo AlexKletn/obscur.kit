@@ -1,10 +1,10 @@
-#![doc = include_str!("declaration.doc/_module.md")]
+//! A single declaration participating in the cascade: [`Declaration`] (§4.14).
 
 use crate::cascade::{CascadeOrigin, CascadePriority, ImportantFlag};
 use crate::property::{PropertyId, PropertyValue};
 use crate::selector::{SelectorId, SelectorSpecificity};
 
-#[doc = include_str!("declaration.doc/Declaration.md")]
+#[doc = include_str!("../../docs/api/cascade/declaration.doc/Declaration.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Declaration {
     property: PropertyId,
@@ -17,7 +17,7 @@ pub struct Declaration {
 }
 
 impl Declaration {
-    #[doc = include_str!("declaration.doc/new.md")]
+    #[doc = include_str!("../../docs/api/cascade/declaration.doc/new.md")]
     #[must_use]
     pub const fn new(
         property: PropertyId,
@@ -39,49 +39,50 @@ impl Declaration {
         }
     }
 
-    #[doc = include_str!("declaration.doc/property.md")]
+    /// Returns the property this declaration assigns.
     #[must_use]
     pub const fn property(&self) -> PropertyId {
         self.property
     }
 
-    #[doc = include_str!("declaration.doc/value.md")]
+    /// Returns the value this declaration assigns.
     #[must_use]
     pub const fn value(&self) -> &PropertyValue {
         &self.value
     }
 
-    #[doc = include_str!("declaration.doc/important.md")]
+    /// Returns whether this declaration is `!important`.
     #[must_use]
     pub const fn important(&self) -> ImportantFlag {
         self.important
     }
 
-    #[doc = include_str!("declaration.doc/origin.md")]
+    /// Returns the origin this declaration comes from.
     #[must_use]
     pub const fn origin(&self) -> CascadeOrigin {
         self.origin
     }
 
-    #[doc = include_str!("declaration.doc/specificity.md")]
+    /// Returns the specificity of the rule that produced this declaration.
     #[must_use]
     pub const fn specificity(&self) -> SelectorSpecificity {
         self.specificity
     }
 
-    #[doc = include_str!("declaration.doc/source_order.md")]
+    /// Returns the declaration's position within its origin stream.
     #[must_use]
     pub const fn source_order(&self) -> u32 {
         self.source_order
     }
 
-    #[doc = include_str!("declaration.doc/selector.md")]
+    /// Returns the compiled selector that produced this declaration, if any
+    /// (provenance only; not used for ranking).
     #[must_use]
     pub const fn selector(&self) -> Option<SelectorId> {
         self.selector
     }
 
-    #[doc = include_str!("declaration.doc/priority.md")]
+    #[doc = include_str!("../../docs/api/cascade/declaration.doc/priority.md")]
     #[must_use]
     pub const fn priority(&self) -> CascadePriority {
         CascadePriority::new(

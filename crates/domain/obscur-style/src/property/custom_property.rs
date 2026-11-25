@@ -1,31 +1,32 @@
-#![doc = include_str!("custom_property.doc/_module.md")]
+#![doc = include_str!("../../docs/api/property/custom_property.doc/_module.md")]
 
 use crate::property::PropertyValue;
 use obscur_identity::InternedSymbol;
 
-#[doc = include_str!("custom_property.doc/CustomProperty.md")]
+#[doc = include_str!("../../docs/api/property/custom_property.doc/CustomProperty.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct CustomProperty {
-    #[doc = include_str!("custom_property.doc/name.md")]
+    /// The interned `--`-prefixed custom-property name.
     name: InternedSymbol,
-    #[doc = include_str!("custom_property.doc/value.md")]
+    /// The declared value: the text it was written with, or the reference it defers
+    /// to. See [`CustomProperty`].
     value: PropertyValue,
 }
 
 impl CustomProperty {
-    #[doc = include_str!("custom_property.doc/new.md")]
+    /// Creates a custom property from its interned name and declared value.
     #[must_use]
     pub const fn new(name: InternedSymbol, value: PropertyValue) -> Self {
         Self { name, value }
     }
 
-    #[doc = include_str!("custom_property.doc/name_2.md")]
+    /// Returns the interned `--`-prefixed name.
     #[must_use]
     pub const fn name(&self) -> InternedSymbol {
         self.name
     }
 
-    #[doc = include_str!("custom_property.doc/value_2.md")]
+    /// Returns a reference to the declared value.
     #[must_use]
     pub const fn value(&self) -> &PropertyValue {
         &self.value

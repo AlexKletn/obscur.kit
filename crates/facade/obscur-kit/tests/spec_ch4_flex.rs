@@ -247,3 +247,84 @@ fn a_single_flex_line_takes_the_containers_inner_cross_size() {
     approx(by, 0.0, "b starts at the container's cross start");
     approx(bh, 200.0, "b stretches to the container's inner cross size");
 }
+
+#[test]
+fn order_applies_before_flex_line_wrapping() {
+    let rt = drive(
+        VW,
+        VW,
+        ".c{display:flex;flex-wrap:wrap;width:70px}
+         .c>*{height:10px;flex-shrink:0}
+         .a{width:45px;order:1} .b{width:40px;order:-1} .d{width:20px;order:1}",
+        &container(&["a", "b", "d"]),
+    );
+    assert_eq!(geom(&rt, at(&rt, &[0, 0])), (0.0, 10.0, 45.0, 10.0));
+    assert_eq!(geom(&rt, at(&rt, &[0, 1])), (0.0, 0.0, 40.0, 10.0));
+    assert_eq!(geom(&rt, at(&rt, &[0, 2])), (45.0, 10.0, 20.0, 10.0));
+}
+
+#[test]
+fn row_reverse_places_ordered_items_from_the_right() {
+    let rt = drive(
+        VW,
+        VW,
+        ".c{display:flex;flex-direction:row-reverse;width:100px}
+         .c>*{height:10px;flex-shrink:0}
+         .a{width:20px;order:1} .b{width:40px;order:-1} .d{width:30px;order:1}",
+        &container(&["a", "b", "d"]),
+    );
+    assert_eq!(geom(&rt, at(&rt, &[0, 0])), (40.0, 0.0, 20.0, 10.0));
+    assert_eq!(geom(&rt, at(&rt, &[0, 1])), (60.0, 0.0, 40.0, 10.0));
+    assert_eq!(geom(&rt, at(&rt, &[0, 2])), (10.0, 0.0, 30.0, 10.0));
+}
+
+#[test]
+fn row_reverse_maps_margins_to_their_physical_sides() {
+    let rt = drive(
+        VW,
+        VW,
+        ".c{display:flex;flex-direction:row-reverse;width:100px;gap:5px}
+         .a{width:20px;height:10px;margin-right:10px}
+         .b{width:30px;height:10px;margin-left:5px}",
+        &container(&["a", "b"]),
+    );
+    assert_eq!(geom(&rt, at(&rt, &[0, 0])).0, 70.0);
+    assert_eq!(geom(&rt, at(&rt, &[0, 1])).0, 35.0);
+}
+
+#[test]
+fn column_reverse_places_from_the_bottom_of_an_auto_height_container() {
+    let rt = drive(
+        VW,
+        VW,
+        ".c{display:flex;flex-direction:column-reverse;width:100px;gap:5px}
+         .a{height:20px} .b{height:30px}",
+        &container(&["a", "b"]),
+    );
+    assert_eq!(geom(&rt, at(&rt, &[0])).3, 55.0);
+    assert_eq!(geom(&rt, at(&rt, &[0, 0])).1, 35.0);
+    assert_eq!(geom(&rt, at(&rt, &[0, 1])).1, 0.0);
+}
+
+#[doc = include_str!("spec_ch4_flex.doc/normal_align_content_stretches_wrapped_flex_lines.md")]
+#[test]
+fn normal_align_content_stretches_wrapped_flex_lines() {
+    for (alignment, second_line) in [("", 150.0), ("normal", 150.0), ("flex-start", 50.0)] {
+        let declaration = if alignment.is_empty() {
+            String::new()
+        } else {
+            format!("align-content:{alignment}")
+        };
+        let rt = drive(
+            VW,
+            VW,
+            &format!(
+                ".c{{display:flex;flex-wrap:wrap;width:100px;height:300px;{declaration}}}
+                 .a,.b{{width:100px;height:50px;flex:none}}"
+            ),
+            &container(&["a", "b"]),
+        );
+        let (_, y, _, _) = geom(&rt, at(&rt, &[0, 1]));
+        approx(y, second_line, alignment);
+    }
+}

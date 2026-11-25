@@ -1,4 +1,5 @@
-#![doc = include_str!("winit_window_backend.doc/_module.md")]
+//! The [`WinitWindowBackend`] winit adapter implementing the [`WindowBackend`]
+//! port (spec §6.1-6.6 windowing; §2.7 "Реализует `WindowBackend`").
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -17,22 +18,25 @@ use obscur_windowing::request::{
 };
 use obscur_windowing::window::{Window, WindowEvent, WindowRelation, WindowState};
 
-use super::winit_event_loop::{BackendState, WinitAppHandler};
+use super::backend_state::BackendState;
+use super::winit_event_loop::WinitAppHandler;
 use super::winit_window::WinitWindow;
 
-#[doc = include_str!("winit_window_backend.doc/WinitWindowBackend.md")]
+#[doc = include_str!("../../docs/api/backend/winit_window_backend.doc/WinitWindowBackend.md")]
 #[derive(Debug)]
 pub struct WinitWindowBackend {
-    #[doc = include_str!("winit_window_backend.doc/next_id.md")]
+    /// The source of fresh window identities: a plain monotonic counter, owned
+    /// by the backend so ids can be minted without touching the shared state.
     next_id: u64,
-    #[doc = include_str!("winit_window_backend.doc/records.md")]
+    /// The retained domain records, owned directly so `window()` can borrow one
+    /// without going through the mutex.
     records: HashMap<WindowId, Window>,
-    #[doc = include_str!("winit_window_backend.doc/state.md")]
+    /// The winit-side state shared with the [`WinitAppHandler`].
     state: Arc<Mutex<BackendState>>,
 }
 
 impl WinitWindowBackend {
-    #[doc = include_str!("winit_window_backend.doc/new.md")]
+    /// Creates an empty backend with no windows and no queued work.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -42,31 +46,32 @@ impl WinitWindowBackend {
         }
     }
 
-    #[doc = include_str!("winit_window_backend.doc/app_handler.md")]
+    #[doc = include_str!("../../docs/api/backend/winit_window_backend.doc/app_handler.md")]
     #[must_use]
     pub fn app_handler(&self) -> WinitAppHandler {
         WinitAppHandler::new(Arc::clone(&self.state))
     }
 
-    #[doc = include_str!("winit_window_backend.doc/native_window.md")]
+    #[doc = include_str!("../../docs/api/backend/winit_window_backend.doc/native_window.md")]
     #[must_use]
     pub fn native_window(&self, id: WindowId) -> Option<Arc<winit::window::Window>> {
         self.lock().windows.get(&id).map(WinitWindow::shared)
     }
 
-    #[doc = include_str!("winit_window_backend.doc/allocate_id.md")]
+    /// Mints the next fresh [`WindowId`] from the owned monotonic counter.
     fn allocate_id(&mut self) -> WindowId {
         let id = WindowId::from_raw(self.next_id);
         self.next_id += 1;
         id
     }
 
-    #[doc = include_str!("winit_window_backend.doc/lock.md")]
+    /// Locks the shared winit-side state, treating poisoning as a bug.
     fn lock(&self) -> std::sync::MutexGuard<'_, BackendState> {
         self.state.lock().expect("backend state mutex poisoned")
     }
 
-    #[doc = include_str!("winit_window_backend.doc/queue_property_push.md")]
+    /// Queues the current desired properties of `id` for the handler to push
+    /// onto the live winit window on the next turn.
     fn queue_property_push(&self, id: WindowId) {
         if let Some(record) = self.records.get(&id) {
             let properties = record.properties().clone();
@@ -282,7 +287,7 @@ impl WindowBackend for WinitWindowBackend {
     }
 }
 
-#[doc = include_str!("winit_window_backend.doc/unsatisfiable_relation.md")]
+#[doc = include_str!("../../docs/api/backend/winit_window_backend.doc/unsatisfiable_relation.md")]
 fn unsatisfiable_relation(relation: WindowRelation) -> Option<Box<str>> {
     if relation.owner.is_some() {
         return Some(Box::from(
@@ -297,7 +302,7 @@ fn unsatisfiable_relation(relation: WindowRelation) -> Option<Box<str>> {
     None
 }
 
-#[doc = include_str!("winit_window_backend.doc/presentation_outcome.md")]
+#[doc = include_str!("../../docs/api/backend/winit_window_backend.doc/presentation_outcome.md")]
 fn presentation_outcome(mode: &PresentationMode) -> WindowOperationResult {
     match mode.fullscreen {
         FullscreenMode::Kiosk => WindowOperationResult::Unsupported,
@@ -314,7 +319,7 @@ fn presentation_outcome(mode: &PresentationMode) -> WindowOperationResult {
     }
 }
 
-#[doc = include_str!("winit_window_backend.doc/drops_presentation_controls.md")]
+/// Returns whether `mode` asks for a §6.5 optional control this backend drops.
 fn drops_presentation_controls(mode: &PresentationMode) -> bool {
     mode.hide_cursor
         || mode.inhibit_sleep
@@ -322,7 +327,7 @@ fn drops_presentation_controls(mode: &PresentationMode) -> bool {
         || mode.safe_escape != SafeEscapePolicy::Allow
 }
 
-#[doc = include_str!("winit_window_backend.doc/live_tests.md")]
+#[doc = include_str!("../../docs/api/backend/winit_window_backend.doc/live_tests.md")]
 #[cfg(all(test, target_os = "linux"))]
 mod live_tests {
     use super::*;
@@ -332,9 +337,9 @@ mod live_tests {
     use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
     use winit::window::WindowId as WinitWindowId;
 
-    use super::super::winit_event_loop::{UserEvent, WinitAppHandler};
+    use super::super::{UserEvent, WinitAppHandler};
 
-    #[doc = include_str!("winit_window_backend.doc/display_event_loop.md")]
+    #[doc = include_str!("../../docs/api/backend/winit_window_backend.doc/display_event_loop.md")]
     fn display_event_loop() -> Option<EventLoop<UserEvent>> {
         use winit::platform::x11::EventLoopBuilderExtX11;
 
@@ -353,35 +358,39 @@ mod live_tests {
         }
     }
 
-    #[doc = include_str!("winit_window_backend.doc/Observations.md")]
+    #[doc = include_str!("../../docs/api/backend/winit_window_backend.doc/Observations.md")]
     #[derive(Debug, Default)]
     struct Observations {
-        #[doc = include_str!("winit_window_backend.doc/handles_after_pump.md")]
+        /// Whether each window's platform handle was reachable once pumped.
         handles_after_pump: Option<(bool, bool)>,
-        #[doc = include_str!("winit_window_backend.doc/each_handle_routes_to_its_own_id.md")]
+        /// Whether each id's handle is *its own* window — the window whose native
+        /// events route back to that same id.
         each_handle_routes_to_its_own_id: Option<(bool, bool)>,
-        #[doc = include_str!("winit_window_backend.doc/created_events.md")]
+        /// Whether the port reported both materializations to the host.
         created_events: Option<bool>,
-        #[doc = include_str!("winit_window_backend.doc/handles_after_closing_the_first.md")]
+        /// Whether the closed window's handle went, and the other one stayed.
         handles_after_closing_the_first: Option<(bool, bool)>,
     }
 
-    #[doc = include_str!("winit_window_backend.doc/LiveProbe.md")]
+    #[doc = include_str!("../../docs/api/backend/winit_window_backend.doc/LiveProbe.md")]
     struct LiveProbe {
-        #[doc = include_str!("winit_window_backend.doc/inner.md")]
+        /// The backend's handler, forwarded to on every callback.
         inner: WinitAppHandler,
-        #[doc = include_str!("winit_window_backend.doc/backend.md")]
+        /// The port handle the host issues its operations on.
         backend: WinitWindowBackend,
-        #[doc = include_str!("winit_window_backend.doc/ids.md")]
+        /// The two windows this probe created through the port. Two, not one,
+        /// because §6.1 is a *multi-window* API and because one window cannot
+        /// tell "the handle for this id" apart from "a handle".
         ids: (WindowId, WindowId),
-        #[doc = include_str!("winit_window_backend.doc/turn.md")]
+        /// Turns of `about_to_wait` seen so far.
         turn: u32,
-        #[doc = include_str!("winit_window_backend.doc/observed.md")]
+        /// What was observed, read by the test after the loop returns.
         observed: Observations,
     }
 
     impl LiveProbe {
-        #[doc = include_str!("winit_window_backend.doc/handle_routes_to_own_id.md")]
+        /// Returns whether the live handle for `id` is the window whose native
+        /// events route back to `id`.
         fn handle_routes_to_own_id(&self, id: WindowId) -> bool {
             self.backend.native_window(id).is_some_and(|window| {
                 self.backend.lock().winit_to_domain.get(&window.id()) == Some(&id)
@@ -439,7 +448,7 @@ mod live_tests {
         }
     }
 
-    #[doc = include_str!("winit_window_backend.doc/a_host_reaches_its_own_real_windows_through_the_port.md")]
+    #[doc = include_str!("../../docs/api/backend/winit_window_backend.doc/a_host_reaches_its_own_real_windows_through_the_port.md")]
     #[test]
     #[ignore = "opens real OS windows: attended proof only, and vacuous headless — see the module docs"]
     fn a_host_reaches_its_own_real_windows_through_the_port() {

@@ -1,14 +1,18 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Focus module.
 mod focus_node;
 pub use focus_node::FocusNode;
 mod focus_request;
-pub use focus_request::{FocusReason, FocusRequest};
+pub use focus_request::FocusRequest;
+mod focus_reason;
+pub use focus_reason::FocusReason;
 mod focus_restore;
 pub use focus_restore::FocusRestore;
 mod focus_result;
 pub use focus_result::FocusResult;
 mod focus_scope;
-pub use focus_scope::{FocusScope, FocusScopeId};
+pub use focus_scope::FocusScope;
+mod focus_scope_id;
+pub use focus_scope_id::FocusScopeId;
 mod focus_trap;
 pub use focus_trap::FOCUS_TRAP;
 mod focus_tree;

@@ -1,96 +1,48 @@
-#![doc = include_str!("appearance_provider.doc/_module.md")]
-
-use std::sync::Arc;
+//! The port a platform implements to read its desktop's appearance.
 
 use obscur_capability::SupportLevel;
 
-use super::{AppearanceWatch, SystemAppearance};
+use super::{AppearanceCallback, AppearanceWatch, SystemAppearance};
 
-#[doc = include_str!("appearance_provider.doc/AppearanceCallback.md")]
-pub type AppearanceCallback = Arc<dyn Fn() + Send + Sync + 'static>;
-
-#[doc = include_str!("appearance_provider.doc/AppearanceProvider.md")]
+#[doc = include_str!("../../docs/api/appearance/appearance_provider.doc/AppearanceProvider.md")]
 pub trait AppearanceProvider {
-    #[doc = include_str!("appearance_provider.doc/appearance.md")]
+    #[doc = include_str!("../../docs/api/appearance/appearance_provider.doc/appearance.md")]
     fn appearance(&self) -> SystemAppearance;
 
-    #[doc = include_str!("appearance_provider.doc/support.md")]
+    #[doc = include_str!("../../docs/api/appearance/appearance_provider.doc/support.md")]
     fn support(&self) -> SupportLevel;
 
-    #[doc = include_str!("appearance_provider.doc/answers.md")]
+    /// Whether asking this source is worth doing at all.
     fn answers(&self) -> bool {
         !matches!(self.support(), SupportLevel::Unavailable)
     }
 
-    #[doc = include_str!("appearance_provider.doc/watch_support.md")]
+    #[doc = include_str!("../../docs/api/appearance/appearance_provider.doc/watch_support.md")]
     fn watch_support(&self) -> SupportLevel {
         SupportLevel::Unavailable
     }
 
-    #[doc = include_str!("appearance_provider.doc/watch.md")]
+    #[doc = include_str!("../../docs/api/appearance/appearance_provider.doc/watch.md")]
     fn watch(&self, on_change: AppearanceCallback) -> Option<AppearanceWatch> {
         let _ = on_change;
         None
     }
 
-    #[doc = include_str!("appearance_provider.doc/notifies.md")]
+    /// Whether asking to be told is worth doing at all.
     fn notifies(&self) -> bool {
         !matches!(self.watch_support(), SupportLevel::Unavailable)
     }
 }
 
-#[doc = include_str!("appearance_provider.doc/NullAppearanceProvider.md")]
-#[derive(Debug, Default)]
-pub struct NullAppearanceProvider;
-
-impl NullAppearanceProvider {
-    #[doc = include_str!("appearance_provider.doc/new.md")]
-    #[must_use]
-    pub const fn new() -> Self {
-        Self
-    }
-}
-
-impl AppearanceProvider for NullAppearanceProvider {
-    fn appearance(&self) -> SystemAppearance {
-        SystemAppearance::default()
-    }
-
-    fn support(&self) -> SupportLevel {
-        SupportLevel::Unavailable
-    }
-
-    fn watch_support(&self) -> SupportLevel {
-        SupportLevel::Unavailable
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use super::super::NullAppearanceProvider;
     use super::*;
 
     #[test]
     fn the_port_is_object_safe() {
         fn assert_obj_safe(_: &dyn AppearanceProvider) {}
         assert_obj_safe(&NullAppearanceProvider::new());
-    }
-
-    #[test]
-    fn a_platform_with_no_desktop_settings_answers_nothing_and_says_so() {
-        let provider = NullAppearanceProvider::new();
-        assert!(provider.appearance().is_empty());
-        assert_eq!(provider.support(), SupportLevel::Unavailable);
-        assert!(!provider.answers());
-    }
-
-    #[test]
-    fn a_source_says_nothing_about_changes_unless_it_can() {
-        // The default, and the honest one: most settings stores have no signal,
-        // so a provider that does nothing inherits "you will not be told".
-        let provider = NullAppearanceProvider::new();
-        assert_eq!(provider.watch_support(), SupportLevel::Unavailable);
-        assert!(!provider.notifies());
-        assert!(provider.watch(Arc::new(|| {})).is_none());
     }
 
     #[test]

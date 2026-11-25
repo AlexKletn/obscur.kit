@@ -1,22 +1,11 @@
-#![doc = include_str!("complex_selector.doc/_module.md")]
+//! A complex selector: compounds joined by combinators ([`ComplexSelector`]).
 
 use super::compound_selector::CompoundSelector;
 use super::selector_specificity::SelectorSpecificity;
 
-#[doc = include_str!("complex_selector.doc/Combinator.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Combinator {
-    #[doc = include_str!("complex_selector.doc/Descendant.md")]
-    Descendant,
-    #[doc = include_str!("complex_selector.doc/Child.md")]
-    Child,
-    #[doc = include_str!("complex_selector.doc/NextSibling.md")]
-    NextSibling,
-    #[doc = include_str!("complex_selector.doc/SubsequentSibling.md")]
-    SubsequentSibling,
-}
+use super::Combinator;
 
-#[doc = include_str!("complex_selector.doc/ComplexSelector.md")]
+#[doc = include_str!("../../docs/api/selector/complex_selector.doc/ComplexSelector.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComplexSelector {
     head: CompoundSelector,
@@ -24,31 +13,34 @@ pub struct ComplexSelector {
 }
 
 impl ComplexSelector {
-    #[doc = include_str!("complex_selector.doc/new.md")]
+    /// Creates a complex selector from its lead compound and combinator-linked
+    /// tail (both stored left-to-right).
     #[must_use]
     pub const fn new(head: CompoundSelector, tail: Vec<(Combinator, CompoundSelector)>) -> Self {
         Self { head, tail }
     }
 
-    #[doc = include_str!("complex_selector.doc/head.md")]
+    /// Returns the lead (leftmost) compound selector.
     #[must_use]
     pub const fn head(&self) -> &CompoundSelector {
         &self.head
     }
 
-    #[doc = include_str!("complex_selector.doc/tail.md")]
+    /// Returns the combinator-linked tail compounds, left-to-right.
     #[must_use]
     pub fn tail(&self) -> &[(Combinator, CompoundSelector)] {
         &self.tail
     }
 
-    #[doc = include_str!("complex_selector.doc/subject.md")]
+    /// Returns the subject compound: the rightmost compound, which the tested
+    /// element itself must match.
     #[must_use]
     pub fn subject(&self) -> &CompoundSelector {
         self.tail.last().map_or(&self.head, |(_, c)| c)
     }
 
-    #[doc = include_str!("complex_selector.doc/specificity.md")]
+    /// Returns the specificity of this complex selector: the sum over all its
+    /// compounds (combinators contribute nothing).
     #[must_use]
     pub fn specificity(&self) -> SelectorSpecificity {
         self.tail

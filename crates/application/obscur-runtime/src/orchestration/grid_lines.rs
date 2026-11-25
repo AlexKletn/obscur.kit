@@ -1,15 +1,18 @@
-#![doc = include_str!("grid_lines.doc/_module.md")]
+#![doc = include_str!("../../docs/api/orchestration/grid_lines.doc/_module.md")]
 
 use std::collections::HashMap;
 
-use obscur_layout::algorithm::{GridLine, GridPlacement};
+use obscur_layout::algorithm::{GridLine, GridPlacement, RepeatedGridLine};
 use obscur_style::computed::{ComputedStyle, ComputedValue};
-use obscur_style::property::{GridLineValue, PropertyId, PropertyValue};
+use obscur_style::property::{
+    GridAreaTemplate, GridLineValue, GridTrack, GridTrackList, PropertyId, PropertyValue,
+};
 use obscur_tree::tree::RetainedTree;
 
-use super::{ComputedStyles, LayoutStyles};
+use super::grid_areas::grid_areas_of;
+use super::{ComputedStyles, GridTemplates, LayoutStyles};
 
-#[doc = include_str!("grid_lines.doc/resolve_named_grid_lines.md")]
+#[doc = include_str!("../../docs/api/orchestration/grid_lines.doc/resolve_named_grid_lines.md")]
 pub fn resolve_named_grid_lines(
     styles: &mut LayoutStyles,
     tree: &RetainedTree,
@@ -20,7 +23,7 @@ pub fn resolve_named_grid_lines(
         if !has_named_edge(style) {
             continue;
         }
-        let Some(parent) = tree.get(node).and_then(|n| n.logical_parent().parent()) else {
+        let Some(parent) = tree.visual_parent_of(node) else {
             continue;
         };
         let Some(parent_style) = computed.get(&parent) else {
@@ -32,33 +35,166 @@ pub fn resolve_named_grid_lines(
 
         let columns = line_name_map(parent_style, PropertyId::GridTemplateColumns);
         let rows = line_name_map(parent_style, PropertyId::GridTemplateRows);
+        let areas = grid_areas_of(parent_style);
+        let implicit_columns = !has_auto_repeat(parent_style, PropertyId::GridTemplateColumns);
+        let implicit_rows = !has_auto_repeat(parent_style, PropertyId::GridTemplateRows);
         let placement = &layout.grid_placement;
 
         let column_start = resolve_edge(
             style,
             PropertyId::GridColumnStart,
             &columns,
+            implicit_columns,
+            areas,
             placement.column_start(),
         );
         let column_end = resolve_edge(
             style,
             PropertyId::GridColumnEnd,
             &columns,
+            implicit_columns,
+            areas,
             placement.column_end(),
         );
         let row_start = resolve_edge(
             style,
             PropertyId::GridRowStart,
             &rows,
+            implicit_rows,
+            areas,
             placement.row_start(),
         );
-        let row_end = resolve_edge(style, PropertyId::GridRowEnd, &rows, placement.row_end());
+        let row_end = resolve_edge(
+            style,
+            PropertyId::GridRowEnd,
+            &rows,
+            implicit_rows,
+            areas,
+            placement.row_end(),
+        );
 
         layout.grid_placement = GridPlacement::new(column_start, column_end, row_start, row_end);
     }
 }
 
-#[doc = include_str!("grid_lines.doc/has_named_edge.md")]
+/// Saves placement lookups whose line numbers depend on layout's repeat count.
+pub(crate) fn defer_repeated_grid_lines(
+    templates: &mut GridTemplates,
+    tree: &RetainedTree,
+    computed: &ComputedStyles,
+) {
+    if !templates.values().any(|template| {
+        template.columns().auto_repeat().is_some() || template.rows().auto_repeat().is_some()
+    }) {
+        return;
+    }
+    for (&node, style) in computed {
+        if !has_named_edge(style) {
+            continue;
+        }
+        let Some(parent) = tree.visual_parent_of(node) else {
+            continue;
+        };
+        let (Some(template), Some(parent_style)) =
+            (templates.get_mut(&parent), computed.get(&parent))
+        else {
+            continue;
+        };
+        let areas = grid_areas_of(parent_style);
+        let columns = grid_track_list(parent_style, PropertyId::GridTemplateColumns);
+        let rows = grid_track_list(parent_style, PropertyId::GridTemplateRows);
+        let line = |property, list: Option<&GridTrackList>| {
+            repeated_edge(grid_line_of(style, property)?, list?, areas, property)
+        };
+        let lines = [
+            line(PropertyId::GridColumnStart, columns),
+            line(PropertyId::GridColumnEnd, columns),
+            line(PropertyId::GridRowStart, rows),
+            line(PropertyId::GridRowEnd, rows),
+        ];
+        if lines.iter().any(Option::is_some) {
+            template.set_repeated_lines(node, lines);
+        }
+    }
+}
+
+fn repeated_edge(
+    value: &GridLineValue,
+    list: &GridTrackList,
+    areas: Option<&GridAreaTemplate>,
+    property: PropertyId,
+) -> Option<RepeatedGridLine> {
+    let (name, occurrence) = match value {
+        GridLineValue::Named(name) => (name, std::num::NonZeroI32::new(1)?),
+        GridLineValue::NamedOccurrence(name, occurrence) => (name, *occurrence),
+        _ => return None,
+    };
+    let (start, pattern) =
+        list.tracks()
+            .iter()
+            .enumerate()
+            .find_map(|(index, track)| match track {
+                GridTrack::AutoRepeat { line_names, .. } => Some((index, line_names)),
+                _ => None,
+            })?;
+    let lookup = |name: &str, count_implicit| {
+        let matching_lines = |buckets: &[Box<[Box<str>]>]| {
+            buckets
+                .iter()
+                .enumerate()
+                .filter_map(|(index, names)| {
+                    names
+                        .iter()
+                        .any(|candidate| candidate.as_ref() == name)
+                        .then_some(index)
+                })
+                .collect::<Vec<_>>()
+        };
+        let mut fixed = Vec::new();
+        let mut after = Vec::new();
+        for index in matching_lines(list.line_names()) {
+            if index <= start {
+                fixed.push(index);
+            } else {
+                after.push(index - start - 1);
+            }
+        }
+        if let Some(line) = areas.and_then(|template| area_edge(template, property, name)) {
+            fixed.push((line - 1) as usize);
+        }
+        RepeatedGridLine::new(
+            occurrence,
+            fixed,
+            matching_lines(pattern),
+            after,
+            count_implicit,
+        )
+    };
+    let direct = lookup(name, true);
+    if matches!(value, GridLineValue::Named(_)) {
+        let preferred = lookup(&area_edge_name(property, name), false);
+        return Some(direct.with_preferred(preferred));
+    }
+    Some(direct)
+}
+
+fn grid_track_list(style: &ComputedStyle, property: PropertyId) -> Option<&GridTrackList> {
+    style
+        .get(property)
+        .map(ComputedValue::value)
+        .and_then(PropertyValue::as_grid_track_list)
+}
+
+fn has_auto_repeat(style: &ComputedStyle, property: PropertyId) -> bool {
+    grid_track_list(style, property).is_some_and(|list| {
+        list.tracks()
+            .iter()
+            .any(|track| matches!(track, GridTrack::AutoRepeat { .. }))
+    })
+}
+
+/// Whether any of the four `grid-*-start` / `-end` longhands is a
+/// [`GridLineValue::Named`] edge (the only case this pass acts on).
 fn has_named_edge(style: &ComputedStyle) -> bool {
     [
         PropertyId::GridColumnStart,
@@ -67,25 +203,100 @@ fn has_named_edge(style: &ComputedStyle) -> bool {
         PropertyId::GridRowEnd,
     ]
     .into_iter()
-    .any(|id| matches!(grid_line_of(style, id), Some(GridLineValue::Named(_))))
+    .any(|id| {
+        matches!(
+            grid_line_of(style, id),
+            Some(GridLineValue::Named(_) | GridLineValue::NamedOccurrence(..))
+        )
+    })
 }
 
-#[doc = include_str!("grid_lines.doc/resolve_edge.md")]
+/// Resolves a named edge against authored and area-generated line names.
+/// Bare names prefer the corresponding area-edge spelling. Numbered names
+/// count distinct matching lines from the requested end. When overtaking
+/// the matches in the explicit grid, counting continues on implicit lines.
 fn resolve_edge(
     style: &ComputedStyle,
     property: PropertyId,
-    map: &HashMap<Box<str>, i32>,
+    map: &HashMap<&str, Vec<i32>>,
+    allow_implicit: bool,
+    areas: Option<&GridAreaTemplate>,
     current: GridLine,
 ) -> GridLine {
-    match grid_line_of(style, property) {
-        Some(GridLineValue::Named(name)) => {
-            map.get(name).map_or(current, |&line| GridLine::Line(line))
-        }
-        _ => current,
+    if !allow_implicit {
+        return current; // Layout resolves this axis after expanding auto-repeat.
     }
+    let (name, occurrence) = match grid_line_of(style, property) {
+        Some(GridLineValue::Named(name)) => {
+            let preferred = area_edge_name(property, name);
+            let first = map
+                .get(preferred.as_str())
+                .and_then(|matches| matches.first())
+                .copied();
+            let generated = areas.and_then(|template| area_edge(template, property, &preferred));
+            if let Some(line) = first.into_iter().chain(generated).min() {
+                return GridLine::Line(line);
+            }
+            (name, 1)
+        }
+        Some(GridLineValue::NamedOccurrence(name, occurrence)) => (name, occurrence.get()),
+        _ => return current,
+    };
+    let explicit = map.get(name.as_ref()).map_or(&[][..], Vec::as_slice);
+    let implicit = areas.and_then(|template| area_edge(template, property, name));
+    let extra = implicit.filter(|line| explicit.binary_search(line).is_err());
+    let count = explicit.len() + usize::from(extra.is_some());
+    let Ok(occurrence_count) = usize::try_from(occurrence.unsigned_abs()) else {
+        return current;
+    };
+    let offset = occurrence_count - 1;
+    if offset >= count {
+        return u32::try_from(occurrence_count - count).map_or(current, |missing| {
+            GridLine::outside_explicit(missing, occurrence < 0)
+        });
+    }
+    let index = if occurrence < 0 {
+        count - 1 - offset
+    } else {
+        offset
+    };
+    if let Some(line) = extra {
+        let insertion = explicit.partition_point(|&explicit_line| explicit_line < line);
+        if index == insertion {
+            return GridLine::Line(line);
+        }
+        return GridLine::Line(explicit[index - usize::from(index > insertion)]);
+    }
+    GridLine::Line(explicit[index])
 }
 
-#[doc = include_str!("grid_lines.doc/grid_line_of.md")]
+/// Converts a bare name to the spelling used by the requested area edge.
+fn area_edge_name(property: PropertyId, name: &str) -> String {
+    let suffix = match property {
+        PropertyId::GridColumnEnd | PropertyId::GridRowEnd => "end",
+        _ => "start",
+    };
+    format!("{name}-{suffix}")
+}
+
+/// Finds the line contributed by a template area's generated name.
+fn area_edge(template: &GridAreaTemplate, property: PropertyId, name: &str) -> Option<i32> {
+    let (area, is_start) = name
+        .strip_suffix("-start")
+        .map(|area| (area, true))
+        .or_else(|| name.strip_suffix("-end").map(|area| (area, false)))?;
+    let area = template.area(area)?;
+    let line = match (property, is_start) {
+        (PropertyId::GridColumnStart | PropertyId::GridColumnEnd, true) => area.column_start,
+        (PropertyId::GridColumnStart | PropertyId::GridColumnEnd, false) => area.column_end,
+        (_, true) => area.row_start,
+        (_, false) => area.row_end,
+    };
+    Some(i32::try_from(line).unwrap_or(i32::MAX))
+}
+
+/// Reads one grid-line longhand as its style-local [`GridLineValue`], or [`None`]
+/// when the property is absent or not a grid-line value.
 fn grid_line_of(style: &ComputedStyle, property: PropertyId) -> Option<&GridLineValue> {
     style
         .get(property)
@@ -93,20 +304,26 @@ fn grid_line_of(style: &ComputedStyle, property: PropertyId) -> Option<&GridLine
         .and_then(PropertyValue::as_grid_line)
 }
 
-#[doc = include_str!("grid_lines.doc/line_name_map.md")]
-fn line_name_map(style: &ComputedStyle, property: PropertyId) -> HashMap<Box<str>, i32> {
-    let mut map = HashMap::new();
-    let Some(list) = style
-        .get(property)
-        .map(ComputedValue::value)
-        .and_then(PropertyValue::as_grid_track_list)
-    else {
+#[doc = include_str!("../../docs/api/orchestration/grid_lines.doc/line_name_map.md")]
+fn line_name_map(style: &ComputedStyle, property: PropertyId) -> HashMap<&str, Vec<i32>> {
+    let mut map = HashMap::<&str, Vec<i32>>::new();
+    let Some(list) = grid_track_list(style, property) else {
         return map;
     };
+    if list
+        .tracks()
+        .iter()
+        .any(|track| matches!(track, GridTrack::AutoRepeat { .. }))
+    {
+        return map;
+    }
     for (index, names) in list.line_names().iter().enumerate() {
         let line = i32::try_from(index).unwrap_or(i32::MAX).saturating_add(1);
         for name in names {
-            map.entry(name.clone()).or_insert(line);
+            let lines = map.entry(name.as_ref()).or_default();
+            if lines.last() != Some(&line) {
+                lines.push(line);
+            }
         }
     }
     map
@@ -204,7 +421,7 @@ mod tests {
     }
 
     #[test]
-    fn unknown_line_name_leaves_auto_placement() {
+    fn unknown_line_name_resolves_to_an_implicit_track() {
         let (tree, parent, child) = tree_with_child();
         let mut computed = ComputedStyles::default();
         computed.insert(parent, container_with_named_columns());
@@ -216,8 +433,10 @@ mod tests {
         resolve_named_grid_lines(&mut styles, &tree, &computed);
 
         let placement = styles.get(&child).expect("child").grid_placement;
-        // Unknown start name stays auto; the known end resolves.
-        assert_eq!(placement.column_start(), GridLine::Auto);
+        assert_eq!(
+            placement.column_start(),
+            GridLine::outside_explicit(1, false)
+        );
         assert_eq!(placement.column_end(), GridLine::Line(3));
     }
 

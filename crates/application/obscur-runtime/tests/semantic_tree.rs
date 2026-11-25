@@ -91,6 +91,45 @@ fn semantic_snapshot_reflects_the_live_rendered_tree() {
 }
 
 #[test]
+fn a_frame_publishes_the_live_editable_value_and_directional_selection() {
+    use obscur_accessibility::semantic::SemanticValue;
+    use obscur_interaction::command::{
+        KeyEvent, LogicalKey, Modifier, Modifiers, NamedKey, PhysicalKey,
+    };
+
+    let view = View::from_fragment(ViewFragment::from_nodes(vec![
+        ViewNode::element(ComponentId::from_raw(20))
+            .with_prop(ViewProperty::new(
+                LOCAL_NAME,
+                ViewValue::Text("input".into()),
+            ))
+            .with_event(obscur_view::view::ViewEventBinding::new(
+                obscur_view::view::EVENT_INPUT,
+                obscur_identity::InternedSymbol::named("edit"),
+            ))
+            .with_children(ViewFragment::from_nodes(vec![ViewNode::text("aé")])),
+    ]));
+    let mut runtime = TestFixture::runtime();
+    let bridge = install_capture(&mut runtime);
+    let _ = runtime.render_now(&view, &[]);
+    let root = runtime.tree().root().unwrap();
+    let field = runtime.tree().get(root).unwrap().child_nodes()[0];
+    assert!(runtime.focus_node(Some(field)));
+    let _ = runtime.render_now(&view, &[]);
+    runtime.set_modifiers(Modifiers::new().with(Modifier::Shift));
+    let _ = runtime.handle_key(KeyEvent::press(
+        PhysicalKey::ArrowLeft,
+        Some(LogicalKey::Named(NamedKey::ArrowLeft)),
+    ));
+    let _ = runtime.run_due_frame(&view, &[]);
+
+    let seen = bridge.borrow();
+    let node = seen.last.as_ref().unwrap().get(field).unwrap();
+    assert_eq!(node.value(), &SemanticValue::text("aé"));
+    assert_eq!(node.text_selection, Some([3, 1]));
+}
+
+#[test]
 fn push_accessibility_feeds_the_bridge() {
     let mut runtime = TestFixture::runtime();
     let _ = runtime.render_now(&CounterPanel::view(), &[]);

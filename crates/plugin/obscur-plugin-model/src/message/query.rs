@@ -1,5 +1,6 @@
-#![doc = include_str!("query.doc/_module.md")]
+//! Query (skeleton stub for the spec-defined entity; not yet implemented).
 
-#[doc = include_str!("query.doc/Query.md")]
+/// Placeholder for the `Query` entity. See the Obscur Kit 2 specs for its
+/// contract; this stub exists to materialise the target source layout.
 #[derive(Debug)]
 pub struct Query;

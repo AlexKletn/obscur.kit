@@ -1,22 +1,25 @@
-#![doc = include_str!("blur_layer.doc/_module.md")]
+//! A `filter` sub-scene extracted from the display list (spec §5.2).
 
 use obscur_geometry::Rect;
 use vello::Scene;
 
-#[doc = include_str!("blur_layer.doc/BlurLayer.md")]
+#[doc = include_str!("../../docs/api/conversion/blur_layer.doc/BlurLayer.md")]
 pub struct BlurLayer {
-    #[doc = include_str!("blur_layer.doc/scene.md")]
+    /// The bracketed subtree, as an independent scene in absolute coordinates.
     pub scene: Scene,
-    #[doc = include_str!("blur_layer.doc/bounds.md")]
+    /// The element's border box (the filter region), in absolute logical pixels —
+    /// taken from the filter layer's clip.
     pub bounds: Rect,
-    #[doc = include_str!("blur_layer.doc/radius.md")]
+    /// The blur radius in logical pixels (`0` = no blur, a color-only filter).
     pub radius: f32,
-    #[doc = include_str!("blur_layer.doc/color_matrix.md")]
+    /// The folded 4×5 color matrix (20 entries: row-major 4×4 linear part + 4-entry
+    /// bias), applied to the sub-scene before any blur. [`None`] = no color op.
     pub color_matrix: Option<[f32; 20]>,
 }
 
 impl BlurLayer {
-    #[doc = include_str!("blur_layer.doc/new.md")]
+    /// Creates a filter layer descriptor carrying a blur radius and/or a color
+    /// matrix.
     #[must_use]
     pub const fn new(
         scene: Scene,

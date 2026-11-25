@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+#![doc = include_str!("../../docs/api/bootstrap/mod.doc/_module.md")]
 mod builtin_components;
 pub use builtin_components::BuiltinComponents;
 mod builtin_painters;
@@ -13,5 +13,10 @@ mod kit_bootstrap;
 pub use kit_bootstrap::KitBootstrap;
 mod stderr_diagnostics;
 pub use stderr_diagnostics::StderrDiagnostics;
+mod font_face_bytes;
 mod text_stack;
-pub use text_stack::{FontFaceBytes, FontSet, InstalledFonts};
+pub use font_face_bytes::FontFaceBytes;
+mod font_set;
+pub use font_set::FontSet;
+mod installed_fonts;
+pub use installed_fonts::InstalledFonts;

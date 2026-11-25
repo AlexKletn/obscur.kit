@@ -1,24 +1,27 @@
-#![doc = include_str!("tx_error.doc/_module.md")]
+//! `TxError`: typed validation errors returned by a transaction commit.
 
 use core::fmt;
 
 use obscur_identity::NodeId;
 
-#[doc = include_str!("tx_error.doc/TxError.md")]
+#[doc = include_str!("../../docs/api/transaction/tx_error.doc/TxError.md")]
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TxError {
-    #[doc = include_str!("tx_error.doc/StaleNode.md")]
+    /// A referenced existing node is not (or no longer) live in the tree.
     StaleNode(NodeId),
-    #[doc = include_str!("tx_error.doc/UndefinedNewRef.md")]
+    /// A [`StagedRef::New`](super::StagedRef::New) index refers to a creation
+    /// that has not been staged before its use in this transaction.
     UndefinedNewRef(u32),
-    #[doc = include_str!("tx_error.doc/NotTextNode.md")]
+    /// A [`SetText`](super::TreeChange::SetText) targeted a node that is not a
+    /// text node.
     NotTextNode(NodeId),
-    #[doc = include_str!("tx_error.doc/IndexOutOfRange.md")]
+    /// A child insertion or move used an index outside the valid range for the
+    /// parent's (projected) child count.
     IndexOutOfRange {
-        #[doc = include_str!("tx_error.doc/index.md")]
+        /// The offending index that was requested.
         index: usize,
-        #[doc = include_str!("tx_error.doc/child_count.md")]
+        /// The parent's child count against which the index was validated.
         child_count: usize,
     },
 }

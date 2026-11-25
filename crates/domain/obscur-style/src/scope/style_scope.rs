@@ -1,9 +1,9 @@
-#![doc = include_str!("style_scope.doc/_module.md")]
+#![doc = include_str!("../../docs/api/scope/style_scope.doc/_module.md")]
 
 use crate::property::{InheritedProperty, PropertyId};
 use crate::scope::{ScopeId, ScopeKind};
 
-#[doc = include_str!("style_scope.doc/StyleScope.md")]
+#[doc = include_str!("../../docs/api/scope/style_scope.doc/StyleScope.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StyleScope {
     id: ScopeId,
@@ -11,37 +11,37 @@ pub struct StyleScope {
 }
 
 impl StyleScope {
-    #[doc = include_str!("style_scope.doc/new.md")]
+    /// Creates a style scope with the given identity and behaviour.
     #[must_use]
     pub const fn new(id: ScopeId, kind: ScopeKind) -> Self {
         Self { id, kind }
     }
 
-    #[doc = include_str!("style_scope.doc/id.md")]
+    /// Returns this scope's identifier.
     #[must_use]
     pub const fn id(self) -> ScopeId {
         self.id
     }
 
-    #[doc = include_str!("style_scope.doc/kind.md")]
+    /// Returns this scope's behaviour classification.
     #[must_use]
     pub const fn kind(self) -> ScopeKind {
         self.kind
     }
 
-    #[doc = include_str!("style_scope.doc/is_isolated.md")]
+    #[doc = include_str!("../../docs/api/scope/style_scope.doc/is_isolated.md")]
     #[must_use]
     pub const fn is_isolated(self) -> bool {
         self.kind.is_isolated()
     }
 
-    #[doc = include_str!("style_scope.doc/property_crosses_boundary.md")]
+    #[doc = include_str!("../../docs/api/scope/style_scope.doc/property_crosses_boundary.md")]
     #[must_use]
     pub fn property_crosses_boundary(property: PropertyId) -> bool {
         InheritedProperty::of(property).is_inherited()
     }
 
-    #[doc = include_str!("style_scope.doc/contains_property.md")]
+    #[doc = include_str!("../../docs/api/scope/style_scope.doc/contains_property.md")]
     #[must_use]
     pub fn contains_property(self, property: PropertyId) -> bool {
         self.is_isolated() && !Self::property_crosses_boundary(property)

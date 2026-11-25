@@ -1,1 +1,0 @@
-Equivalent to [`SmolSpawner::new`].

@@ -1,20 +1,20 @@
-#![doc = include_str!("signal_driver.doc/_module.md")]
+//! The [`SignalDriver`] value-driven motion source (spec §4.17).
 
 use crate::driver::MotionDriver;
 
-#[doc = include_str!("signal_driver.doc/SignalDriver.md")]
+#[doc = include_str!("../../docs/api/driver/signal_driver.doc/SignalDriver.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SignalDriver {
-    #[doc = include_str!("signal_driver.doc/value.md")]
+    /// The current raw signal value.
     value: f32,
-    #[doc = include_str!("signal_driver.doc/min.md")]
+    /// The input-domain endpoint mapped to progress `0`.
     min: f32,
-    #[doc = include_str!("signal_driver.doc/max.md")]
+    /// The input-domain endpoint mapped to progress `1`.
     max: f32,
 }
 
 impl SignalDriver {
-    #[doc = include_str!("signal_driver.doc/new.md")]
+    #[doc = include_str!("../../docs/api/driver/signal_driver.doc/new.md")]
     #[must_use]
     pub const fn new(min: f32, max: f32) -> Self {
         Self {
@@ -24,31 +24,31 @@ impl SignalDriver {
         }
     }
 
-    #[doc = include_str!("signal_driver.doc/with_value.md")]
+    /// Returns this driver with its current signal set to `value`.
     #[must_use]
     pub const fn with_value(mut self, value: f32) -> Self {
         self.value = value;
         self
     }
 
-    #[doc = include_str!("signal_driver.doc/set_value.md")]
+    #[doc = include_str!("../../docs/api/driver/signal_driver.doc/set_value.md")]
     pub fn set_value(&mut self, value: f32) {
         self.value = value;
     }
 
-    #[doc = include_str!("signal_driver.doc/value_2.md")]
+    /// Returns the current raw signal value.
     #[must_use]
     pub const fn value(&self) -> f32 {
         self.value
     }
 
-    #[doc = include_str!("signal_driver.doc/min_2.md")]
+    /// Returns the input-domain endpoint mapped to progress `0`.
     #[must_use]
     pub const fn min(&self) -> f32 {
         self.min
     }
 
-    #[doc = include_str!("signal_driver.doc/max_2.md")]
+    /// Returns the input-domain endpoint mapped to progress `1`.
     #[must_use]
     pub const fn max(&self) -> f32 {
         self.max
@@ -56,7 +56,7 @@ impl SignalDriver {
 }
 
 impl MotionDriver for SignalDriver {
-    #[doc = include_str!("signal_driver.doc/progress.md")]
+    #[doc = include_str!("../../docs/api/driver/signal_driver.doc/progress.md")]
     fn progress(&self) -> f32 {
         let span = self.max - self.min;
         if span == 0.0 {
@@ -65,7 +65,7 @@ impl MotionDriver for SignalDriver {
         ((self.value - self.min) / span).clamp(0.0, 1.0)
     }
 
-    #[doc = include_str!("signal_driver.doc/is_active.md")]
+    /// Always `true`: a live drag/cursor/gesture signal can move at any time.
     fn is_active(&self) -> bool {
         true
     }

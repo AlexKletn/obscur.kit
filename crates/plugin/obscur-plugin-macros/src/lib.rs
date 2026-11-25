@@ -1,6 +1,6 @@
-#![doc = include_str!("lib.doc/_module.md")]
+//! Plugin manifest/service/contribution code generation (skeleton).
 #![forbid(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 
-#[doc = include_str!("lib.doc/derive.md")]
+/// Derive macros for plugin authors.
 pub mod derive;

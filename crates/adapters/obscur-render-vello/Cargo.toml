@@ -10,6 +10,10 @@ publish = false
 [lints]
 workspace = true
 
+[features]
+hybrid = ["dep:vello_hybrid", "dep:glifo"]
+lyon = ["dep:lyon_tessellation", "dep:skrifa", "dep:bytemuck", "dep:pollster", "dep:png", "dep:wgpu-profiler"]
+
 [dependencies]
 obscur-identity = { workspace = true }
 obscur-geometry = { workspace = true }
@@ -19,3 +23,20 @@ obscur-render = { workspace = true }
 obscur-diagnostics = { workspace = true }
 vello = "0.9"
 wgpu = "29"
+wgpu-profiler = { version = "0.27", optional = true }
+vello_hybrid = { version = "=0.0.9", optional = true }
+glifo = { version = "0.1", optional = true }
+lyon_tessellation = { version = "1.0", optional = true }
+skrifa = { workspace = true, optional = true }
+bytemuck = { version = "1", features = ["derive"], optional = true }
+
+pollster = { version = "0.4", optional = true }
+png = { version = "0.18", optional = true }
+
+[dev-dependencies]
+# Tests only, and only the ones that need a real device: a bind group is a GPU
+# resource, so a cache of one cannot be argued about without an adapter to build
+# it on. `pollster` drives wgpu's async init to completion; the workspace already
+# pins this version for `obscur-kit`, so this adds nothing new to the lock file
+# and is also enabled for Lyon pipeline validation.
+pollster = "0.4"

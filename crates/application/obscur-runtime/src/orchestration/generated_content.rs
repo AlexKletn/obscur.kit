@@ -1,138 +1,73 @@
-#![doc = include_str!("generated_content.doc/_module.md")]
+#![doc = include_str!("../../docs/api/orchestration/generated_content.doc/_module.md")]
+
+use super::GeneratedRun;
+use super::candidate_rule::CandidateRule;
+use super::pseudo_rule_index::PseudoRuleIndex;
 
 use std::collections::HashSet;
 
 use obscur_identity::{FastMap, FastSet, NodeId};
-use obscur_style::cascade::{Cascade, CascadeOrigin, Declaration, ResolvedDeclarations};
+use obscur_style::cascade::{Cascade, Declaration, ResolvedDeclarations};
 use obscur_style::invalidation::StyleInvalidation;
-use obscur_style::matching::{MediaEnvironment, StyleRule, Stylesheet};
-use obscur_style::property::{PropertyId, PropertyValue, StyleColor};
+use obscur_style::matching::{MediaEnvironment, Stylesheet};
+use obscur_style::property::{PropertyId, PropertyValue};
 use obscur_style::selector::{ComplexSelector, SelectorMatcher, SelectorSpecificity};
 use obscur_tree::node::RetainedNode;
 use obscur_tree::tree::RetainedTree;
 
-use super::{PseudoStates, TreeElement, part_specificity_for, subject_part_name};
+use super::{PseudoStates, TreeElement, part_specificity_for};
 
-#[doc = include_str!("generated_content.doc/PLACEHOLDER_PART.md")]
-const PLACEHOLDER_PART: &str = "placeholder";
+/// The reserved exported-part name a text control gives its placeholder hint, so
+/// `Input::part(placeholder)` (the CSS `::placeholder` analogue) can restyle it.
+pub(super) const PLACEHOLDER_PART: &str = "placeholder";
 
-#[doc = include_str!("generated_content.doc/BEFORE.md")]
-const BEFORE: &str = "before";
+/// The `::before` pseudo-element's name, as the selector engine spells it.
+pub(super) const BEFORE: &str = "before";
 
-#[doc = include_str!("generated_content.doc/AFTER.md")]
-const AFTER: &str = "after";
+/// The `::after` pseudo-element's name, as the selector engine spells it.
+pub(super) const AFTER: &str = "after";
 
-#[doc = include_str!("generated_content.doc/GeneratedRun.md")]
-#[derive(Debug, Clone, PartialEq)]
-pub struct GeneratedRun {
-    #[doc = include_str!("generated_content.doc/text.md")]
-    pub text: Box<str>,
-    #[doc = include_str!("generated_content.doc/color.md")]
-    pub color: Option<StyleColor>,
-}
-
-#[doc = include_str!("generated_content.doc/GeneratedContent.md")]
+/// The generated decoration attached to one node (§4.16): `::before` / `::after`
+/// content, plus the text control's synthetic **placeholder** part.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct GeneratedContent {
-    #[doc = include_str!("generated_content.doc/before.md")]
+    /// `::before` content, painted before the node's own content.
     pub before: Option<GeneratedRun>,
-    #[doc = include_str!("generated_content.doc/after.md")]
+    /// `::after` content, painted after the node's own content.
     pub after: Option<GeneratedRun>,
-    #[doc = include_str!("generated_content.doc/placeholder.md")]
+    /// The text control's **placeholder** hint (the CSS `::placeholder` analogue),
+    /// present only while the field is empty (`:placeholder-shown`). Its colour is
+    /// resolved through the exported-part selector `Component::part(placeholder)`.
+    /// This is a §4.16 synthetic part: paint-only, DevTools-visible, hit-transparent,
+    /// and never a component-tree child.
     pub placeholder: Option<GeneratedRun>,
 }
 
 impl GeneratedContent {
     fn is_empty(&self) -> bool {
-        self.before.is_none() && self.after.is_none() && self.placeholder.is_none()
+        !self.has_boxes() && self.placeholder.is_none()
+    }
+
+    /// Whether the element generates at least one decorative layout box.
+    pub(crate) fn has_boxes(&self) -> bool {
+        self.before.is_some() || self.after.is_some()
     }
 }
 
-#[doc = include_str!("generated_content.doc/CandidateRule.md")]
-#[derive(Debug, Clone, Copy)]
-struct CandidateRule<'a> {
-    #[doc = include_str!("generated_content.doc/origin.md")]
-    origin: CascadeOrigin,
-    #[doc = include_str!("generated_content.doc/rule.md")]
-    rule: &'a StyleRule,
-    #[doc = include_str!("generated_content.doc/order.md")]
-    order: u32,
-}
-
-#[doc = include_str!("generated_content.doc/PseudoRuleIndex.md")]
-struct PseudoRuleIndex<'a> {
-    #[doc = include_str!("generated_content.doc/before_2.md")]
-    before: Vec<CandidateRule<'a>>,
-    #[doc = include_str!("generated_content.doc/after_2.md")]
-    after: Vec<CandidateRule<'a>>,
-    #[doc = include_str!("generated_content.doc/placeholder_2.md")]
-    placeholder: Vec<CandidateRule<'a>>,
-}
-
-impl<'a> PseudoRuleIndex<'a> {
-    #[doc = include_str!("generated_content.doc/of.md")]
-    fn of(sheets: &'a [Stylesheet]) -> Self {
-        let mut index = Self {
-            before: Vec::new(),
-            after: Vec::new(),
-            placeholder: Vec::new(),
-        };
-        // The declaration counter runs over EVERY declaration of EVERY rule,
-        // matched or not, because that number is what the cascade tie-breaks
-        // document order on. Advancing it by whole blocks leaves a kept rule's
-        // declarations on exactly the numbers the unfiltered walk gave them, so
-        // dropping the rules that cannot match cannot reorder the ones that can.
-        let mut order: u32 = 0;
-        for sheet in sheets {
-            for rule in sheet.rules() {
-                let candidate = CandidateRule {
-                    origin: sheet.origin(),
-                    rule,
-                    order,
-                };
-                order = order.wrapping_add(u32::try_from(rule.block().len()).unwrap_or(u32::MAX));
-                let selectors = rule.selectors().selectors();
-                if selectors.iter().any(|s| targets_pseudo_element(s, BEFORE)) {
-                    index.before.push(candidate);
-                }
-                if selectors.iter().any(|s| targets_pseudo_element(s, AFTER)) {
-                    index.after.push(candidate);
-                }
-                if selectors
-                    .iter()
-                    .any(|s| subject_part_name(s) == Some(PLACEHOLDER_PART))
-                {
-                    index.placeholder.push(candidate);
-                }
-            }
-        }
-        index
-    }
-}
-
-#[doc = include_str!("generated_content.doc/targets_pseudo_element.md")]
-fn targets_pseudo_element(selector: &ComplexSelector, pseudo: &str) -> bool {
-    selector
-        .subject()
-        .simples()
-        .iter()
-        .any(|simple| simple.pseudo_element_name() == Some(pseudo))
-}
-
-#[doc = include_str!("generated_content.doc/resolve_generated_content.md")]
+#[doc = include_str!("../../docs/api/orchestration/generated_content.doc/resolve_generated_content.md")]
 pub(crate) fn resolve_generated_content(
     out: &mut FastMap<NodeId, GeneratedContent>,
     tree: &RetainedTree,
     sheets: &[Stylesheet],
     environment: &MediaEnvironment,
     scope: Option<&StyleInvalidation>,
+    pseudo: &PseudoStates,
 ) {
     let index = PseudoRuleIndex::of(sheets);
-    let pseudo = PseudoStates::new();
     let Some(dirty) = scope else {
         out.clear();
         for (id, _) in tree.iter() {
-            if let Some(content) = content_for(tree, &index, &pseudo, environment, id) {
+            if let Some(content) = content_for(tree, &index, pseudo, environment, id) {
                 out.insert(id, content);
             }
         }
@@ -143,7 +78,7 @@ pub(crate) fn resolve_generated_content(
     // never be mistaken for a live one here.
     out.retain(|id, _| tree.get(*id).is_some_and(|node| node.kind().is_element()));
     for id in restyled_with_ancestors(tree, dirty) {
-        match content_for(tree, &index, &pseudo, environment, id) {
+        match content_for(tree, &index, pseudo, environment, id) {
             Some(content) => {
                 out.insert(id, content);
             }
@@ -154,7 +89,7 @@ pub(crate) fn resolve_generated_content(
     }
 }
 
-#[doc = include_str!("generated_content.doc/restyled_with_ancestors.md")]
+#[doc = include_str!("../../docs/api/orchestration/generated_content.doc/restyled_with_ancestors.md")]
 fn restyled_with_ancestors(tree: &RetainedTree, dirty: &StyleInvalidation) -> Vec<NodeId> {
     let mut seen: FastSet<NodeId> = HashSet::default();
     let mut scoped = Vec::new();
@@ -178,7 +113,8 @@ fn restyled_with_ancestors(tree: &RetainedTree, dirty: &StyleInvalidation) -> Ve
     scoped
 }
 
-#[doc = include_str!("generated_content.doc/content_for.md")]
+/// The decoration `id` carries under `index`, or [`None`] when it carries none
+/// (including when `id` is not an element, or no longer in the tree).
 fn content_for(
     tree: &RetainedTree,
     index: &PseudoRuleIndex<'_>,
@@ -190,6 +126,7 @@ fn content_for(
     if !node.kind().is_element() {
         return None;
     }
+    let environment = &environment.for_subject(id);
     let element = TreeElement::with_pseudo(tree, id, pseudo);
     let content = GeneratedContent {
         before: resolve_pseudo(&index.before, &element, BEFORE, environment),
@@ -199,7 +136,7 @@ fn content_for(
     (!content.is_empty()).then_some(content)
 }
 
-#[doc = include_str!("generated_content.doc/resolve_pseudo.md")]
+#[doc = include_str!("../../docs/api/orchestration/generated_content.doc/resolve_pseudo.md")]
 fn resolve_pseudo(
     candidates: &[CandidateRule<'_>],
     element: &TreeElement<'_>,
@@ -224,10 +161,11 @@ fn resolve_pseudo(
         color: resolved
             .get(PropertyId::Color)
             .and_then(PropertyValue::as_color),
+        declarations: resolved,
     })
 }
 
-#[doc = include_str!("generated_content.doc/resolve_placeholder.md")]
+#[doc = include_str!("../../docs/api/orchestration/generated_content.doc/resolve_placeholder.md")]
 fn resolve_placeholder(
     tree: &RetainedTree,
     candidates: &[CandidateRule<'_>],
@@ -265,10 +203,11 @@ fn resolve_placeholder(
         color: resolved
             .get(PropertyId::Color)
             .and_then(PropertyValue::as_color),
+        declarations: ResolvedDeclarations::default(),
     })
 }
 
-#[doc = include_str!("generated_content.doc/renders_no_text.md")]
+#[doc = include_str!("../../docs/api/orchestration/generated_content.doc/renders_no_text.md")]
 fn renders_no_text(tree: &RetainedTree, node: &RetainedNode) -> bool {
     node.child_nodes().iter().all(|&child| {
         tree.get(child).is_none_or(|child| {
@@ -277,7 +216,7 @@ fn renders_no_text(tree: &RetainedTree, node: &RetainedNode) -> bool {
     })
 }
 
-#[doc = include_str!("generated_content.doc/cascade_candidates.md")]
+#[doc = include_str!("../../docs/api/orchestration/generated_content.doc/cascade_candidates.md")]
 fn cascade_candidates(
     candidates: &[CandidateRule<'_>],
     environment: &MediaEnvironment,
@@ -321,11 +260,15 @@ fn cascade_candidates(
 
 #[cfg(test)]
 thread_local! {
-    #[doc = include_str!("generated_content.doc/SELECTOR_PROBES.md")]
+    /// How many selectors this thread has taken to the engine since the counter was
+    /// last reset — the observable form of the skip. Per-thread, so tests that run
+    /// concurrently do not count each other's work. Test builds only.
     static SELECTOR_PROBES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
-#[doc = include_str!("generated_content.doc/probe.md")]
+/// Records that one selector is about to be matched. Compiles to nothing outside
+/// test builds, where `SELECTOR_PROBES` counts them and makes "this pass never
+/// asked the engine anything" an assertion rather than a hope.
 fn probe() {
     #[cfg(test)]
     SELECTOR_PROBES.with(|count| count.set(count.get() + 1));
@@ -333,6 +276,7 @@ fn probe() {
 
 #[cfg(test)]
 mod tests {
+    use obscur_style::property::StyleColor;
     use std::collections::HashMap;
 
     use super::*;
@@ -359,7 +303,7 @@ mod tests {
         PropertyValue::Color(StyleColor::rgba(1.0, 0.0, 0.0, 1.0))
     }
 
-    fn environment() -> MediaEnvironment {
+    fn environment() -> MediaEnvironment<'static> {
         MediaEnvironment::viewport(400.0, 300.0)
     }
 
@@ -445,7 +389,14 @@ mod tests {
 
         reset_probes();
         let mut out = HashMap::default();
-        resolve_generated_content(&mut out, &tree, &sheets, &environment(), None);
+        resolve_generated_content(
+            &mut out,
+            &tree,
+            &sheets,
+            &environment(),
+            None,
+            &PseudoStates::new(),
+        );
 
         assert!(out.is_empty(), "an ordinary sheet decorates nothing");
         assert_eq!(
@@ -468,16 +419,21 @@ mod tests {
 
         reset_probes();
         let mut out = HashMap::default();
-        resolve_generated_content(&mut out, &tree, &sheets, &environment(), None);
-
-        assert_eq!(
-            out.get(&a).and_then(|c| c.before.clone()),
-            Some(GeneratedRun {
-                text: "!".into(),
-                color: Some(StyleColor::rgba(1.0, 0.0, 0.0, 1.0)),
-            }),
-            "`.a::before` decorates the element it names"
+        resolve_generated_content(
+            &mut out,
+            &tree,
+            &sheets,
+            &environment(),
+            None,
+            &PseudoStates::new(),
         );
+
+        let run = out[&a]
+            .before
+            .as_ref()
+            .expect("`.a::before` decorates its element");
+        assert_eq!(run.text.as_ref(), "!");
+        assert_eq!(run.color, Some(StyleColor::rgba(1.0, 0.0, 0.0, 1.0)));
         assert!(!out.contains_key(&b), "`.b` matches no pseudo-element rule");
         assert!(
             probes() > 0,
@@ -493,7 +449,14 @@ mod tests {
             StyleRule::new(before_selectors("b"), vec![content("B")]),
         ]);
         let mut out = HashMap::default();
-        resolve_generated_content(&mut out, &tree, &sheets, &environment(), None);
+        resolve_generated_content(
+            &mut out,
+            &tree,
+            &sheets,
+            &environment(),
+            None,
+            &PseudoStates::new(),
+        );
 
         // A sentinel no rule could ever produce: if the scoped pass recomputes
         // `a`, or drops what it did not recompute, the sentinel disappears.
@@ -501,6 +464,7 @@ mod tests {
             before: Some(GeneratedRun {
                 text: "sentinel".into(),
                 color: None,
+                declarations: Default::default(),
             }),
             ..GeneratedContent::default()
         };
@@ -512,6 +476,7 @@ mod tests {
             &sheets,
             &environment(),
             Some(&dirty_with(&[b])),
+            &PseudoStates::new(),
         );
 
         assert_eq!(
@@ -553,6 +518,7 @@ mod tests {
                 placeholder: Some(GeneratedRun {
                     text: "Search".into(),
                     color: None,
+                    declarations: Default::default(),
                 }),
                 ..GeneratedContent::default()
             },
@@ -564,6 +530,7 @@ mod tests {
             &sheet(Vec::new()),
             &environment(),
             Some(&dirty_with(&[text])),
+            &PseudoStates::new(),
         );
 
         assert!(
@@ -580,7 +547,14 @@ mod tests {
             vec![content("A")],
         )]);
         let mut out = HashMap::default();
-        resolve_generated_content(&mut out, &tree, &sheets, &environment(), None);
+        resolve_generated_content(
+            &mut out,
+            &tree,
+            &sheets,
+            &environment(),
+            None,
+            &PseudoStates::new(),
+        );
         assert!(out.contains_key(&a));
 
         // `a` is gone from this tree; only `b` is dirty.
@@ -595,6 +569,7 @@ mod tests {
             &sheets,
             &environment(),
             Some(&dirty_with(&[b])),
+            &PseudoStates::new(),
         );
 
         assert!(

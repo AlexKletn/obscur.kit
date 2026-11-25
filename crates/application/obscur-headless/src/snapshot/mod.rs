@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Snapshot module.
 mod pipeline_snapshot;
 pub use pipeline_snapshot::PipelineSnapshot;
 mod normalized_node;
@@ -14,4 +14,10 @@ pub use render_pass::RenderPass;
 mod render_graph_summary;
 pub use render_graph_summary::RenderGraphSummary;
 mod image_snapshot;
-pub use image_snapshot::{GoldenMismatch, ImageDiff, ImageSnapshot, ImageTolerance};
+pub use image_snapshot::ImageSnapshot;
+mod image_tolerance;
+pub use image_tolerance::ImageTolerance;
+mod image_diff;
+pub use image_diff::ImageDiff;
+mod golden_mismatch;
+pub use golden_mismatch::GoldenMismatch;

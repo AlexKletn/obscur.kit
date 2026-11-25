@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Mock providers a fixture installs in place of a real host's.
 mod canned_image_decoder;
 mod canned_image_loader;
 mod queued_executor;

@@ -1,81 +1,72 @@
-#![doc = include_str!("capture_request.doc/_module.md")]
+//! What the app asks the host to capture (spec §6.17 — capture and privacy).
 
 use obscur_geometry::Rect;
 use obscur_identity::{NodeId, WindowId};
 
-#[doc = include_str!("capture_request.doc/CaptureSource.md")]
-#[derive(Debug, Clone, PartialEq)]
-pub enum CaptureSource {
-    #[doc = include_str!("capture_request.doc/Window.md")]
-    Window(WindowId),
-    #[doc = include_str!("capture_request.doc/Surface.md")]
-    Surface,
-    #[doc = include_str!("capture_request.doc/Node.md")]
-    Node(NodeId),
-    #[doc = include_str!("capture_request.doc/Region.md")]
-    Region(Rect),
-}
+use super::CaptureSource;
 
-#[doc = include_str!("capture_request.doc/CaptureRequest.md")]
+#[doc = include_str!("../../docs/api/capture/capture_request.doc/CaptureRequest.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct CaptureRequest {
-    #[doc = include_str!("capture_request.doc/source.md")]
+    /// What to capture.
     source: CaptureSource,
-    #[doc = include_str!("capture_request.doc/protected_regions.md")]
+    /// Regions to exclude or redact as privacy-sensitive / capture-protected.
     protected_regions: Vec<Rect>,
 }
 
 impl CaptureRequest {
-    #[doc = include_str!("capture_request.doc/window.md")]
+    /// Creates a request capturing the window `id` with no protected regions
+    /// (spec §6.17).
     #[must_use]
     pub fn window(id: WindowId) -> Self {
         Self::with_source(CaptureSource::Window(id))
     }
 
-    #[doc = include_str!("capture_request.doc/surface.md")]
+    /// Creates a request capturing the app's drawing surface (spec §6.17).
     #[must_use]
     pub fn surface() -> Self {
         Self::with_source(CaptureSource::Surface)
     }
 
-    #[doc = include_str!("capture_request.doc/node.md")]
+    /// Creates a request capturing the scene node `id` (spec §6.17).
     #[must_use]
     pub fn node(id: NodeId) -> Self {
         Self::with_source(CaptureSource::Node(id))
     }
 
-    #[doc = include_str!("capture_request.doc/region.md")]
+    /// Creates a request capturing the image `region` (spec §6.17).
     #[must_use]
     pub fn region(region: Rect) -> Self {
         Self::with_source(CaptureSource::Region(region))
     }
 
-    #[doc = include_str!("capture_request.doc/protecting.md")]
+    /// Returns this request with `region` added to its protected regions
+    /// (spec §6.17).
     #[must_use]
     pub fn protecting(mut self, region: Rect) -> Self {
         self.protected_regions.push(region);
         self
     }
 
-    #[doc = include_str!("capture_request.doc/source_2.md")]
+    /// Returns what this request captures (spec §6.17).
     #[must_use]
     pub const fn source(&self) -> &CaptureSource {
         &self.source
     }
 
-    #[doc = include_str!("capture_request.doc/protected_regions_2.md")]
+    /// Returns the privacy-sensitive / capture-protected regions (spec §6.17).
     #[must_use]
     pub fn protected_regions(&self) -> &[Rect] {
         &self.protected_regions
     }
 
-    #[doc = include_str!("capture_request.doc/has_protected_regions.md")]
+    /// Returns whether this request carries any protected regions (spec §6.17).
     #[must_use]
     pub fn has_protected_regions(&self) -> bool {
         !self.protected_regions.is_empty()
     }
 
-    #[doc = include_str!("capture_request.doc/with_source.md")]
+    /// Builds a request from `source` with no protected regions.
     #[must_use]
     fn with_source(source: CaptureSource) -> Self {
         Self {

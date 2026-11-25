@@ -1,10 +1,10 @@
-#![doc = include_str!("system_face.doc/_module.md")]
+//! One face fontconfig reported: where it lives and what cut it is.
 
 use std::path::{Path, PathBuf};
 
 use obscur_text::font::FontAttributes;
 
-#[doc = include_str!("system_face.doc/SystemFace.md")]
+#[doc = include_str!("../../docs/api/source/system_face.doc/SystemFace.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SystemFace {
     family: Box<str>,
@@ -13,7 +13,7 @@ pub struct SystemFace {
 }
 
 impl SystemFace {
-    #[doc = include_str!("system_face.doc/new.md")]
+    /// Creates a located face.
     #[must_use]
     pub fn new(
         family: impl Into<Box<str>>,
@@ -27,19 +27,21 @@ impl SystemFace {
         }
     }
 
-    #[doc = include_str!("system_face.doc/family.md")]
+    /// The family name fontconfig reported — the face it *actually* resolved,
+    /// which for a generic request is the host's nominated substitute rather than
+    /// the generic's own name.
     #[must_use]
     pub fn family(&self) -> &str {
         &self.family
     }
 
-    #[doc = include_str!("system_face.doc/path.md")]
+    /// The font file's path on the host.
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
     }
 
-    #[doc = include_str!("system_face.doc/attributes.md")]
+    /// The face's weight/slant/width, converted from fontconfig's scales to CSS's.
     #[must_use]
     pub const fn attributes(&self) -> &FontAttributes {
         &self.attributes

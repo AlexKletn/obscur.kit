@@ -1,1 +1,0 @@
-A menu of choices.

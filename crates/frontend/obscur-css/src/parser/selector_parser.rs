@@ -1,108 +1,26 @@
-#![doc = include_str!("selector_parser.doc/_module.md")]
+#![doc = include_str!("../../docs/api/parser/selector_parser.doc/_module.md")]
 
-use crate::error::{CssParseError, CssParseErrorKind};
-use crate::source::{CssSource, SourceSpan};
+mod selector_parse_state;
 
-use super::css_tokenizer::{CssToken, CssTokenKind, Tokenizer};
-use super::token_cursor::{TokenCursor, slice_span};
+use super::{ParsedSelectorList, css_token::CssToken, css_tokenizer::Tokenizer};
+use crate::error::CssParseError;
+use crate::source::CssSource;
+use selector_parse_state::SelectorParseState;
 
-#[doc = include_str!("selector_parser.doc/ParsedSelectorList.md")]
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct ParsedSelectorList(pub Vec<ParsedComplexSelector>);
-
-#[doc = include_str!("selector_parser.doc/ParsedComplexSelector.md")]
-#[derive(Debug, Clone, PartialEq)]
-pub struct ParsedComplexSelector {
-    #[doc = include_str!("selector_parser.doc/head.md")]
-    pub head: ParsedCompoundSelector,
-    #[doc = include_str!("selector_parser.doc/tail.md")]
-    pub tail: Vec<(Combinator, ParsedCompoundSelector)>,
-}
-
-#[doc = include_str!("selector_parser.doc/Combinator.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Combinator {
-    #[doc = include_str!("selector_parser.doc/Descendant.md")]
-    Descendant,
-    #[doc = include_str!("selector_parser.doc/Child.md")]
-    Child,
-    #[doc = include_str!("selector_parser.doc/NextSibling.md")]
-    NextSibling,
-    #[doc = include_str!("selector_parser.doc/SubsequentSibling.md")]
-    SubsequentSibling,
-}
-
-#[doc = include_str!("selector_parser.doc/ParsedCompoundSelector.md")]
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct ParsedCompoundSelector {
-    #[doc = include_str!("selector_parser.doc/parts.md")]
-    pub parts: Vec<SimpleSelector>,
-}
-
-#[doc = include_str!("selector_parser.doc/SimpleSelector.md")]
-#[derive(Debug, Clone, PartialEq)]
-pub enum SimpleSelector {
-    #[doc = include_str!("selector_parser.doc/Type.md")]
-    Type(Box<str>),
-    #[doc = include_str!("selector_parser.doc/Universal.md")]
-    Universal,
-    #[doc = include_str!("selector_parser.doc/Class.md")]
-    Class(Box<str>),
-    #[doc = include_str!("selector_parser.doc/Id.md")]
-    Id(Box<str>),
-    #[doc = include_str!("selector_parser.doc/Attribute.md")]
-    Attribute {
-        #[doc = include_str!("selector_parser.doc/name.md")]
-        name: Box<str>,
-        #[doc = include_str!("selector_parser.doc/op.md")]
-        op: Option<AttrOp>,
-        #[doc = include_str!("selector_parser.doc/value.md")]
-        value: Option<Box<str>>,
-    },
-    #[doc = include_str!("selector_parser.doc/PseudoClass.md")]
-    PseudoClass {
-        #[doc = include_str!("selector_parser.doc/name_2.md")]
-        name: Box<str>,
-        #[doc = include_str!("selector_parser.doc/arg.md")]
-        arg: Option<Box<str>>,
-    },
-    #[doc = include_str!("selector_parser.doc/PseudoElement.md")]
-    PseudoElement(Box<str>),
-    #[doc = include_str!("selector_parser.doc/Part.md")]
-    Part(Box<str>),
-}
-
-#[doc = include_str!("selector_parser.doc/AttrOp.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AttrOp {
-    #[doc = include_str!("selector_parser.doc/Exact.md")]
-    Exact,
-    #[doc = include_str!("selector_parser.doc/Includes.md")]
-    Includes,
-    #[doc = include_str!("selector_parser.doc/DashMatch.md")]
-    DashMatch,
-    #[doc = include_str!("selector_parser.doc/Prefix.md")]
-    Prefix,
-    #[doc = include_str!("selector_parser.doc/Suffix.md")]
-    Suffix,
-    #[doc = include_str!("selector_parser.doc/Substring.md")]
-    Substring,
-}
-
-#[doc = include_str!("selector_parser.doc/SelectorParser.md")]
+#[doc = include_str!("../../docs/api/parser/selector_parser.doc/SelectorParser.md")]
 #[derive(Debug, Clone, Default)]
 pub struct SelectorParser {
     _private: (),
 }
 
 impl SelectorParser {
-    #[doc = include_str!("selector_parser.doc/new.md")]
+    /// Creates a selector parser.
     #[must_use]
     pub fn new() -> Self {
         Self { _private: () }
     }
 
-    #[doc = include_str!("selector_parser.doc/parse.md")]
+    #[doc = include_str!("../../docs/api/parser/selector_parser.doc/parse.md")]
     pub fn parse(&self, source: &CssSource) -> Result<ParsedSelectorList, CssParseError> {
         let text = source.text();
         let eof = u32::try_from(text.len()).unwrap_or(u32::MAX);
@@ -113,281 +31,21 @@ impl SelectorParser {
         Self::parse_tokens(&tokens, text, eof)
     }
 
-    #[doc = include_str!("selector_parser.doc/parse_tokens.md")]
+    #[doc = include_str!("../../docs/api/parser/selector_parser.doc/parse_tokens.md")]
     pub(crate) fn parse_tokens(
         tokens: &[CssToken],
         source: &str,
         eof: u32,
     ) -> Result<ParsedSelectorList, CssParseError> {
-        let mut parser = Inner {
-            cursor: TokenCursor::new(tokens, eof),
-            source,
-            span: slice_span(tokens, eof),
-        };
-        parser.parse_list()
-    }
-}
-
-#[doc = include_str!("selector_parser.doc/Inner.md")]
-struct Inner<'a, 't> {
-    cursor: TokenCursor<'t>,
-    source: &'a str,
-    span: SourceSpan,
-}
-
-impl Inner<'_, '_> {
-    fn error(&self, message: &str) -> CssParseError {
-        CssParseError::new(CssParseErrorKind::InvalidSelector, message, self.span)
-    }
-
-    fn parse_list(&mut self) -> Result<ParsedSelectorList, CssParseError> {
-        let mut selectors = Vec::new();
-        loop {
-            let complex = self.parse_complex()?;
-            selectors.push(complex);
-            self.cursor.skip_ws();
-            match self.cursor.peek_kind() {
-                Some(CssTokenKind::Comma) => {
-                    self.cursor.advance();
-                }
-                None => break,
-                Some(_) => return Err(self.error("unexpected token after selector")),
-            }
-        }
-        if selectors.is_empty() {
-            return Err(self.error("empty selector"));
-        }
-        Ok(ParsedSelectorList(selectors))
-    }
-
-    fn parse_complex(&mut self) -> Result<ParsedComplexSelector, CssParseError> {
-        self.cursor.skip_ws();
-        let head = self.parse_compound()?;
-        let mut tail = Vec::new();
-        loop {
-            let had_ws = self.skip_ws_reporting();
-            let combinator = match self.cursor.peek_kind() {
-                None | Some(CssTokenKind::Comma) => break,
-                Some(CssTokenKind::Delim('>')) => {
-                    self.cursor.advance();
-                    Combinator::Child
-                }
-                Some(CssTokenKind::Delim('+')) => {
-                    self.cursor.advance();
-                    Combinator::NextSibling
-                }
-                Some(CssTokenKind::Delim('~')) => {
-                    self.cursor.advance();
-                    Combinator::SubsequentSibling
-                }
-                Some(_) if had_ws => Combinator::Descendant,
-                Some(_) => return Err(self.error("unexpected token in selector")),
-            };
-            self.cursor.skip_ws();
-            let compound = self.parse_compound()?;
-            tail.push((combinator, compound));
-        }
-        Ok(ParsedComplexSelector { head, tail })
-    }
-
-    #[doc = include_str!("selector_parser.doc/skip_ws_reporting.md")]
-    fn skip_ws_reporting(&mut self) -> bool {
-        let mut had = false;
-        while matches!(self.cursor.peek(), Some(t) if t.is_whitespace()) {
-            self.cursor.advance();
-            had = true;
-        }
-        had
-    }
-
-    fn parse_compound(&mut self) -> Result<ParsedCompoundSelector, CssParseError> {
-        let mut parts = Vec::new();
-        loop {
-            match self.cursor.peek_kind() {
-                Some(CssTokenKind::Delim('*')) => {
-                    self.cursor.advance();
-                    parts.push(SimpleSelector::Universal);
-                }
-                Some(CssTokenKind::Ident(name)) => {
-                    let name = name.clone();
-                    self.cursor.advance();
-                    parts.push(SimpleSelector::Type(name));
-                }
-                Some(CssTokenKind::Delim('.')) => {
-                    self.cursor.advance();
-                    let name = self.expect_ident("expected a class name after '.'")?;
-                    parts.push(SimpleSelector::Class(name));
-                }
-                Some(CssTokenKind::Hash(name)) => {
-                    let name = name.clone();
-                    self.cursor.advance();
-                    parts.push(SimpleSelector::Id(name));
-                }
-                Some(CssTokenKind::LBracket) => {
-                    self.cursor.advance();
-                    parts.push(self.parse_attribute()?);
-                }
-                Some(CssTokenKind::Colon) => {
-                    parts.push(self.parse_pseudo()?);
-                }
-                _ => break,
-            }
-        }
-        if parts.is_empty() {
-            return Err(self.error("expected a compound selector"));
-        }
-        Ok(ParsedCompoundSelector { parts })
-    }
-
-    fn parse_attribute(&mut self) -> Result<SimpleSelector, CssParseError> {
-        self.cursor.skip_ws();
-        let name = self.expect_ident("expected an attribute name")?;
-        self.cursor.skip_ws();
-        if matches!(self.cursor.peek_kind(), Some(CssTokenKind::RBracket)) {
-            self.cursor.advance();
-            return Ok(SimpleSelector::Attribute {
-                name,
-                op: None,
-                value: None,
-            });
-        }
-        let op = self.parse_attr_op()?;
-        self.cursor.skip_ws();
-        let value = match self.cursor.peek_kind() {
-            Some(CssTokenKind::Str(s) | CssTokenKind::Ident(s)) => {
-                let s = s.clone();
-                self.cursor.advance();
-                s
-            }
-            _ => return Err(self.error("expected an attribute value")),
-        };
-        self.cursor.skip_ws();
-        // Tolerate an optional case-sensitivity flag (`i`/`s`).
-        if matches!(self.cursor.peek_kind(), Some(CssTokenKind::Ident(_))) {
-            self.cursor.advance();
-            self.cursor.skip_ws();
-        }
-        if !matches!(self.cursor.peek_kind(), Some(CssTokenKind::RBracket)) {
-            return Err(self.error("expected ']' to close attribute selector"));
-        }
-        self.cursor.advance();
-        Ok(SimpleSelector::Attribute {
-            name,
-            op: Some(op),
-            value: Some(value),
-        })
-    }
-
-    #[doc = include_str!("selector_parser.doc/parse_attr_op.md")]
-    fn parse_attr_op(&mut self) -> Result<AttrOp, CssParseError> {
-        match self.cursor.peek_kind() {
-            Some(CssTokenKind::Delim('=')) => {
-                self.cursor.advance();
-                Ok(AttrOp::Exact)
-            }
-            Some(CssTokenKind::Delim(prefix @ ('~' | '|' | '^' | '$' | '*'))) => {
-                let prefix = *prefix;
-                self.cursor.advance();
-                if !matches!(self.cursor.peek_kind(), Some(CssTokenKind::Delim('='))) {
-                    return Err(self.error("expected '=' in attribute operator"));
-                }
-                self.cursor.advance();
-                Ok(match prefix {
-                    '~' => AttrOp::Includes,
-                    '|' => AttrOp::DashMatch,
-                    '^' => AttrOp::Prefix,
-                    '$' => AttrOp::Suffix,
-                    _ => AttrOp::Substring,
-                })
-            }
-            _ => Err(self.error("expected an attribute operator")),
-        }
-    }
-
-    fn parse_pseudo(&mut self) -> Result<SimpleSelector, CssParseError> {
-        self.cursor.advance(); // consume first ':'
-        // A second colon marks a pseudo-element.
-        if matches!(self.cursor.peek_kind(), Some(CssTokenKind::Colon)) {
-            self.cursor.advance();
-            let name = self.expect_ident("expected a pseudo-element name")?;
-            // A functional pseudo-element carries a parenthesised argument.
-            // `::part(name)` is the one we model (§2.12 / §4.15); any other
-            // `::foo(...)` keeps its bare pseudo-element name but its argument is
-            // consumed so the compound parse does not choke on the `(`.
-            if matches!(self.cursor.peek_kind(), Some(CssTokenKind::LParen)) {
-                let arg = self.capture_paren_arg()?;
-                if name.eq_ignore_ascii_case("part") {
-                    return Ok(SimpleSelector::Part(arg));
-                }
-                return Ok(SimpleSelector::PseudoElement(name));
-            }
-            return Ok(SimpleSelector::PseudoElement(name));
-        }
-        let name = self.expect_ident("expected a pseudo-class name")?;
-        if matches!(self.cursor.peek_kind(), Some(CssTokenKind::LParen)) {
-            let arg = self.capture_paren_arg()?;
-            return Ok(SimpleSelector::PseudoClass {
-                name,
-                arg: Some(arg),
-            });
-        }
-        Ok(SimpleSelector::PseudoClass { name, arg: None })
-    }
-
-    #[doc = include_str!("selector_parser.doc/capture_paren_arg.md")]
-    fn capture_paren_arg(&mut self) -> Result<Box<str>, CssParseError> {
-        self.cursor.advance(); // consume '('
-        let mut depth = 1i32;
-        let mut first: Option<SourceSpan> = None;
-        let mut last: Option<SourceSpan> = None;
-        while let Some(tok) = self.cursor.peek() {
-            match tok.kind() {
-                CssTokenKind::LParen => depth += 1,
-                CssTokenKind::RParen => {
-                    depth -= 1;
-                    if depth == 0 {
-                        self.cursor.advance();
-                        let raw = match (first, last) {
-                            (Some(f), Some(l)) => {
-                                let span = f.union(l);
-                                let a = usize::try_from(span.start()).unwrap_or(0);
-                                let b = usize::try_from(span.end()).unwrap_or(0);
-                                self.source.get(a..b).unwrap_or("").trim()
-                            }
-                            _ => "",
-                        };
-                        return Ok(raw.into());
-                    }
-                }
-                _ => {}
-            }
-            if !tok.is_whitespace() {
-                let span = tok.span();
-                if first.is_none() {
-                    first = Some(span);
-                }
-                last = Some(span);
-            }
-            self.cursor.advance();
-        }
-        Err(self.error("unterminated functional pseudo-class"))
-    }
-
-    fn expect_ident(&mut self, message: &str) -> Result<Box<str>, CssParseError> {
-        match self.cursor.peek_kind() {
-            Some(CssTokenKind::Ident(name)) => {
-                let name = name.clone();
-                self.cursor.advance();
-                Ok(name)
-            }
-            _ => Err(self.error(message)),
-        }
+        SelectorParseState::parse(tokens, source, eof)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::CssParseErrorKind;
+    use crate::parser::{AttrOp, Combinator, ParsedComplexSelector, SimpleSelector};
 
     fn parse(text: &str) -> Result<ParsedSelectorList, CssParseError> {
         let src = CssSource::anonymous(text);

@@ -1,27 +1,27 @@
-#![doc = include_str!("window.doc/_module.md")]
+//! The retained domain record of a live window (spec §6.1, §6.2).
 
 use obscur_geometry::{ScaleFactor, Size};
 use obscur_identity::WindowId;
 
 use crate::window::{WindowConstraints, WindowProperties, WindowRelation};
 
-#[doc = include_str!("window.doc/Window.md")]
+#[doc = include_str!("../../docs/api/window/window.doc/Window.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Window {
-    #[doc = include_str!("window.doc/id.md")]
+    /// The stable identity of this window.
     id: WindowId,
-    #[doc = include_str!("window.doc/properties.md")]
+    /// The desired presentation properties.
     properties: WindowProperties,
-    #[doc = include_str!("window.doc/constraints.md")]
+    /// The size constraints applied to the window.
     constraints: WindowConstraints,
-    #[doc = include_str!("window.doc/relation.md")]
+    /// The owner/modality relationship to other windows.
     relation: WindowRelation,
-    #[doc = include_str!("window.doc/scale_factor.md")]
+    /// The current display scale factor.
     scale_factor: ScaleFactor,
 }
 
 impl Window {
-    #[doc = include_str!("window.doc/new.md")]
+    #[doc = include_str!("../../docs/api/window/window.doc/new.md")]
     #[must_use]
     pub fn new(id: WindowId, properties: WindowProperties) -> Self {
         Self {
@@ -33,57 +33,57 @@ impl Window {
         }
     }
 
-    #[doc = include_str!("window.doc/id_2.md")]
+    /// Returns the window's identity.
     #[must_use]
     pub const fn id(&self) -> WindowId {
         self.id
     }
 
-    #[doc = include_str!("window.doc/properties_2.md")]
+    /// Returns a shared reference to the window's properties.
     #[must_use]
     pub const fn properties(&self) -> &WindowProperties {
         &self.properties
     }
 
-    #[doc = include_str!("window.doc/properties_mut.md")]
+    /// Returns a mutable reference to the window's properties.
     pub const fn properties_mut(&mut self) -> &mut WindowProperties {
         &mut self.properties
     }
 
-    #[doc = include_str!("window.doc/constraints_2.md")]
+    /// Returns the window's size constraints.
     #[must_use]
     pub const fn constraints(&self) -> WindowConstraints {
         self.constraints
     }
 
-    #[doc = include_str!("window.doc/set_constraints.md")]
+    /// Sets the window's size constraints.
     pub const fn set_constraints(&mut self, constraints: WindowConstraints) {
         self.constraints = constraints;
     }
 
-    #[doc = include_str!("window.doc/relation_2.md")]
+    /// Returns the window's relation to other windows.
     #[must_use]
     pub const fn relation(&self) -> WindowRelation {
         self.relation
     }
 
-    #[doc = include_str!("window.doc/set_relation.md")]
+    /// Sets the window's relation to other windows.
     pub const fn set_relation(&mut self, relation: WindowRelation) {
         self.relation = relation;
     }
 
-    #[doc = include_str!("window.doc/scale_factor_2.md")]
+    /// Returns the window's current display scale factor.
     #[must_use]
     pub const fn scale_factor(&self) -> ScaleFactor {
         self.scale_factor
     }
 
-    #[doc = include_str!("window.doc/set_scale_factor.md")]
+    /// Sets the window's current display scale factor.
     pub const fn set_scale_factor(&mut self, scale_factor: ScaleFactor) {
         self.scale_factor = scale_factor;
     }
 
-    #[doc = include_str!("window.doc/constrained_size.md")]
+    /// Returns the window's desired size clamped by its constraints.
     #[must_use]
     pub fn constrained_size(&self) -> Size {
         self.constraints.constrain(self.properties.size)

@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Invalidation module.
 mod layout_invalidation;
 pub use layout_invalidation::LayoutInvalidation;
 mod layout_invalidation_reason;

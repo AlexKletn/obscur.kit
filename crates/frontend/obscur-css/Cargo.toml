@@ -16,3 +16,4 @@ obscur-geometry = { workspace = true }
 obscur-scene = { workspace = true }
 obscur-style = { workspace = true }
 obscur-motion = { workspace = true }
+svgtypes = "0.16"

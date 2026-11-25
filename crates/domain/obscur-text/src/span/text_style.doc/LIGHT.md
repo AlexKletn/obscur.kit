@@ -1,1 +1,0 @@
-Light weight (`300`).

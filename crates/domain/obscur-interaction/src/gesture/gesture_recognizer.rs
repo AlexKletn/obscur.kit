@@ -1,72 +1,9 @@
-#![doc = include_str!("gesture_recognizer.doc/_module.md")]
+//! The [`GestureRecognizer`] and its lifecycle state (spec §6.16 mobile
+//! gestures).
 
-#[doc = include_str!("gesture_recognizer.doc/RecognizerId.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct RecognizerId(u64);
+use super::{GestureKind, RecognizerId, RecognizerState};
 
-impl RecognizerId {
-    #[doc = include_str!("gesture_recognizer.doc/from_raw.md")]
-    #[must_use]
-    pub const fn from_raw(raw: u64) -> Self {
-        Self(raw)
-    }
-
-    #[doc = include_str!("gesture_recognizer.doc/raw.md")]
-    #[must_use]
-    pub const fn raw(self) -> u64 {
-        self.0
-    }
-}
-
-#[doc = include_str!("gesture_recognizer.doc/GestureKind.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum GestureKind {
-    #[doc = include_str!("gesture_recognizer.doc/Tap.md")]
-    Tap,
-    #[doc = include_str!("gesture_recognizer.doc/DoubleTap.md")]
-    DoubleTap,
-    #[doc = include_str!("gesture_recognizer.doc/LongPress.md")]
-    LongPress,
-    #[doc = include_str!("gesture_recognizer.doc/Pan.md")]
-    Pan,
-    #[doc = include_str!("gesture_recognizer.doc/Swipe.md")]
-    Swipe,
-    #[doc = include_str!("gesture_recognizer.doc/Pinch.md")]
-    Pinch,
-    #[doc = include_str!("gesture_recognizer.doc/Rotate.md")]
-    Rotate,
-}
-
-#[doc = include_str!("gesture_recognizer.doc/RecognizerState.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum RecognizerState {
-    #[doc = include_str!("gesture_recognizer.doc/Possible.md")]
-    Possible,
-    #[doc = include_str!("gesture_recognizer.doc/Began.md")]
-    Began,
-    #[doc = include_str!("gesture_recognizer.doc/Recognized.md")]
-    Recognized,
-    #[doc = include_str!("gesture_recognizer.doc/Failed.md")]
-    Failed,
-    #[doc = include_str!("gesture_recognizer.doc/Cancelled.md")]
-    Cancelled,
-}
-
-impl RecognizerState {
-    #[doc = include_str!("gesture_recognizer.doc/is_terminal.md")]
-    #[must_use]
-    pub const fn is_terminal(self) -> bool {
-        matches!(self, Self::Recognized | Self::Failed | Self::Cancelled)
-    }
-
-    #[doc = include_str!("gesture_recognizer.doc/is_active.md")]
-    #[must_use]
-    pub const fn is_active(self) -> bool {
-        matches!(self, Self::Possible | Self::Began)
-    }
-}
-
-#[doc = include_str!("gesture_recognizer.doc/GestureRecognizer.md")]
+#[doc = include_str!("../../docs/api/gesture/gesture_recognizer.doc/GestureRecognizer.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GestureRecognizer {
     id: RecognizerId,
@@ -75,7 +12,8 @@ pub struct GestureRecognizer {
 }
 
 impl GestureRecognizer {
-    #[doc = include_str!("gesture_recognizer.doc/new.md")]
+    /// Creates a recognizer of `kind` identified by `id`, in the
+    /// [`Possible`](RecognizerState::Possible) state.
     #[must_use]
     pub const fn new(id: RecognizerId, kind: GestureKind) -> Self {
         Self {
@@ -85,53 +23,59 @@ impl GestureRecognizer {
         }
     }
 
-    #[doc = include_str!("gesture_recognizer.doc/begin.md")]
+    /// Transitions [`Possible`](RecognizerState::Possible) →
+    /// [`Began`](RecognizerState::Began). No-op in any other state.
     pub fn begin(&mut self) {
         if matches!(self.state, RecognizerState::Possible) {
             self.state = RecognizerState::Began;
         }
     }
 
-    #[doc = include_str!("gesture_recognizer.doc/recognize.md")]
+    /// Transitions [`Possible`](RecognizerState::Possible) or
+    /// [`Began`](RecognizerState::Began) →
+    /// [`Recognized`](RecognizerState::Recognized). No-op if already terminal.
     pub fn recognize(&mut self) {
         if !self.state.is_terminal() {
             self.state = RecognizerState::Recognized;
         }
     }
 
-    #[doc = include_str!("gesture_recognizer.doc/fail.md")]
+    /// Transitions any non-terminal state →
+    /// [`Failed`](RecognizerState::Failed). No-op if already terminal.
     pub fn fail(&mut self) {
         if !self.state.is_terminal() {
             self.state = RecognizerState::Failed;
         }
     }
 
-    #[doc = include_str!("gesture_recognizer.doc/cancel.md")]
+    /// Transitions any non-terminal state →
+    /// [`Cancelled`](RecognizerState::Cancelled). No-op if already terminal.
     pub fn cancel(&mut self) {
         if !self.state.is_terminal() {
             self.state = RecognizerState::Cancelled;
         }
     }
 
-    #[doc = include_str!("gesture_recognizer.doc/id.md")]
+    /// Returns this recognizer's id.
     #[must_use]
     pub const fn id(self) -> RecognizerId {
         self.id
     }
 
-    #[doc = include_str!("gesture_recognizer.doc/kind.md")]
+    /// Returns the kind of gesture this recognizer detects.
     #[must_use]
     pub const fn kind(self) -> GestureKind {
         self.kind
     }
 
-    #[doc = include_str!("gesture_recognizer.doc/state.md")]
+    /// Returns the current lifecycle state.
     #[must_use]
     pub const fn state(self) -> RecognizerState {
         self.state
     }
 
-    #[doc = include_str!("gesture_recognizer.doc/is_recognized.md")]
+    /// Returns whether the recognizer has reached
+    /// [`Recognized`](RecognizerState::Recognized).
     #[must_use]
     pub const fn is_recognized(self) -> bool {
         matches!(self.state, RecognizerState::Recognized)
@@ -144,22 +88,6 @@ mod tests {
 
     fn rec() -> GestureRecognizer {
         GestureRecognizer::new(RecognizerId::from_raw(1), GestureKind::Pan)
-    }
-
-    #[test]
-    fn recognizer_id_roundtrips() {
-        assert_eq!(RecognizerId::from_raw(7).raw(), 7);
-    }
-
-    #[test]
-    fn state_predicates() {
-        assert!(RecognizerState::Possible.is_active());
-        assert!(RecognizerState::Began.is_active());
-        assert!(!RecognizerState::Recognized.is_active());
-        assert!(RecognizerState::Recognized.is_terminal());
-        assert!(RecognizerState::Failed.is_terminal());
-        assert!(RecognizerState::Cancelled.is_terminal());
-        assert!(!RecognizerState::Possible.is_terminal());
     }
 
     #[test]

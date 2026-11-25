@@ -15,6 +15,118 @@ use support::{approx, at, compile, el, runtime_id, txt, view};
 
 const VW: f32 = 1000.0;
 
+#[test]
+fn critical_stop_reports_its_cause_before_release() {
+    use obscur_kit::runtime::lifecycle::{LifecycleEvent, ShutdownConcern};
+
+    let id = RuntimeId::from_raw(7);
+    let mut runtime = UiRuntime::new(id, Size::new(400.0, 300.0));
+    runtime
+        .lifecycle_mut()
+        .report_critical_stop(ShutdownConcern::Renderer);
+    assert_eq!(
+        runtime.release().into_events(),
+        [
+            LifecycleEvent::CriticalStop(ShutdownConcern::Renderer),
+            LifecycleEvent::ResourceReleaseComplete(id),
+        ]
+    );
+}
+
+#[test]
+fn release_drops_runtime_owned_resources_before_reporting_completion() {
+    use obscur_kit::runtime::lifecycle::{LifecycleEvent, ShutdownRequest};
+    use std::{cell::Cell, rc::Rc};
+
+    struct DropFlag(Rc<Cell<bool>>);
+    impl Drop for DropFlag {
+        fn drop(&mut self) {
+            self.0.set(true);
+        }
+    }
+
+    let id = RuntimeId::from_raw(7);
+    let mut runtime = UiRuntime::new(id, Size::new(400.0, 300.0));
+    let released = Rc::new(Cell::new(false));
+    let owned = DropFlag(Rc::clone(&released));
+    runtime.enqueue_background(move || {
+        drop(owned);
+        panic!("the pending job must not run during release");
+    });
+    runtime
+        .lifecycle_mut()
+        .request_shutdown(ShutdownRequest::Host);
+    let result = runtime.release();
+    assert!(released.get());
+    assert_eq!(
+        result.into_events(),
+        [
+            LifecycleEvent::ShutdownRequested(ShutdownRequest::Host),
+            LifecycleEvent::ResourceReleaseComplete(id),
+        ]
+    );
+}
+
+#[test]
+fn shutdown_requests_and_window_closure_have_separate_notifications() {
+    use obscur_kit::identity::WindowId;
+    use obscur_kit::runtime::lifecycle::{LifecycleEvent, ShutdownRequest};
+
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(400.0, 300.0));
+    let window = WindowId::from_raw(1);
+    runtime.lifecycle_mut().window_opened(window);
+    runtime
+        .lifecycle_mut()
+        .request_shutdown(ShutdownRequest::Host);
+    assert_eq!(
+        runtime.lifecycle_mut().take_events(),
+        [LifecycleEvent::ShutdownRequested(ShutdownRequest::Host)]
+    );
+    assert!(runtime.render_now(&View::empty(), &[]).is_balanced());
+
+    let request = ShutdownRequest::WindowClose(window);
+    runtime.lifecycle_mut().request_shutdown(request);
+    runtime.lifecycle_mut().window_closed(window);
+    assert_eq!(
+        runtime.lifecycle_mut().take_events(),
+        [
+            LifecycleEvent::ShutdownRequested(request),
+            LifecycleEvent::LastWindowClosed(window),
+        ]
+    );
+}
+
+#[test]
+fn the_host_observes_each_transition_to_no_windows() {
+    use obscur_kit::identity::WindowId;
+    use obscur_kit::runtime::lifecycle::LifecycleEvent;
+
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(400.0, 300.0));
+    let lifecycle = runtime.lifecycle_mut();
+    let first = WindowId::from_raw(1);
+    let second = WindowId::from_raw(2);
+    lifecycle.window_opened(first);
+    lifecycle.window_opened(second);
+    lifecycle.window_opened(second);
+    lifecycle.window_closed(first);
+    assert!(lifecycle.take_events().is_empty());
+    lifecycle.window_closed(second);
+    lifecycle.window_closed(second);
+    assert_eq!(
+        lifecycle.take_events(),
+        [LifecycleEvent::LastWindowClosed(second)]
+    );
+    assert!(lifecycle.take_events().is_empty());
+
+    lifecycle.window_opened(first);
+    lifecycle.window_closed(first);
+    assert_eq!(
+        lifecycle.take_events(),
+        [LifecycleEvent::LastWindowClosed(first)]
+    );
+    assert!(runtime.render_now(&View::empty(), &[]).is_balanced());
+}
+
 #[doc = include_str!("spec_ch9_runtime_topology.doc/keyed.md")]
 fn keyed(id: u64, key: &str, class: &str) -> ViewNode {
     ViewNode::element(ComponentId::from_raw(id))

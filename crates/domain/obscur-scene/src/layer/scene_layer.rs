@@ -1,4 +1,4 @@
-#![doc = include_str!("scene_layer.doc/_module.md")]
+//! A compositing layer descriptor.
 
 use obscur_geometry::AffineTransform;
 
@@ -7,111 +7,137 @@ use crate::paint::BlendMode;
 
 use super::{CompositionMode, LayerEffect};
 
-#[doc = include_str!("scene_layer.doc/SceneLayer.md")]
+#[doc = include_str!("../../docs/api/layer/scene_layer.doc/SceneLayer.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct SceneLayer {
     transform: AffineTransform,
     clip: Option<Clip>,
     opacity: f32,
+    isolated: bool,
     blend_mode: BlendMode,
     composition: CompositionMode,
     effects: Vec<LayerEffect>,
 }
 
 impl SceneLayer {
-    #[doc = include_str!("scene_layer.doc/new.md")]
+    /// Creates a neutral layer: identity transform, no clip, opacity `1.0`,
+    /// [`BlendMode::Normal`], [`CompositionMode::SrcOver`], and no effects.
     #[must_use]
     pub fn new() -> Self {
         Self {
             transform: AffineTransform::IDENTITY,
             clip: None,
             opacity: 1.0,
+            isolated: false,
             blend_mode: BlendMode::Normal,
             composition: CompositionMode::SrcOver,
             effects: Vec::new(),
         }
     }
 
-    #[doc = include_str!("scene_layer.doc/with_transform.md")]
+    /// Requires a fresh transparent backdrop for the children of this layer.
+    #[must_use]
+    pub fn with_isolation(mut self, isolated: bool) -> Self {
+        self.isolated = isolated;
+        self
+    }
+
+    /// Whether the layer requires an independent blending backdrop.
+    #[must_use]
+    pub const fn is_isolated(&self) -> bool {
+        self.isolated
+    }
+
+    /// Returns the layer with its local transform replaced.
     #[must_use]
     pub fn with_transform(mut self, transform: AffineTransform) -> Self {
         self.transform = transform;
         self
     }
 
-    #[doc = include_str!("scene_layer.doc/with_clip.md")]
+    /// Returns the layer with a clip applied to its content.
     #[must_use]
     pub fn with_clip(mut self, clip: Clip) -> Self {
         self.clip = Some(clip);
         self
     }
 
-    #[doc = include_str!("scene_layer.doc/with_opacity.md")]
+    /// Returns the layer with its opacity replaced (nominally `0.0..=1.0`).
     #[must_use]
     pub fn with_opacity(mut self, opacity: f32) -> Self {
         self.opacity = opacity;
         self
     }
 
-    #[doc = include_str!("scene_layer.doc/with_blend_mode.md")]
+    /// Returns the layer with its blend mode replaced.
     #[must_use]
     pub fn with_blend_mode(mut self, blend_mode: BlendMode) -> Self {
         self.blend_mode = blend_mode;
         self
     }
 
-    #[doc = include_str!("scene_layer.doc/with_composition.md")]
+    /// Returns the layer with its composition operator replaced.
     #[must_use]
     pub fn with_composition(mut self, composition: CompositionMode) -> Self {
         self.composition = composition;
         self
     }
 
-    #[doc = include_str!("scene_layer.doc/add_effect.md")]
+    /// Appends an additional effect (e.g. a blur) to the layer.
     pub fn add_effect(&mut self, effect: LayerEffect) {
         self.effects.push(effect);
     }
 
-    #[doc = include_str!("scene_layer.doc/transform.md")]
+    /// The local transform composed with the parent transform for the layer's clip
+    /// and drawing commands. The parent transform resumes when the layer closes.
     #[must_use]
     pub fn transform(&self) -> AffineTransform {
         self.transform
     }
 
-    #[doc = include_str!("scene_layer.doc/clip.md")]
+    /// The layer's optional clip.
     #[must_use]
     pub fn clip(&self) -> Option<&Clip> {
         self.clip.as_ref()
     }
 
-    #[doc = include_str!("scene_layer.doc/opacity.md")]
+    /// The layer's opacity.
     #[must_use]
     pub fn opacity(&self) -> f32 {
         self.opacity
     }
 
-    #[doc = include_str!("scene_layer.doc/blend_mode.md")]
+    /// The mode used to composite the layer against its backdrop. The last
+    /// blend effect takes precedence over the mode set by the builder.
     #[must_use]
     pub fn blend_mode(&self) -> BlendMode {
-        self.blend_mode
+        self.effects
+            .iter()
+            .rev()
+            .find_map(|effect| match effect {
+                LayerEffect::Blend(mode) => Some(*mode),
+                _ => None,
+            })
+            .unwrap_or(self.blend_mode)
     }
 
-    #[doc = include_str!("scene_layer.doc/composition.md")]
+    /// The layer's composition operator.
     #[must_use]
     pub fn composition(&self) -> CompositionMode {
         self.composition
     }
 
-    #[doc = include_str!("scene_layer.doc/effects.md")]
+    /// The layer's additional effects, in application order.
     #[must_use]
     pub fn effects(&self) -> &[LayerEffect] {
         &self.effects
     }
 
-    #[doc = include_str!("scene_layer.doc/is_trivial.md")]
+    #[doc = include_str!("../../docs/api/layer/scene_layer.doc/is_trivial.md")]
     #[must_use]
     pub fn is_trivial(&self) -> bool {
-        self.transform == AffineTransform::IDENTITY
+        !self.isolated
+            && self.transform == AffineTransform::IDENTITY
             && self.clip.is_none()
             && self.opacity >= 1.0
             && self.blend_mode.is_normal()
@@ -121,7 +147,7 @@ impl SceneLayer {
 }
 
 impl Default for SceneLayer {
-    #[doc = include_str!("scene_layer.doc/default.md")]
+    /// The default layer is the neutral layer produced by [`SceneLayer::new`].
     fn default() -> Self {
         Self::new()
     }

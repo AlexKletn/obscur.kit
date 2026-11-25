@@ -1,51 +1,60 @@
-#![doc = include_str!("scene_coordinator.doc/_module.md")]
+//! Composes a paint-ordered display list from the styled + laid-out tree:
+//! [`SceneCoordinator`].
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
-use obscur_geometry::CornerRadii;
-use obscur_identity::{FastMap, FastSet, NodeId};
+use obscur_geometry::{AffineTransform, CornerRadii, PixelSnapMode, PixelSnapPolicy, Point, Rect};
+use obscur_identity::{FastBuildHasher, FastMap, FastSet, InternedSymbol, NodeId};
+use obscur_layout::model::LayoutBox;
 use obscur_scene::clip::Clip;
 use obscur_scene::command::{DisplayList, DisplayListBuilder, PaintCommand};
 use obscur_scene::paint::{Brush, SceneImage, SceneVector, Stroke};
 use obscur_scene::path::Path;
-use obscur_style::property::FilterOp;
+use obscur_style::computed::ComputedStyle;
+use obscur_style::property::{BackgroundAttachment, FilterOp, PropertyId, PropertyValue};
 use obscur_text::font::FontResolver;
 use obscur_text::layout::Hyphenator;
 use obscur_text::shaping::{ParagraphShaper, TextItemizer, TextShaper};
 use obscur_tree::tree::RetainedTree;
 
 use super::background_paint::{
-    background_color_of, background_gradient_brush, background_image_geometry,
-    background_image_url_of, background_layers_of, paint_background_layer,
+    attachment_at, background_clips, background_color_of, background_image_url_of,
+    background_layers_of, background_origin, local_background_rect, paint_background_layer,
+    paint_background_url, paint_single_background_gradient,
 };
 use super::border_paint::{
-    border_fills, corner_radii_of, dashed_border_path, dashed_border_pattern, outline_paint,
-    uniform_border, uniform_border_ring, uniform_dashed_border,
+    any_border_width, border_fills, border_widths_of, corner_radii_of, dashed_border_path,
+    dashed_border_pattern, outline_paint, uniform_border, uniform_border_ring,
+    uniform_dashed_border,
 };
 use super::box_shadow_paint::{box_shadows_of, emit_box_shadow};
+use super::clip_path::ResolvedClipPath;
 use super::composite_effects::{
     backdrop_blur_of, blend_mode_of, filter_blur_of, filter_color_matrix_of, filter_ops_of,
-    opacity_of,
+    isolation_of, opacity_of,
 };
 use super::paint_color::{current_color_of, scene_color_from};
 use super::paint_transform::resolved_transform;
+use super::paint_unit::PaintUnit;
 use super::paragraph_shaping::ParagraphShaping;
-use super::replaced_content::{element_image_of, emit_vector, object_fit_tile};
+use super::replaced_content::{element_image_of, emit_vector, object_fit_tile, replaced_region};
 use super::scroll_container_paint::overflow_clips;
-use super::stacking::{PaintLayer, PaintUnit, effective_stacking};
+use super::stacking::{effective_stacking, for_each_paint_child_rev};
 use super::subtree_brackets::SubtreeBrackets;
 use super::text_painter::{emit_generated_run, paint_text_node};
 use super::{ComputedStyles, EditingView, GeneratedContent, LayoutBoxes, ScrollPaint};
 
-#[doc = include_str!("scene_coordinator.doc/SceneCoordinator.md")]
+#[doc = include_str!("../../docs/api/orchestration/scene_coordinator.doc/SceneCoordinator.md")]
 pub struct SceneCoordinator {
-    #[doc = include_str!("scene_coordinator.doc/text.md")]
+    #[doc = include_str!("../../docs/api/orchestration/scene_coordinator.doc/text.md")]
     text: ParagraphShaping,
 }
 
 impl SceneCoordinator {
-    #[doc = include_str!("scene_coordinator.doc/new.md")]
+    /// Creates a coordinator whose default paragraph orchestrator reproduces the
+    /// historical single-font behavior (single run, primary face, deterministic
+    /// mock shaper) with a generic monospace default face.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -53,49 +62,55 @@ impl SceneCoordinator {
         }
     }
 
-    #[doc = include_str!("scene_coordinator.doc/set_hyphenator.md")]
+    #[doc = include_str!("../../docs/api/orchestration/scene_coordinator.doc/set_hyphenator.md")]
     pub fn set_hyphenator(&mut self, hyphenator: Box<dyn Hyphenator>) {
         self.text.set_hyphenator(hyphenator);
     }
 
-    #[doc = include_str!("scene_coordinator.doc/hyphenator.md")]
+    #[doc = include_str!("../../docs/api/orchestration/scene_coordinator.doc/hyphenator.md")]
     #[must_use]
     pub fn hyphenator(&self) -> Option<&dyn Hyphenator> {
         self.text.hyphenator()
     }
 
-    #[doc = include_str!("scene_coordinator.doc/set_text_shaper.md")]
+    #[doc = include_str!("../../docs/api/orchestration/scene_coordinator.doc/set_text_shaper.md")]
     pub fn set_text_shaper(&mut self, shaper: Box<dyn TextShaper>) {
         self.text.set_shaper(shaper);
     }
 
-    #[doc = include_str!("scene_coordinator.doc/set_itemizer.md")]
+    /// Installs `itemizer` as the paragraph itemizer, replacing the default
+    /// single-run itemizer (e.g. a real Unicode script/bidi itemizer) so a text
+    /// node splits into multiple script runs.
     pub fn set_itemizer(&mut self, itemizer: Box<dyn TextItemizer>) {
         self.text.set_itemizer(itemizer);
     }
 
-    #[doc = include_str!("scene_coordinator.doc/set_font_resolver.md")]
+    /// Installs `resolver` as the font resolver, replacing the default empty
+    /// resolver (e.g. a coverage registry) so each script run resolves to a
+    /// covering font.
     pub fn set_font_resolver(&mut self, resolver: Box<dyn FontResolver>) {
         self.text.set_resolver(resolver);
     }
 
-    #[doc = include_str!("scene_coordinator.doc/set_language.md")]
+    #[doc = include_str!("../../docs/api/orchestration/scene_coordinator.doc/set_language.md")]
     pub fn set_language(&mut self, language: Option<Box<str>>) {
         self.text.set_language(language);
     }
 
-    #[doc = include_str!("scene_coordinator.doc/paragraph.md")]
+    #[doc = include_str!("../../docs/api/orchestration/scene_coordinator.doc/paragraph.md")]
     #[must_use]
     pub fn paragraph(&self) -> &ParagraphShaper {
         self.text.paragraph()
     }
 
-    #[doc = include_str!("scene_coordinator.doc/text_2.md")]
+    /// The phase's text engine, which the caret geometry
+    /// ([`caret_geometry`](super::caret_geometry)) shapes and measures through so
+    /// a hit-test resolves against the very runs the compose walk painted.
     pub(crate) fn text(&self) -> &ParagraphShaping {
         &self.text
     }
 
-    #[doc = include_str!("scene_coordinator.doc/compose.md")]
+    #[doc = include_str!("../../docs/api/orchestration/scene_coordinator.doc/compose.md")]
     #[must_use]
     pub fn compose(
         &self,
@@ -109,7 +124,7 @@ impl SceneCoordinator {
         self.compose_with_images(tree, computed, boxes, editing, &HashMap::default())
     }
 
-    #[doc = include_str!("scene_coordinator.doc/compose_with_images.md")]
+    #[doc = include_str!("../../docs/api/orchestration/scene_coordinator.doc/compose_with_images.md")]
     #[must_use]
     pub fn compose_with_images(
         &self,
@@ -133,7 +148,7 @@ impl SceneCoordinator {
         )
     }
 
-    #[doc = include_str!("scene_coordinator.doc/compose_with_images_scrolled.md")]
+    #[doc = include_str!("../../docs/api/orchestration/scene_coordinator.doc/compose_with_images_scrolled.md")]
     #[must_use]
     pub fn compose_with_images_scrolled(
         &self,
@@ -147,6 +162,36 @@ impl SceneCoordinator {
         generated: &FastMap<NodeId, GeneratedContent>,
         canvases: &FastMap<NodeId, Vec<PaintCommand>>,
     ) -> DisplayList {
+        self.compose_at_surface(
+            tree,
+            computed,
+            boxes,
+            editing,
+            images,
+            vectors,
+            scroll,
+            generated,
+            canvases,
+            AffineTransform::IDENTITY,
+            None,
+        )
+    }
+
+    /// Composes the display list with the surface mapping available for physical pixel snapping.
+    pub(crate) fn compose_at_surface(
+        &self,
+        tree: &RetainedTree,
+        computed: &ComputedStyles,
+        boxes: &LayoutBoxes,
+        editing: Option<EditingView<'_>>,
+        images: &HashMap<Box<str>, SceneImage>,
+        vectors: &HashMap<Box<str>, SceneVector>,
+        scroll: &FastMap<NodeId, ScrollPaint>,
+        generated: &FastMap<NodeId, GeneratedContent>,
+        canvases: &FastMap<NodeId, Vec<PaintCommand>>,
+        root_transform: AffineTransform,
+        surface_viewport: Option<Rect>,
+    ) -> DisplayList {
         let Some(root) = tree.root() else {
             return DisplayListBuilder::new().build();
         };
@@ -158,7 +203,7 @@ impl SceneCoordinator {
         // bug B2), and is uniform when nothing is positioned, so the sort then
         // reduces to the pre-fix `(z, tree_index)`.
         let stacking = effective_stacking(tree, computed);
-        let (zmap, layermap) = (stacking.z, stacking.layer);
+        let zmap = stacking.paint_band;
 
         // Pre-order walk (parent before children). Children are pushed reversed
         // so the leftmost child is popped first, preserving left-to-right paint
@@ -171,7 +216,14 @@ impl SceneCoordinator {
         // so higher-z positioned elements paint last (on top) while equal-z units
         // keep tree order. When no `z-index` is authored every z is 0 and the sort
         // reproduces the exact pre-order sequence (the regression guard).
-        let mut visited: FastSet<NodeId> = HashSet::default();
+        // The walk visits every live node exactly once, so the set's final size
+        // is known before the first insert: reserving it here trades one sized
+        // allocation for the seven rehashes (each one a full re-probe of every
+        // key inserted so far) a table that starts empty pays on the way to ~230
+        // entries. The count is an upper bound, never a promise — a smaller walk
+        // just leaves the tail of the table unused.
+        let mut visited: FastSet<NodeId> =
+            HashSet::with_capacity_and_hasher(tree.len(), FastBuildHasher::default());
         // Each stack entry carries the node's parent and its tree depth, so a
         // `border-radius` element can bracket its subtree with a clip whose
         // `PopClip` sorts after the last descendant (see `SubtreeBrackets`).
@@ -182,7 +234,7 @@ impl SceneCoordinator {
         // the opacity / blend / filter group layers, the scroll translation and the
         // outline ring — is recorded here as a PAIR, and emitted below once the walk
         // knows where each subtree ends (see `SubtreeBrackets`).
-        let mut brackets = SubtreeBrackets::default();
+        let mut brackets = SubtreeBrackets::with_capacity(tree.len());
 
         while let Some((node, parent, depth)) = stack.pop() {
             if !visited.insert(node) {
@@ -195,44 +247,69 @@ impl SceneCoordinator {
             next_index += 1;
             brackets.enter(node, parent, depth, tree_index);
 
-            let radii = resolved_corner_radii(computed, boxes, node);
-            let has_radius = radii.any_positive();
-            // A node with `overflow` other than `visible` clips its subtree to its
-            // box (`hidden` / `clip` / `scroll` / `auto`; scroll/auto clip like
-            // hidden — no scrollbars yet). `visible` / absent adds no clip.
-            let clips_overflow = overflow_clips(computed, node);
-            // The clip shape (border box) bracketing this node's subtree, recorded
-            // for a second pass once every descendant's exit index is known. A node
-            // that rounds its corners OR clips overflow emits exactly ONE clip: the
-            // ROUNDED border box when it has a radius (which also clips overflow),
-            // else a plain rect clip to the border box.
-            if (has_radius || clips_overflow)
-                && let Some(layout_box) = boxes.get(&node)
-            {
-                let clip = if has_radius {
-                    Clip::rounded_rect(layout_box.bounds, radii)
-                } else {
-                    Clip::rect(layout_box.bounds)
-                };
-                brackets.clip(node, clip);
-            }
+            // The node's computed style and its arranged box, looked up ONCE for
+            // the whole of this node's turn and handed to every paint helper
+            // below. Each helper used to re-probe the two maps for itself — about
+            // thirty-three style probes and ten box probes per node — and the
+            // style table is large enough that most of them missed L2. Nothing is
+            // remembered between frames: both borrows die with the iteration.
+            let style = computed.get(&node);
+            let layout_box = boxes.get(&node).copied();
+            let visible = !style.is_some_and(ComputedStyle::is_visibility_hidden);
 
-            // A scroll container (present in `scroll`): record its descendant
-            // scroll transform (elided at `scroll_top == 0` — the identity) and its
-            // scrollbar. The `overflow` clip above already brackets the same
-            // subtree, so the scroll transform nests inside it (CSS Overflow 3
-            // §scrollport). Absent from the map ⇒ nothing recorded ⇒ byte-identical.
-            if let (Some(paint), Some(layout_box)) = (scroll.get(&node), boxes.get(&node)) {
-                if paint.scroll_top != 0.0 {
-                    brackets.scroll(node, paint.scroll_top);
+            let radii = resolved_corner_radii(style, layout_box);
+            let has_radius = radii.any_positive();
+            let clips_overflow = overflow_clips(style);
+            if let Some(layout_box) = layout_box {
+                let bounds = layout_box.bounds;
+                if let Some(clip) = ResolvedClipPath::of(style, layout_box) {
+                    brackets.css_clip(node, clip.clip());
                 }
-                if paint.shows_scrollbar {
-                    brackets.scrollbar(
-                        node,
-                        layout_box.bounds,
-                        paint.scroll_top,
-                        paint.content_height,
-                    );
+                let scroll_paint = scroll.get(&node);
+                let port = if clips_overflow || scroll_paint.is_some() {
+                    super::overflow_padding_box(style, bounds)
+                } else {
+                    bounds
+                };
+                if has_radius {
+                    brackets.clip(node, Clip::rounded_rect(bounds, radii));
+                }
+                if clips_overflow {
+                    if port != bounds {
+                        let inner = super::overflow_padding_radii(style, bounds, port);
+                        let clip = if inner.any_positive() {
+                            Clip::rounded_rect(port, inner)
+                        } else {
+                            Clip::rect(port)
+                        };
+                        brackets.overflow_clip(node, clip);
+                    } else if !has_radius {
+                        brackets.clip(node, Clip::rect(port));
+                    }
+                }
+
+                if let Some(paint) = scroll_paint {
+                    if paint.offset() != Point::ORIGIN {
+                        brackets.scroll(node, paint.offset());
+                    }
+                    if visible && paint.shows_scrollbar {
+                        brackets.scrollbar(
+                            node,
+                            port,
+                            paint.scroll_top,
+                            paint.content_height,
+                            false,
+                        );
+                    }
+                    if visible && paint.shows_horizontal_scrollbar {
+                        let offset = super::horizontal_thumb_offset(
+                            port,
+                            paint.scroll_left,
+                            paint.content_width,
+                            paint.rtl,
+                        );
+                        brackets.scrollbar(node, port, offset, paint.content_width, true);
+                    }
                 }
             }
 
@@ -240,25 +317,25 @@ impl SceneCoordinator {
             // affine is resolved about the node's transform origin (border-box
             // position + `transform-origin`, default center). No transform (or an
             // identity one) records nothing — byte-for-byte identical to before.
-            if let Some(layout_box) = boxes.get(&node)
-                && let Some(affine) = resolved_transform(computed, node, layout_box.bounds)
+            if let Some(layout_box) = layout_box
+                && let Some(affine) = resolved_transform(style, layout_box.bounds)
             {
                 brackets.transform(node, affine);
             }
 
-            // A CSS `opacity` below `1.0` brackets this node's subtree with an
-            // opacity group layer. It needs no geometry (the layer applies to the
-            // group as a whole), so — unlike the transform — it is recorded even
-            // for a node with no arranged box. `opacity: 1` or an absent opacity
-            // records nothing (byte-for-byte identical to before).
-            if let Some(alpha) = opacity_of(computed, node) {
-                brackets.opacity(node, alpha);
-            }
-
-            // A CSS `mix-blend-mode` other than `normal` brackets this node's
-            // subtree with a blend group layer. Like opacity it needs no box.
-            if let Some(mode) = blend_mode_of(computed, node) {
-                brackets.blend(node, mode);
+            // Opacity, blend mode and isolation describe one group. Its
+            // children render into a separate backdrop before it composites.
+            let isolated = isolation_of(style);
+            let alpha = opacity_of(style);
+            let blend = blend_mode_of(style);
+            if isolated || alpha.is_some() || blend.is_some() {
+                brackets.group(
+                    node,
+                    obscur_scene::layer::SceneLayer::new()
+                        .with_isolation(isolated)
+                        .with_opacity(alpha.unwrap_or(1.0))
+                        .with_blend_mode(blend.unwrap_or(obscur_scene::paint::BlendMode::Normal)),
+                );
             }
 
             // A CSS `filter` (blur and/or color ops) brackets this node's subtree
@@ -267,12 +344,25 @@ impl SceneCoordinator {
             // recorded for a node with a box. The color-op chain folds into one
             // 4×5 matrix; blur keeps its radius. No blur AND no color op (or no
             // box) records nothing (byte-for-byte identical).
-            if let Some(layout_box) = boxes.get(&node) {
-                let radius = filter_blur_of(computed, node);
-                let color_matrix = filter_color_matrix_of(computed, node);
+            // `filter` is read ONCE here and reused: the blur radius, the folded
+            // colour matrix and the drop-shadow list below are three readings of
+            // the same property, and this used to be three separate lookups.
+            let filter_ops = filter_ops_of(style);
+            if let Some(layout_box) = layout_box {
+                let radius = filter_blur_of(filter_ops);
+                let color_matrix = filter_color_matrix_of(filter_ops);
                 if radius.is_some() || color_matrix.is_some() {
                     brackets.filter(node, layout_box.bounds, radius.unwrap_or(0.0), color_matrix);
                 }
+            }
+
+            for_each_paint_child_rev(tree, computed, node, |child| {
+                if !visited.contains(&child) {
+                    stack.push((child, Some(node), depth.saturating_add(1)));
+                }
+            });
+            if !visible {
+                continue;
             }
 
             // A CSS `outline` (focus ring): when the node has a non-`none`
@@ -280,9 +370,8 @@ impl SceneCoordinator {
             // ring it paints OUTSIDE its border box (inflated by
             // `outline-offset + width/2`). It needs the arranged box; no outline
             // (or no box) records nothing (byte-for-byte identical to before).
-            if let Some(layout_box) = boxes.get(&node)
-                && let Some(command) =
-                    outline_paint(computed, node, layout_box.bounds, radii, has_radius)
+            if let Some(layout_box) = layout_box
+                && let Some(command) = outline_paint(style, layout_box.bounds, radii, has_radius)
             {
                 brackets.outline(node, command);
             }
@@ -301,8 +390,8 @@ impl SceneCoordinator {
             // arranged box (the frost region); no `backdrop-filter` (or no box) emits
             // nothing (byte-for-byte identical). Only the GPU (Vello) backend frosts;
             // the CPU rasterizer honestly skips it (documented).
-            if let Some(radius) = backdrop_blur_of(computed, node)
-                && let Some(layout_box) = boxes.get(&node)
+            if let Some(radius) = backdrop_blur_of(style)
+                && let Some(layout_box) = layout_box
             {
                 node_paint.backdrop_filter(layout_box.bounds, radii, radius);
             }
@@ -314,9 +403,9 @@ impl SceneCoordinator {
             // order. The shadow color falls back to the computed `color`
             // (`currentColor`) when the author omitted it. No `box-shadow` emits
             // nothing — byte-for-byte identical to before.
-            let shadows = box_shadows_of(computed, node);
-            if let (Some(shadows), Some(layout_box)) = (shadows, boxes.get(&node)) {
-                let current = current_color_of(computed, node);
+            let shadows = box_shadows_of(style);
+            if let (Some(shadows), Some(layout_box)) = (shadows, layout_box) {
+                let current = current_color_of(style);
                 for shadow in shadows.iter().rev().filter(|s| !s.is_inset()) {
                     emit_box_shadow(&mut node_paint, layout_box.bounds, radii, shadow, current);
                 }
@@ -334,59 +423,140 @@ impl SceneCoordinator {
             // reach here; `blur()` / color-matrix / `backdrop-filter` are dropped at
             // CSS lower time (out of scope on vello 0.9). No filter emits nothing —
             // byte-for-byte identical to before.
-            let filter_ops = filter_ops_of(computed, node);
-            if let (Some(filter_ops), Some(layout_box)) = (filter_ops, boxes.get(&node)) {
-                let current = current_color_of(computed, node);
+            if let (Some(filter_ops), Some(layout_box)) = (filter_ops, layout_box) {
+                let current = current_color_of(style);
                 for shadow in filter_ops.iter().rev().filter_map(FilterOp::as_drop_shadow) {
                     emit_box_shadow(&mut node_paint, layout_box.bounds, radii, shadow, current);
                 }
             }
 
-            // The background fill brush: an authored `background-image` gradient
-            // (linear / radial / conic) wins over `background-color` (the gradient
-            // paints over the color), otherwise a non-transparent
-            // `background-color` fills solid. With neither authored the block emits
-            // nothing — byte-for-byte identical to before backgrounds existed.
-            if let Some(layout_box) = boxes.get(&node) {
-                let brush = if let Some(brush) =
-                    background_gradient_brush(computed, node, layout_box.bounds)
+            if let Some(layout_box) = layout_box {
+                let mut background_bounds = layout_box.bounds;
+                if !has_radius
+                    && let Some(PropertyValue::Keyword(keyword)) = style
+                        .and_then(|style| style.get(PropertyId::PixelSnap))
+                        .map(|value| value.value())
+                    && *keyword == InternedSymbol::named("edges")
                 {
-                    Some(brush)
-                } else {
-                    background_color_of(computed, node)
-                        .filter(|color| color.a > 0.0)
-                        .map(|color| Brush::solid(scene_color_from(color)))
+                    background_bounds = snap_background_bounds(
+                        background_bounds,
+                        node,
+                        tree,
+                        computed,
+                        scroll,
+                        root_transform,
+                    );
+                }
+                let layers = background_layers_of(style);
+                let blend_keywords: &[InternedSymbol] = match style
+                    .and_then(|style| style.get(PropertyId::BackgroundBlendMode))
+                    .map(|value| value.value())
+                {
+                    Some(PropertyValue::BackgroundBlendModes(modes)) => modes,
+                    _ => &[],
                 };
-                if let Some(brush) = brush {
-                    if has_radius {
-                        node_paint.fill(Path::rounded_rect(layout_box.bounds, radii), brush);
+                let blend_at = |index| {
+                    blend_keywords
+                        .get(index % blend_keywords.len().max(1))
+                        .and_then(|&keyword| {
+                            super::composite_effects::blend_mode_for_keyword(keyword)
+                        })
+                };
+                let isolate =
+                    (0..layers.map_or(1, <[_]>::len)).any(|index| blend_at(index).is_some());
+                if isolate {
+                    node_paint
+                        .push_layer(obscur_scene::layer::SceneLayer::new().with_isolation(true));
+                }
+                let own_scroll = scroll.get(&node);
+                let clips_at = |index| {
+                    let local = own_scroll
+                        .filter(|_| attachment_at(style, index) == BackgroundAttachment::Local);
+                    background_clips(style, layout_box, radii, index, local)
+                };
+                let origin_at = |index| {
+                    let origin = background_origin(style, layout_box, index);
+                    let origin = if origin == layout_box.bounds {
+                        background_bounds
                     } else {
-                        node_paint.fill_rect(layout_box.bounds, brush);
+                        origin
+                    };
+                    match attachment_at(style, index) {
+                        BackgroundAttachment::Scroll => origin,
+                        BackgroundAttachment::Local => {
+                            let Some(scroll) = own_scroll else {
+                                return origin;
+                            };
+                            let port = super::overflow_padding_box(style, layout_box.bounds);
+                            local_background_rect(origin, port, scroll)
+                        }
+                        BackgroundAttachment::Fixed => {
+                            let viewport = surface_viewport
+                                .or_else(|| boxes.get(&root).map(|layout| layout.bounds));
+                            viewport
+                                .and_then(|viewport| {
+                                    fixed_background_origin(viewport, node, tree, computed, scroll)
+                                })
+                                .unwrap_or(origin)
+                        }
+                    }
+                };
+                let base_color = background_color_of(style)
+                    .filter(|color| color.a > 0.0)
+                    .map(|color| Brush::solid(scene_color_from(color)));
+                if let Some(brush) = base_color {
+                    let base_clips = push_background_clips(
+                        &mut node_paint,
+                        clips_at(layers.map_or(0, |layers| layers.len().saturating_sub(1))),
+                    );
+                    if has_radius {
+                        node_paint.fill(Path::rounded_rect(background_bounds, radii), brush);
+                    } else {
+                        node_paint.fill_rect(background_bounds, brush);
+                    }
+                    for _ in 0..base_clips {
+                        node_paint.pop_clip();
                     }
                 }
 
-                // An authored `background-image: url(...)` whose image has been
-                // resolved paints OVER the `background-color` fill and UNDER the
-                // border/content — matching CSS background paint order. The image's
-                // tile is placed (`background-position`), sized (`background-size`),
-                // and tiled (`background-repeat`) within the node's border box (the
-                // paint region), resolved by `background_image_geometry`. A URL not
-                // present in `images` (unloaded or failed) emits nothing, so the
-                // color background shows through — the regression-safe path
-                // (byte-identical when `images` is empty). This is the SINGLE-layer
-                // path; the multi-layer list is handled just below.
-                if let Some(image) =
-                    background_image_url_of(computed, node).and_then(|url| images.get(url))
-                {
-                    let (tile, repeat_x, repeat_y) =
-                        background_image_geometry(computed, node, image, layout_box.bounds);
-                    node_paint.draw_image(
-                        image.clone(),
-                        tile,
-                        layout_box.bounds,
-                        repeat_x,
-                        repeat_y,
+                let single_clips = if layers.is_none() {
+                    push_background_clips(&mut node_paint, clips_at(0))
+                } else {
+                    0
+                };
+                if let Some(mode) = blend_at(0).filter(|_| layers.is_none()) {
+                    node_paint
+                        .push_layer(obscur_scene::layer::SceneLayer::new().with_blend_mode(mode));
+                }
+                paint_single_background_gradient(
+                    &mut node_paint,
+                    style,
+                    origin_at(0),
+                    background_bounds,
+                    radii,
+                    has_radius,
+                );
+
+                // Single URL layers paint over the background color and under
+                // the border and content, like the stacked layers below.
+                if let Some(url) = background_image_url_of(style) {
+                    paint_background_url(
+                        &mut node_paint,
+                        url,
+                        style,
+                        0,
+                        origin_at(0),
+                        background_bounds,
+                        images,
+                        vectors,
                     );
+                }
+
+                if layers.is_none() && blend_at(0).is_some() {
+                    node_paint.pop_layer();
+                }
+                for _ in 0..single_clips {
+                    node_paint.pop_clip();
                 }
 
                 // Multiple `background-image` layers (a comma list). CSS lists them
@@ -395,30 +565,45 @@ impl SceneCoordinator {
                 // first-listed (top) last. Every layer paints OVER the
                 // `background-color` fill emitted above and UNDER the border/content.
                 // The single-layer case never reaches here (it stays a flat value
-                // above), so one-layer backgrounds are byte-identical. Per-layer
-                // `background-size`/`-position`/`-repeat` currently reuse the node's
-                // single resolved value for every layer (those longhands are not yet
-                // comma lists).
-                if let Some(layers) = background_layers_of(computed, node) {
-                    for layer in layers.iter().rev() {
+                // above). Image placement uses the original layer index.
+                if let Some(layers) = layers {
+                    for (layer_index, layer) in layers.iter().enumerate().rev() {
+                        let clips = push_background_clips(&mut node_paint, clips_at(layer_index));
+                        let blend = blend_at(layer_index);
+                        if let Some(mode) = blend {
+                            node_paint.push_layer(
+                                obscur_scene::layer::SceneLayer::new().with_blend_mode(mode),
+                            );
+                        }
                         paint_background_layer(
                             &mut node_paint,
                             layer,
-                            computed,
-                            node,
-                            layout_box.bounds,
+                            style,
+                            layer_index,
+                            origin_at(layer_index),
+                            background_bounds,
                             radii,
                             has_radius,
                             images,
+                            vectors,
                         );
+                        if blend.is_some() {
+                            node_paint.pop_layer();
+                        }
+                        for _ in 0..clips {
+                            node_paint.pop_clip();
+                        }
                     }
+                }
+                if isolate {
+                    node_paint.pop_layer();
                 }
             }
 
             // Inset shadows paint on top of the background (clipped to the box,
             // approximated by the renderer), under the border and text.
-            if let (Some(shadows), Some(layout_box)) = (shadows, boxes.get(&node)) {
-                let current = current_color_of(computed, node);
+            if let (Some(shadows), Some(layout_box)) = (shadows, layout_box) {
+                let current = current_color_of(style);
                 for shadow in shadows.iter().rev().filter(|s| s.is_inset()) {
                     emit_box_shadow(&mut node_paint, layout_box.bounds, radii, shadow, current);
                 }
@@ -446,12 +631,26 @@ impl SceneCoordinator {
             //   (the surrounding `PushClip`) and its inner corners stay approximate
             //   (documented). A transparent or zero-width side, or an unauthored
             //   border, emits nothing.
-            if let Some(layout_box) = boxes.get(&node) {
-                if let Some((width, color)) = uniform_border(computed, node).filter(|_| has_radius)
+            //
+            // The four widths are read ONCE and threaded through all three
+            // attempts: each shape used to re-read the same four properties, so a
+            // node with no border paid twelve lookups to learn it has none. All
+            // four zero means no shape can match — `uniform_border` and
+            // `uniform_dashed_border` both need a positive width and `border_fills`
+            // returns nothing — so the whole block is skipped. And the radius test
+            // moved from a `filter` AFTER `uniform_border` to a condition BEFORE
+            // it: a uniform border on a square box fell through to the mitered
+            // path either way, but used to pay the ring probe first.
+            if let Some(layout_box) = layout_box
+                && let border_widths = border_widths_of(style)
+                && any_border_width(border_widths)
+            {
+                if let Some((width, color)) =
+                    uniform_border(style, border_widths).filter(|_| has_radius)
                 {
                     let ring = uniform_border_ring(layout_box.bounds, radii, width);
                     node_paint.fill(ring, Brush::solid(scene_color_from(color)));
-                } else if let Some((width, color)) = uniform_dashed_border(computed, node) {
+                } else if let Some((width, color)) = uniform_dashed_border(style, border_widths) {
                     // A uniform DASHED border is a single dashed stroke run along
                     // the border box inset by width/2, so the centered stroke band
                     // exactly fills the CSS border area (rounded when a radius is
@@ -461,7 +660,7 @@ impl SceneCoordinator {
                         .with_dash(dashed_border_pattern(width), 0.0);
                     node_paint.stroke(path, stroke);
                 } else {
-                    for (path, color) in border_fills(computed, node, layout_box.bounds) {
+                    for (path, color) in border_fills(style, layout_box.bounds, border_widths) {
                         node_paint.fill(path, Brush::solid(scene_color_from(color)));
                     }
                 }
@@ -473,17 +672,17 @@ impl SceneCoordinator {
             // and text (they are separate paint units at a later tree index). The
             // image is sized/placed by `object-fit` (default `fill` = stretch to the
             // box) about the box center, and its `region` is the box so `cover`
-            // overflow is clipped. The paint uses the element's BORDER box (the
-            // content-box insets are not resolved in this pure coordinator — a
-            // documented approximation). A `src` absent from `images` (unloaded or
-            // failed) or no `src` at all emits nothing (byte-identical when `images`
-            // is empty). A `background-image` and an element `src` both paint: the
+            // overflow is clipped to the content box. An unresolved source
+            // paints nothing. A background image and a source can both paint:
             // background behind, the element image above.
-            if let Some(layout_box) = boxes.get(&node)
+            if let Some(layout_box) = layout_box
                 && let Some(image) = element_image_of(tree, node).and_then(|src| images.get(src))
             {
-                let tile = object_fit_tile(computed, node, image, layout_box.bounds);
-                node_paint.draw_image(image.clone(), tile, layout_box.bounds, false, false);
+                let region = replaced_region(style, layout_box);
+                if region.size.width > 0.0 && region.size.height > 0.0 {
+                    let tile = object_fit_tile(style, image, region);
+                    node_paint.draw_image(image.clone(), tile, region, false, false);
+                }
             }
 
             // An element's own VECTOR content (an `<img src="...svg">`) paints at
@@ -496,11 +695,14 @@ impl SceneCoordinator {
             // frame's resolution like every other path. `currentColor` is resolved
             // HERE, against the node's computed `color` — the parsed document is
             // colour-independent, so a theme change re-resolves without reparsing.
-            if let Some(layout_box) = boxes.get(&node)
+            if let Some(layout_box) = layout_box
                 && let Some(vector) = element_image_of(tree, node).and_then(|src| vectors.get(src))
                 && !vector.is_empty()
             {
-                emit_vector(&mut node_paint, computed, node, vector, layout_box.bounds);
+                let region = replaced_region(style, layout_box);
+                if region.size.width > 0.0 && region.size.height > 0.0 {
+                    emit_vector(&mut node_paint, style, vector, region);
+                }
             }
 
             // §5.3 Canvas. The painter already ran — before this walk, because it
@@ -521,7 +723,7 @@ impl SceneCoordinator {
             // only here in the display list. `::after` is a documented
             // approximation: it also paints in the node's own unit rather than
             // after the subtree.
-            if let (Some(content), Some(layout_box)) = (generated.get(&node), boxes.get(&node)) {
+            if let (Some(content), Some(layout_box)) = (generated.get(&node), layout_box) {
                 // The placeholder synthetic part (§4.16) paints only while the field
                 // is *effectively* empty (`:placeholder-shown`): the resolver already
                 // gated it on the retained empty value, but a live editing session on
@@ -568,12 +770,6 @@ impl SceneCoordinator {
                         editing,
                     );
                 }
-
-                for &child in retained.child_nodes().iter().rev() {
-                    if !visited.contains(&child) {
-                        stack.push((child, Some(node), depth.saturating_add(1)));
-                    }
-                }
             }
 
             // A node with no own paint (no background, no text) contributes no
@@ -588,13 +784,8 @@ impl SceneCoordinator {
             let commands = node_paint.build().into_commands();
             if !commands.is_empty() {
                 let z = zmap.get(&node).copied().unwrap_or(0);
-                let layer = layermap
-                    .get(&node)
-                    .copied()
-                    .unwrap_or(PaintLayer::NonPositioned);
                 units.push(PaintUnit {
                     z,
-                    layer,
                     tree_index,
                     order: PaintUnit::PAINT_ORDER,
                     commands,
@@ -605,26 +796,100 @@ impl SceneCoordinator {
         // Every recorded bracket becomes its `Push*` at the node's enter index and
         // its `Pop*` at the subtree's exit index, in the one place that decides how
         // the kinds nest.
-        brackets.emit(&zmap, &layermap, &mut units);
+        brackets.emit(&zmap, &stacking.context_end_band, &mut units);
 
-        // Stable sort by `(z, layer, tree_index, order)`, all ascending (CSS 2.1
-        // §9.9 / Appendix E painting order): higher z paints last (on top); within
-        // one z bucket the §9.9 `layer` rank lifts a positioned `z:auto`/`0` box
-        // (`PositionedZeroOrAuto`) above every non-positioned unit (`NonPositioned`)
-        // regardless of tree order — the fix for bug B2; equal-(z, layer) units keep
-        // pre-order (document) order; and `order` phases a subtree's `PushClip`
-        // before the node's paint and its `PopClip` after the whole subtree. When
-        // nothing is positioned every `layer` is `NonPositioned` and, with no radius,
-        // every `order` is `PAINT_ORDER`, so the key reduces to `(z, tree_index)`,
-        // reproducing the pre-fix pre-order sequence byte-for-byte.
-        units.sort_by_key(|unit| (unit.z, unit.layer, unit.tree_index, unit.order));
+        // Context bands capture stacking order. Within a band, pre-order
+        // and the command phase keep subtree brackets in sequence.
+        units.sort_by_key(|unit| (unit.z, unit.tree_index, unit.order));
 
-        let mut ordered: Vec<PaintCommand> = Vec::new();
+        // The exact command count is known now that every unit is built, and a
+        // `PaintCommand` is 128 bytes: growing from empty to a thousand of them
+        // reallocates about nine times, and every one of those memcpies the whole
+        // list built so far. One sized allocation instead.
+        let total: usize = units.iter().map(|unit| unit.commands.len()).sum();
+        let mut ordered: Vec<PaintCommand> = Vec::with_capacity(total);
         for unit in units {
             ordered.extend(unit.commands);
         }
         DisplayList::from_commands(ordered)
     }
+}
+
+fn push_background_clips(paint: &mut DisplayListBuilder, clips: [Option<Clip>; 2]) -> usize {
+    let mut count = 0;
+    for clip in clips.into_iter().flatten() {
+        paint.push_clip(clip);
+        count += 1;
+    }
+    count
+}
+
+fn fixed_background_origin(
+    mut viewport: Rect,
+    node: NodeId,
+    tree: &RetainedTree,
+    computed: &ComputedStyles,
+    scroll: &FastMap<NodeId, ScrollPaint>,
+) -> Option<Rect> {
+    let mut current = node;
+    for _ in 0..tree.len() {
+        if has_css_transform(computed, current) {
+            return None;
+        }
+        let Some(parent) = tree.visual_parent_of(current) else {
+            return Some(viewport);
+        };
+        if let Some(paint) = scroll.get(&parent) {
+            viewport.origin.x += paint.scroll_left;
+            viewport.origin.y += paint.scroll_top;
+        }
+        current = parent;
+    }
+    None
+}
+
+fn has_css_transform(computed: &ComputedStyles, node: NodeId) -> bool {
+    computed
+        .get(&node)
+        .and_then(|style| style.get(PropertyId::Transform))
+        .is_some_and(|value| match value.value() {
+            PropertyValue::Transform(transform) => !transform.is_identity(),
+            PropertyValue::TransformFunctions(_) => true,
+            _ => false,
+        })
+}
+
+/// Snaps background edges in surface space, accounting for ancestor scrolling.
+fn snap_background_bounds(
+    bounds: Rect,
+    node: NodeId,
+    tree: &RetainedTree,
+    computed: &ComputedStyles,
+    scroll: &FastMap<NodeId, ScrollPaint>,
+    root_transform: AffineTransform,
+) -> Rect {
+    let mut paint_transform = root_transform;
+    let mut current = node;
+    for _ in 0..tree.len() {
+        if has_css_transform(computed, current) {
+            return bounds;
+        }
+        let Some(parent) = tree.visual_parent_of(current) else {
+            return paint_transform.inverse().map_or(bounds, |inverse| {
+                let physical_bounds = paint_transform.map_rect(bounds);
+                let snapped =
+                    PixelSnapPolicy::new(PixelSnapMode::Edges).snap_rect(physical_bounds, 1.0);
+                inverse.map_rect(snapped)
+            });
+        };
+        if let Some(paint) = scroll.get(&parent) {
+            let offset = paint.offset();
+            paint_transform =
+                paint_transform.multiply(AffineTransform::translate(-offset.x, -offset.y));
+        }
+        current = parent;
+    }
+    bounds
 }
 
 impl Default for SceneCoordinator {
@@ -651,15 +916,12 @@ impl fmt::Debug for SceneCoordinator {
 // unchanged (byte-identical); a node without an arranged box has no basis for a
 // `%` and no box to correct against, so it keeps its absolute radii.
 fn resolved_corner_radii(
-    computed: &ComputedStyles,
-    boxes: &LayoutBoxes,
-    node: NodeId,
+    style: Option<&ComputedStyle>,
+    layout_box: Option<LayoutBox>,
 ) -> CornerRadii {
-    boxes.get(&node).map_or_else(
-        || corner_radii_of(computed, node, None),
-        |layout_box| {
-            corner_radii_of(computed, node, Some(layout_box.bounds)).normalized(layout_box.bounds)
-        },
+    layout_box.map_or_else(
+        || corner_radii_of(style, None),
+        |layout_box| corner_radii_of(style, Some(layout_box.bounds)).normalized(layout_box.bounds),
     )
 }
 
@@ -1296,6 +1558,77 @@ mod tests {
             kinds,
             vec!["fill", "image"],
             "color fills, image paints over it"
+        );
+    }
+
+    #[test]
+    fn background_placement_lists_cycle_over_empty_and_painted_layers() {
+        let mut tree = RetainedTree::new();
+        let root = tree.alloc(NodeKind::Root);
+        tree.set_root(root);
+        let node = add_child(&mut tree, root, 10);
+        let mut style = with_background_image(PropertyValue::BackgroundLayers(Box::new([
+            BackgroundLayer::None,
+            BackgroundLayer::Url("x.png".into()),
+            BackgroundLayer::Url("x.png".into()),
+        ])));
+        style.set(
+            PropertyId::BackgroundRepeat,
+            ComputedValue::from_concrete(PropertyValue::BackgroundRepeats(Box::new([
+                BackgroundRepeat::RepeatX,
+                BackgroundRepeat::RepeatY,
+            ])))
+            .unwrap(),
+        );
+        style.set(
+            PropertyId::BackgroundSize,
+            ComputedValue::from_concrete(PropertyValue::BackgroundSizes(Box::new([
+                BackgroundSize::Explicit {
+                    width: Length::px(20.0),
+                    height: Length::px(10.0),
+                },
+                BackgroundSize::Explicit {
+                    width: Length::px(30.0),
+                    height: Length::px(15.0),
+                },
+            ])))
+            .unwrap(),
+        );
+        style.set(
+            PropertyId::BackgroundPosition,
+            ComputedValue::from_concrete(PropertyValue::BackgroundPositions(Box::new([
+                BackgroundPosition::new(Length::px(0.0), Length::px(0.0)),
+                BackgroundPosition::new(Length::Percent(100.0), Length::Percent(100.0)),
+            ])))
+            .unwrap(),
+        );
+        let mut computed = ComputedStyles::default();
+        computed.insert(root, ComputedStyle::new());
+        computed.insert(node, style);
+        let mut boxes = LayoutBoxes::default();
+        boxes.insert(node, box_at(0.0, 0.0, 100.0, 50.0));
+        let mut images = HashMap::default();
+        images.insert("x.png".into(), canned_image());
+        let list =
+            SceneCoordinator::new().compose_with_images(&tree, &computed, &boxes, None, &images);
+        let tiles: Vec<_> = image_draws(&list)
+            .into_iter()
+            .map(|(tile, _, x, y)| (tile, x, y))
+            .collect();
+        assert_eq!(
+            tiles,
+            [
+                (
+                    Rect::new(Point::new(0.0, 0.0), Size::new(20.0, 10.0)),
+                    true,
+                    false
+                ),
+                (
+                    Rect::new(Point::new(70.0, 35.0), Size::new(30.0, 15.0)),
+                    false,
+                    true
+                ),
+            ]
         );
     }
 
@@ -3868,7 +4201,7 @@ mod tests {
             with_background_and_percent_radius(StyleColor::rgba(0.0, 0.0, 0.0, 1.0), 50.0),
         );
         let bounds = Rect::new(Point::new(0.0, 0.0), Size::new(200.0, 100.0));
-        let radii = corner_radii_of(&computed, node, Some(bounds));
+        let radii = corner_radii_of(computed.get(&node), Some(bounds));
         for c in radii.corners() {
             assert_eq!(c, CornerRadius::new(100.0, 50.0));
         }
@@ -3879,7 +4212,7 @@ mod tests {
         // Without an arranged box a percentage has no basis and yields a square
         // corner — it must never silently resolve against zero or a stale box.
         assert_eq!(
-            corner_radii_of(&computed, node, None),
+            corner_radii_of(computed.get(&node), None),
             CornerRadii::default()
         );
     }
@@ -4052,6 +4385,10 @@ mod tests {
                 scroll_top: 80.0,
                 content_height: 120.0,
                 shows_scrollbar: true,
+                scroll_left: 0.0,
+                rtl: false,
+                content_width: 0.0,
+                shows_horizontal_scrollbar: false,
             },
         );
         let list = SceneCoordinator::new().compose_with_images_scrolled(

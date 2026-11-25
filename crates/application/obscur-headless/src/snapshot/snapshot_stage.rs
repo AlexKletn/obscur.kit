@@ -1,28 +1,34 @@
-#![doc = include_str!("snapshot_stage.doc/_module.md")]
+//! Identifies which pipeline stage a snapshot captures: [`SnapshotStage`].
 
-#[doc = include_str!("snapshot_stage.doc/SnapshotStage.md")]
+#[doc = include_str!("../../docs/api/snapshot/snapshot_stage.doc/SnapshotStage.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum SnapshotStage {
-    #[doc = include_str!("snapshot_stage.doc/RetainedTree.md")]
+    /// The reconciled retained tree — the structural result of
+    /// `View → reconcile` (spec §5.13).
     RetainedTree,
-    #[doc = include_str!("snapshot_stage.doc/ComputedStyle.md")]
+    /// The per-node computed styles resolved from the tree (spec §4.14).
     ComputedStyle,
-    #[doc = include_str!("snapshot_stage.doc/Layout.md")]
+    /// The per-node absolute layout boxes arranged under the viewport
+    /// (spec §4.2).
     Layout,
-    #[doc = include_str!("snapshot_stage.doc/Scene.md")]
+    /// The composed, paint-ordered scene display list (spec §5.1).
     Scene,
-    #[doc = include_str!("snapshot_stage.doc/Paint.md")]
+    /// The flat paint-command stream a rasterizer consumes, in paint order
+    /// (spec §5.1, §7.4).
     Paint,
-    #[doc = include_str!("snapshot_stage.doc/Accessibility.md")]
+    /// The semantic accessibility tree linked to the retained tree
+    /// (spec §7.1, §7.4).
     Accessibility,
-    #[doc = include_str!("snapshot_stage.doc/RenderGraph.md")]
+    /// The backend-neutral render-graph description: the ordered render passes
+    /// and their target (spec §7.4).
     RenderGraph,
-    #[doc = include_str!("snapshot_stage.doc/Image.md")]
+    /// The rendered raster image — the one backend-dependent stage, produced by
+    /// a concrete renderer (spec §7.4).
     Image,
 }
 
 impl SnapshotStage {
-    #[doc = include_str!("snapshot_stage.doc/name.md")]
+    #[doc = include_str!("../../docs/api/snapshot/snapshot_stage.doc/name.md")]
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
@@ -37,7 +43,7 @@ impl SnapshotStage {
         }
     }
 
-    #[doc = include_str!("snapshot_stage.doc/is_backend_dependent.md")]
+    #[doc = include_str!("../../docs/api/snapshot/snapshot_stage.doc/is_backend_dependent.md")]
     #[must_use]
     pub const fn is_backend_dependent(self) -> bool {
         matches!(self, Self::Image)

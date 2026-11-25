@@ -1,19 +1,19 @@
-#![doc = include_str!("theme_vars.doc/_module.md")]
+//! Turning a system appearance into CSS custom properties.
 
 use obscur_scene::color::Color;
 use obscur_system::appearance::{SystemAppearance, SystemFont};
 
-#[doc = include_str!("theme_vars.doc/PREFIX.md")]
+#[doc = include_str!("../../docs/api/system_theme/theme_vars.doc/PREFIX.md")]
 pub const PREFIX: &str = "--obscur-sys-";
 
-#[doc = include_str!("theme_vars.doc/ThemeVars.md")]
+#[doc = include_str!("../../docs/api/system_theme/theme_vars.doc/ThemeVars.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ThemeVars {
     entries: Vec<(String, String)>,
 }
 
 impl ThemeVars {
-    #[doc = include_str!("theme_vars.doc/from_appearance.md")]
+    #[doc = include_str!("../../docs/api/system_theme/theme_vars.doc/from_appearance.md")]
     #[must_use]
     pub fn from_appearance(appearance: &SystemAppearance) -> Self {
         let mut vars = Self::default();
@@ -26,6 +26,10 @@ impl ThemeVars {
         }
         if let Some(accent) = appearance.accent {
             vars.push("accent", &css_color(accent));
+        }
+
+        if let Some(radius) = appearance.window_radius {
+            vars.push("window-radius", &format!("{}px", trim_number(radius)));
         }
 
         let palette = &appearance.palette;
@@ -57,26 +61,26 @@ impl ThemeVars {
         vars
     }
 
-    #[doc = include_str!("theme_vars.doc/iter.md")]
+    /// Each `(name, value)` pair, in emission order.
     pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
         self.entries
             .iter()
             .map(|(name, value)| (name.as_str(), value.as_str()))
     }
 
-    #[doc = include_str!("theme_vars.doc/len.md")]
+    /// How many properties the desktop's answer produced.
     #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
-    #[doc = include_str!("theme_vars.doc/is_empty.md")]
+    /// Whether the desktop said nothing this can carry.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
-    #[doc = include_str!("theme_vars.doc/get.md")]
+    /// One property by its full name, prefix included.
     #[must_use]
     pub fn get(&self, name: &str) -> Option<&str> {
         self.entries
@@ -85,7 +89,7 @@ impl ThemeVars {
             .map(|(_, value)| value.as_str())
     }
 
-    #[doc = include_str!("theme_vars.doc/stylesheet.md")]
+    #[doc = include_str!("../../docs/api/system_theme/theme_vars.doc/stylesheet.md")]
     #[must_use]
     pub fn stylesheet(&self) -> String {
         if self.entries.is_empty() {
@@ -103,20 +107,20 @@ impl ThemeVars {
         out
     }
 
-    #[doc = include_str!("theme_vars.doc/push.md")]
+    /// Add one property, prefix applied here so no caller can forget it.
     fn push(&mut self, suffix: &str, value: &str) {
         self.entries
             .push((format!("{PREFIX}{suffix}"), value.to_owned()));
     }
 
-    #[doc = include_str!("theme_vars.doc/push_color.md")]
+    /// Add a colour property, or nothing where there is no colour.
     fn push_color(&mut self, suffix: &str, color: Option<Color>) {
         if let Some(color) = color {
             self.push(suffix, &css_color(color));
         }
     }
 
-    #[doc = include_str!("theme_vars.doc/push_font.md")]
+    #[doc = include_str!("../../docs/api/system_theme/theme_vars.doc/push_font.md")]
     fn push_font(&mut self, suffix: &str, font: Option<&SystemFont>) {
         let Some(font) = font else {
             return;
@@ -130,7 +134,7 @@ impl ThemeVars {
     }
 }
 
-#[doc = include_str!("theme_vars.doc/css_color.md")]
+#[doc = include_str!("../../docs/api/system_theme/theme_vars.doc/css_color.md")]
 fn css_color(color: Color) -> String {
     // Clamped first, so the cast below cannot see a value outside 0..=255 and
     // the truncation clippy warns about cannot happen.
@@ -144,7 +148,7 @@ fn css_color(color: Color) -> String {
     }
 }
 
-#[doc = include_str!("theme_vars.doc/trim_number.md")]
+/// A number with no trailing zeros, to three decimals.
 fn trim_number(value: f32) -> String {
     // Three decimals is finer than any of these values is measured to, and a
     // trailing `.0` in a stylesheet is noise a reader has to skip.
@@ -178,6 +182,8 @@ mod tests {
             text_scale: Some(1.25),
             cursor_size: Some(24),
             icon_theme: Some("breeze-dark".into()),
+            window_radius: Some(15.0),
+            window_decoration: None,
             reduced_motion: Some(true),
         }
     }
@@ -208,6 +214,12 @@ mod tests {
         for (name, _) in ThemeVars::from_appearance(&full()).iter() {
             assert!(name.starts_with(PREFIX), "{name} is unprefixed");
         }
+    }
+
+    #[test]
+    fn window_radius_is_published_as_a_css_length() {
+        let vars = ThemeVars::from_appearance(&full());
+        assert_eq!(vars.get("--obscur-sys-window-radius"), Some("15px"));
     }
 
     #[test]

@@ -1,17 +1,18 @@
-#![doc = include_str!("flex_axis_bounds.doc/_module.md")]
+#![doc = include_str!("../../docs/api/algorithm/flex_axis_bounds.doc/_module.md")]
 
 use crate::model::{Dimension, LayoutStyle};
 
-#[doc = include_str!("flex_axis_bounds.doc/main_bounds.md")]
+/// The item's main-axis min / max dimensions for the container's flow direction:
+/// `width` bounds along a row, `height` bounds along a column.
 pub(super) fn main_bounds(style: &LayoutStyle, is_row: bool) -> (Dimension, Dimension) {
     if is_row {
-        (style.min_width, style.max_width)
+        (style.min_width.clone(), style.max_width.clone())
     } else {
-        (style.min_height, style.max_height)
+        (style.min_height.clone(), style.max_height.clone())
     }
 }
 
-#[doc = include_str!("flex_axis_bounds.doc/clamp_floor.md")]
+#[doc = include_str!("../../docs/api/algorithm/flex_axis_bounds.doc/clamp_floor.md")]
 pub(super) fn clamp_floor(value: f32, min_floor: f32, max_val: f32) -> f32 {
     let mut clamped = value;
     if max_val.is_finite() {
@@ -20,7 +21,7 @@ pub(super) fn clamp_floor(value: f32, min_floor: f32, max_val: f32) -> f32 {
     clamped.max(min_floor).max(0.0)
 }
 
-#[doc = include_str!("flex_axis_bounds.doc/axis_bp.md")]
+#[doc = include_str!("../../docs/api/algorithm/flex_axis_bounds.doc/axis_bp.md")]
 pub(super) fn axis_bp(style: &LayoutStyle, horizontal: bool) -> f32 {
     if horizontal {
         style.border.left + style.border.right + style.padding.left + style.padding.right
@@ -29,16 +30,18 @@ pub(super) fn axis_bp(style: &LayoutStyle, horizontal: bool) -> f32 {
     }
 }
 
-#[doc = include_str!("flex_axis_bounds.doc/cross_bounds.md")]
+/// The item's **cross**-axis min / max dimensions for the container's flow
+/// direction: `height` bounds across a row, `width` bounds across a column — the
+/// mirror of [`main_bounds`].
 fn cross_bounds(style: &LayoutStyle, is_row: bool) -> (Dimension, Dimension) {
     if is_row {
-        (style.min_height, style.max_height)
+        (style.min_height.clone(), style.max_height.clone())
     } else {
-        (style.min_width, style.max_width)
+        (style.min_width.clone(), style.max_width.clone())
     }
 }
 
-#[doc = include_str!("flex_axis_bounds.doc/clamp_cross.md")]
+#[doc = include_str!("../../docs/api/algorithm/flex_axis_bounds.doc/clamp_cross.md")]
 pub(super) fn clamp_cross(
     value: f32,
     style: &LayoutStyle,

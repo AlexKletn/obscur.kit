@@ -1,36 +1,37 @@
-#![doc = include_str!("normalized_pipeline.doc/_module.md")]
+//! A stable, order-independent form of a pipeline snapshot: [`NormalizedPipeline`].
 
 use obscur_identity::NodeId;
 
 use super::{ImageSnapshot, NormalizedNode};
 
-#[doc = include_str!("normalized_pipeline.doc/NormalizedPipeline.md")]
+#[doc = include_str!("../../docs/api/snapshot/normalized_pipeline.doc/NormalizedPipeline.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct NormalizedPipeline {
-    #[doc = include_str!("normalized_pipeline.doc/root.md")]
+    /// The retained-tree root at capture, if any.
     root: Option<NodeId>,
-    #[doc = include_str!("normalized_pipeline.doc/node_count.md")]
+    /// The number of nodes in the retained-tree snapshot.
     node_count: usize,
-    #[doc = include_str!("normalized_pipeline.doc/nodes.md")]
+    /// One row per node present in the computed styles or the layout boxes,
+    /// sorted by [`NodeId`].
     nodes: Vec<NormalizedNode>,
-    #[doc = include_str!("normalized_pipeline.doc/fill_count.md")]
+    /// The number of paint commands (fills) in the composed scene.
     fill_count: usize,
-    #[doc = include_str!("normalized_pipeline.doc/scene_balanced.md")]
+    /// Whether the composed scene's display list is balanced.
     scene_balanced: bool,
-    #[doc = include_str!("normalized_pipeline.doc/paint_command_count.md")]
+    /// The number of paint commands in the paint-command stream (spec §7.4).
     paint_command_count: usize,
-    #[doc = include_str!("normalized_pipeline.doc/accessibility_node_count.md")]
+    /// The number of nodes in the accessibility (semantic) snapshot (spec §7.1).
     accessibility_node_count: usize,
-    #[doc = include_str!("normalized_pipeline.doc/accessibility_root.md")]
+    /// The accessibility tree root at capture, if any (spec §7.1).
     accessibility_root: Option<NodeId>,
-    #[doc = include_str!("normalized_pipeline.doc/render_pass_count.md")]
+    /// The number of passes in the backend-neutral render graph (spec §7.4).
     render_pass_count: usize,
-    #[doc = include_str!("normalized_pipeline.doc/image.md")]
+    /// The rendered image, if a backend attached one (spec §7.4).
     image: Option<ImageSnapshot>,
 }
 
 impl NormalizedPipeline {
-    #[doc = include_str!("normalized_pipeline.doc/new.md")]
+    #[doc = include_str!("../../docs/api/snapshot/normalized_pipeline.doc/new.md")]
     #[must_use]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -59,61 +60,62 @@ impl NormalizedPipeline {
         }
     }
 
-    #[doc = include_str!("normalized_pipeline.doc/root_2.md")]
+    /// Returns the retained-tree root at capture, if any.
     #[must_use]
     pub fn root(&self) -> Option<NodeId> {
         self.root
     }
 
-    #[doc = include_str!("normalized_pipeline.doc/node_count_2.md")]
+    /// Returns the number of nodes in the retained-tree snapshot.
     #[must_use]
     pub fn node_count(&self) -> usize {
         self.node_count
     }
 
-    #[doc = include_str!("normalized_pipeline.doc/nodes_2.md")]
+    /// Returns the `NodeId`-sorted per-node rows.
     #[must_use]
     pub fn nodes(&self) -> &[NormalizedNode] {
         &self.nodes
     }
 
-    #[doc = include_str!("normalized_pipeline.doc/fill_count_2.md")]
+    /// Returns the number of paint commands (fills) in the composed scene.
     #[must_use]
     pub fn fill_count(&self) -> usize {
         self.fill_count
     }
 
-    #[doc = include_str!("normalized_pipeline.doc/scene_balanced_2.md")]
+    /// Returns whether the composed scene's display list is balanced.
     #[must_use]
     pub fn scene_balanced(&self) -> bool {
         self.scene_balanced
     }
 
-    #[doc = include_str!("normalized_pipeline.doc/paint_command_count_2.md")]
+    /// Returns the number of paint commands in the paint-command stream
+    /// (spec §7.4).
     #[must_use]
     pub fn paint_command_count(&self) -> usize {
         self.paint_command_count
     }
 
-    #[doc = include_str!("normalized_pipeline.doc/accessibility_node_count_2.md")]
+    /// Returns the number of nodes in the accessibility snapshot (spec §7.1).
     #[must_use]
     pub fn accessibility_node_count(&self) -> usize {
         self.accessibility_node_count
     }
 
-    #[doc = include_str!("normalized_pipeline.doc/accessibility_root_2.md")]
+    /// Returns the accessibility tree root at capture, if any (spec §7.1).
     #[must_use]
     pub fn accessibility_root(&self) -> Option<NodeId> {
         self.accessibility_root
     }
 
-    #[doc = include_str!("normalized_pipeline.doc/render_pass_count_2.md")]
+    /// Returns the number of passes in the render graph (spec §7.4).
     #[must_use]
     pub fn render_pass_count(&self) -> usize {
         self.render_pass_count
     }
 
-    #[doc = include_str!("normalized_pipeline.doc/image_2.md")]
+    #[doc = include_str!("../../docs/api/snapshot/normalized_pipeline.doc/image_2.md")]
     #[must_use]
     pub fn image(&self) -> Option<&ImageSnapshot> {
         self.image.as_ref()

@@ -1,8 +1,9 @@
-#![doc = include_str!("slot_surface.doc/_module.md")]
+//! `SlotSurface`: the string-keyed *tooling* view of one declared slot (spec
+//! §2.12).
 
 use crate::contract::{ChildrenSurface, SlotCardinality};
 
-#[doc = include_str!("slot_surface.doc/SlotSurface.md")]
+#[doc = include_str!("../../docs/api/contract/slot_surface.doc/SlotSurface.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SlotSurface {
     name: &'static str,
@@ -11,7 +12,8 @@ pub struct SlotSurface {
 }
 
 impl SlotSurface {
-    #[doc = include_str!("slot_surface.doc/new.md")]
+    /// Declares a slot called `name` accepting `cardinality` children, with no
+    /// restriction on which children those are.
     #[must_use]
     pub const fn new(name: &'static str, cardinality: SlotCardinality) -> Self {
         Self {
@@ -21,7 +23,8 @@ impl SlotSurface {
         }
     }
 
-    #[doc = include_str!("slot_surface.doc/allowing_child.md")]
+    /// Adds `tag` to the slot's allowed child tags (fluent), switching the
+    /// membership rule to [`ChildrenSurface::Only`].
     #[must_use]
     pub fn allowing_child(mut self, tag: &'static str) -> Self {
         match &mut self.children {
@@ -31,19 +34,19 @@ impl SlotSurface {
         self
     }
 
-    #[doc = include_str!("slot_surface.doc/name.md")]
+    /// Returns the slot's name — the value a child's `slot="…"` must match.
     #[must_use]
     pub const fn name(&self) -> &'static str {
         self.name
     }
 
-    #[doc = include_str!("slot_surface.doc/cardinality.md")]
+    /// Returns how many children the slot accepts.
     #[must_use]
     pub const fn cardinality(&self) -> SlotCardinality {
         self.cardinality
     }
 
-    #[doc = include_str!("slot_surface.doc/children.md")]
+    /// Returns which child tags the slot admits.
     #[must_use]
     pub const fn children(&self) -> &ChildrenSurface {
         &self.children

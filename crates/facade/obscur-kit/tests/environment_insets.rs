@@ -215,3 +215,41 @@ fn the_environment_is_reported_back_as_a_whole() {
     assert_eq!(rt.environment().safe_area, NOTCHED);
     assert_eq!(rt.environment().keyboard, keyboard);
 }
+
+#[doc = include_str!("environment_insets.doc/app_control_passes_host_insets_to_layout.md")]
+#[test]
+fn app_control_passes_host_insets_to_layout() {
+    use obscur_kit::AppControl;
+    use obscur_kit::bootstrap::CssPipeline;
+
+    let control = AppControl::new();
+    let mut css = CssPipeline::new();
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(400.0, 800.0));
+    let view = view();
+    let sheets = [compile(
+        "#root { padding-top: env(safe-area-inset-top);
+                 padding-bottom: env(keyboard-inset-bottom) }
+         #child { width: 10px; height: 10px }",
+    )];
+    let keyboard = Insets {
+        bottom: 120.0,
+        ..Insets::uniform(0.0)
+    };
+
+    control.set_safe_area_insets(NOTCHED);
+    control.set_keyboard_insets(keyboard);
+    assert_eq!(runtime.environment(), EnvironmentValues::none());
+    control.apply(&mut runtime, &mut css);
+    runtime.render_now(&view, &sheets);
+    let root = at(&runtime, &[0]);
+    let style = runtime.computed_style(root).unwrap();
+    assert_eq!(px_of(style.get(PropertyId::PaddingTop)), Some(44.0));
+    assert_eq!(px_of(style.get(PropertyId::PaddingBottom)), Some(120.0));
+
+    control.set_keyboard_insets(Insets::uniform(0.0));
+    control.apply(&mut runtime, &mut css);
+    runtime.render_now(&view, &sheets);
+    let style = runtime.computed_style(root).unwrap();
+    assert_eq!(px_of(style.get(PropertyId::PaddingTop)), Some(44.0));
+    assert_eq!(px_of(style.get(PropertyId::PaddingBottom)), Some(0.0));
+}

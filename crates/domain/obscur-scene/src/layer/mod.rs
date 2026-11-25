@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Layer module.
 mod composition_mode;
 pub use composition_mode::CompositionMode;
 mod layer_effect;

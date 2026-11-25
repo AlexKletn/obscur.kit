@@ -1,9 +1,9 @@
-#![doc = include_str!("render_frame.doc/_module.md")]
+//! A scene snapshot ready to render at a viewport (spec §5.2).
 
 use obscur_geometry::Size;
 use obscur_scene::scene::{SceneGeneration, SceneSnapshot};
 
-#[doc = include_str!("render_frame.doc/RenderFrame.md")]
+#[doc = include_str!("../../docs/api/frame/render_frame.doc/RenderFrame.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct RenderFrame {
     scene: SceneSnapshot,
@@ -11,25 +11,26 @@ pub struct RenderFrame {
 }
 
 impl RenderFrame {
-    #[doc = include_str!("render_frame.doc/new.md")]
+    /// Pairs a [`SceneSnapshot`] with the physical-pixel `viewport` it renders
+    /// into.
     #[must_use]
     pub fn new(scene: SceneSnapshot, viewport: Size) -> Self {
         Self { scene, viewport }
     }
 
-    #[doc = include_str!("render_frame.doc/scene.md")]
+    /// The backend-agnostic scene snapshot this frame renders (spec §5.2).
     #[must_use]
     pub const fn scene(&self) -> &SceneSnapshot {
         &self.scene
     }
 
-    #[doc = include_str!("render_frame.doc/viewport.md")]
+    /// The target area this frame renders into, in physical pixels.
     #[must_use]
     pub const fn viewport(&self) -> Size {
         self.viewport
     }
 
-    #[doc = include_str!("render_frame.doc/generation.md")]
+    #[doc = include_str!("../../docs/api/frame/render_frame.doc/generation.md")]
     #[must_use]
     pub fn generation(&self) -> SceneGeneration {
         self.scene.generation()

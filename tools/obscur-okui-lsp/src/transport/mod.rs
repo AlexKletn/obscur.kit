@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+#![doc = include_str!("../../docs/api/transport/mod.doc/_module.md")]
 mod reader;
 pub use reader::read_message;
 mod writer;

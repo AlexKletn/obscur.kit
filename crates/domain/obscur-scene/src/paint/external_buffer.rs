@@ -1,28 +1,28 @@
-#![doc = include_str!("external_buffer.doc/_module.md")]
+#![doc = include_str!("../../docs/api/paint/external_buffer.doc/_module.md")]
 
 use crate::color::AlphaMode;
 
 use super::{BufferFormat, SceneImage};
 
-#[doc = include_str!("external_buffer.doc/ExternalBuffer.md")]
+/// A borrowed description of foreign pixels: size, row stride, layout and alpha.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ExternalBuffer<'a> {
-    #[doc = include_str!("external_buffer.doc/width.md")]
+    /// The image width in pixels.
     width: u32,
-    #[doc = include_str!("external_buffer.doc/height.md")]
+    /// The image height in pixels.
     height: u32,
-    #[doc = include_str!("external_buffer.doc/stride.md")]
+    #[doc = include_str!("../../docs/api/paint/external_buffer.doc/stride.md")]
     stride: usize,
-    #[doc = include_str!("external_buffer.doc/format.md")]
+    /// How the bytes of one pixel are laid out.
     format: BufferFormat,
-    #[doc = include_str!("external_buffer.doc/alpha.md")]
+    /// Whether the colour channels are already multiplied by alpha.
     alpha: AlphaMode,
-    #[doc = include_str!("external_buffer.doc/pixels.md")]
+    /// The borrowed bytes.
     pixels: &'a [u8],
 }
 
 impl<'a> ExternalBuffer<'a> {
-    #[doc = include_str!("external_buffer.doc/new.md")]
+    #[doc = include_str!("../../docs/api/paint/external_buffer.doc/new.md")]
     #[must_use]
     pub fn new(
         pixels: &'a [u8],
@@ -58,7 +58,7 @@ impl<'a> ExternalBuffer<'a> {
         })
     }
 
-    #[doc = include_str!("external_buffer.doc/packed.md")]
+    /// The same, for a buffer with no row padding at all.
     #[must_use]
     pub fn packed(
         pixels: &'a [u8],
@@ -71,37 +71,38 @@ impl<'a> ExternalBuffer<'a> {
         Self::new(pixels, width, height, stride, format, alpha)
     }
 
-    #[doc = include_str!("external_buffer.doc/width_2.md")]
+    /// The image width in pixels.
     #[must_use]
     pub const fn width(&self) -> u32 {
         self.width
     }
 
-    #[doc = include_str!("external_buffer.doc/height_2.md")]
+    /// The image height in pixels.
     #[must_use]
     pub const fn height(&self) -> u32 {
         self.height
     }
 
-    #[doc = include_str!("external_buffer.doc/stride_2.md")]
+    /// The row stride in bytes.
     #[must_use]
     pub const fn stride(&self) -> usize {
         self.stride
     }
 
-    #[doc = include_str!("external_buffer.doc/format_2.md")]
+    /// The pixel layout.
     #[must_use]
     pub const fn format(&self) -> BufferFormat {
         self.format
     }
 
-    #[doc = include_str!("external_buffer.doc/is_empty.md")]
+    /// Whether the buffer has no pixels — a camera that has not produced a frame yet,
+    /// which is a real state and not an error.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.width == 0 || self.height == 0
     }
 
-    #[doc = include_str!("external_buffer.doc/to_scene_image.md")]
+    #[doc = include_str!("../../docs/api/paint/external_buffer.doc/to_scene_image.md")]
     #[must_use]
     pub fn to_scene_image(&self) -> SceneImage {
         let step = self.format.bytes_per_pixel();

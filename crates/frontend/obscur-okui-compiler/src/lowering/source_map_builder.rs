@@ -1,8 +1,9 @@
-#![doc = include_str!("source_map_builder.doc/_module.md")]
+//! `SourceMapBuilder`: accumulates IR-node-id → source-span mappings during
+//! lowering, then produces a [`SourceMap`] (spec §2.15).
 
 use obscur_ui_ir::source::{SourceLocation, SourceMap, SourceReference};
 
-#[doc = include_str!("source_map_builder.doc/SourceMapBuilder.md")]
+#[doc = include_str!("../../docs/api/lowering/source_map_builder.doc/SourceMapBuilder.md")]
 #[derive(Debug, Clone)]
 pub struct SourceMapBuilder {
     source_name: Box<str>,
@@ -10,7 +11,8 @@ pub struct SourceMapBuilder {
 }
 
 impl SourceMapBuilder {
-    #[doc = include_str!("source_map_builder.doc/new.md")]
+    /// Creates a builder whose recorded spans name `source_name` (the logical
+    /// `.okui` source identifier).
     #[must_use]
     pub fn new(source_name: impl Into<Box<str>>) -> Self {
         Self {
@@ -19,7 +21,7 @@ impl SourceMapBuilder {
         }
     }
 
-    #[doc = include_str!("source_map_builder.doc/record.md")]
+    #[doc = include_str!("../../docs/api/lowering/source_map_builder.doc/record.md")]
     pub fn record(&mut self, node_id: u64, offset: u32) {
         let location = SourceLocation::new(offset, 1, 1);
         self.map.insert(
@@ -28,19 +30,19 @@ impl SourceMapBuilder {
         );
     }
 
-    #[doc = include_str!("source_map_builder.doc/build.md")]
+    /// Consumes the builder, returning the accumulated [`SourceMap`].
     #[must_use]
     pub fn build(self) -> SourceMap {
         self.map
     }
 
-    #[doc = include_str!("source_map_builder.doc/len.md")]
+    /// Returns the number of recorded node-id → span mappings.
     #[must_use]
     pub fn len(&self) -> usize {
         self.map.len()
     }
 
-    #[doc = include_str!("source_map_builder.doc/is_empty.md")]
+    /// Returns whether no mappings have been recorded yet.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.map.is_empty()
@@ -48,7 +50,7 @@ impl SourceMapBuilder {
 }
 
 impl Default for SourceMapBuilder {
-    #[doc = include_str!("source_map_builder.doc/default.md")]
+    /// A builder whose recorded spans carry an empty source name.
     fn default() -> Self {
         Self::new("")
     }

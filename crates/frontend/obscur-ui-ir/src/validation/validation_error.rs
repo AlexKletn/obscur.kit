@@ -1,27 +1,35 @@
-#![doc = include_str!("validation_error.doc/_module.md")]
+//! `UiIrValidationError`: one structural fault found while validating a UI IR
+//! document (spec §2.5 validation).
 
-#[doc = include_str!("validation_error.doc/UiIrValidationError.md")]
+#[doc = include_str!("../../docs/api/validation/validation_error.doc/UiIrValidationError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UiIrValidationError {
-    #[doc = include_str!("validation_error.doc/DuplicateNodeId.md")]
+    /// Two nodes in the tree share the same stable id; the payload is the
+    /// duplicated id. Ids must be unique so source maps and diagnostics resolve
+    /// unambiguously.
     DuplicateNodeId(u64),
-    #[doc = include_str!("validation_error.doc/EmptyElementTag.md")]
+    /// An `Element` or `Component` node carries an empty tag; the payload is the
+    /// node's id. Such nodes have no element name or component to instantiate.
     EmptyElementTag(u64),
-    #[doc = include_str!("validation_error.doc/TextNodeHasChildren.md")]
+    /// A `Text` node has children; the payload is the node's id. Text leaves
+    /// cannot contain a subtree.
     TextNodeHasChildren(u64),
-    #[doc = include_str!("validation_error.doc/EmptyBindingPath.md")]
+    /// A property's value is a binding with an empty path. Names the owning
+    /// `node` and the offending `property`.
     EmptyBindingPath {
-        #[doc = include_str!("validation_error.doc/node.md")]
+        /// The stable id of the node owning the property.
         node: u64,
-        #[doc = include_str!("validation_error.doc/property.md")]
+        /// The name of the property whose binding path was empty.
         property: Box<str>,
     },
-    #[doc = include_str!("validation_error.doc/UndeclaredCapability.md")]
+    /// A required capability was not present in a provided allow-set, or a
+    /// declared capability id was itself empty; the payload is the offending
+    /// capability id (empty string for the empty-id case).
     UndeclaredCapability(Box<str>),
 }
 
 impl UiIrValidationError {
-    #[doc = include_str!("validation_error.doc/node_id.md")]
+    #[doc = include_str!("../../docs/api/validation/validation_error.doc/node_id.md")]
     #[must_use]
     pub const fn node_id(&self) -> Option<u64> {
         match self {

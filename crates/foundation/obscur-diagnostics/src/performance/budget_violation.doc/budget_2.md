@@ -1,1 +1,0 @@
-Returns the budgeted limit.

@@ -1,22 +1,23 @@
-#![doc = include_str!("text_hit_test.doc/_module.md")]
+//! Caret hit-testing: mapping between points and source byte offsets (spec §5.10).
 
 use obscur_geometry::{Point, Rect, Size};
 
 use super::{TextLayout, TextLine};
 
-#[doc = include_str!("text_hit_test.doc/TextHitTest.md")]
+#[doc = include_str!("../../docs/api/layout/text_hit_test.doc/TextHitTest.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TextHitTest {
-    #[doc = include_str!("text_hit_test.doc/line_index.md")]
+    /// The index of the line the point resolved to.
     line_index: usize,
-    #[doc = include_str!("text_hit_test.doc/byte_offset.md")]
+    /// The source byte offset of the nearest cluster boundary.
     byte_offset: usize,
-    #[doc = include_str!("text_hit_test.doc/is_trailing.md")]
+    /// Whether the point fell on the trailing half of the glyph.
     is_trailing: bool,
 }
 
 impl TextHitTest {
-    #[doc = include_str!("text_hit_test.doc/new.md")]
+    /// Creates a hit result naming `line_index`, the source `byte_offset`, and the
+    /// `is_trailing` flag.
     #[must_use]
     pub const fn new(line_index: usize, byte_offset: usize, is_trailing: bool) -> Self {
         Self {
@@ -26,25 +27,26 @@ impl TextHitTest {
         }
     }
 
-    #[doc = include_str!("text_hit_test.doc/line_index_2.md")]
+    /// Returns the index of the line the point resolved to.
     #[must_use]
     pub const fn line_index(&self) -> usize {
         self.line_index
     }
 
-    #[doc = include_str!("text_hit_test.doc/byte_offset_2.md")]
+    /// Returns the source byte offset of the nearest cluster boundary.
     #[must_use]
     pub const fn byte_offset(&self) -> usize {
         self.byte_offset
     }
 
-    #[doc = include_str!("text_hit_test.doc/is_trailing_2.md")]
+    /// Returns whether the point fell on the trailing half of the glyph (the
+    /// caret then belongs after this cluster).
     #[must_use]
     pub const fn is_trailing(&self) -> bool {
         self.is_trailing
     }
 
-    #[doc = include_str!("text_hit_test.doc/hit.md")]
+    #[doc = include_str!("../../docs/api/layout/text_hit_test.doc/hit.md")]
     #[must_use]
     pub fn hit(layout: &TextLayout, point: Point) -> Self {
         let lines = layout.lines();
@@ -75,7 +77,7 @@ impl TextHitTest {
         Self::new(line_index, line.range().end, false)
     }
 
-    #[doc = include_str!("text_hit_test.doc/caret_rect.md")]
+    #[doc = include_str!("../../docs/api/layout/text_hit_test.doc/caret_rect.md")]
     #[must_use]
     pub fn caret_rect(
         layout: &TextLayout,

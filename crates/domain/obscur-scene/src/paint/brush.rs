@@ -1,36 +1,37 @@
-#![doc = include_str!("brush.doc/_module.md")]
+//! The typed brush that paints a shape.
 
 use crate::color::Color;
 
 use super::{ConicGradient, LinearGradient, RadialGradient, SolidBrush};
 
-#[doc = include_str!("brush.doc/Brush.md")]
+#[doc = include_str!("../../docs/api/paint/brush.doc/Brush.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Brush {
-    #[doc = include_str!("brush.doc/Solid.md")]
+    /// A flat, single-color fill.
     Solid(SolidBrush),
-    #[doc = include_str!("brush.doc/Linear.md")]
+    /// A linear (axial) gradient.
     Linear(LinearGradient),
-    #[doc = include_str!("brush.doc/Radial.md")]
+    /// A radial (concentric) gradient.
     Radial(RadialGradient),
-    #[doc = include_str!("brush.doc/Conic.md")]
+    /// A conic (angular / sweep) gradient.
     Conic(ConicGradient),
 }
 
 impl Brush {
-    #[doc = include_str!("brush.doc/solid.md")]
+    /// Creates a solid-color brush painting with `color`.
     #[must_use]
     pub const fn solid(color: Color) -> Self {
         Self::Solid(SolidBrush::new(color))
     }
 
-    #[doc = include_str!("brush.doc/is_solid.md")]
+    /// Returns whether this brush is a [`Brush::Solid`] brush.
     #[must_use]
     pub const fn is_solid(&self) -> bool {
         matches!(self, Self::Solid(_))
     }
 
-    #[doc = include_str!("brush.doc/as_solid.md")]
+    /// Returns the inner [`SolidBrush`] if this is a [`Brush::Solid`] brush,
+    /// otherwise `None`.
     #[must_use]
     pub const fn as_solid(&self) -> Option<&SolidBrush> {
         match self {

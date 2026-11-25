@@ -1,25 +1,26 @@
-#![doc = include_str!("spatial_navigation.doc/_module.md")]
+//! The [`SpatialNavigation`] helper for directional focus movement
+//! (spec §4.7).
 
 use obscur_geometry::Rect;
 use obscur_identity::NodeId;
 
 use super::NavigationDirection;
 
-#[doc = include_str!("spatial_navigation.doc/CROSS_AXIS_PENALTY.md")]
+#[doc = include_str!("../../docs/api/spatial/spatial_navigation.doc/CROSS_AXIS_PENALTY.md")]
 const CROSS_AXIS_PENALTY: f32 = 2.0;
 
-#[doc = include_str!("spatial_navigation.doc/SpatialNavigation.md")]
+#[doc = include_str!("../../docs/api/spatial/spatial_navigation.doc/SpatialNavigation.md")]
 #[derive(Debug, Default, Clone)]
 pub struct SpatialNavigation;
 
 impl SpatialNavigation {
-    #[doc = include_str!("spatial_navigation.doc/new.md")]
+    /// Creates the navigation helper.
     #[must_use]
     pub fn new() -> Self {
         Self
     }
 
-    #[doc = include_str!("spatial_navigation.doc/find_next.md")]
+    #[doc = include_str!("../../docs/api/spatial/spatial_navigation.doc/find_next.md")]
     #[must_use]
     pub fn find_next(
         &self,
@@ -59,7 +60,7 @@ impl SpatialNavigation {
     }
 }
 
-#[doc = include_str!("spatial_navigation.doc/center.md")]
+/// Returns the center `(x, y)` of `rect`.
 fn center(rect: Rect) -> (f32, f32) {
     (
         rect.origin.x + rect.size.width / 2.0,

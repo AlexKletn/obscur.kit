@@ -66,8 +66,8 @@ you restyle it.
 | `Input` | `new(command)`, `with_value(command, value)` | `placeholder(…)`, `multiline(bool)`, `disabled(bool)` | `input`, or `textarea` when multiline |
 | `Select` | `new(command)` | `option(label)`, `with_options(iter)`, `disabled(bool)`, `open()`, `selected_label()` | `select` |
 | `List` | `new()` | `item(label)`, `with_items(iter)`, `selected_indices()` | — |
-| `Table` | `new()` | `column(Column)`, `with_columns(iter)`, `row(cells)`, `with_rows(iter)`, `row_count()`, `column_count()` | `table`, and its parts `tr` / `th` / `td` |
-| `Tabs` | `new()` | `tab(label)`, `with_tabs(iter)` | — |
+| `Table` | `new()` | `column(Column)`, `with_columns(iter)`, `row(cells)`, `with_rows(iter)`, `sort_by(column)`, `move_row(from, to)`, `move_column(from, to)`, `resize_column(index, width)`, `sticky_header(bool)`, `row_count()`, `column_count()` | `table`, and its parts `tr` / `th` / `td` |
+| `Tabs` | `new()` | `tab(label)`, `tab_with_id(id, label)`, `with_tabs(iter)` | — |
 | `Tree` | — | built from `TreeNode::new(label, depth, has_children)` | — |
 | `Menu` | `new()` | `item(MenuItem)`, `with_items(iter)`, `open()` | — |
 | `MenuItem` | `new(label, command)` | `disabled()` | — |
@@ -101,6 +101,21 @@ The widgets with no CSS type at all set a private `role` property instead — th
 is not a class and not a local name, so a CSS type selector cannot match it. To
 style a `List` or a `Menu`, use classes.
 
+Use `TreeGrid` for hierarchical rows with additional cells. Build rows in
+preorder using `TreeNode` depth, then call `set_expanded`, `select`, or
+`move_selection` from application handlers. Expanded and selected states
+are included in semantic snapshots. Route arrow, Home, and End keys through
+`navigate` to move selection and expand or collapse branches.
+
+Use `Arc<TreeGrid>::virtual_view(list_id, row_height)` for a fixed-height list.
+The header occupies virtual slot zero. Use `logical_row_at` to map other
+slots to the corresponding rows after expansion or collapse. The host
+styles the tree grid as a scroll container and installs the inline CSS compiler.
+
+Columns retain their cells and explicit
+widths when reordered. Widths and the viewport-sticky header use the kit’s
+inline CSS compiler.
+
 `Table` is the one that changed: its rows and cells are real element nodes, and
 they used to carry that private `role` (the text `row` / `cell`) rather than a
 name. The sheet's `table`, `th`, `td` and `tr:hover` rules were therefore dead
@@ -124,6 +139,29 @@ application names by hand with the `LOCAL_NAME` property — and, since
 markup without an application naming anything. Those two are also the whole of
 the escape hatch in `tests/ua_stylesheet_vocabulary.rs`, the guard that now
 rejects a UA rule for anything the toolkit cannot build.
+
+### Persisting tab selection
+
+Supply stable IDs with `tab_with_id(id, label)`.
+`capture_selection_state()` returns a versioned Serde snapshot.
+`restore_selection_state(&state)` selects the unique matching ID in the
+current tab strip, so order and label changes preserve the saved selection.
+
+### Persisting docking layout
+
+`Docking::capture_layout_state()` records panel IDs, order and sides in a
+versioned Serde snapshot. Build the current panel set first, then call
+`restore_layout_state(&state)`. Removed panels are skipped. New panels
+stay in their current relative order after the restored panels and keep
+their current docking sides.
+
+### Persisting tree expansion
+
+Assign stable IDs with `TreeNode::with_id(id)`. Capture expanded branches
+with `Tree::capture_expansion_state()` and restore them by ID with
+`restore_expansion_state(&state)` after creating the current tree. The
+versioned Serde snapshot replaces expansion for keyed branches. Unkeyed
+branches retain their current state, and removed nodes or leaves are skipped.
 
 ### Five of them mount from markup
 

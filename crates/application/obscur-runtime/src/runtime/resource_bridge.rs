@@ -1,17 +1,17 @@
-#![doc = include_str!("resource_bridge.doc/_module.md")]
+//! [`ResourceBridge`]: the runtime's side of the §5.15–§5.19 resource tier.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::{TryRecvError, channel};
+use std::time::{Duration, Instant};
 
 use obscur_diagnostics::{
     Diagnostic, DiagnosticCode, DiagnosticSeverity, DiagnosticSink, DiagnosticSubsystem,
     RecoveryAction,
 };
 use obscur_geometry::{Rect, Size};
-use obscur_identity::{NodeId, RuntimeId, WindowId};
-use obscur_layout::model::Dimension;
-use obscur_localization::locale::LanguageTag;
+use obscur_identity::{NodeId, WindowId};
+use obscur_layout::model::{BoxSizing, Dimension};
 use obscur_resources::cache::{
     CacheBudget, CacheKey, CacheStatistics, EvictionPolicy, VisibilityPriority,
 };
@@ -23,71 +23,76 @@ use obscur_resources::source::{ResourceSource, dpi_variants};
 use obscur_resources::state::ResourceState;
 use obscur_resources::state::{ResourceError, ResourceMetadata, ResourceVersion};
 use obscur_scene::paint::{SceneImage, SceneVector};
-use obscur_style::computed::ComputedValue;
-use obscur_style::property::PropertyId;
-use obscur_task::{BlockingExecutor, TaskId, TaskResult, TaskScope};
+use obscur_style::computed::{ComputedStyle, ComputedValue};
+use obscur_style::property::{BackgroundLayer, PropertyId};
+use obscur_task::BlockingExecutor;
 use obscur_tree::tree::RetainedTree;
 
+use super::{
+    ImageCache, ResourceOutcome, ResourceReporting, bitmap_info::BitmapInfo,
+    deferred_load::DeferredLoad, pending_load::PendingLoad,
+};
 use crate::orchestration::{ComputedStyles, LayoutBoxes, LayoutStyles};
-use crate::runtime::{ImageCache, ResourceOutcome};
 
-#[doc = include_str!("resource_bridge.doc/ResourceBridge.md")]
+#[doc = include_str!("../../docs/api/runtime/resource_bridge.doc/ResourceBridge.md")]
 pub(crate) struct ResourceBridge {
-    #[doc = include_str!("resource_bridge.doc/loader.md")]
+    #[doc = include_str!("../../docs/api/runtime/resource_bridge.doc/loader.md")]
     loader: Option<Arc<dyn ResourceLoader + Send + Sync>>,
-    #[doc = include_str!("resource_bridge.doc/decoder.md")]
+    /// The injected decoder that turns a loaded image's encoded bytes into RGBA8
+    /// pixels + intrinsic size (spec §5.16), or [`None`] when none was installed.
+    /// Both a loader and a decoder are required to resolve an image; either absent
+    /// means `url()` backgrounds paint nothing.
     decoder: Option<Arc<dyn ResourceDecoder + Send + Sync>>,
-    #[doc = include_str!("resource_bridge.doc/hub.md")]
+    /// The pure lifecycle/versioning registry for requested image resources (spec
+    /// §5.15). It stores only lifecycle + metadata, never the decoded pixels — the
+    /// pixels live in [`image_cache`](Self::image_cache) — so the two are kept in
+    /// step by URL.
     hub: ResourceHub,
-    #[doc = include_str!("resource_bridge.doc/image_cache.md")]
+    #[doc = include_str!("../../docs/api/runtime/resource_bridge.doc/image_cache.md")]
     image_cache: ImageCache,
-    #[doc = include_str!("resource_bridge.doc/vector_decoder.md")]
+    image_visibility: HashMap<Box<str>, VisibilityPriority>,
+    known_images: HashMap<Box<str>, BitmapInfo>,
+    cache_pressure_reported: bool,
+    /// The host-installed port that parses vector sources (spec §5.17). Absent by
+    /// default, in which case an SVG source paints nothing — the same policy an
+    /// absent raster decoder has for a bitmap.
     vector_decoder: Option<Arc<dyn VectorDecoder + Send + Sync>>,
-    #[doc = include_str!("resource_bridge.doc/vector_cache.md")]
+    #[doc = include_str!("../../docs/api/runtime/resource_bridge.doc/vector_cache.md")]
     vector_cache: HashMap<Box<str>, SceneVector>,
-    #[doc = include_str!("resource_bridge.doc/blocking_executor.md")]
+    #[doc = include_str!("../../docs/api/runtime/resource_bridge.doc/blocking_executor.md")]
     blocking_executor: Option<Arc<dyn BlockingExecutor + Send + Sync>>,
-    #[doc = include_str!("resource_bridge.doc/tx.md")]
-    tx: Sender<TaskResult<ResourceOutcome>>,
-    #[doc = include_str!("resource_bridge.doc/rx.md")]
-    rx: Receiver<TaskResult<ResourceOutcome>>,
-    #[doc = include_str!("resource_bridge.doc/next_task.md")]
-    next_task: u64,
-    #[doc = include_str!("resource_bridge.doc/image_handles.md")]
+    /// Dispatched loads awaiting completion, cancellation or timeout.
+    pending_loads: Vec<PendingLoad>,
+    #[doc = include_str!("../../docs/api/runtime/resource_bridge.doc/image_handles.md")]
     image_handles: HashMap<Box<str>, ResourceHandle>,
-    #[doc = include_str!("resource_bridge.doc/image_referrers.md")]
+    #[doc = include_str!("../../docs/api/runtime/resource_bridge.doc/image_referrers.md")]
     image_referrers: HashMap<Box<str>, NodeId>,
-    #[doc = include_str!("resource_bridge.doc/unresolved_reported.md")]
+    /// Image sources this runtime has already reported as unresolvable because no
+    /// loader/decoder is installed (spec §5.15 "The kit does not perform arbitrary
+    /// network access by itself."). Deduplicates the diagnostic so a referenced
+    /// URL is named once, not once per frame.
     unresolved_reported: HashSet<Box<str>>,
-    #[doc = include_str!("resource_bridge.doc/deferred_loads.md")]
-    deferred_loads: Vec<Box<dyn FnOnce() -> ResourceOutcome + Send>>,
-}
-
-#[doc = include_str!("resource_bridge.doc/ResourceReporting.md")]
-pub(crate) struct ResourceReporting<'a> {
-    #[doc = include_str!("resource_bridge.doc/sink.md")]
-    pub(crate) sink: &'a dyn DiagnosticSink,
-    #[doc = include_str!("resource_bridge.doc/runtime.md")]
-    pub(crate) runtime: RuntimeId,
-    #[doc = include_str!("resource_bridge.doc/locale.md")]
-    pub(crate) locale: &'a LanguageTag,
+    #[doc = include_str!("../../docs/api/runtime/resource_bridge.doc/deferred_loads.md")]
+    deferred_loads: Vec<DeferredLoad>,
 }
 
 impl ResourceBridge {
-    #[doc = include_str!("resource_bridge.doc/new.md")]
+    /// A bridge with no ports installed: the honest-capability default, in which
+    /// every `url()` and every element `src` resolves to nothing and paints
+    /// nothing.
     pub(crate) fn new() -> Self {
-        let (tx, rx) = channel();
         Self {
             loader: None,
             decoder: None,
             hub: ResourceHub::new(),
             image_cache: ImageCache::new(),
+            image_visibility: HashMap::new(),
+            known_images: HashMap::new(),
+            cache_pressure_reported: false,
             vector_decoder: None,
             vector_cache: HashMap::new(),
             blocking_executor: None,
-            tx,
-            rx,
-            next_task: 0,
+            pending_loads: Vec::new(),
             image_handles: HashMap::new(),
             image_referrers: HashMap::new(),
             unresolved_reported: HashSet::new(),
@@ -95,23 +100,24 @@ impl ResourceBridge {
         }
     }
 
-    #[doc = include_str!("resource_bridge.doc/images.md")]
+    /// The decoded images, for the scene coordinator to paint from.
     pub(crate) fn images(&self) -> &HashMap<Box<str>, SceneImage> {
         self.image_cache.images()
     }
 
-    #[doc = include_str!("resource_bridge.doc/vectors.md")]
+    /// The parsed vector documents, for the scene coordinator to paint from.
     pub(crate) const fn vectors(&self) -> &HashMap<Box<str>, SceneVector> {
         &self.vector_cache
     }
 
-    #[doc = include_str!("resource_bridge.doc/state_of.md")]
+    #[doc = include_str!("../../docs/api/runtime/resource_bridge.doc/state_of.md")]
     #[cfg(test)]
     pub(crate) fn state_of(&self, url: &str) -> Option<&ResourceState> {
         self.hub.state(*self.image_handles.get(url)?)
     }
 
-    #[doc = include_str!("resource_bridge.doc/set_providers.md")]
+    /// Replaces the shared source loader and raster decoder. Clears both caches and
+    /// releases their handles so raster and vector URLs resolve against the new loader.
     pub(crate) fn set_providers(
         &mut self,
         loader: Arc<dyn ResourceLoader + Send + Sync>,
@@ -120,7 +126,13 @@ impl ResourceBridge {
         self.loader = Some(loader);
         self.decoder = Some(decoder);
         self.image_cache.clear();
-        self.image_handles.clear();
+        self.known_images.clear();
+        self.cache_pressure_reported = false;
+        self.vector_cache.clear();
+        for (_, handle) in self.image_handles.drain() {
+            self.hub.release(handle);
+        }
+        self.pending_loads.clear();
         self.image_referrers.clear();
         // Any load queued against the previous providers is abandoned — the new
         // pair re-resolves every URL from scratch, and a stale closure still holds
@@ -131,7 +143,7 @@ impl ResourceBridge {
         self.unresolved_reported.clear();
     }
 
-    #[doc = include_str!("resource_bridge.doc/set_blocking_executor.md")]
+    /// Installs the blocking-work facility resource loads run on (spec §3.3).
     pub(crate) fn set_blocking_executor(
         &mut self,
         executor: Arc<dyn BlockingExecutor + Send + Sync>,
@@ -139,110 +151,170 @@ impl ResourceBridge {
         self.blocking_executor = Some(executor);
     }
 
-    #[doc = include_str!("resource_bridge.doc/set_vector_decoder.md")]
+    /// Replaces the vector decoder, clears its cache and releases vector requests made
+    /// with the previous decoder.
     pub(crate) fn set_vector_decoder(&mut self, decoder: Arc<dyn VectorDecoder + Send + Sync>) {
         self.vector_decoder = Some(decoder);
         self.vector_cache.clear();
-        self.image_handles.clear();
+        self.image_handles.retain(|_, handle| {
+            if handle.kind() == ResourceKind::Svg {
+                self.hub.release(*handle);
+                false
+            } else {
+                true
+            }
+        });
+        self.pending_loads
+            .retain(|load| load.handle.kind() != ResourceKind::Svg);
+        self.deferred_loads
+            .retain(|load| load.handle.kind() != ResourceKind::Svg);
+        self.image_referrers.retain(|url, _| !is_vector_source(url));
+        self.unresolved_reported
+            .retain(|url| !is_vector_source(url));
     }
 
-    #[doc = include_str!("resource_bridge.doc/run_deferred_loads.md")]
+    #[doc = include_str!("../../docs/api/runtime/resource_bridge.doc/run_deferred_loads.md")]
     pub(crate) fn run_deferred_loads(&mut self, report: &ResourceReporting<'_>) -> usize {
         let mut applied = 0usize;
         // Take the queue up front: `apply_outcome` borrows `self`, and a fresh
         // enqueue cannot happen here (no frame runs during a drain).
         for job in std::mem::take(&mut self.deferred_loads) {
-            if self.apply_outcome(job(), report) {
+            if self.apply_outcome((job.run)(), report) {
                 applied += 1;
             }
         }
         applied
     }
 
-    #[doc = include_str!("resource_bridge.doc/commit_results.md")]
+    /// Applies finished off-thread loads and fails jobs whose executor dropped them or
+    /// whose result is still pending after 60 seconds. Receivers for timed-out jobs
+    /// are dropped, so a later result cannot overwrite the terminal failure. Returns
+    /// the number of successful commits without requesting a frame.
     pub(crate) fn commit_results(&mut self, report: &ResourceReporting<'_>) -> usize {
-        let mut applied = 0usize;
-        while let Ok(message) = self.rx.try_recv() {
-            if self.apply_outcome(message.into_payload(), report) {
+        const LOAD_TIMEOUT: Duration = Duration::from_secs(60);
+        let mut applied = 0;
+        let now = Instant::now();
+        for index in (0..self.pending_loads.len()).rev() {
+            let pending = &self.pending_loads[index];
+            let outcome = match pending.result.try_recv() {
+                Ok(outcome) => outcome,
+                Err(TryRecvError::Empty)
+                    if now.duration_since(pending.submitted) < LOAD_TIMEOUT =>
+                {
+                    continue;
+                }
+                Err(error) => {
+                    let error = match error {
+                        TryRecvError::Disconnected => ResourceError::Cancelled,
+                        TryRecvError::Empty => {
+                            ResourceError::SourceUnavailable("resource load timed out".into())
+                        }
+                    };
+                    ResourceOutcome::failed(
+                        pending.key.clone(),
+                        pending.handle,
+                        pending.version,
+                        error,
+                    )
+                }
+            };
+            self.pending_loads.swap_remove(index);
+            if self.apply_outcome(outcome, report) {
                 applied += 1;
             }
         }
         applied
     }
 
-    #[doc = include_str!("resource_bridge.doc/apply_outcome.md")]
+    /// Applies one finished load, returning whether it was accepted (a stale or
+    /// failed job is not).
     fn apply_outcome(&mut self, outcome: ResourceOutcome, report: &ResourceReporting<'_>) -> bool {
         match outcome {
             ResourceOutcome::Image {
                 key,
                 handle,
                 version,
-                result,
-            } => match result {
-                Ok(image) => {
-                    // `intrinsic_size` is the pixel count and `scale` the density
-                    // of *this* representation, so a consumer derives the logical
-                    // size as one over the other (spec §5.16 DPI variants).
-                    let metadata = ResourceMetadata::new()
-                        .with_intrinsic_size(intrinsic_of(&image))
-                        .with_scale(image.scale());
-                    // The hub owns the staleness verdict; `false` means this job
-                    // was superseded, so its pixels must not reach the cache.
-                    if !self.hub.complete(handle, version, metadata) {
-                        return false;
-                    }
-                    // The pixels enter the cache through its §5.19 budget: an
-                    // over-budget cache evicts to seat them, and the URLs it gave up
-                    // must lose their hub bookkeeping or they could never load again.
-                    let evicted = self.image_cache.insert(
-                        key,
-                        CacheKey::for_resource(handle.id()),
-                        version,
-                        image,
-                    );
-                    self.release_evicted(evicted);
-                    true
+                result: Ok(image),
+            } => {
+                // `intrinsic_size` is the pixel count and `scale` the density
+                // of *this* representation, so a consumer derives the logical
+                // size as one over the other (spec §5.16 DPI variants).
+                let metadata = ResourceMetadata::new()
+                    .with_intrinsic_size(intrinsic_of(&image))
+                    .with_scale(image.scale());
+                // The hub owns the staleness verdict; `false` means this job
+                // was superseded, so its pixels must not reach the cache.
+                if !self.hub.complete(handle, version, metadata) {
+                    return false;
                 }
-                Err(error) => {
-                    // The hub rejects a stale/superseded failure; report only a
-                    // fresh one, so a resource fails loudly exactly once (with its
-                    // identity attached) rather than on every late arrival.
-                    if self.hub.fail(handle, version, error.clone()) {
-                        self.report_failure(handle, &key, &error, report);
-                    }
-                    false
+                let priority = self.image_priority(&key);
+                let retry = self
+                    .known_images
+                    .insert(
+                        key.clone(),
+                        BitmapInfo {
+                            bytes: image.pixels().len() as u64,
+                            logical_size: image.logical_size(),
+                        },
+                    )
+                    .is_some();
+                let evicted = self.image_cache.insert_for_frame(
+                    key.clone(),
+                    CacheKey::for_resource(handle.id()),
+                    version,
+                    image,
+                    priority,
+                    retry,
+                );
+                let rejected = !self.image_cache.images().contains_key(&key);
+                let displaced = evicted
+                    .iter()
+                    .any(|url| self.image_visibility.contains_key(url));
+                if rejected || displaced {
+                    self.report_cache_pressure(report);
                 }
-            },
+                self.release_evicted(evicted);
+                if rejected {
+                    self.image_handles.remove(&key);
+                    self.hub.release(handle);
+                }
+                true
+            }
             ResourceOutcome::Vector {
                 key,
                 handle,
                 version,
-                result,
-            } => match result {
-                Ok(vector) => {
-                    let metadata = ResourceMetadata::new().with_intrinsic_size(vector.size());
-                    if !self.hub.complete(handle, version, metadata) {
-                        return false;
-                    }
-                    self.vector_cache.insert(key, vector);
-                    true
+                result: Ok(vector),
+            } => {
+                let metadata = ResourceMetadata::new().with_intrinsic_size(vector.size());
+                if !self.hub.complete(handle, version, metadata) {
+                    return false;
                 }
-                Err(error) => {
-                    self.hub.fail(handle, version, error);
-                    false
+                self.vector_cache.insert(key, vector);
+                true
+            }
+            ResourceOutcome::Image {
+                key,
+                handle,
+                version,
+                result: Err(error),
+            }
+            | ResourceOutcome::Vector {
+                key,
+                handle,
+                version,
+                result: Err(error),
+            } => {
+                // Only report failures the hub accepts for the current load.
+                if self.hub.fail(handle, version, error.clone()) {
+                    self.report_failure(handle, &key, &error, report);
                 }
-            },
+                false
+            }
         }
     }
 
-    #[doc = include_str!("resource_bridge.doc/next_task_id.md")]
-    fn next_task_id(&mut self) -> TaskId {
-        let id = TaskId::from_raw(self.next_task);
-        self.next_task += 1;
-        id
-    }
-
-    #[doc = include_str!("resource_bridge.doc/release_evicted.md")]
+    #[doc = include_str!("../../docs/api/runtime/resource_bridge.doc/release_evicted.md")]
     fn release_evicted(&mut self, evicted: Vec<Box<str>>) {
         for url in evicted {
             if let Some(handle) = self.image_handles.remove(&url) {
@@ -251,53 +323,68 @@ impl ResourceBridge {
         }
     }
 
-    #[doc = include_str!("resource_bridge.doc/set_image_cache_budget.md")]
+    /// Sets the memory budget the decoded-image cache is held under, evicting down
+    /// to it immediately, and returns how many images that evicted (spec §5.19
+    /// *memory budgets*).
     pub(crate) fn set_image_cache_budget(&mut self, budget: CacheBudget) -> usize {
+        self.cache_pressure_reported = false;
         let evicted = self.image_cache.set_budget(budget);
         let count = evicted.len();
         self.release_evicted(evicted);
         count
     }
 
-    #[doc = include_str!("resource_bridge.doc/image_cache_budget.md")]
+    /// The memory budget the decoded-image cache is held under (spec §5.19).
     pub(crate) fn image_cache_budget(&self) -> CacheBudget {
         self.image_cache.budget()
     }
 
-    #[doc = include_str!("resource_bridge.doc/set_image_eviction_policy.md")]
+    /// Installs the strategy the decoded-image cache evicts by (spec §5.19
+    /// *eviction*), replacing [`EvictionPolicy::VisibilityAware`] (the default).
     pub(crate) fn set_image_eviction_policy(&mut self, policy: EvictionPolicy) {
         self.image_cache.set_policy(policy);
     }
 
-    #[doc = include_str!("resource_bridge.doc/image_cache_statistics.md")]
+    /// The decoded-image cache's live metrics: hits, misses, evictions,
+    /// insertions, resident entries and resident bytes (spec §5.19 *`DevTools`
+    /// metrics*).
     pub(crate) fn image_cache_statistics(&self) -> CacheStatistics {
         self.image_cache.statistics()
     }
 
-    #[doc = include_str!("resource_bridge.doc/resource_count.md")]
+    /// How many resources the hub has been asked for, and how many decoded
+    /// images / parsed vectors are resident.
     pub(crate) fn resource_count(&self) -> usize {
         self.hub.len()
     }
 
-    #[doc = include_str!("resource_bridge.doc/cached_counts.md")]
+    pub(crate) fn resource_version(
+        &self,
+        id: obscur_identity::ResourceId,
+    ) -> Option<obscur_resources::state::ResourceVersion> {
+        self.hub.version(id)
+    }
+
+    /// The resident entry counts of the two asset caches, `(images, vectors)`.
     pub(crate) fn cached_counts(&self) -> (usize, usize) {
         (self.image_cache.len(), self.vector_cache.len())
     }
 
-    #[doc = include_str!("resource_bridge.doc/bookkeeping_counts.md")]
+    #[doc = include_str!("../../docs/api/runtime/resource_bridge.doc/bookkeeping_counts.md")]
     #[cfg(test)]
     pub(crate) fn bookkeeping_counts(&self) -> (usize, usize) {
         (self.image_handles.len(), self.image_referrers.len())
     }
 
-    #[doc = include_str!("resource_bridge.doc/invalidate_dpi_variants.md")]
+    #[doc = include_str!("../../docs/api/runtime/resource_bridge.doc/invalidate_dpi_variants.md")]
     pub(crate) fn invalidate_dpi_variants(&mut self) {
         let resident: Vec<Box<str>> = self.image_cache.images().keys().cloned().collect();
         self.image_cache.clear();
         self.release_evicted(resident);
+        self.known_images.clear();
     }
 
-    #[doc = include_str!("resource_bridge.doc/mark_image_visibility.md")]
+    #[doc = include_str!("../../docs/api/runtime/resource_bridge.doc/mark_image_visibility.md")]
     pub(crate) fn mark_image_visibility(
         &mut self,
         computed: &ComputedStyles,
@@ -307,10 +394,7 @@ impl ResourceBridge {
     ) {
         let mut referenced: HashMap<Box<str>, VisibilityPriority> = HashMap::new();
         for (node, style) in computed {
-            if let Some(url) = style
-                .get(PropertyId::BackgroundImage)
-                .and_then(ComputedValue::as_background_image_url)
-            {
+            for url in background_urls(style) {
                 let priority = image_priority(boxes, *node, viewport);
                 referenced
                     .entry(url.into())
@@ -331,9 +415,10 @@ impl ResourceBridge {
         }
         self.image_cache.mark_visibility(&referenced);
         self.retain_referenced(&referenced);
+        self.image_visibility = referenced;
     }
 
-    #[doc = include_str!("resource_bridge.doc/retain_referenced.md")]
+    #[doc = include_str!("../../docs/api/runtime/resource_bridge.doc/retain_referenced.md")]
     fn retain_referenced(&mut self, referenced: &HashMap<Box<str>, VisibilityPriority>) {
         // A parsed document is small and re-parsing one costs what its first parse
         // cost, so liveness alone decides it. Decoded pixels are megabytes and the
@@ -353,6 +438,8 @@ impl ResourceBridge {
             .chain(self.image_cache.images().keys().map(Box::as_ref))
             .chain(self.vector_cache.keys().map(Box::as_ref))
             .collect();
+        self.known_images
+            .retain(|url, _| live.contains(url.as_ref()));
         let dropped: Vec<Box<str>> = self
             .image_handles
             .keys()
@@ -369,97 +456,65 @@ impl ResourceBridge {
                 self.hub.release(handle);
             }
         }
+        self.pending_loads
+            .retain(|load| self.hub.state(load.handle).is_some());
         self.image_referrers
             .retain(|url, _| live.contains(url.as_ref()));
     }
 
-    #[doc = include_str!("resource_bridge.doc/resolve_background_images.md")]
+    #[doc = include_str!("../../docs/api/runtime/resource_bridge.doc/resolve_background_images.md")]
     pub(crate) fn resolve_background_images(
         &mut self,
         computed: &ComputedStyles,
         device_scale: f32,
         report: &ResourceReporting<'_>,
     ) {
-        // Both a loader and a decoder are required to actually fetch and decode.
-        // Without either, a `url()` background cannot become `ready` — but the
-        // reference is still a real resource request and must REACH the hub (spec
-        // §5.15 "loading/ready/failed states;"): the kit does not fetch it by
-        // itself, so with no provider the request lands in a terminal `failed`
-        // state rather than never existing. A handle parked outside the hub is
-        // indistinguishable from a URL that was never referenced. Each URL is
-        // registered with the hub once and named once on the diagnostics channel.
-        if self.loader.is_none() || self.decoder.is_none() {
-            let urls: Vec<Box<str>> = computed
-                .values()
-                .filter_map(|style| {
-                    style
-                        .get(PropertyId::BackgroundImage)
-                        .and_then(ComputedValue::as_background_image_url)
-                        .map(Box::<str>::from)
-                })
-                .collect();
-            for url in urls {
-                // `image_handles` is the persistent "already requested" set, so a
-                // URL is registered and reported exactly once however many frames
-                // reference it (the diagnostics dedup on their own channel too).
-                if self.image_handles.contains_key(&url) {
+        for (node, style) in computed {
+            for url in background_urls(style) {
+                self.image_referrers.entry(url.into()).or_insert(*node);
+                let vector = is_vector_source(url);
+                if (!vector && self.image_cache.record_lookup(url))
+                    || self.image_handles.contains_key(url)
+                    || (!vector && self.defer_bitmap_retry(url, report))
+                {
                     continue;
                 }
-                let source = ResourceSource::file(url.clone());
-                let handle = self
-                    .hub
-                    .request(ResourceRequest::new(source, ResourceKind::Image));
-                self.image_handles.insert(url.clone(), handle);
-                // No provider can ever service this request: drive it straight to a
-                // terminal `failed` state, so a caller of `state()` can tell it is
-                // dead rather than parked in `loading` behind a slow network.
-                if let Some(version) = self.hub.begin_load(handle) {
-                    let _ = self.hub.fail(
+                let key: Box<str> = url.into();
+                let source = ResourceSource::file(key.clone());
+                let kind = if vector {
+                    ResourceKind::Svg
+                } else {
+                    ResourceKind::Image
+                };
+                let handle = self.hub.request(ResourceRequest::new(source.clone(), kind));
+                self.image_handles.insert(key.clone(), handle);
+                let Some(version) = self.hub.begin_load(handle) else {
+                    continue;
+                };
+                let has_decoder = if vector {
+                    self.vector_decoder.is_some()
+                } else {
+                    self.decoder.is_some()
+                };
+                if self.loader.is_none() || !has_decoder {
+                    self.hub.fail(
                         handle,
                         version,
                         ResourceError::SourceUnavailable(
-                            "no host loader is installed to service this source".into(),
+                            "no host loader or decoder is installed to service this source".into(),
                         ),
                     );
+                    self.report_unresolvable_source(url, report.sink);
+                } else if vector {
+                    self.load_vector(key, source, handle, version);
+                } else {
+                    self.load_image(key, handle, version, device_scale);
                 }
-                self.report_unresolvable_source(&url, report.sink);
             }
-            return;
-        }
-        for (node, style) in computed {
-            let Some(url) = style
-                .get(PropertyId::BackgroundImage)
-                .and_then(ComputedValue::as_background_image_url)
-            else {
-                continue;
-            };
-            // Attribute the resource to the element whose `background-image`
-            // referenced it, so a later load failure names the node (spec §1.6).
-            self.image_referrers.entry(url.into()).or_insert(*node);
-            // Asking through `record_lookup` is what makes this frame's reference
-            // count as a hit and stamp the entry's recency, so eviction can tell a
-            // live image from a stale one (spec §5.19).
-            if self.image_cache.record_lookup(url) || self.image_handles.contains_key(url) {
-                // Already resolved, or already attempted (and failed): do not retry.
-                continue;
-            }
-            let key: Box<str> = url.into();
-            // A `url()` is resolved by the loader port from a plain path/source.
-            let source = ResourceSource::file(key.clone());
-            let handle = self
-                .hub
-                .request(ResourceRequest::new(source.clone(), ResourceKind::Image));
-            self.image_handles.insert(key.clone(), handle);
-            let Some(version) = self.hub.begin_load(handle) else {
-                continue;
-            };
-            // Load → decode → build the SceneImage; any failure fails the handle
-            // and caches nothing (the image is not painted).
-            self.load_image(key, handle, version, device_scale);
         }
     }
 
-    #[doc = include_str!("resource_bridge.doc/resolve_element_images.md")]
+    #[doc = include_str!("../../docs/api/runtime/resource_bridge.doc/resolve_element_images.md")]
     pub(crate) fn resolve_element_images(
         &mut self,
         tree: &RetainedTree,
@@ -499,7 +554,10 @@ impl ResourceBridge {
             .collect();
         for (node, key) in sources {
             self.image_referrers.entry(key.clone()).or_insert(node);
-            if self.image_cache.record_lookup(&key) || self.image_handles.contains_key(&key) {
+            if self.image_cache.record_lookup(&key)
+                || self.image_handles.contains_key(&key)
+                || self.defer_bitmap_retry(&key, report)
+            {
                 // Already resolved, or already attempted (and failed): do not retry.
                 continue;
             }
@@ -515,19 +573,25 @@ impl ResourceBridge {
         }
     }
 
-    #[doc = include_str!("resource_bridge.doc/resolve_element_vectors.md")]
-    pub(crate) fn resolve_element_vectors(&mut self, tree: &RetainedTree) {
-        // A loader and a VECTOR decoder are both required; without either, an SVG
-        // source honestly resolves to nothing.
-        if self.loader.is_none() || self.vector_decoder.is_none() {
-            return;
-        }
-        let sources: Vec<Box<str>> = tree
-            .iter()
-            .filter_map(|(_, node)| node.attributes().image_source().map(Box::<str>::from))
-            .filter(|src| is_vector_source(src))
-            .collect();
-        for key in sources {
+    /// Resolves every not-yet-parsed element `src` that names a vector document
+    /// into the parsed-document cache (spec §5.17).
+    pub(crate) fn resolve_element_vectors(
+        &mut self,
+        tree: &RetainedTree,
+        report: &ResourceReporting<'_>,
+    ) {
+        let has_providers = self.loader.is_some() && self.vector_decoder.is_some();
+        let sources = tree.iter().filter_map(|(node, element)| {
+            let src = element.attributes().image_source()?;
+            is_vector_source(src).then_some((node, src))
+        });
+        for (node, src) in sources {
+            if !has_providers {
+                self.report_unresolvable_source(src, report.sink);
+                continue;
+            }
+            let key = Box::<str>::from(src);
+            self.image_referrers.entry(key.clone()).or_insert(node);
             if self.vector_cache.contains_key(&key) || self.image_handles.contains_key(&key) {
                 // Parsed once. A theme change re-resolves `currentColor` at compose
                 // time and must NOT re-parse (spec §5.17) — so a cached document is
@@ -546,7 +610,45 @@ impl ResourceBridge {
         }
     }
 
-    #[doc = include_str!("resource_bridge.doc/load_image.md")]
+    /// Returns the strongest visibility of the URL across its current references.
+    fn image_priority(&self, url: &str) -> VisibilityPriority {
+        self.image_visibility
+            .get(url)
+            .copied()
+            .unwrap_or(VisibilityPriority::Offscreen)
+    }
+
+    /// Defers a known bitmap when no room can be made without displacing equally or more visible images.
+    fn defer_bitmap_retry(&mut self, url: &str, report: &ResourceReporting<'_>) -> bool {
+        let deferred = self.known_images.get(url).is_some_and(|image| {
+            !self
+                .image_cache
+                .can_retry(image.bytes, self.image_priority(url))
+        });
+        if deferred {
+            self.report_cache_pressure(report);
+        }
+        deferred
+    }
+
+    /// Reports budget pressure once for the active provider and budget configuration.
+    fn report_cache_pressure(&mut self, report: &ResourceReporting<'_>) {
+        if self.cache_pressure_reported {
+            return;
+        }
+        self.cache_pressure_reported = true;
+        report.sink.emit(
+            &Diagnostic::new(
+                DiagnosticCode::new("resource.image_cache_pressure"),
+                DiagnosticSeverity::Warning,
+                DiagnosticSubsystem::Resources,
+                "the image cache budget limited decoded pixels for referenced images",
+            )
+            .with_recovery(RecoveryAction::Fallback),
+        );
+    }
+
+    #[doc = include_str!("../../docs/api/runtime/resource_bridge.doc/load_image.md")]
     fn load_image(
         &mut self,
         key: Box<str>,
@@ -560,27 +662,14 @@ impl ResourceBridge {
         // The surface's density decides which variants are worth asking for: at
         // `1.0` this is just the authored path, so the common case is unchanged.
         let candidates = dpi_variants(&key, device_scale);
-        let outcome = move || {
+        self.submit_load(key, handle, version, move |key| {
             ResourceOutcome::load_image(&*loader, &*decoder, &candidates, key, handle, version)
-        };
-        if let Some(executor) = self.blocking_executor.clone() {
-            let tx = self.tx.clone();
-            let id = self.next_task_id();
-            executor.run_blocking(Box::new(move || {
-                // The receiver is gone only if the runtime was dropped mid-load;
-                // there is nothing left to tell, so the send is allowed to fail.
-                let _ = tx.send(TaskResult::new(id, TaskScope::Runtime, outcome()));
-            }));
-        } else {
-            // No executor: QUEUE the load rather than running it here. It runs on
-            // the frame thread — but after the frame phase — so the loader is never
-            // invoked inside `render_now` (§3.4, §5.15). `image_handles` already
-            // marked this URL pending, so a later frame will not re-queue it.
-            self.deferred_loads.push(Box::new(outcome));
-        }
+        });
     }
 
-    #[doc = include_str!("resource_bridge.doc/load_vector.md")]
+    /// Runs one vector load — off the frame thread when a blocking executor is
+    /// installed, on it when none is. The image counterpart of
+    /// [`load_image`](Self::load_image).
     fn load_vector(
         &mut self,
         key: Box<str>,
@@ -592,24 +681,55 @@ impl ResourceBridge {
         else {
             return;
         };
-        let outcome = move || {
+        self.submit_load(key, handle, version, move |key| {
             ResourceOutcome::load_vector(&*loader, &*decoder, &source, key, handle, version)
+        });
+    }
+
+    /// Runs a load outside the frame phase and converts provider panics into failed outcomes.
+    fn submit_load(
+        &mut self,
+        key: Box<str>,
+        handle: ResourceHandle,
+        version: ResourceVersion,
+        load: impl FnOnce(Box<str>) -> ResourceOutcome + Send + 'static,
+    ) {
+        let job_key = key.clone();
+        let job = move || {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| load(job_key.clone())))
+                .unwrap_or_else(|panic| {
+                    // A custom panic payload can itself panic on drop.
+                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(panic)))
+                        .map_err(std::mem::forget);
+                    ResourceOutcome::failed(
+                        job_key,
+                        handle,
+                        version,
+                        ResourceError::DecodeFailed("resource loader or decoder panicked".into()),
+                    )
+                })
         };
         if let Some(executor) = self.blocking_executor.clone() {
-            let tx = self.tx.clone();
-            let id = self.next_task_id();
+            let (sender, result) = channel();
+            self.pending_loads.push(PendingLoad {
+                key,
+                handle,
+                version,
+                submitted: Instant::now(),
+                result,
+            });
             executor.run_blocking(Box::new(move || {
-                let _ = tx.send(TaskResult::new(id, TaskScope::Runtime, outcome()));
+                let _ = sender.send(job());
             }));
         } else {
-            // No executor: defer the run out of the frame phase, exactly as
-            // `load_image` does — the loader must not be reached inside
-            // `render_now` (§3.4, §5.15).
-            self.deferred_loads.push(Box::new(outcome));
+            self.deferred_loads.push(DeferredLoad {
+                handle,
+                run: Box::new(job),
+            });
         }
     }
 
-    #[doc = include_str!("resource_bridge.doc/size_replaced_elements.md")]
+    #[doc = include_str!("../../docs/api/runtime/resource_bridge.doc/size_replaced_elements.md")]
     pub(crate) fn size_replaced_elements(
         &self,
         tree: &RetainedTree,
@@ -622,10 +742,9 @@ impl ResourceBridge {
             .filter_map(|(node, n)| {
                 let src = n.attributes().image_source()?;
                 let size = self
-                    .image_cache
-                    .images()
+                    .known_images
                     .get(src)
-                    .map(SceneImage::logical_size)
+                    .map(|info| info.logical_size)
                     .or_else(|| {
                         self.vector_cache
                             .get(src)
@@ -638,17 +757,38 @@ impl ResourceBridge {
             if iw <= 0.0 || ih <= 0.0 {
                 continue;
             }
-            if let Some(style) = layout_styles.get_mut(&node)
-                && style.width.is_auto()
-                && style.height.is_auto()
-            {
+            let Some(style) = layout_styles.get_mut(&node) else {
+                continue;
+            };
+            let auto_width = style.width.is_auto();
+            let auto_height = style.height.is_auto();
+            let contain_width = style.size_containment.contains_width(style.writing_mode);
+            let contain_height = style.size_containment.contains_height(style.writing_mode);
+            let border_box = style.box_sizing == BoxSizing::BorderBox;
+            if contain_width && auto_width {
+                let insets = style.padding.left
+                    + style.padding.right
+                    + style.border.left
+                    + style.border.right;
+                let intrinsic = style.contained_intrinsic_size.width;
+                style.width = Dimension::Px(intrinsic + if border_box { insets } else { 0.0 });
+            } else if auto_width && auto_height {
                 style.width = Dimension::Px(iw);
+            }
+            if contain_height && auto_height {
+                let insets = style.padding.top
+                    + style.padding.bottom
+                    + style.border.top
+                    + style.border.bottom;
+                let intrinsic = style.contained_intrinsic_size.height;
+                style.height = Dimension::Px(intrinsic + if border_box { insets } else { 0.0 });
+            } else if auto_width && auto_height {
                 style.height = Dimension::Px(ih);
             }
         }
     }
 
-    #[doc = include_str!("resource_bridge.doc/report_unresolvable_source.md")]
+    #[doc = include_str!("../../docs/api/runtime/resource_bridge.doc/report_unresolvable_source.md")]
     fn report_unresolvable_source(&mut self, key: &str, sink: &dyn DiagnosticSink) {
         if !self.unresolved_reported.insert(key.into()) {
             return;
@@ -665,7 +805,7 @@ impl ResourceBridge {
         ));
     }
 
-    #[doc = include_str!("resource_bridge.doc/report_failure.md")]
+    #[doc = include_str!("../../docs/api/runtime/resource_bridge.doc/report_failure.md")]
     fn report_failure(
         &self,
         handle: ResourceHandle,
@@ -696,7 +836,9 @@ impl ResourceBridge {
 }
 
 impl std::fmt::Debug for ResourceBridge {
-    #[doc = include_str!("resource_bridge.doc/fmt.md")]
+    /// Names what is installed and how much is resident, never the assets
+    /// themselves: a decoded image is megabytes of pixels and a `dyn` port has no
+    /// useful rendering.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ResourceBridge")
             .field("loader", &self.loader.is_some())
@@ -710,7 +852,9 @@ impl std::fmt::Debug for ResourceBridge {
     }
 }
 
-#[doc = include_str!("resource_bridge.doc/image_priority.md")]
+/// `node`'s contribution to an image's visibility: on screen when its arranged
+/// border box intersects `viewport`. A node with no arranged box (never laid
+/// out, or `display: none`) shows nothing, so it contributes `Offscreen`.
 fn image_priority(boxes: &LayoutBoxes, node: NodeId, viewport: Rect) -> VisibilityPriority {
     match boxes.get(&node) {
         Some(layout_box) if rects_intersect(layout_box.bounds, viewport) => {
@@ -720,7 +864,7 @@ fn image_priority(boxes: &LayoutBoxes, node: NodeId, viewport: Rect) -> Visibili
     }
 }
 
-#[doc = include_str!("resource_bridge.doc/rects_intersect.md")]
+#[doc = include_str!("../../docs/api/runtime/resource_bridge.doc/rects_intersect.md")]
 fn rects_intersect(a: Rect, b: Rect) -> bool {
     a.origin.x < b.right()
         && b.origin.x < a.right()
@@ -728,13 +872,14 @@ fn rects_intersect(a: Rect, b: Rect) -> bool {
         && b.origin.y < a.bottom()
 }
 
-#[doc = include_str!("resource_bridge.doc/intrinsic_of.md")]
+/// A decoded image's intrinsic size — its pixel dimensions, which is what
+/// `object-fit` scales from (spec §5.16).
 #[allow(clippy::cast_precision_loss)]
 fn intrinsic_of(image: &SceneImage) -> Size {
     Size::new(image.width() as f32, image.height() as f32)
 }
 
-#[doc = include_str!("resource_bridge.doc/localized_diagnostic_message.md")]
+#[doc = include_str!("../../docs/api/runtime/resource_bridge.doc/localized_diagnostic_message.md")]
 fn localized_diagnostic_message(
     code: &str,
     lang: &str,
@@ -756,7 +901,25 @@ fn localized_diagnostic_message(
     }
 }
 
-#[doc = include_str!("resource_bridge.doc/is_vector_source.md")]
+/// Iterates resource URLs in single-layer and comma-separated backgrounds.
+fn background_urls(style: &ComputedStyle) -> impl Iterator<Item = &str> {
+    let value = style.get(PropertyId::BackgroundImage);
+    value
+        .and_then(ComputedValue::as_background_image_url)
+        .into_iter()
+        .chain(
+            value
+                .and_then(ComputedValue::as_background_layers)
+                .into_iter()
+                .flatten()
+                .filter_map(|layer| match layer {
+                    BackgroundLayer::Url(url) => Some(url.as_ref()),
+                    _ => None,
+                }),
+        )
+}
+
+#[doc = include_str!("../../docs/api/runtime/resource_bridge.doc/is_vector_source.md")]
 fn is_vector_source(src: &str) -> bool {
     // Compared case-insensitively on the extension alone rather than by
     // lowercasing the whole path and matching a suffix: same answer, no
@@ -844,6 +1007,118 @@ mod tests {
         fn decode_vector(&self, _bytes: &[u8]) -> Result<SceneVector, ResourceError> {
             Ok(SceneVector::new(Size::new(1.0, 1.0), Vec::new()))
         }
+    }
+
+    #[derive(Default)]
+    struct HoldingExecutor(std::sync::Mutex<Option<Box<dyn FnOnce() + Send>>>);
+
+    impl obscur_task::BlockingExecutor for HoldingExecutor {
+        fn run_blocking(&self, job: Box<dyn FnOnce() + Send>) {
+            *self.0.lock().unwrap() = Some(job);
+        }
+    }
+
+    /// Verifies cancellation, expiry, and rejection of a completion that arrives after expiry.
+    #[test]
+    fn discarded_and_expired_loads_fail() {
+        use obscur_diagnostics::{Diagnostic, DiagnosticSink};
+        use std::cell::RefCell;
+        use std::time::Duration;
+
+        #[derive(Default)]
+        struct Recorder(RefCell<Vec<Diagnostic>>);
+
+        impl DiagnosticSink for Recorder {
+            fn emit(&self, diagnostic: &Diagnostic) {
+                self.0.borrow_mut().push(diagnostic.clone());
+            }
+        }
+
+        let locale = LanguageTag::parse(LOCALE).unwrap();
+        for expired in [false, true] {
+            let sink = Recorder::default();
+            let report = ResourceReporting {
+                sink: &sink,
+                locale: &locale,
+                runtime: RuntimeId::from_raw(1),
+            };
+            let executor = Arc::new(HoldingExecutor::default());
+            let mut bridge = ResourceBridge::new();
+            bridge.set_providers(Arc::new(Loader { succeeds: true }), Arc::new(OnePixel));
+            bridge.set_blocking_executor(executor.clone());
+            let mut tree = rooted();
+            mount(&mut tree, "icon.png");
+            bridge.resolve_element_images(&tree, 1.0, &report);
+            assert!(bridge.state_of("icon.png").unwrap().is_loading());
+            assert_eq!(bridge.commit_results(&report), 0);
+
+            let job = executor.0.lock().unwrap().take().unwrap();
+            let late_job = if expired {
+                bridge.pending_loads[0].submitted -= Duration::from_secs(61);
+                Some(job)
+            } else {
+                drop(job);
+                None
+            };
+            assert_eq!(bridge.commit_results(&report), 0);
+            assert!(bridge.state_of("icon.png").unwrap().is_failed());
+            assert!(bridge.pending_loads.is_empty());
+            if let Some(job) = late_job {
+                job();
+                assert_eq!(bridge.commit_results(&report), 0);
+                assert!(bridge.state_of("icon.png").unwrap().is_failed());
+                assert_eq!(bridge.cached_counts(), (0, 0));
+            }
+            let diagnostics = sink.0.borrow();
+            assert_eq!(diagnostics.len(), 1);
+            assert_eq!(diagnostics[0].code.as_str(), "resource.load_failed");
+            assert!(diagnostics[0].message.contains("icon.png"));
+        }
+    }
+
+    /// Checks provider replacement across queued raster and vector loads and late off-thread completions.
+    #[test]
+    fn replacing_providers_releases_handles_and_cancels_old_loads() {
+        let sink = NullDiagnosticSink;
+        let locale = LanguageTag::parse(LOCALE).unwrap();
+        let report = reporting(&sink, &locale);
+        let mut bridge = ResourceBridge::new();
+        bridge.set_providers(Arc::new(Loader { succeeds: true }), Arc::new(OnePixel));
+        bridge.set_vector_decoder(Arc::new(EmptyVector));
+
+        let mut tree = rooted();
+        mount(&mut tree, "icon.png");
+        mount(&mut tree, "icon.svg");
+        bridge.resolve_element_images(&tree, 1.0, &report);
+        bridge.resolve_element_vectors(&tree, &report);
+        assert_eq!(bridge.resource_count(), 2);
+
+        bridge.set_vector_decoder(Arc::new(EmptyVector));
+        assert_eq!(bridge.resource_count(), 1);
+        assert_eq!(bridge.run_deferred_loads(&report), 1);
+        assert_eq!(bridge.cached_counts(), (1, 0));
+
+        let executor = Arc::new(HoldingExecutor::default());
+        bridge.set_blocking_executor(executor.clone());
+        bridge.resolve_element_vectors(&tree, &report);
+        let old_job = executor.0.lock().unwrap().take().unwrap();
+        assert_eq!(bridge.resource_count(), 2);
+
+        bridge.set_providers(Arc::new(Loader { succeeds: true }), Arc::new(OnePixel));
+        assert_eq!(bridge.resource_count(), 0);
+        assert_eq!(bridge.cached_counts(), (0, 0));
+
+        bridge.resolve_element_vectors(&tree, &report);
+        let new_job = executor.0.lock().unwrap().take().unwrap();
+        old_job();
+        assert_eq!(bridge.commit_results(&report), 0);
+        assert!(bridge.state_of("icon.svg").unwrap().is_loading());
+        assert_eq!(bridge.cached_counts(), (0, 0));
+
+        new_job();
+        assert_eq!(bridge.commit_results(&report), 1);
+        assert_eq!(bridge.cached_counts(), (0, 1));
+        assert_eq!(bridge.resource_count(), 1);
     }
 
     const LOCALE: &str = "en";
@@ -983,7 +1258,7 @@ mod tests {
         let mut tree = rooted();
 
         let node = mount(&mut tree, "icon.svg");
-        bridge.resolve_element_vectors(&tree);
+        bridge.resolve_element_vectors(&tree, &report);
         bridge.run_deferred_loads(&report);
         assert_eq!(bridge.cached_counts().1, 1, "parsed once and cached");
         assert_eq!(bridge.bookkeeping_counts().0, 1);

@@ -1,16 +1,21 @@
-#![doc = include_str!("shorthand_expansion.doc/_module.md")]
+#![doc = include_str!("../../docs/api/compiler/shorthand_expansion.doc/_module.md")]
 
 use super::grid_placement::grid_line_edge;
-use super::property_compiler::{CompiledDeclaration, lower_for_property, value_unsupported_kind};
-use super::stylesheet_compiler::CssSymbolInterner;
-use super::value_lowering::{css_wide_keyword, custom_ref, lower_component};
+use super::grid_track_lowering::{lower_grid_shorthand, lower_grid_template_shorthand};
+use super::property_compiler::{baseline_position, lower_for_property, value_unsupported_kind};
+use super::value_lowering::css_wide_keyword;
+use super::{CompiledDeclaration, CssSymbolInterner};
 use crate::error::UnsupportedCssFeature;
 use crate::parser::{ParsedDeclaration, ParsedValue};
+use obscur_identity::InternedSymbol;
+
+use super::custom_value::custom_value_text;
 use obscur_style::cascade::{CascadeOrigin, Declaration, ImportantFlag};
-use obscur_style::property::{GridLineValue, Length, PropertyId, PropertyValue};
+use obscur_style::property::{ContainerComponent, GridLineValue, PropertyId, PropertyValue};
 use obscur_style::selector::{SelectorId, SelectorSpecificity};
 
-#[doc = include_str!("shorthand_expansion.doc/box_shorthand_sides.md")]
+/// Returns the four longhand [`PropertyId`]s (in top/right/bottom/left order) a
+/// `margin` / `padding` shorthand expands into, or [`None`] for any other name.
 pub(super) fn box_shorthand_sides(name: &str) -> Option<[PropertyId; 4]> {
     if name.eq_ignore_ascii_case("margin") {
         Some([
@@ -62,7 +67,7 @@ pub(super) fn box_shorthand_sides(name: &str) -> Option<[PropertyId; 4]> {
     }
 }
 
-#[doc = include_str!("shorthand_expansion.doc/expand_box_shorthand.md")]
+#[doc = include_str!("../../docs/api/compiler/shorthand_expansion.doc/expand_box_shorthand.md")]
 pub(super) fn expand_box_shorthand(
     decl: &ParsedDeclaration,
     sides: [PropertyId; 4],
@@ -77,9 +82,16 @@ pub(super) fn expand_box_shorthand(
             UnsupportedCssFeature::new(value_unsupported_kind(&decl.value), &*decl.name, decl.span),
         )]
     };
+    if decl.value.len() > 1
+        && decl.value.iter().any(
+            |value| matches!(value, ParsedValue::Keyword(word) if css_wide_keyword(word).is_some()),
+        )
+    {
+        return unsupported();
+    }
     let mut components = Vec::new();
     for value in &decl.value {
-        match box_side_length(value, interner) {
+        match lower_for_property(sides[0], std::slice::from_ref(value), interner) {
             Some(length) => components.push(length),
             None => return unsupported(),
         }
@@ -113,7 +125,11 @@ pub(super) fn expand_box_shorthand(
         .collect()
 }
 
-#[doc = include_str!("shorthand_expansion.doc/place_shorthand_sides.md")]
+/// Returns the two longhand [`PropertyId`]s (`align`, `justify`) that a
+/// `place-items` / `place-self` / `place-content` shorthand expands into, or
+/// [`None`] for any other name. The CSS `place-*` grammar is `<align> <justify>`,
+/// so the *align* side comes first (`place-content: <align-content>
+/// <justify-content>`).
 pub(super) fn place_shorthand_sides(name: &str) -> Option<(PropertyId, PropertyId)> {
     if name.eq_ignore_ascii_case("place-items") {
         Some((PropertyId::AlignItems, PropertyId::JustifyItems))
@@ -126,15 +142,30 @@ pub(super) fn place_shorthand_sides(name: &str) -> Option<(PropertyId, PropertyI
     }
 }
 
-#[doc = include_str!("shorthand_expansion.doc/axis_pair_shorthand_sides.md")]
+#[doc = include_str!("../../docs/api/compiler/shorthand_expansion.doc/axis_pair_shorthand_sides.md")]
 pub(super) fn axis_pair_shorthand_sides(name: &str) -> Option<(PropertyId, PropertyId)> {
     // `overflow: <x> <y>` (css-overflow-3 §3): the inline axis is stated first,
     // and one value sets both.
-    name.eq_ignore_ascii_case("overflow")
-        .then_some((PropertyId::OverflowX, PropertyId::OverflowY))
+    if name.eq_ignore_ascii_case("gap") || name.eq_ignore_ascii_case("grid-gap") {
+        return Some((PropertyId::RowGap, PropertyId::ColumnGap));
+    }
+    if name.eq_ignore_ascii_case("contain-intrinsic-size") {
+        Some((
+            PropertyId::ContainIntrinsicWidth,
+            PropertyId::ContainIntrinsicHeight,
+        ))
+    } else if name.eq_ignore_ascii_case("overscroll-behavior") {
+        Some((
+            PropertyId::OverscrollBehaviorX,
+            PropertyId::OverscrollBehaviorY,
+        ))
+    } else {
+        name.eq_ignore_ascii_case("overflow")
+            .then_some((PropertyId::OverflowX, PropertyId::OverflowY))
+    }
 }
 
-#[doc = include_str!("shorthand_expansion.doc/logical_pair_shorthand_sides.md")]
+#[doc = include_str!("../../docs/api/compiler/shorthand_expansion.doc/logical_pair_shorthand_sides.md")]
 pub(super) fn logical_pair_shorthand_sides(name: &str) -> Option<(PropertyId, PropertyId)> {
     if name.eq_ignore_ascii_case("margin-inline") {
         Some((PropertyId::MarginInlineStart, PropertyId::MarginInlineEnd))
@@ -153,7 +184,7 @@ pub(super) fn logical_pair_shorthand_sides(name: &str) -> Option<(PropertyId, Pr
     }
 }
 
-#[doc = include_str!("shorthand_expansion.doc/expand_pair_shorthand.md")]
+#[doc = include_str!("../../docs/api/compiler/shorthand_expansion.doc/expand_pair_shorthand.md")]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn expand_pair_shorthand(
     decl: &ParsedDeclaration,
@@ -170,15 +201,15 @@ pub(super) fn expand_pair_shorthand(
             UnsupportedCssFeature::new(value_unsupported_kind(&decl.value), &*decl.name, decl.span),
         )]
     };
-    let (align_values, justify_values): (&[ParsedValue], &[ParsedValue]) = match &*decl.value {
-        [a] => (std::slice::from_ref(a), std::slice::from_ref(a)),
-        [a, b] => (std::slice::from_ref(a), std::slice::from_ref(b)),
-        _ => return unsupported(),
+    let values = if align == PropertyId::RowGap && decl.value.iter().any(contains_var) {
+        shorthand_components(&decl.value).map(|components| {
+            let value = PropertyValue::GapTemplate(components);
+            [value.clone(), value]
+        })
+    } else {
+        pair_values(align, justify, &decl.value, interner)
     };
-    let (Some(align_value), Some(justify_value)) = (
-        lower_for_property(align, align_values, interner),
-        lower_for_property(justify, justify_values, interner),
-    ) else {
+    let Some([align_value, justify_value]) = values else {
         return unsupported();
     };
     let important = if decl.important {
@@ -202,7 +233,281 @@ pub(super) fn expand_pair_shorthand(
         .collect()
 }
 
-#[doc = include_str!("shorthand_expansion.doc/expand_flex_shorthand.md")]
+/// Lowers a two-longhand shorthand and duplicates a single component when needed.
+pub(super) fn pair_values(
+    align: PropertyId,
+    justify: PropertyId,
+    values: &[ParsedValue],
+    interner: &mut CssSymbolInterner,
+) -> Option<[PropertyValue; 2]> {
+    if matches!(align, PropertyId::ContainIntrinsicWidth | PropertyId::OverscrollBehaviorX | PropertyId::RowGap)
+        && values.len() > 1
+        && values.iter().any(|value| matches!(value, ParsedValue::Keyword(keyword) if css_wide_keyword(keyword).is_some()))
+    {
+        return None;
+    }
+    let item_alignment = matches!(align, PropertyId::AlignItems | PropertyId::AlignSelf);
+    let first_is_pair = item_alignment && values.get(..2).and_then(baseline_position).is_some();
+    let first_len = if first_is_pair { 2 } else { 1 };
+    let Some((align_values, remaining)) = values.split_at_checked(first_len) else {
+        return None;
+    };
+    let justify_values = match remaining {
+        [] => align_values,
+        [_] => remaining,
+        [_, _] if item_alignment && baseline_position(remaining).is_some() => remaining,
+        _ => return None,
+    };
+    if !remaining.is_empty()
+        && item_alignment
+        && values.iter().any(|value| {
+            matches!(value, ParsedValue::Keyword(keyword) if css_wide_keyword(keyword).is_some())
+        })
+    {
+        return None;
+    }
+    let (Some(align_value), Some(justify_value)) = (
+        lower_for_property(align, align_values, interner),
+        lower_for_property(justify, justify_values, interner),
+    ) else {
+        return None;
+    };
+    Some([align_value, justify_value])
+}
+
+/// Expands a supported container shorthand into the two longhands with the same cascade metadata. An omitted type resets to its initial value.
+pub(super) fn expand_container_shorthand(
+    decl: &ParsedDeclaration,
+    specificity: SelectorSpecificity,
+    origin: CascadeOrigin,
+    source_order: u32,
+    selector: Option<SelectorId>,
+    interner: &mut CssSymbolInterner,
+) -> Vec<CompiledDeclaration> {
+    let Some((name, kind)) = deferred_container(&decl.value)
+        .map(|reference| (reference.clone(), reference))
+        .or_else(|| container_values(&decl.value, interner))
+    else {
+        return vec![CompiledDeclaration::Unsupported(
+            UnsupportedCssFeature::new(value_unsupported_kind(&decl.value), &*decl.name, decl.span),
+        )];
+    };
+    let important = if decl.important {
+        ImportantFlag::Important
+    } else {
+        ImportantFlag::Normal
+    };
+    [
+        (PropertyId::ContainerName, name),
+        (PropertyId::ContainerType, kind),
+    ]
+    .into_iter()
+    .map(|(property, value)| {
+        CompiledDeclaration::Standard(Declaration::new(
+            property,
+            value,
+            important,
+            origin,
+            specificity,
+            source_order,
+            selector,
+        ))
+    })
+    .collect()
+}
+
+fn deferred_container(values: &[ParsedValue]) -> Option<PropertyValue> {
+    if let [value] = values
+        && let ContainerComponent::Variable { name, fallback } = container_reference(value)?
+    {
+        return Some(PropertyValue::ContainerRef { name, fallback });
+    }
+    shorthand_components(values).map(PropertyValue::ContainerTemplate)
+}
+
+pub(super) fn shorthand_components(
+    values: &[ParsedValue],
+) -> Option<std::sync::Arc<[ContainerComponent]>> {
+    if !values.iter().any(contains_var) {
+        return None;
+    }
+    let components = values
+        .iter()
+        .map(|value| match value {
+            value if is_var(value) => container_reference(value),
+            ParsedValue::Function { name, args } if args.iter().any(contains_var) => {
+                Some(ContainerComponent::Function {
+                    name: name.clone(),
+                    args: shorthand_components(args)?,
+                })
+            }
+            value => Some(ContainerComponent::Literal(custom_value_text(
+                std::slice::from_ref(value),
+            ))),
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(components.into())
+}
+
+fn is_var(value: &ParsedValue) -> bool {
+    matches!(value, ParsedValue::Function { name, .. } if name.eq_ignore_ascii_case("var"))
+}
+
+pub(super) fn contains_var(value: &ParsedValue) -> bool {
+    match value {
+        ParsedValue::Function { args, .. } => is_var(value) || args.iter().any(contains_var),
+        _ => false,
+    }
+}
+
+pub(super) fn container_reference(value: &ParsedValue) -> Option<ContainerComponent> {
+    let ParsedValue::Function { args, .. } = value else {
+        return None;
+    };
+    if !is_var(value) {
+        return None;
+    }
+    let [ParsedValue::Keyword(name), rest @ ..] = args.as_slice() else {
+        return None;
+    };
+    if !name.starts_with("--") || name.len() == 2 {
+        return None;
+    }
+    let name = InternedSymbol::named(name);
+    match rest {
+        [] => Some(ContainerComponent::Variable {
+            name,
+            fallback: None,
+        }),
+        [ParsedValue::Comma, fallback @ ..] if fallback.iter().any(contains_var) => {
+            Some(ContainerComponent::VariableWithTemplateFallback {
+                name,
+                fallback: shorthand_components(fallback)?,
+            })
+        }
+        [ParsedValue::Comma, fallback @ ..] => Some(ContainerComponent::Variable {
+            name,
+            fallback: Some(custom_value_text(fallback).into()),
+        }),
+        _ => None,
+    }
+}
+
+pub(super) fn container_values(
+    values: &[ParsedValue],
+    interner: &mut CssSymbolInterner,
+) -> Option<(PropertyValue, PropertyValue)> {
+    if let [ParsedValue::Keyword(keyword)] = values
+        && let Some(wide) = css_wide_keyword(keyword)
+    {
+        return Some((wide.clone(), wide));
+    }
+    let mut parts = values.split(|value| matches!(value, ParsedValue::Delimiter('/')));
+    let names = parts.next()?;
+    let kind = match parts.next() {
+        None => PropertyValue::Initial,
+        Some([token @ ParsedValue::Keyword(keyword)]) if css_wide_keyword(keyword).is_none() => {
+            lower_for_property(
+                PropertyId::ContainerType,
+                std::slice::from_ref(token),
+                interner,
+            )?
+        }
+        _ => return None,
+    };
+    if parts.next().is_some()
+        || !names.iter().all(
+            |value| matches!(value, ParsedValue::Keyword(name) if css_wide_keyword(name).is_none()),
+        )
+    {
+        return None;
+    }
+    let names = lower_for_property(PropertyId::ContainerName, names, interner)?;
+    Some((names, kind))
+}
+
+/// Expands flex-flow into its direction and wrapping longhands.
+pub(super) fn expand_flex_flow_shorthand(
+    decl: &ParsedDeclaration,
+    specificity: SelectorSpecificity,
+    origin: CascadeOrigin,
+    source_order: u32,
+    selector: Option<SelectorId>,
+) -> Vec<CompiledDeclaration> {
+    let values = if decl.value.iter().any(is_var) {
+        shorthand_components(&decl.value).map(|components| {
+            let deferred = PropertyValue::FlexFlowTemplate(components);
+            [deferred.clone(), deferred]
+        })
+    } else {
+        flex_flow_values(&decl.value)
+    };
+    let Some([direction, wrap]) = values else {
+        return vec![CompiledDeclaration::Unsupported(
+            UnsupportedCssFeature::new(value_unsupported_kind(&decl.value), &*decl.name, decl.span),
+        )];
+    };
+    let important = if decl.important {
+        ImportantFlag::Important
+    } else {
+        ImportantFlag::Normal
+    };
+    [
+        (PropertyId::FlexDirection, direction),
+        (PropertyId::FlexWrap, wrap),
+    ]
+    .into_iter()
+    .map(|(property, value)| {
+        CompiledDeclaration::Standard(Declaration::new(
+            property,
+            value,
+            important,
+            origin,
+            specificity,
+            source_order,
+            selector,
+        ))
+    })
+    .collect()
+}
+
+/// Parses direction and wrapping in either order, filling omitted components with their initial values.
+pub(super) fn flex_flow_values(values: &[ParsedValue]) -> Option<[PropertyValue; 2]> {
+    use obscur_style::property::layout_keyword::{flex_direction_from_name, flex_wrap_from_name};
+
+    if let [ParsedValue::Keyword(keyword)] = values
+        && let Some(wide) = css_wide_keyword(keyword)
+    {
+        return Some([wide.clone(), wide]);
+    }
+    if !(1..=2).contains(&values.len()) {
+        return None;
+    }
+    let mut direction = None;
+    let mut wrap = None;
+    for value in values {
+        let ParsedValue::Keyword(keyword) = value else {
+            return None;
+        };
+        if let Some(value) = flex_direction_from_name(keyword) {
+            if direction.replace(value).is_some() {
+                return None;
+            }
+        } else if let Some(value) = flex_wrap_from_name(keyword) {
+            if wrap.replace(value).is_some() {
+                return None;
+            }
+        } else {
+            return None;
+        }
+    }
+    Some([
+        direction.map_or(PropertyValue::Initial, PropertyValue::Keyword),
+        wrap.map_or(PropertyValue::Initial, PropertyValue::Keyword),
+    ])
+}
+
+#[doc = include_str!("../../docs/api/compiler/shorthand_expansion.doc/expand_flex_shorthand.md")]
 pub(super) fn expand_flex_shorthand(
     decl: &ParsedDeclaration,
     specificity: SelectorSpecificity,
@@ -311,7 +616,9 @@ pub(super) fn expand_flex_shorthand(
         .collect()
 }
 
-#[doc = include_str!("shorthand_expansion.doc/grid_line_shorthand_sides.md")]
+/// Returns the two longhand [`PropertyId`]s (`start`, `end`) that the
+/// `grid-column` / `grid-row` shorthand expands into, or [`None`] for any other
+/// name.
 pub(super) fn grid_line_shorthand_sides(name: &str) -> Option<(PropertyId, PropertyId)> {
     if name.eq_ignore_ascii_case("grid-column") {
         Some((PropertyId::GridColumnStart, PropertyId::GridColumnEnd))
@@ -322,7 +629,54 @@ pub(super) fn grid_line_shorthand_sides(name: &str) -> Option<(PropertyId, Prope
     }
 }
 
-#[doc = include_str!("shorthand_expansion.doc/expand_grid_line_shorthand.md")]
+/// Expands grid or grid-template atomically into its longhands.
+pub(super) fn expand_grid_shorthand(
+    decl: &ParsedDeclaration,
+    specificity: SelectorSpecificity,
+    origin: CascadeOrigin,
+    source_order: u32,
+    selector: Option<SelectorId>,
+) -> Vec<CompiledDeclaration> {
+    let values = if decl.name.eq_ignore_ascii_case("grid") {
+        lower_grid_shorthand(&decl.value).map(Vec::from)
+    } else {
+        lower_grid_template_shorthand(&decl.value).map(Vec::from)
+    };
+    let Some(values) = values else {
+        return vec![CompiledDeclaration::Unsupported(
+            UnsupportedCssFeature::new(value_unsupported_kind(&decl.value), &*decl.name, decl.span),
+        )];
+    };
+    let important = if decl.important {
+        ImportantFlag::Important
+    } else {
+        ImportantFlag::Normal
+    };
+    [
+        PropertyId::GridTemplateRows,
+        PropertyId::GridTemplateColumns,
+        PropertyId::GridTemplateAreas,
+        PropertyId::GridAutoRows,
+        PropertyId::GridAutoColumns,
+        PropertyId::GridAutoFlow,
+    ]
+    .into_iter()
+    .zip(values)
+    .map(|(property, value)| {
+        CompiledDeclaration::Standard(Declaration::new(
+            property,
+            value,
+            important,
+            origin,
+            specificity,
+            source_order,
+            selector,
+        ))
+    })
+    .collect()
+}
+
+#[doc = include_str!("../../docs/api/compiler/shorthand_expansion.doc/expand_grid_line_shorthand.md")]
 pub(super) fn expand_grid_line_shorthand(
     decl: &ParsedDeclaration,
     start_id: PropertyId,
@@ -352,13 +706,13 @@ pub(super) fn expand_grid_line_shorthand(
     let Some(start) = grid_line_edge(start_group) else {
         return unsupported();
     };
-    // No `/`: the end edge is `auto` (the line-based single-value form).
+    // A bare name applies to both edges when the end is omitted.
     let end = match end_group {
         Some(group) => match grid_line_edge(group) {
             Some(edge) => edge,
             None => return unsupported(),
         },
-        None => GridLineValue::Auto,
+        None => omitted_grid_edge(&start),
     };
     let important = if decl.important {
         ImportantFlag::Important
@@ -381,7 +735,10 @@ pub(super) fn expand_grid_line_shorthand(
         .collect()
 }
 
-#[doc = include_str!("shorthand_expansion.doc/expand_grid_area_shorthand.md")]
+/// Expands a grid-area declaration into row-start, column-start, row-end and
+/// column-end. An omitted edge copies its corresponding bare name or uses
+/// auto. CSS-wide keywords apply to all four properties. A named area is
+/// resolved by the same line lookup as grid-row and grid-column.
 pub(super) fn expand_grid_area_shorthand(
     decl: &ParsedDeclaration,
     specificity: SelectorSpecificity,
@@ -399,61 +756,47 @@ pub(super) fn expand_grid_area_shorthand(
     } else {
         ImportantFlag::Normal
     };
-    // The single-`<custom-ident>` named form (`grid-area: header`): a lone keyword
-    // that is not a CSS-wide keyword and not the `auto` line edge is an area name.
-    // It cannot be resolved to line numbers here (the area rectangle lives on the
-    // item's *container* `grid-template-areas`), so it is carried as a
-    // `PropertyId::GridArea` marker the runtime resolves against the parent's
-    // template. The numeric `a / b / c / d` line form falls through below.
-    if let [ParsedValue::Keyword(name)] = decl.value.as_slice()
-        && css_wide_keyword(name).is_none()
-        && !name.eq_ignore_ascii_case("auto")
+    let values = if let [ParsedValue::Keyword(keyword)] = decl.value.as_slice()
+        && let Some(wide) = css_wide_keyword(keyword)
     {
-        return vec![CompiledDeclaration::Standard(Declaration::new(
-            PropertyId::GridArea,
-            PropertyValue::GridAreaName((**name).into()),
-            important,
-            origin,
-            specificity,
-            source_order,
-            selector,
-        ))];
-    }
-    let mut edges = Vec::new();
-    for group in decl
-        .value
-        .split(|v| matches!(v, ParsedValue::Delimiter('/')))
-    {
-        match grid_line_edge(group) {
-            Some(edge) => edges.push(edge),
-            None => return unsupported(),
+        std::array::from_fn(|_| wide.clone())
+    } else {
+        let mut edges = decl
+            .value
+            .split(|value| matches!(value, ParsedValue::Delimiter('/')));
+        let Some(row_start) = edges.next().and_then(grid_line_edge) else {
+            return unsupported();
+        };
+        let mut take_edge = |fallback: &GridLineValue| match edges.next() {
+            Some(group) => grid_line_edge(group),
+            None => Some(omitted_grid_edge(fallback)),
+        };
+        let Some(column_start) = take_edge(&row_start) else {
+            return unsupported();
+        };
+        let Some(row_end) = take_edge(&row_start) else {
+            return unsupported();
+        };
+        let Some(column_end) = take_edge(&column_start) else {
+            return unsupported();
+        };
+        if edges.next().is_some() {
+            return unsupported();
         }
-    }
-    // `GridLineValue` is no longer `Copy` (its `Named` variant owns a name), so
-    // clone the reused edges.
-    let [row_start, column_start, row_end, column_end] = match edges.as_slice() {
-        [a] => [a.clone(), a.clone(), a.clone(), a.clone()],
-        [a, b] => [
-            a.clone(),
-            b.clone(),
-            GridLineValue::Auto,
-            GridLineValue::Auto,
-        ],
-        [a, b, c] => [a.clone(), b.clone(), c.clone(), GridLineValue::Auto],
-        [a, b, c, d] => [a.clone(), b.clone(), c.clone(), d.clone()],
-        _ => return unsupported(),
+        [row_start, column_start, row_end, column_end].map(PropertyValue::GridLine)
     };
     [
-        (PropertyId::GridRowStart, row_start),
-        (PropertyId::GridColumnStart, column_start),
-        (PropertyId::GridRowEnd, row_end),
-        (PropertyId::GridColumnEnd, column_end),
+        PropertyId::GridRowStart,
+        PropertyId::GridColumnStart,
+        PropertyId::GridRowEnd,
+        PropertyId::GridColumnEnd,
     ]
     .into_iter()
-    .map(|(property, edge)| {
+    .zip(values)
+    .map(|(property, value)| {
         CompiledDeclaration::Standard(Declaration::new(
             property,
-            PropertyValue::GridLine(edge),
+            value,
             important,
             origin,
             specificity,
@@ -464,28 +807,12 @@ pub(super) fn expand_grid_area_shorthand(
     .collect()
 }
 
-#[doc = include_str!("shorthand_expansion.doc/box_side_length.md")]
-fn box_side_length(value: &ParsedValue, interner: &mut CssSymbolInterner) -> Option<PropertyValue> {
-    // A `var()` in one side is carried, not judged: the length it stands for
-    // does not exist until the cascade has run, and rejecting it here degrades
-    // the WHOLE declaration, so `border-radius: var(--r)` left four square
-    // corners and `margin: 0 var(--gap)` lost the zero as well as the gap.
-    if let Some(reference) = custom_ref(value) {
-        return Some(reference);
-    }
-    if let ParsedValue::Number(n) = value
-        && *n == 0.0
-    {
-        return Some(PropertyValue::Length(Length::px(0.0)));
-    }
-    match lower_component(value, interner) {
-        // A math function is accepted wherever a `<length>` is (CSS Values 4
-        // §10.1), and these shorthands are no exception: rejecting it here does
-        // not degrade one corner, it degrades the WHOLE declaration to
-        // `Unsupported`, so `border-radius: min(3vmin, 14px)` used to leave four
-        // square corners rather than four clamped ones.
-        Some(length @ (PropertyValue::Length(_) | PropertyValue::Calc(_))) => Some(length),
-        _ => None,
+/// Only a bare custom identifier is copied to an omitted grid edge.
+fn omitted_grid_edge(start: &GridLineValue) -> GridLineValue {
+    if matches!(start, GridLineValue::Named(_)) {
+        start.clone()
+    } else {
+        GridLineValue::Auto
     }
 }
 
@@ -501,6 +828,118 @@ mod tests {
     use obscur_style::property::{
         GridLineValue, Length, PropertyId, PropertyValue, layout_keyword,
     };
+
+    #[test]
+    fn contain_intrinsic_size_expands_lengths_and_rejects_invalid_components() {
+        let width = PropertyId::ContainIntrinsicWidth;
+        let height = PropertyId::ContainIntrinsicHeight;
+        assert_eq!(
+            pairs(&compile_all("contain-intrinsic-size: 20px none")),
+            [
+                (width, PropertyValue::Length(Length::px(20.0))),
+                (height, PropertyValue::Initial)
+            ]
+        );
+        assert_eq!(
+            pairs(&compile_all("contain-intrinsic-size: 0")),
+            [
+                (width, PropertyValue::Length(Length::px(0.0))),
+                (height, PropertyValue::Length(Length::px(0.0)))
+            ]
+        );
+        for css in [
+            "contain-intrinsic-size: 20px -1px",
+            "contain-intrinsic-size: 10%",
+            "contain-intrinsic-size: calc(1px + 5%)",
+            "contain-intrinsic-size: inherit 20px",
+            "contain-intrinsic-size: none none none",
+        ] {
+            assert!(
+                matches!(
+                    compile_all(css).as_slice(),
+                    [CompiledDeclaration::Unsupported(_)]
+                ),
+                "{css}"
+            );
+        }
+    }
+
+    #[test]
+    fn both_container_declarations_accept_multiple_names() {
+        let names = PropertyValue::ContainerNames(vec!["Layout".into(), "Wide".into()].into());
+        assert_eq!(
+            pairs(&compile_all("container-name: Layout Wide")),
+            [(PropertyId::ContainerName, names.clone())]
+        );
+        assert_eq!(
+            pairs(&compile_all("container: Layout Wide / size")),
+            [
+                (PropertyId::ContainerName, names),
+                (
+                    PropertyId::ContainerType,
+                    PropertyValue::Name("size".into())
+                )
+            ]
+        );
+        for css in [
+            "container-name: none Wide",
+            "container-name: Layout, Wide",
+            "container: Layout inherit / size",
+        ] {
+            assert!(
+                matches!(
+                    compile_all(css).as_slice(),
+                    [CompiledDeclaration::Unsupported(_)]
+                ),
+                "{css}"
+            );
+        }
+    }
+
+    #[test]
+    fn container_shorthand_resets_omitted_type_and_rejects_invalid_pairs() {
+        let name = PropertyId::ContainerName;
+        let kind = PropertyId::ContainerType;
+        assert_eq!(
+            pairs(&compile_all("container: Sidebar/INLINE-SIZE")),
+            [
+                (name, PropertyValue::Name("Sidebar".into())),
+                (kind, PropertyValue::Name("inline-size".into()))
+            ]
+        );
+        assert_eq!(
+            pairs(&compile_all("container: sidebar")),
+            [
+                (name, PropertyValue::Name("sidebar".into())),
+                (kind, PropertyValue::Initial)
+            ]
+        );
+        assert_eq!(
+            pairs(&compile_all("container: inherit")),
+            [
+                (name, PropertyValue::Inherit),
+                (kind, PropertyValue::Inherit)
+            ]
+        );
+        for css in [
+            "container: sidebar /",
+            "container: / size",
+            "container: sidebar 2px",
+            "container: sidebar / inherit",
+            "container: unset / size",
+            "container: sidebar / auto",
+            "container: sidebar / size / size",
+            "container: not / size",
+        ] {
+            assert!(
+                matches!(
+                    compile_all(css).as_slice(),
+                    [CompiledDeclaration::Unsupported(_)]
+                ),
+                "{css}"
+            );
+        }
+    }
 
     #[test]
     fn a_var_in_one_side_leaves_the_other_sides_standing() {
@@ -813,6 +1252,48 @@ mod tests {
     }
 
     #[test]
+    fn place_alignment_keeps_two_word_baseline_values_together() {
+        use layout_keyword::{ALIGN_BASELINE, ALIGN_CENTER, ALIGN_LAST_BASELINE};
+
+        for (css, expected) in [
+            (
+                "place-items: last baseline",
+                [ALIGN_LAST_BASELINE, ALIGN_LAST_BASELINE],
+            ),
+            (
+                "place-items: first baseline center",
+                [ALIGN_BASELINE, ALIGN_CENTER],
+            ),
+            (
+                "place-self: center baseline last",
+                [ALIGN_CENTER, ALIGN_LAST_BASELINE],
+            ),
+            (
+                "place-self: baseline first last baseline",
+                [ALIGN_BASELINE, ALIGN_LAST_BASELINE],
+            ),
+        ] {
+            let output = compile_all(css);
+            let values: Vec<_> = output
+                .iter()
+                .map(|item| standard_of(item).value().clone())
+                .collect();
+            assert_eq!(values, expected.map(PropertyValue::Keyword), "{css}");
+        }
+
+        for css in [
+            "place-self: last baseline center end",
+            "place-items: last baseline inherit",
+            "place-items: first center",
+        ] {
+            assert!(
+                matches!(&compile_all(css)[..], [CompiledDeclaration::Unsupported(_)]),
+                "{css}"
+            );
+        }
+    }
+
+    #[test]
     fn place_content_expands_align_then_justify() {
         // `place-content: <align-content> <justify-content>` — align side first.
         let out = compile_all("place-content: center end");
@@ -1011,8 +1492,8 @@ mod tests {
     }
 
     #[test]
-    fn grid_column_single_named_line_sets_end_auto() {
-        // `grid-column: main` -> start = Named("main"), end = auto.
+    fn grid_column_single_named_line_sets_both_edges() {
+        // The bare name is used for both edges.
         assert_eq!(
             grid_lines(&compile_all("grid-column: main")),
             vec![
@@ -1020,7 +1501,10 @@ mod tests {
                     PropertyId::GridColumnStart,
                     GridLineValue::Named("main".into())
                 ),
-                (PropertyId::GridColumnEnd, GridLineValue::Auto),
+                (
+                    PropertyId::GridColumnEnd,
+                    GridLineValue::Named("main".into())
+                ),
             ]
         );
     }
@@ -1130,15 +1614,15 @@ mod tests {
     }
 
     #[test]
-    fn grid_area_single_value_fills_all_four() {
-        // `grid-area: 2` → all four edges = line 2.
+    fn grid_area_single_number_leaves_other_edges_auto() {
+        // A number only sets the first edge.
         assert_eq!(
             grid_lines(&compile_all("grid-area: 2")),
             vec![
                 (PropertyId::GridRowStart, GridLineValue::Line(2)),
-                (PropertyId::GridColumnStart, GridLineValue::Line(2)),
-                (PropertyId::GridRowEnd, GridLineValue::Line(2)),
-                (PropertyId::GridColumnEnd, GridLineValue::Line(2)),
+                (PropertyId::GridColumnStart, GridLineValue::Auto),
+                (PropertyId::GridRowEnd, GridLineValue::Auto),
+                (PropertyId::GridColumnEnd, GridLineValue::Auto),
             ]
         );
     }
@@ -1159,15 +1643,36 @@ mod tests {
     }
 
     #[test]
-    fn grid_area_named_ident_lowers_to_marker() {
-        // A bare named-area ident is a `GridArea` marker the runtime resolves.
-        let decls = compile_all("grid-area: header");
-        assert_eq!(decls.len(), 1);
-        let CompiledDeclaration::Standard(d) = &decls[0] else {
-            panic!("expected standard, got {:?}", decls[0]);
-        };
-        assert_eq!(d.property(), PropertyId::GridArea);
-        assert_eq!(d.value(), &PropertyValue::GridAreaName("header".into()));
+    fn grid_area_named_ident_sets_all_four_edges() {
+        assert_eq!(
+            grid_lines(&compile_all("grid-area: header")),
+            [
+                PropertyId::GridRowStart,
+                PropertyId::GridColumnStart,
+                PropertyId::GridRowEnd,
+                PropertyId::GridColumnEnd,
+            ]
+            .map(|property| (property, GridLineValue::Named("header".into())))
+        );
+    }
+
+    #[test]
+    fn grid_area_copies_each_bare_start_name_to_its_omitted_end() {
+        assert_eq!(
+            grid_lines(&compile_all("grid-area: section / 2")),
+            [
+                (
+                    PropertyId::GridRowStart,
+                    GridLineValue::Named("section".into())
+                ),
+                (PropertyId::GridColumnStart, GridLineValue::Line(2)),
+                (
+                    PropertyId::GridRowEnd,
+                    GridLineValue::Named("section".into())
+                ),
+                (PropertyId::GridColumnEnd, GridLineValue::Auto),
+            ]
+        );
     }
 
     #[test]

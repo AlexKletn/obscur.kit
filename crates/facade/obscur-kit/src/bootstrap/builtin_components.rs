@@ -1,4 +1,4 @@
-#![doc = include_str!("builtin_components.doc/_module.md")]
+//! The set of shipped controls a runtime mounts by default (spec §2.2).
 
 use crate::view::component::{ComponentRegistration, ComponentVersion, RegistryError};
 use crate::widgets::button::ButtonFactory;
@@ -7,15 +7,17 @@ use crate::widgets::input::InputFactory;
 use crate::widgets::radio::RadioFactory;
 use crate::widgets::select::SelectFactory;
 
-#[doc = include_str!("builtin_components.doc/BuiltinComponents.md")]
+#[doc = include_str!("../../docs/api/bootstrap/builtin_components.doc/BuiltinComponents.md")]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct BuiltinComponents;
 
 impl BuiltinComponents {
-    #[doc = include_str!("builtin_components.doc/VERSION.md")]
+    /// The version every built-in registers under (§2.2). `1.0`: the shipped
+    /// controls have one shape, and a host that needs a different one replaces the
+    /// registration rather than negotiating a minor version with it.
     const VERSION: ComponentVersion = ComponentVersion::new(1, 0);
 
-    #[doc = include_str!("builtin_components.doc/registrations.md")]
+    #[doc = include_str!("../../docs/api/bootstrap/builtin_components.doc/registrations.md")]
     #[must_use]
     pub fn registrations() -> Vec<ComponentRegistration> {
         vec![
@@ -27,7 +29,7 @@ impl BuiltinComponents {
         ]
     }
 
-    #[doc = include_str!("builtin_components.doc/install.md")]
+    #[doc = include_str!("../../docs/api/bootstrap/builtin_components.doc/install.md")]
     pub fn install(runtime: &mut crate::runtime::UiRuntime) -> Result<(), RegistryError> {
         for registration in Self::registrations() {
             runtime.register_component(registration)?;

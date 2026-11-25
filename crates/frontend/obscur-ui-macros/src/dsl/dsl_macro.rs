@@ -1,28 +1,54 @@
-#![doc = include_str!("dsl_macro.doc/_module.md")]
+#![doc = include_str!("../../docs/api/dsl/dsl_macro.doc/_module.md")]
 
+mod dsl_attr;
+mod dsl_element;
+mod dsl_instance;
+mod dsl_node;
+mod prop_value;
+
+use dsl_attr::DslAttr;
+use dsl_element::DslElement;
+use dsl_instance::DslInstance;
+use dsl_node::DslNode;
+use prop_value::PropValue;
+
+use obscur_okui_compiler::codegen::{CodegenRoot, ViewCodegen};
 use obscur_okui_compiler::compile::ContractRegistry;
 use obscur_okui_compiler::validation::{
-    AttributeUse, ElementUse, MemberArity, MemberUse, OutletName, OutletUse, SlotUse,
-    ViolationAnchor, check_collection, check_contract, check_outlet, is_outlet_tag,
+    DUPLICATE_KEY, OutletName, OutletUse, check_collection, check_condition_attribute,
+    check_conditional_branch, check_contract, check_outlet, duplicate_collection_slots,
+    is_outlet_tag,
 };
 use obscur_ui_ir::document::{
     UiIrDocument, UiIrEvent, UiIrExpression, UiIrNode, UiIrProperty, UiIrValue,
 };
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
-use syn::ext::IdentExt;
-use syn::parse::{Parse, ParseStream, Parser};
-use syn::{
-    Expr, ExprField, ExprLit, ExprPath, Ident, Lit, LitStr, Member, PathArguments, Token, braced,
-    token,
-};
+use syn::parse::{ParseStream, Parser};
+use syn::{Expr, ExprField, ExprLit, ExprPath, Lit, Member, PathArguments};
 
-#[doc = include_str!("dsl_macro.doc/DslMacro.md")]
+#[doc = include_str!("../../docs/api/dsl/dsl_macro.doc/DslMacro.md")]
 #[derive(Debug)]
 pub(crate) struct DslMacro;
 
 impl DslMacro {
-    #[doc = include_str!("dsl_macro.doc/to_document.md")]
+    pub(crate) fn expand(input: TokenStream) -> TokenStream {
+        let document = match Self::to_document(input) {
+            Ok(document) => document,
+            Err(error) => return error.to_compile_error(),
+        };
+        // Applications resolve the generated view types through the facade.
+        let expression = ViewCodegen::document_to_view_expr(&document, &CodegenRoot::facade());
+        expression.parse().unwrap_or_else(|error| {
+            syn::Error::new(
+                Span::call_site(),
+                format!("generated view expression did not parse: {error}"),
+            )
+            .to_compile_error()
+        })
+    }
+
+    #[doc = include_str!("../../docs/api/dsl/dsl_macro.doc/to_document.md")]
     pub(crate) fn to_document(input: TokenStream) -> Result<UiIrDocument, syn::Error> {
         let nodes = parse_nodes(input)?;
         validate_contracts(&nodes)?;
@@ -40,7 +66,7 @@ impl DslMacro {
     }
 }
 
-#[doc = include_str!("dsl_macro.doc/parse_nodes.md")]
+#[doc = include_str!("../../docs/api/dsl/dsl_macro.doc/parse_nodes.md")]
 fn parse_nodes(input: TokenStream) -> Result<Vec<DslNode>, syn::Error> {
     let parser = |stream: ParseStream| -> syn::Result<Vec<DslNode>> {
         let mut nodes = Vec::new();
@@ -59,17 +85,18 @@ fn parse_nodes(input: TokenStream) -> Result<Vec<DslNode>, syn::Error> {
     Ok(nodes)
 }
 
-#[doc = include_str!("dsl_macro.doc/is_conditional_tag.md")]
+#[doc = include_str!("../../docs/api/dsl/dsl_macro.doc/is_conditional_tag.md")]
 fn is_conditional_tag(tag: &str) -> bool {
     matches!(tag, "If" | "ElseIf" | "Else")
 }
 
-#[doc = include_str!("dsl_macro.doc/is_loop_tag.md")]
+#[doc = include_str!("../../docs/api/dsl/dsl_macro.doc/is_loop_tag.md")]
 fn is_loop_tag(tag: &str) -> bool {
     matches!(tag, "For" | "VirtualFor")
 }
 
-#[doc = include_str!("dsl_macro.doc/build_node.md")]
+/// Builds the [`UiIrNode`] for `node`, threading `counter` to assign pre-order
+/// ids (root = 0, incrementing).
 fn build_node(node: &DslNode, counter: &mut u64) -> UiIrNode {
     match node {
         DslNode::Text(content) => UiIrNode::text(take_id(counter), content.as_str()),
@@ -97,12 +124,8 @@ fn build_node(node: &DslNode, counter: &mut u64) -> UiIrNode {
                     DslAttr::Event { event, handler, .. } => {
                         ir.with_event(UiIrEvent::new(event.as_str(), handler.as_str()))
                     }
-                    // A `<For>`'s mandatory `key` is carried on the Loop node
-                    // itself (spec §2.11), not as a property — the same split the
-                    // `.okui` file lowering makes. Left as a property it reaches
-                    // no consumer, and every item in the list renders unkeyed.
                     DslAttr::Prop { name, value, .. }
-                        if name == "key" && is_loop_tag(element.tag.as_str()) =>
+                        if name == "key" && !is_conditional_tag(element.tag.as_str()) =>
                     {
                         ir.with_key(build_expression(value))
                     }
@@ -119,7 +142,9 @@ fn build_node(node: &DslNode, counter: &mut u64) -> UiIrNode {
     }
 }
 
-#[doc = include_str!("dsl_macro.doc/build_expression.md")]
+/// Builds the [`UiIrProperty`] for one attribute.
+/// Builds the [`UiIrExpression`] for a bare attribute value, with no property
+/// name around it — for the places a value stands alone, such as a `<For>`'s key.
 fn build_expression(value: &PropValue) -> UiIrExpression {
     match value {
         PropValue::BareTrue => UiIrExpression::literal(UiIrValue::Bool(true)),
@@ -142,242 +167,36 @@ fn build_property(name: &str, value: &PropValue) -> UiIrProperty {
     }
 }
 
-#[doc = include_str!("dsl_macro.doc/DslNode.md")]
-enum DslNode {
-    #[doc = include_str!("dsl_macro.doc/Element.md")]
-    Element(DslElement),
-    #[doc = include_str!("dsl_macro.doc/Text.md")]
-    Text(String),
-    #[doc = include_str!("dsl_macro.doc/Interpolation.md")]
-    Interpolation(PropValue),
-}
-
-#[doc = include_str!("dsl_macro.doc/DslElement.md")]
-struct DslElement {
-    #[doc = include_str!("dsl_macro.doc/is_component.md")]
-    is_component: bool,
-    #[doc = include_str!("dsl_macro.doc/tag.md")]
-    tag: String,
-    #[doc = include_str!("dsl_macro.doc/span.md")]
-    span: Span,
-    #[doc = include_str!("dsl_macro.doc/attrs.md")]
-    attrs: Vec<DslAttr>,
-    #[doc = include_str!("dsl_macro.doc/children.md")]
-    children: Vec<DslNode>,
-}
-
-#[doc = include_str!("dsl_macro.doc/DslAttr.md")]
-enum DslAttr {
-    #[doc = include_str!("dsl_macro.doc/Prop.md")]
-    Prop {
-        #[doc = include_str!("dsl_macro.doc/name.md")]
-        name: String,
-        #[doc = include_str!("dsl_macro.doc/span_2.md")]
-        span: Span,
-        #[doc = include_str!("dsl_macro.doc/value.md")]
-        value: PropValue,
-    },
-    #[doc = include_str!("dsl_macro.doc/Event.md")]
-    Event {
-        #[doc = include_str!("dsl_macro.doc/event.md")]
-        event: String,
-        #[doc = include_str!("dsl_macro.doc/span_3.md")]
-        span: Span,
-        #[doc = include_str!("dsl_macro.doc/handler.md")]
-        handler: String,
-    },
-}
-
-#[doc = include_str!("dsl_macro.doc/PropValue.md")]
-enum PropValue {
-    #[doc = include_str!("dsl_macro.doc/BareTrue.md")]
-    BareTrue,
-    #[doc = include_str!("dsl_macro.doc/Text_2.md")]
-    Text(String),
-    #[doc = include_str!("dsl_macro.doc/Bool.md")]
-    Bool(bool),
-    #[doc = include_str!("dsl_macro.doc/Int.md")]
-    Int(i64),
-    #[doc = include_str!("dsl_macro.doc/Float.md")]
-    Float(f64),
-    #[doc = include_str!("dsl_macro.doc/Binding.md")]
-    Binding(String),
-}
-
-impl Parse for DslNode {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        if input.peek(Token![<]) {
-            Ok(Self::Element(input.parse()?))
-        } else if input.peek(LitStr) {
-            let literal: LitStr = input.parse()?;
-            Ok(Self::Text(literal.value()))
-        } else if input.peek(token::Brace) {
-            let content;
-            braced!(content in input);
-            let expr: Expr = content.parse()?;
-            // Through `classify_prop_value`, so a body `{expr}` faces §2.10's
-            // allow-list exactly as an attribute's does. It never did before,
-            // because it never evaluated: it was carried as text. Now it becomes
-            // real Rust, and a binding that evaluates must be one that was checked.
-            Ok(Self::Interpolation(classify_prop_value(&expr)?))
-        } else {
-            Err(input.error("expected an element `<..>`, a string literal, or `{ expr }`"))
-        }
-    }
-}
-
-impl Parse for DslElement {
-    fn parse(input: ParseStream) -> syn::Result<Self> {
-        input.parse::<Token![<]>()?;
-        let tag_ident = Ident::parse_any(input)?;
-        let tag = tag_ident.to_string();
-        let is_component = tag.chars().next().is_some_and(char::is_uppercase);
-
-        let mut attrs = Vec::new();
-        while !input.peek(Token![/]) && !input.peek(Token![>]) {
-            if input.is_empty() {
-                return Err(syn::Error::new(
-                    tag_ident.span(),
-                    format!("unexpected end of input inside the opening tag `<{tag}>`"),
-                ));
-            }
-            attrs.push(parse_attr(input)?);
-        }
-
-        if input.peek(Token![/]) {
-            input.parse::<Token![/]>()?;
-            input.parse::<Token![>]>()?;
-            return Ok(Self {
-                is_component,
-                tag,
-                span: tag_ident.span(),
-                attrs,
-                children: Vec::new(),
-            });
-        }
-        input.parse::<Token![>]>()?;
-
-        let mut children = Vec::new();
-        loop {
-            if input.peek(Token![<]) && input.peek2(Token![/]) {
-                break;
-            }
-            if input.is_empty() {
-                return Err(syn::Error::new(
-                    tag_ident.span(),
-                    format!("missing closing tag `</{tag}>`"),
-                ));
-            }
-            children.push(input.parse::<DslNode>()?);
-        }
-
-        input.parse::<Token![<]>()?;
-        input.parse::<Token![/]>()?;
-        let close = Ident::parse_any(input)?;
-        if close != tag_ident {
-            return Err(syn::Error::new(
-                close.span(),
-                format!("mismatched closing tag: expected `</{tag}>`, found `</{close}>`"),
-            ));
-        }
-        input.parse::<Token![>]>()?;
-
-        Ok(Self {
-            is_component,
-            tag,
-            span: tag_ident.span(),
-            attrs,
-            children,
-        })
-    }
-}
-
-#[doc = include_str!("dsl_macro.doc/parse_dashed_name.md")]
-fn parse_dashed_name(input: ParseStream) -> syn::Result<(String, Span)> {
-    let head = Ident::parse_any(input)?;
-    let span = head.span();
-    let mut name = head.to_string();
-    while input.peek(Token![-]) {
-        let dash = input.parse::<Token![-]>()?;
-        let segment = Ident::parse_any(input).map_err(|_| {
-            syn::Error::new(
-                dash.spans[0],
-                format!(
-                    "expected an identifier after `-` in the attribute name `{name}-`: \
-                     a hyphenated name is `ident-ident`, as in `test-id`"
-                ),
-            )
-        })?;
-        name.push('-');
-        name.push_str(&segment.to_string());
-    }
-    Ok((name, span))
-}
-
-#[doc = include_str!("dsl_macro.doc/parse_attr.md")]
-fn parse_attr(input: ParseStream) -> syn::Result<DslAttr> {
-    let (name, span) = parse_dashed_name(input)?;
-
-    if name == "on" && input.peek(Token![:]) {
-        input.parse::<Token![:]>()?;
-        // The event name goes through the same join: the `.okui` lexer makes one
-        // Ident of `on:pointer-down`, so this front end must too or the pair
-        // disagree about a spelling again.
-        let (event, event_span) = parse_dashed_name(input)?;
-        input.parse::<Token![=]>()?;
-        let content;
-        braced!(content in input);
-        let handler: Expr = content.parse()?;
-        return Ok(DslAttr::Event {
-            event,
-            span: event_span,
-            handler: binding_or_string(&handler),
-        });
-    }
-
-    if input.peek(Token![=]) {
-        input.parse::<Token![=]>()?;
-        if input.peek(LitStr) {
-            let literal: LitStr = input.parse()?;
-            Ok(DslAttr::Prop {
-                name,
-                span,
-                value: PropValue::Text(literal.value()),
-            })
-        } else if input.peek(token::Brace) {
-            let content;
-            braced!(content in input);
-            let expr: Expr = content.parse()?;
-            Ok(DslAttr::Prop {
-                name,
-                span,
-                value: classify_prop_value(&expr)?,
-            })
-        } else {
-            Err(input.error("expected a string literal or `{ expr }` after `=`"))
-        }
-    } else {
-        Ok(DslAttr::Prop {
-            name,
-            span,
-            value: PropValue::BareTrue,
-        })
-    }
-}
-
-#[doc = include_str!("dsl_macro.doc/validate_contracts.md")]
+#[doc = include_str!("../../docs/api/dsl/dsl_macro.doc/validate_contracts.md")]
 fn validate_contracts(nodes: &[DslNode]) -> syn::Result<()> {
     let registry = ContractRegistry::builtins();
     let mut error: Option<syn::Error> = None;
-    for node in nodes {
-        if let DslNode::Element(element) = node {
-            validate_element(element, &registry, &mut error);
-        }
-    }
+    validate_siblings(nodes, &registry, &mut error);
     error.map_or(Ok(()), Err)
 }
 
-#[doc = include_str!("dsl_macro.doc/validate_element.md")]
+/// Validates a sibling sequence in source order. Each child sequence starts
+/// with its own conditional chain state.
+fn validate_siblings(
+    nodes: &[DslNode],
+    registry: &ContractRegistry,
+    error: &mut Option<syn::Error>,
+) {
+    let mut chain_open = false;
+    for node in nodes {
+        if let DslNode::Element(element) = node {
+            match check_conditional_branch(&element.tag, chain_open) {
+                Ok(open) => chain_open = open,
+                Err(message) => push_error(error, syn::Error::new(element.span, message)),
+            }
+            validate_element(element, registry, error);
+        } else {
+            chain_open = false;
+        }
+    }
+}
+
+#[doc = include_str!("../../docs/api/dsl/dsl_macro.doc/validate_element.md")]
 fn validate_element(
     element: &DslElement,
     registry: &ContractRegistry,
@@ -385,6 +204,51 @@ fn validate_element(
 ) {
     if let Err(message) = check_collection(&element.tag) {
         push_error(error, syn::Error::new(element.span, message));
+    }
+    if is_conditional_tag(&element.tag) {
+        let count = element
+            .attrs
+            .iter()
+            .filter(|attr| matches!(attr, DslAttr::Prop { name, .. } if name == "cond"))
+            .count();
+        if let Err(message) = check_condition_attribute(&element.tag, count) {
+            push_error(error, syn::Error::new(element.span, message));
+        }
+    }
+    let mut keys = element.attrs.iter().filter_map(|attr| match attr {
+        DslAttr::Prop { name, span, value } if name == "key" => Some((*span, value)),
+        _ => None,
+    });
+    let first_key = keys.next();
+    if first_key.is_none() && is_loop_tag(&element.tag) {
+        push_error(
+            error,
+            syn::Error::new(
+                element.span,
+                format!(
+                    "`<{}>` requires a `key` for stable item identity",
+                    element.tag
+                ),
+            ),
+        );
+    }
+    if let Some((span, PropValue::BareTrue)) = first_key {
+        push_error(
+            error,
+            syn::Error::new(span, obscur_okui_compiler::validation::KEY_REQUIRES_VALUE),
+        );
+    }
+    for (span, _) in keys {
+        push_error(error, syn::Error::new(span, DUPLICATE_KEY));
+    }
+    if is_loop_tag(&element.tag) {
+        let tags = element.children.iter().filter_map(|child| match child {
+            DslNode::Element(child) => Some((child.tag.as_str(), child.span)),
+            _ => None,
+        });
+        for (span, message) in duplicate_collection_slots(tags) {
+            push_error(error, syn::Error::new(span, message));
+        }
     }
     if is_outlet_tag(&element.tag) {
         // Owned first, borrowed second: the rule takes `&str`, and an event's
@@ -410,14 +274,11 @@ fn validate_element(
             );
         }
     }
-    for child in &element.children {
-        if let DslNode::Element(child) = child {
-            validate_element(child, registry, error);
-        }
-    }
+    validate_siblings(&element.children, registry, error);
 }
 
-#[doc = include_str!("dsl_macro.doc/push_error.md")]
+/// Folds `reported` into the accumulated `error`, so one expansion reports every
+/// violation it found rather than only the first.
 fn push_error(error: &mut Option<syn::Error>, reported: syn::Error) {
     match error {
         Some(existing) => existing.combine(reported),
@@ -425,118 +286,7 @@ fn push_error(error: &mut Option<syn::Error>, reported: syn::Error) {
     }
 }
 
-#[doc = include_str!("dsl_macro.doc/DslInstance.md")]
-struct DslInstance<'a> {
-    tag: &'a str,
-    attributes: Vec<(&'a str, bool)>,
-    attribute_spans: Vec<Span>,
-    members: Vec<(&'a str, Option<SlotUse<'a>>, MemberArity)>,
-    member_spans: Vec<Span>,
-    #[doc = include_str!("dsl_macro.doc/content.md")]
-    content: bool,
-}
-
-impl<'a> DslInstance<'a> {
-    #[doc = include_str!("dsl_macro.doc/of.md")]
-    fn of(element: &'a DslElement) -> Self {
-        let mut instance = Self {
-            tag: element.tag.as_str(),
-            attributes: Vec::new(),
-            attribute_spans: Vec::new(),
-            members: Vec::new(),
-            member_spans: Vec::new(),
-            content: false,
-        };
-        for attr in &element.attrs {
-            let (name, event, span) = match attr {
-                DslAttr::Prop { name, span, .. } => (name.as_str(), false, *span),
-                DslAttr::Event { event, span, .. } => (event.as_str(), true, *span),
-            };
-            instance.attributes.push((name, event));
-            instance.attribute_spans.push(span);
-        }
-        instance.collect_members(element, MemberArity::Once);
-        instance
-    }
-
-    #[doc = include_str!("dsl_macro.doc/collect_members.md")]
-    fn collect_members(&mut self, element: &'a DslElement, arity: MemberArity) {
-        for child in &element.children {
-            let DslNode::Element(child) = child else {
-                self.content = true;
-                continue;
-            };
-            if is_conditional_tag(&child.tag) {
-                self.collect_members(child, degrade(arity, MemberArity::AtMostOnce));
-                continue;
-            }
-            if is_loop_tag(&child.tag) {
-                self.collect_members(child, MemberArity::Any);
-                continue;
-            }
-            // A `<For>`'s `<Empty>`/`<Separator>` are §2.11 slots whose bodies
-            // reach the loop's parent; the wrappers themselves are never nodes.
-            if arity == MemberArity::Any && matches!(child.tag.as_str(), "Empty" | "Separator") {
-                self.collect_members(child, MemberArity::Any);
-                continue;
-            }
-            self.members
-                .push((child.tag.as_str(), slot_of(child), arity));
-            self.member_spans.push(child.span);
-        }
-    }
-
-    #[doc = include_str!("dsl_macro.doc/as_use.md")]
-    fn as_use(&self) -> ElementUse<'_> {
-        ElementUse {
-            tag: self.tag,
-            attributes: self
-                .attributes
-                .iter()
-                .map(|(name, event)| AttributeUse {
-                    name,
-                    event: *event,
-                })
-                .collect(),
-            members: self
-                .members
-                .iter()
-                .map(|(tag, slot, arity)| MemberUse {
-                    tag,
-                    slot: *slot,
-                    arity: *arity,
-                })
-                .collect(),
-            content: self.content,
-        }
-    }
-
-    #[doc = include_str!("dsl_macro.doc/span_of.md")]
-    fn span_of(&self, anchor: ViolationAnchor, element: Span) -> Span {
-        match anchor {
-            ViolationAnchor::Element => element,
-            ViolationAnchor::Attribute(index) => {
-                self.attribute_spans.get(index).copied().unwrap_or(element)
-            }
-            ViolationAnchor::Member(index) => {
-                self.member_spans.get(index).copied().unwrap_or(element)
-            }
-        }
-    }
-}
-
-#[doc = include_str!("dsl_macro.doc/slot_of.md")]
-fn slot_of(element: &DslElement) -> Option<SlotUse<'_>> {
-    element.attrs.iter().find_map(|attr| match attr {
-        DslAttr::Prop { name, value, .. } if name == "slot" => Some(match value {
-            PropValue::Text(text) => SlotUse::Named(text.as_str()),
-            _ => SlotUse::Dynamic,
-        }),
-        _ => None,
-    })
-}
-
-#[doc = include_str!("dsl_macro.doc/outlet_extras.md")]
+#[doc = include_str!("../../docs/api/dsl/dsl_macro.doc/outlet_extras.md")]
 fn outlet_extras(element: &DslElement) -> Vec<String> {
     element
         .attrs
@@ -549,7 +299,7 @@ fn outlet_extras(element: &DslElement) -> Vec<String> {
         .collect()
 }
 
-#[doc = include_str!("dsl_macro.doc/outlet_name_of.md")]
+#[doc = include_str!("../../docs/api/dsl/dsl_macro.doc/outlet_name_of.md")]
 fn outlet_name_of(element: &DslElement) -> OutletName<'_> {
     element
         .attrs
@@ -564,21 +314,13 @@ fn outlet_name_of(element: &DslElement) -> OutletName<'_> {
         .unwrap_or(OutletName::Missing)
 }
 
-#[doc = include_str!("dsl_macro.doc/degrade.md")]
-const fn degrade(arity: MemberArity, inner: MemberArity) -> MemberArity {
-    match arity {
-        MemberArity::Any => MemberArity::Any,
-        MemberArity::Once | MemberArity::AtMostOnce => inner,
-    }
-}
-
-#[doc = include_str!("dsl_macro.doc/check_expression.md")]
+#[doc = include_str!("../../docs/api/dsl/dsl_macro.doc/check_expression.md")]
 fn check_expression(expr: &Expr) -> syn::Result<()> {
     ::obscur_okui_compiler::validation::check_expression(expr)
         .map_err(|message| syn::Error::new_spanned(expr, message))
 }
 
-#[doc = include_str!("dsl_macro.doc/classify_prop_value.md")]
+/// Classifies a braced attribute expression into a resolved [`PropValue`].
 fn classify_prop_value(expr: &Expr) -> syn::Result<PropValue> {
     check_expression(expr)?;
     if let Expr::Lit(ExprLit { lit, .. }) = expr {
@@ -595,7 +337,8 @@ fn classify_prop_value(expr: &Expr) -> syn::Result<PropValue> {
     ))
 }
 
-#[doc = include_str!("dsl_macro.doc/path_string.md")]
+/// Returns a normalised binding path for a simple ident or dotted field-access
+/// expression, else `None`.
 fn path_string(expr: &Expr) -> Option<String> {
     match expr {
         Expr::Path(ExprPath {
@@ -616,17 +359,18 @@ fn path_string(expr: &Expr) -> Option<String> {
     }
 }
 
-#[doc = include_str!("dsl_macro.doc/binding_or_string.md")]
+/// Returns the normalised binding path for `expr`, falling back to its
+/// stringified token form for anything that is not a simple path.
 fn binding_or_string(expr: &Expr) -> String {
     path_string(expr).unwrap_or_else(|| stringify_expr(expr))
 }
 
-#[doc = include_str!("dsl_macro.doc/stringify_expr.md")]
+/// Stringifies an expression to its (space-separated) token form.
 fn stringify_expr(expr: &Expr) -> String {
     quote!(#expr).to_string()
 }
 
-#[doc = include_str!("dsl_macro.doc/take_id.md")]
+/// Takes the current id from `counter` and advances it.
 fn take_id(counter: &mut u64) -> u64 {
     let id = *counter;
     *counter += 1;
@@ -1188,6 +932,87 @@ mod tests {
             .is_ok(),
             "`<For>` materializes one node per item"
         );
+    }
+
+    #[test]
+    fn both_loop_tags_require_a_key() {
+        let cases = [
+            quote! { <For each={rows}><span/></For> },
+            quote! { <div><VirtualFor each={rows}><span/></VirtualFor></div> },
+        ];
+        for input in cases {
+            let message = rejection(input);
+            assert!(message.contains("requires a `key`"), "got: {message}");
+        }
+    }
+
+    #[test]
+    fn repeated_keys_are_rejected_on_nodes_and_loops() {
+        for input in [
+            quote! { <span key="first" key="second"/> },
+            quote! { <For each={rows} key={item.id} key={index}/> },
+        ] {
+            let message = rejection(input);
+            assert!(message.contains("only one `key`"), "{message}");
+        }
+    }
+
+    #[test]
+    fn bare_keys_are_rejected() {
+        for input in [quote! { <span key/> }, quote! { <For each={rows} key/> }] {
+            assert!(rejection(input).contains("explicit value"));
+        }
+    }
+
+    #[test]
+    fn collection_slots_are_unique_within_each_loop() {
+        for (source, expected) in [
+            (
+                quote! { <For each={rows} key={item}><Loading/><Loading/></For> },
+                "<Loading>",
+            ),
+            (
+                quote! { <VirtualFor each={rows} key={item}><Separator/><span/><Separator/></VirtualFor> },
+                "<Separator>",
+            ),
+        ] {
+            let message = rejection(source);
+            assert!(
+                message.contains("accepts only one") && message.contains(expected),
+                "{message}"
+            );
+        }
+        assert!(DslMacro::to_document(quote! {
+            <div><For key={item}><Empty/></For><VirtualFor key={item}><Empty/></VirtualFor></div>
+        }).is_ok());
+    }
+
+    #[test]
+    fn conditional_chains_cannot_cross_content_or_a_closed_branch() {
+        for input in [
+            quote! { <Else/> },
+            quote! { <div><If cond={true}/>{"content"}<Else/></div> },
+            quote! { <div><If cond={true}/><Else/><ElseIf cond={true}/></div> },
+        ] {
+            let message = rejection(input);
+            assert!(message.contains("must immediately follow"), "{message}");
+        }
+    }
+
+    #[test]
+    fn conditional_branches_validate_condition_attributes() {
+        for (input, expected) in [
+            (quote! { <If condition={true}/> }, "requires a"),
+            (quote! { <If cond={true}/><ElseIf/> }, "requires a"),
+            (quote! { <If cond={true} cond={false}/> }, "only one"),
+            (
+                quote! { <If cond={true}/><Else cond={false}/> },
+                "cannot have",
+            ),
+        ] {
+            let message = rejection(input);
+            assert!(message.contains(expected), "{message}");
+        }
     }
 
     #[test]

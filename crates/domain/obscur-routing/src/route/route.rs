@@ -1,18 +1,18 @@
-#![doc = include_str!("route.doc/_module.md")]
+//! A parsed URL-like location: path, query, and fragment (spec §6.13).
 
-#[doc = include_str!("route.doc/Route.md")]
+#[doc = include_str!("../../docs/api/route/route.doc/Route.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Route {
-    #[doc = include_str!("route.doc/path.md")]
+    /// The normalized path; always starts with `/`.
     path: Box<str>,
-    #[doc = include_str!("route.doc/query.md")]
+    /// The ordered query key/value pairs, in the order they appeared.
     query: Vec<(Box<str>, Box<str>)>,
-    #[doc = include_str!("route.doc/fragment.md")]
+    /// The fragment (the part after `#`), without the leading `#`.
     fragment: Option<Box<str>>,
 }
 
 impl Route {
-    #[doc = include_str!("route.doc/new.md")]
+    #[doc = include_str!("../../docs/api/route/route.doc/new.md")]
     #[must_use]
     pub fn new(path: impl Into<Box<str>>) -> Self {
         Self {
@@ -22,7 +22,7 @@ impl Route {
         }
     }
 
-    #[doc = include_str!("route.doc/parse.md")]
+    #[doc = include_str!("../../docs/api/route/route.doc/parse.md")]
     #[must_use]
     pub fn parse(input: &str) -> Self {
         let (before_fragment, fragment) = match input.split_once('#') {
@@ -44,19 +44,19 @@ impl Route {
         }
     }
 
-    #[doc = include_str!("route.doc/path_2.md")]
+    /// Returns the normalized path (always starting with `/`).
     #[must_use]
     pub fn path(&self) -> &str {
         &self.path
     }
 
-    #[doc = include_str!("route.doc/query_2.md")]
+    /// Returns the ordered query key/value pairs.
     #[must_use]
     pub fn query(&self) -> &[(Box<str>, Box<str>)] {
         &self.query
     }
 
-    #[doc = include_str!("route.doc/query_param.md")]
+    /// Returns the value of the first query parameter matching `key`, if any.
     #[must_use]
     pub fn query_param(&self, key: &str) -> Option<&str> {
         self.query
@@ -65,19 +65,19 @@ impl Route {
             .map(|(_, v)| &**v)
     }
 
-    #[doc = include_str!("route.doc/fragment_2.md")]
+    /// Returns the fragment (without the leading `#`), if present.
     #[must_use]
     pub fn fragment(&self) -> Option<&str> {
         self.fragment.as_deref()
     }
 
-    #[doc = include_str!("route.doc/segments.md")]
+    #[doc = include_str!("../../docs/api/route/route.doc/segments.md")]
     #[must_use]
     pub fn segments(&self) -> Vec<&str> {
         self.path.split('/').filter(|s| !s.is_empty()).collect()
     }
 
-    #[doc = include_str!("route.doc/to_string_path.md")]
+    #[doc = include_str!("../../docs/api/route/route.doc/to_string_path.md")]
     #[must_use]
     pub fn to_string_path(&self) -> String {
         let mut out = String::from(&*self.path);
@@ -100,7 +100,7 @@ impl Route {
     }
 }
 
-#[doc = include_str!("route.doc/normalize_path.md")]
+/// Normalizes a raw path so that it begins with `/`.
 fn normalize_path(path: &str) -> Box<str> {
     if path.starts_with('/') {
         Box::from(path)
@@ -112,7 +112,7 @@ fn normalize_path(path: &str) -> Box<str> {
     }
 }
 
-#[doc = include_str!("route.doc/parse_query.md")]
+/// Parses a raw query string (`k=v&k2=v2`) into ordered key/value pairs.
 fn parse_query(query: &str) -> Vec<(Box<str>, Box<str>)> {
     query
         .split('&')

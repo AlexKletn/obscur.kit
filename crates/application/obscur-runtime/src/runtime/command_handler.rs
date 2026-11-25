@@ -1,20 +1,20 @@
-#![doc = include_str!("command_handler.doc/_module.md")]
+//! The one stored shape every registered handler is normalized to.
 
 use obscur_interaction::event::UiEvent;
 
-#[doc = include_str!("command_handler.doc/CommandHandler.md")]
+#[doc = include_str!("../../docs/api/runtime/command_handler.doc/CommandHandler.md")]
 pub struct CommandHandler {
     handler: Box<dyn FnMut(&mut UiEvent)>,
 }
 
 impl CommandHandler {
-    #[doc = include_str!("command_handler.doc/new.md")]
+    /// Wraps a boxed event-taking closure.
     #[must_use]
     pub fn new(handler: Box<dyn FnMut(&mut UiEvent)>) -> Self {
         Self { handler }
     }
 
-    #[doc = include_str!("command_handler.doc/call.md")]
+    #[doc = include_str!("../../docs/api/runtime/command_handler.doc/call.md")]
     pub fn call(&mut self, event: &mut UiEvent) {
         (self.handler)(event);
     }

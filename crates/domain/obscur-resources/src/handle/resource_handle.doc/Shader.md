@@ -1,1 +1,0 @@
-A shader program resource.

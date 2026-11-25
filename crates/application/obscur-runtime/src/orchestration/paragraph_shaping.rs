@@ -1,4 +1,5 @@
-#![doc = include_str!("paragraph_shaping.doc/_module.md")]
+//! The text engine the compose phase shapes every paragraph through:
+//! [`ParagraphShaping`].
 
 use std::fmt;
 
@@ -25,21 +26,29 @@ use super::{
     root_font_size, tab_size_for, white_space_for, word_break_for, word_spacing_for,
 };
 
-#[doc = include_str!("paragraph_shaping.doc/DEFAULT_FONT_SIZE.md")]
+#[doc = include_str!("../../docs/api/orchestration/paragraph_shaping.doc/DEFAULT_FONT_SIZE.md")]
 pub(super) const DEFAULT_FONT_SIZE: f32 = 16.0;
 
-#[doc = include_str!("paragraph_shaping.doc/ParagraphShaping.md")]
+#[doc = include_str!("../../docs/api/orchestration/paragraph_shaping.doc/ParagraphShaping.md")]
 pub(crate) struct ParagraphShaping {
-    #[doc = include_str!("paragraph_shaping.doc/paragraph.md")]
+    /// The multi-font orchestrator turning text-node strings into font-tagged
+    /// runs. The default composition is deterministic (single run, primary face,
+    /// mock glyphs), which is what the cross-backend determinism boundary relies
+    /// on. A host swaps its ports via the setters.
     paragraph: ParagraphShaper,
-    #[doc = include_str!("paragraph_shaping.doc/default_face.md")]
+    /// The default fallback face requests resolve to when the resolver covers no
+    /// font for a run. The mock shaper is font-agnostic (it needs no real
+    /// metrics), so a generic monospace face suffices as the default; a real
+    /// pipeline would resolve this per node via a `FontProvider`.
     default_face: FontFace,
-    #[doc = include_str!("paragraph_shaping.doc/hyphenator.md")]
+    #[doc = include_str!("../../docs/api/orchestration/paragraph_shaping.doc/hyphenator.md")]
     hyphenator: Option<Box<dyn Hyphenator>>,
 }
 
 impl ParagraphShaping {
-    #[doc = include_str!("paragraph_shaping.doc/new.md")]
+    /// Creates the default engine: a single-run itemizer, an empty resolver, a
+    /// cache-wrapped deterministic [`MockTextShaper`], a generic monospace default
+    /// face, and no hyphenation.
     pub(super) fn new() -> Self {
         Self {
             // Single-run itemizer + empty resolver ⇒ one PRIMARY run per text; the
@@ -62,48 +71,56 @@ impl ParagraphShaping {
         }
     }
 
-    #[doc = include_str!("paragraph_shaping.doc/paragraph_2.md")]
+    /// The paragraph orchestrator as a shared borrow — the seam the layout phase
+    /// measures text through, so measure and compose shape the identical runs.
     pub(super) fn paragraph(&self) -> &ParagraphShaper {
         &self.paragraph
     }
 
-    #[doc = include_str!("paragraph_shaping.doc/default_face_2.md")]
+    #[doc = include_str!("../../docs/api/orchestration/paragraph_shaping.doc/default_face_2.md")]
+    #[cfg(test)]
     pub(super) fn default_face(&self) -> &FontFace {
         &self.default_face
     }
 
-    #[doc = include_str!("paragraph_shaping.doc/set_shaper.md")]
+    /// Installs `shaper` as the inner engine, wrapped in a **fresh** shaping cache
+    /// so no run shaped by the previous engine survives it.
     pub(super) fn set_shaper(&mut self, shaper: Box<dyn TextShaper>) {
         self.paragraph
             .set_shaper(Box::new(CachingShaper::new(shaper)));
     }
 
-    #[doc = include_str!("paragraph_shaping.doc/set_itemizer.md")]
+    /// Installs `itemizer` as the paragraph itemizer, keeping the resolver and the
+    /// inner shaper (and its cache) in place.
     pub(super) fn set_itemizer(&mut self, itemizer: Box<dyn TextItemizer>) {
         self.paragraph.set_itemizer(itemizer);
     }
 
-    #[doc = include_str!("paragraph_shaping.doc/set_resolver.md")]
+    /// Installs `resolver` as the font resolver, keeping the itemizer and the inner
+    /// shaper (and its cache) in place.
     pub(super) fn set_resolver(&mut self, resolver: Box<dyn FontResolver>) {
         self.paragraph.set_resolver(resolver);
     }
 
-    #[doc = include_str!("paragraph_shaping.doc/set_language.md")]
+    /// Installs the BCP-47 `language` hint carried by every shaping request this
+    /// orchestrator issues.
     pub(super) fn set_language(&mut self, language: Option<Box<str>>) {
         self.paragraph.set_language(language);
     }
 
-    #[doc = include_str!("paragraph_shaping.doc/set_hyphenator.md")]
+    /// Installs `hyphenator` as the hyphenation port, replacing the default (no
+    /// hyphenation). The same port is used by the measure and the compose pass.
     pub(super) fn set_hyphenator(&mut self, hyphenator: Box<dyn Hyphenator>) {
         self.hyphenator = Some(hyphenator);
     }
 
-    #[doc = include_str!("paragraph_shaping.doc/hyphenator_2.md")]
+    /// The installed hyphenation port, or [`None`] when hyphenation is off (the
+    /// default).
     pub(super) fn hyphenator(&self) -> Option<&dyn Hyphenator> {
         self.hyphenator.as_deref()
     }
 
-    #[doc = include_str!("paragraph_shaping.doc/shape_lines.md")]
+    #[doc = include_str!("../../docs/api/orchestration/paragraph_shaping.doc/shape_lines.md")]
     // The shaping inputs (fallback chain, attributes, direction, alignment) plus
     // the font size and wrap width are cohesive positional arguments of one leaf
     // shaping helper, not a public API surface. `attributes` is kept by reference
@@ -133,7 +150,7 @@ impl ParagraphShaping {
         // box (§8.1 / §8.2). `content` is already `text-transform`ed + white-space
         // collapsed by the caller.
         let runs = apply_spacing(
-            self.paragraph.shape_paragraph(
+            self.paragraph.shape_paragraph_shared(
                 content,
                 fallback,
                 attributes,
@@ -256,7 +273,7 @@ impl ParagraphShaping {
         }
     }
 
-    #[doc = include_str!("paragraph_shaping.doc/shape_ellipsis.md")]
+    #[doc = include_str!("../../docs/api/orchestration/paragraph_shaping.doc/shape_ellipsis.md")]
     // `attributes` stays by reference to match this pass's `shape_paragraph` calls.
     #[allow(clippy::trivially_copy_pass_by_ref)]
     fn shape_ellipsis(
@@ -267,7 +284,7 @@ impl ParagraphShaping {
         font_size: f32,
     ) -> Option<ShapedGlyph> {
         self.paragraph
-            .shape_paragraph(
+            .shape_paragraph_shared(
                 "…",
                 fallback,
                 attributes,
@@ -280,7 +297,7 @@ impl ParagraphShaping {
             .next()
     }
 
-    #[doc = include_str!("paragraph_shaping.doc/shape_hyphen.md")]
+    #[doc = include_str!("../../docs/api/orchestration/paragraph_shaping.doc/shape_hyphen.md")]
     // `attributes` stays by reference to match this pass's `shape_paragraph` calls.
     #[allow(clippy::trivially_copy_pass_by_ref)]
     fn shape_hyphen(
@@ -291,7 +308,7 @@ impl ParagraphShaping {
         font_size: f32,
     ) -> Option<ShapedGlyph> {
         self.paragraph
-            .shape_paragraph(
+            .shape_paragraph_shared(
                 "-",
                 fallback,
                 attributes,
@@ -304,7 +321,7 @@ impl ParagraphShaping {
             .next()
     }
 
-    #[doc = include_str!("paragraph_shaping.doc/tab_stop_width.md")]
+    #[doc = include_str!("../../docs/api/orchestration/paragraph_shaping.doc/tab_stop_width.md")]
     // `attributes` stays by reference to match this pass's `shape_paragraph` calls.
     #[allow(clippy::too_many_arguments, clippy::trivially_copy_pass_by_ref)]
     fn tab_stop_width(
@@ -323,7 +340,7 @@ impl ParagraphShaping {
             TabSize::Length(_) => 0.0,
             TabSize::Factor(_) => self
                 .paragraph
-                .shape_paragraph(
+                .shape_paragraph_shared(
                     " ",
                     fallback,
                     attributes,
@@ -339,7 +356,7 @@ impl ParagraphShaping {
         tab_size.resolve(space_advance)
     }
 
-    #[doc = include_str!("paragraph_shaping.doc/align_width_for.md")]
+    #[doc = include_str!("../../docs/api/orchestration/paragraph_shaping.doc/align_width_for.md")]
     pub(super) fn align_width_for(
         tree: &RetainedTree,
         computed: &ComputedStyles,
@@ -353,6 +370,9 @@ impl ParagraphShaping {
         let Some(parent_box) = boxes.get(&parent) else {
             return box_width;
         };
+        if let Some(content) = parent_box.used_content_rect() {
+            return content.size.width.max(box_width);
+        }
         let style = computed.get(&parent);
         let px = |property: PropertyId| -> f32 {
             style
@@ -372,7 +392,7 @@ impl ParagraphShaping {
         content.max(box_width)
     }
 
-    #[doc = include_str!("paragraph_shaping.doc/shape_text_lines.md")]
+    #[doc = include_str!("../../docs/api/orchestration/paragraph_shaping.doc/shape_text_lines.md")]
     pub(super) fn shape_text_lines(
         &self,
         tree: &RetainedTree,
@@ -381,6 +401,48 @@ impl ParagraphShaping {
         node: NodeId,
         content: &str,
         box_width: f32,
+    ) -> ParagraphLayout {
+        self.shape_text_lines_with_overflow(
+            tree,
+            computed,
+            boxes,
+            node,
+            content,
+            box_width,
+            overflow_for_text(tree, computed, node),
+        )
+    }
+
+    // The field clips the translated full line at its scrollport.
+    pub(crate) fn shape_editable_lines(
+        &self,
+        tree: &RetainedTree,
+        computed: &ComputedStyles,
+        boxes: &LayoutBoxes,
+        node: NodeId,
+        content: &str,
+        box_width: f32,
+    ) -> ParagraphLayout {
+        let overflow = if white_space_for(computed.get(&node)).wraps() {
+            overflow_for_text(tree, computed, node)
+        } else {
+            TextOverflow::Visible
+        };
+        self.shape_text_lines_with_overflow(
+            tree, computed, boxes, node, content, box_width, overflow,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn shape_text_lines_with_overflow(
+        &self,
+        tree: &RetainedTree,
+        computed: &ComputedStyles,
+        boxes: &LayoutBoxes,
+        node: NodeId,
+        content: &str,
+        box_width: f32,
+        overflow: TextOverflow,
     ) -> ParagraphLayout {
         let style = computed.get(&node);
         let font_size = font_size_of(computed, node);
@@ -394,7 +456,7 @@ impl ParagraphShaping {
             &attributes_for(style),
             direction_for(style),
             alignment_for(style),
-            overflow_for_text(tree, computed, node),
+            overflow,
             white_space_for(style),
             overflow_wrap_for(style),
             word_break_for(style),
@@ -428,7 +490,8 @@ impl ParagraphShaping {
 }
 
 impl fmt::Debug for ParagraphShaping {
-    #[doc = include_str!("paragraph_shaping.doc/fmt.md")]
+    /// `ParagraphShaper` holds `dyn` ports and is not `Debug`, so it is shown as an
+    /// opaque placeholder; the resolved default face is printed normally.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ParagraphShaping")
             .field("paragraph", &"<ParagraphShaper>")
@@ -438,12 +501,15 @@ impl fmt::Debug for ParagraphShaping {
     }
 }
 
-#[doc = include_str!("paragraph_shaping.doc/font_size_of.md")]
+#[doc = include_str!("../../docs/api/orchestration/paragraph_shaping.doc/font_size_of.md")]
 pub(super) fn font_size_of(computed: &ComputedStyles, node: NodeId) -> f32 {
     font_size_of_style(computed.get(&node))
 }
 
-#[doc = include_str!("paragraph_shaping.doc/font_size_of_style.md")]
+/// Reads a computed `font-size` in logical pixels from a single node's style,
+/// defaulting to [`DEFAULT_FONT_SIZE`] when absent or not an absolute pixel
+/// length — the by-style form [`font_size_of`] delegates to, shared with the
+/// click-caret hit-test so it sizes text identically to the drawn run.
 pub(super) fn font_size_of_style(style: Option<&ComputedStyle>) -> f32 {
     style
         .and_then(|style| style.get(PropertyId::FontSize))
@@ -452,7 +518,7 @@ pub(super) fn font_size_of_style(style: Option<&ComputedStyle>) -> f32 {
         .map_or(DEFAULT_FONT_SIZE, |px| px.0)
 }
 
-#[doc = include_str!("paragraph_shaping.doc/overflow_for_text.md")]
+#[doc = include_str!("../../docs/api/orchestration/paragraph_shaping.doc/overflow_for_text.md")]
 pub(super) fn overflow_for_text(
     tree: &RetainedTree,
     computed: &ComputedStyles,

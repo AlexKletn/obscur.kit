@@ -28,7 +28,8 @@ const VIEWPORT: Size = Size::new(360.0, 90.0);
 struct Line {
     y: f32,
     width: f32,
-    advances: Vec<f32>,
+    left: f32,
+    glyph_x: Vec<f32>,
 }
 
 fn main() {
@@ -144,13 +145,10 @@ fn verify(
         c_normal.len()
     );
 
-    // D `pre` + tab: the glyph stream is `a`, `\t`, `b`; the pen just after the tab
-    // (advance of `a` + advance of the tab) must land on the tab stop = 4·space.
-    assert!(
-        d_tab4[0].advances.len() >= 2,
-        "D: expected a, tab, b glyphs"
-    );
-    let pen_after_tab_4 = d_tab4[0].advances[0] + d_tab4[0].advances[1];
+    // The tab is invisible. The second painted glyph must start at the tab stop.
+    assert_eq!(d_tab4[0].glyph_x.len(), 2);
+    assert_eq!(d_tab8[0].glyph_x.len(), 2);
+    let pen_after_tab_4 = d_tab4[0].glyph_x[1];
     let stop_4 = 4.0 * space_adv;
     assert!(
         (pen_after_tab_4 - stop_4).abs() < 0.5,
@@ -158,7 +156,7 @@ fn verify(
     );
     // tab-size:8 lands on the farther stop, so its line is wider than tab-size:4,
     // which is wider than a plain single space.
-    let pen_after_tab_8 = d_tab8[0].advances[0] + d_tab8[0].advances[1];
+    let pen_after_tab_8 = d_tab8[0].glyph_x[1];
     let stop_8 = 8.0 * space_adv;
     assert!(
         (pen_after_tab_8 - stop_8).abs() < 0.5,
@@ -202,19 +200,24 @@ fn render_block(css: &str, content: &str) -> (tiny_skia::Pixmap, Vec<Line>) {
     let snapshot = result.snapshot().clone();
 
     // Group the DrawText runs by y-origin (to the nearest 0.1px) — one group per
-    // visual line — summing widths and keeping the first run's per-glyph advances.
+    // visual line — summing run advances and collecting glyph positions relative to the line.
     let mut lines: Vec<Line> = Vec::new();
     for command in snapshot.display_list().commands() {
         if let PaintCommand::DrawText { origin, run, .. } = command {
-            let advances: Vec<f32> = run.glyphs().iter().map(|g| g.advance()).collect();
             let width = run.advance();
             if let Some(line) = lines.iter_mut().find(|l| (l.y - origin.y).abs() < 0.1) {
                 line.width += width;
+                line.glyph_x.extend(
+                    run.glyphs()
+                        .iter()
+                        .map(|glyph| origin.x - line.left + glyph.x()),
+                );
             } else {
                 lines.push(Line {
                     y: origin.y,
                     width,
-                    advances,
+                    left: origin.x,
+                    glyph_x: run.glyphs().iter().map(|glyph| glyph.x()).collect(),
                 });
             }
         }

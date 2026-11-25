@@ -1,33 +1,36 @@
-#![doc = include_str!("cascade_priority.doc/_module.md")]
+//! The total-order sort key that resolves a cascade conflict:
+//! [`CascadePriority`] (§4.14).
 
 use crate::cascade::{CascadeOrigin, ImportantFlag};
 use crate::selector::SelectorSpecificity;
 use core::cmp::Ordering;
 
-#[doc = include_str!("cascade_priority.doc/CascadePriority.md")]
+#[doc = include_str!("../../docs/api/cascade/cascade_priority.doc/CascadePriority.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CascadePriority {
-    #[doc = include_str!("cascade_priority.doc/band.md")]
+    /// The precedence band computed from `(origin, important)` — see
+    /// [`CascadePriority::band`].
     band: u8,
-    #[doc = include_str!("cascade_priority.doc/specificity.md")]
+    /// The selector specificity, compared within a band.
     specificity: SelectorSpecificity,
-    #[doc = include_str!("cascade_priority.doc/source_order.md")]
+    /// The declaration's position within its origin stream; later wins.
     source_order: u32,
-    #[doc = include_str!("cascade_priority.doc/origin.md")]
+    /// The origin the priority was built from (retained for inspection).
     origin: CascadeOrigin,
-    #[doc = include_str!("cascade_priority.doc/important.md")]
+    /// The importance flag the priority was built from (retained for
+    /// inspection).
     important: ImportantFlag,
 }
 
-#[doc = include_str!("cascade_priority.doc/AUTHORED_IMPORTANT_BASE.md")]
+/// Band value for authored `!important` declarations, added to the origin rank.
 const AUTHORED_IMPORTANT_BASE: u8 = 10;
-#[doc = include_str!("cascade_priority.doc/RUNTIME_NORMAL_BAND.md")]
+/// Band value for the runtime-override layer when the declaration is normal.
 const RUNTIME_NORMAL_BAND: u8 = 20;
-#[doc = include_str!("cascade_priority.doc/RUNTIME_IMPORTANT_BAND.md")]
+/// Band value for the runtime-override layer when the declaration is important.
 const RUNTIME_IMPORTANT_BAND: u8 = 21;
 
 impl CascadePriority {
-    #[doc = include_str!("cascade_priority.doc/new.md")]
+    #[doc = include_str!("../../docs/api/cascade/cascade_priority.doc/new.md")]
     #[must_use]
     pub const fn new(
         origin: CascadeOrigin,
@@ -44,7 +47,7 @@ impl CascadePriority {
         }
     }
 
-    #[doc = include_str!("cascade_priority.doc/compute_band.md")]
+    #[doc = include_str!("../../docs/api/cascade/cascade_priority.doc/compute_band.md")]
     const fn compute_band(origin: CascadeOrigin, important: ImportantFlag) -> u8 {
         if origin.is_runtime_override() {
             match important {
@@ -62,37 +65,38 @@ impl CascadePriority {
         }
     }
 
-    #[doc = include_str!("cascade_priority.doc/band_2.md")]
+    #[doc = include_str!("../../docs/api/cascade/cascade_priority.doc/band_2.md")]
     #[must_use]
     pub const fn band(self) -> u8 {
         self.band
     }
 
-    #[doc = include_str!("cascade_priority.doc/origin_2.md")]
+    /// Returns the origin this priority was built from.
     #[must_use]
     pub const fn origin(self) -> CascadeOrigin {
         self.origin
     }
 
-    #[doc = include_str!("cascade_priority.doc/important_2.md")]
+    /// Returns the importance flag this priority was built from.
     #[must_use]
     pub const fn important(self) -> ImportantFlag {
         self.important
     }
 
-    #[doc = include_str!("cascade_priority.doc/specificity_2.md")]
+    /// Returns the selector specificity this priority was built from.
     #[must_use]
     pub const fn specificity(self) -> SelectorSpecificity {
         self.specificity
     }
 
-    #[doc = include_str!("cascade_priority.doc/source_order_2.md")]
+    /// Returns the source order this priority was built from.
     #[must_use]
     pub const fn source_order(self) -> u32 {
         self.source_order
     }
 
-    #[doc = include_str!("cascade_priority.doc/key.md")]
+    /// The ordering key: `(band, specificity, source_order)`, most significant
+    /// first.
     const fn key(self) -> (u8, SelectorSpecificity, u32) {
         (self.band, self.specificity, self.source_order)
     }

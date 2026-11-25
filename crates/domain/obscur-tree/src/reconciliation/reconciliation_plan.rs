@@ -1,19 +1,21 @@
-#![doc = include_str!("reconciliation_plan.doc/_module.md")]
+//! `ReconciliationPlan`: the ordered op log produced by a reconcile pass.
 
 use obscur_identity::{NodeId, StableKey};
 
-use super::ReconciliationOp;
+use super::{DuplicateKey, ReconciliationOp};
 
-#[doc = include_str!("reconciliation_plan.doc/ReconciliationPlan.md")]
+#[doc = include_str!("../../docs/api/reconciliation/reconciliation_plan.doc/ReconciliationPlan.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ReconciliationPlan {
-    #[doc = include_str!("reconciliation_plan.doc/duplicate_keys.md")]
+    /// Sibling groups whose desired children reused one key (spec §2.4 keyed
+    /// identity). Recorded rather than reported: this crate is domain code and
+    /// performs no I/O, so the runtime raises the diagnostic.
     duplicate_keys: Vec<DuplicateKey>,
     ops: Vec<ReconciliationOp>,
 }
 
 impl ReconciliationPlan {
-    #[doc = include_str!("reconciliation_plan.doc/new.md")]
+    /// Creates an empty plan.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -22,43 +24,43 @@ impl ReconciliationPlan {
         }
     }
 
-    #[doc = include_str!("reconciliation_plan.doc/push.md")]
+    /// Appends an op to the end of the log, preserving order.
     pub fn push(&mut self, op: ReconciliationOp) {
         self.ops.push(op);
     }
 
-    #[doc = include_str!("reconciliation_plan.doc/push_duplicate_key.md")]
+    /// Returns the recorded ops in order.
     #[must_use]
-    #[doc = include_str!("reconciliation_plan.doc/push_duplicate_key_2.md")]
+    /// Records a sibling group that reused `key` `count` times under `parent`.
     pub fn push_duplicate_key(&mut self, parent: NodeId, key: StableKey, count: usize) {
         self.duplicate_keys
             .push(DuplicateKey { parent, key, count });
     }
 
-    #[doc = include_str!("reconciliation_plan.doc/duplicate_keys_2.md")]
+    /// The duplicate-key collisions this reconcile saw (spec §2.4).
     #[must_use]
     pub fn duplicate_keys(&self) -> &[DuplicateKey] {
         &self.duplicate_keys
     }
 
-    #[doc = include_str!("reconciliation_plan.doc/ops.md")]
+    #[doc = include_str!("../../docs/api/reconciliation/reconciliation_plan.doc/ops.md")]
     #[must_use]
     pub fn ops(&self) -> &[ReconciliationOp] {
         &self.ops
     }
 
-    #[doc = include_str!("reconciliation_plan.doc/iter.md")]
+    /// Returns an iterator over the recorded ops in order.
     pub fn iter(&self) -> core::slice::Iter<'_, ReconciliationOp> {
         self.ops.iter()
     }
 
-    #[doc = include_str!("reconciliation_plan.doc/len.md")]
+    /// Returns the number of recorded ops.
     #[must_use]
     pub fn len(&self) -> usize {
         self.ops.len()
     }
 
-    #[doc = include_str!("reconciliation_plan.doc/is_empty.md")]
+    /// Returns `true` if no ops were recorded (a no-op reconcile pass).
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.ops.is_empty()
@@ -104,21 +106,4 @@ mod tests {
         let collected: Vec<_> = plan.iter().copied().collect();
         assert_eq!(collected, vec![a, b]);
     }
-}
-
-/// One sibling group that gave the same key to more than one desired child.
-///
-/// Keyed identity assumes a key names **one** child (spec §2.4). When several share
-/// it, the matcher's key index keeps the first and the rest find no partner: they are
-/// inserted as new while the previous ones are removed, every frame, which makes the
-/// whole group churn — a full restyle and a full layout each time. It is silent
-/// otherwise, so the runtime turns this into a diagnostic.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DuplicateKey {
-    /// The parent whose children collided.
-    pub parent: NodeId,
-    /// The key more than one child claimed.
-    pub key: StableKey,
-    /// How many children claimed it.
-    pub count: usize,
 }

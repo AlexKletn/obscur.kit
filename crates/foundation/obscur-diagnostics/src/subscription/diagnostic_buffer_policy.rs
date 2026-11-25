@@ -1,39 +1,33 @@
-#![doc = include_str!("diagnostic_buffer_policy.doc/_module.md")]
+//! Buffering and backpressure configuration for a subscription.
 
-#[doc = include_str!("diagnostic_buffer_policy.doc/OverflowStrategy.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OverflowStrategy {
-    #[doc = include_str!("diagnostic_buffer_policy.doc/DropOldest.md")]
-    DropOldest,
-    #[doc = include_str!("diagnostic_buffer_policy.doc/DropNewest.md")]
-    DropNewest,
-    #[doc = include_str!("diagnostic_buffer_policy.doc/Coalesce.md")]
-    Coalesce,
-}
+use super::OverflowStrategy;
 
-#[doc = include_str!("diagnostic_buffer_policy.doc/DiagnosticBufferPolicy.md")]
+#[doc = include_str!("../../docs/api/subscription/diagnostic_buffer_policy.doc/DiagnosticBufferPolicy.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DiagnosticBufferPolicy {
-    #[doc = include_str!("diagnostic_buffer_policy.doc/capacity.md")]
+    /// Maximum number of buffered diagnostics. `usize::MAX` is treated as
+    /// effectively unbounded.
     pub capacity: usize,
-    #[doc = include_str!("diagnostic_buffer_policy.doc/overflow.md")]
+    /// Strategy applied when the buffer is at capacity.
     pub overflow: OverflowStrategy,
 }
 
 impl DiagnosticBufferPolicy {
-    #[doc = include_str!("diagnostic_buffer_policy.doc/new.md")]
+    /// Creates a policy with the given `capacity` and `overflow` strategy.
     #[must_use]
     pub const fn new(capacity: usize, overflow: OverflowStrategy) -> Self {
         Self { capacity, overflow }
     }
 
-    #[doc = include_str!("diagnostic_buffer_policy.doc/bounded.md")]
+    /// Creates a bounded policy of `capacity` entries that drops the oldest
+    /// diagnostic on overflow.
     #[must_use]
     pub const fn bounded(capacity: usize) -> Self {
         Self::new(capacity, OverflowStrategy::DropOldest)
     }
 
-    #[doc = include_str!("diagnostic_buffer_policy.doc/unbounded.md")]
+    /// Creates an effectively unbounded policy (no backpressure). The overflow
+    /// strategy is irrelevant since the capacity is never reached in practice.
     #[must_use]
     pub const fn unbounded() -> Self {
         Self::new(usize::MAX, OverflowStrategy::DropOldest)

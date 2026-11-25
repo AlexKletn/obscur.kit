@@ -1,58 +1,67 @@
-#![doc = include_str!("hit_testing.doc/_module.md")]
+//! Resolving a point to the node under it: [`HitTesting`].
 
 use std::collections::{HashMap, HashSet};
 
-use obscur_geometry::{AffineTransform, Point, Rect};
+use obscur_geometry::{AffineTransform, CornerRadii, Point, Rect};
 use obscur_identity::{FastMap, FastSet, NodeId};
 use obscur_interaction::spatial::SpatialIndex;
 use obscur_scene::path::PathTrim;
 use obscur_style::computed::{ComputedValue, OverflowAxes};
-use obscur_style::property::{Length, PropertyId, PropertyValue};
+use obscur_style::property::{PropertyId, PropertyValue};
 use obscur_tree::tree::RetainedTree;
 
+use super::PresentationUndo;
+use super::ancestor_geometry::AncestorGeometry;
+use crate::orchestration::clip_path::ResolvedClipPath;
 use crate::orchestration::{
-    ComputedStyles, LayoutBoxes, PaintLayer, effective_stacking, resolved_transform,
+    ComputedStyles, EffectiveStacking, LayoutBoxes, corner_radii_of, effective_stacking,
+    overflow_padding_box, overflow_padding_radii,
 };
 
-#[doc = include_str!("hit_testing.doc/HitTesting.md")]
+#[doc = include_str!("../../docs/api/runtime/hit_testing.doc/HitTesting.md")]
 pub(crate) struct HitTesting {
-    #[doc = include_str!("hit_testing.doc/index.md")]
+    /// The z-order-aware hit-test index, rebuilt from the retained boxes after
+    /// each frame that lays out.
     index: SpatialIndex,
-    #[doc = include_str!("hit_testing.doc/canvas_regions.md")]
+    #[doc = include_str!("../../docs/api/runtime/hit_testing.doc/canvas_regions.md")]
     canvas_regions: FastMap<NodeId, PathTrim>,
-    #[doc = include_str!("hit_testing.doc/inverse_transforms.md")]
+    #[doc = include_str!("../../docs/api/runtime/hit_testing.doc/inverse_transforms.md")]
     inverse_transforms: FastMap<NodeId, AffineTransform>,
+    presented_transforms: bool,
+    presented_stacking: Option<EffectiveStacking>,
 }
 
 impl HitTesting {
-    #[doc = include_str!("hit_testing.doc/new.md")]
+    /// Creates an empty index — nothing is hittable until a frame lays out and
+    /// calls [`rebuild`](Self::rebuild).
     pub(crate) fn new() -> Self {
         Self {
             index: SpatialIndex::new(),
             canvas_regions: HashMap::default(),
             inverse_transforms: HashMap::default(),
+            presented_transforms: false,
+            presented_stacking: None,
         }
     }
 
-    #[doc = include_str!("hit_testing.doc/set_canvas_regions.md")]
+    #[doc = include_str!("../../docs/api/runtime/hit_testing.doc/set_canvas_regions.md")]
     pub(crate) fn set_canvas_regions(&mut self, regions: FastMap<NodeId, PathTrim>) {
         self.canvas_regions = regions;
     }
 
-    #[doc = include_str!("hit_testing.doc/rebuild.md")]
+    #[doc = include_str!("../../docs/api/runtime/hit_testing.doc/rebuild.md")]
     pub(crate) fn rebuild(
         &mut self,
         tree: &RetainedTree,
         computed: &ComputedStyles,
         boxes: &LayoutBoxes,
     ) {
-        self.index.clear();
+        self.index.retain(|node| boxes.contains_key(&node));
         self.inverse_transforms.clear();
-        let mut memo: FastMap<NodeId, Option<AffineTransform>> = HashMap::default();
+        let mut ancestors = AncestorGeometry::new(boxes.len());
         for (&node, layout_box) in boxes {
-            let z_order = Self::logical_depth(tree, node);
-            let Some(chain) = Self::accumulated_transform(tree, computed, boxes, node, &mut memo)
-            else {
+            let (z_order, transform) = ancestors.for_node(tree, computed, boxes, node);
+            let Some(chain) = transform else {
                 self.index.insert(node, layout_box.bounds, z_order);
                 continue;
             };
@@ -60,6 +69,7 @@ impl HitTesting {
             // zero area. It paints nothing, so it is hit by nothing — leaving it
             // out of the index is both the truth and the cheap answer.
             let Some(inverse) = chain.inverse() else {
+                self.index.remove(node);
                 continue;
             };
             self.index
@@ -68,68 +78,56 @@ impl HitTesting {
         }
     }
 
-    #[doc = include_str!("hit_testing.doc/accumulated_transform.md")]
-    fn accumulated_transform(
+    #[doc = include_str!("../../docs/api/runtime/hit_testing.doc/update_presentation.md")]
+    pub(crate) fn update_presentation(
+        &mut self,
         tree: &RetainedTree,
         computed: &ComputedStyles,
         boxes: &LayoutBoxes,
-        node: NodeId,
-        memo: &mut FastMap<NodeId, Option<AffineTransform>>,
-    ) -> Option<AffineTransform> {
-        if let Some(&hit) = memo.get(&node) {
-            return hit;
+        presentation: &PresentationUndo,
+    ) {
+        let transformed = presentation
+            .entries
+            .iter()
+            .any(|(_, property, _, _)| *property == PropertyId::Transform);
+        if transformed || self.presented_transforms {
+            self.rebuild(tree, computed, boxes);
         }
-        let mut pending = Vec::new();
-        let mut inherited = None;
-        let mut current = node;
-        let ancestor_walk_limit = tree.len();
-        for _ in 0..=ancestor_walk_limit {
-            if let Some(&known) = memo.get(&current) {
-                inherited = known;
-                break;
-            }
-            pending.push(current);
-            match tree.get(current).and_then(|n| n.logical_parent().parent()) {
-                Some(parent) => current = parent,
-                None => break,
-            }
-        }
-        let mut chain = inherited;
-        for &ancestor in pending.iter().rev() {
-            let own = boxes
-                .get(&ancestor)
-                .and_then(|b| resolved_transform(computed, ancestor, b.bounds));
-            chain = match (chain, own) {
-                (Some(outer), Some(inner)) => Some(outer.multiply(inner)),
-                (outer, None) => outer,
-                (None, inner) => inner,
-            };
-            memo.insert(ancestor, chain);
-        }
-        chain
+        self.presented_transforms = transformed;
+        self.presented_stacking =
+            (!presentation.entries.is_empty()).then(|| effective_stacking(tree, computed));
     }
 
-    #[doc = include_str!("hit_testing.doc/local_point.md")]
-    fn local_point(&self, node: NodeId, point: Point) -> Point {
+    /// Returns the stacking order sampled during the last animated composition.
+    pub(crate) fn presented_stacking(&self) -> Option<&EffectiveStacking> {
+        self.presented_stacking.as_ref()
+    }
+
+    #[doc = include_str!("../../docs/api/runtime/hit_testing.doc/local_point.md")]
+    pub(crate) fn local_point(&self, node: NodeId, point: Point) -> Point {
         match self.inverse_transforms.get(&node) {
             Some(inverse) => inverse.apply(point),
             None => point,
         }
     }
 
-    #[doc = include_str!("hit_testing.doc/resolve.md")]
+    #[doc = include_str!("../../docs/api/runtime/hit_testing.doc/resolve.md")]
     pub(crate) fn resolve(
         &self,
         tree: &RetainedTree,
         computed: &ComputedStyles,
         boxes: &LayoutBoxes,
         screen: Point,
-        scrolls: &FastMap<NodeId, f32>,
+        scrolls: &FastMap<NodeId, Point>,
     ) -> Option<NodeId> {
-        let preorder = Self::preorder_index(tree);
-        let stacking = effective_stacking(tree, computed);
-        let (zmap, layermap) = (stacking.z, stacking.layer);
-        let mut best: Option<((i32, PaintLayer, i32, usize), NodeId)> = None;
+        let fallback;
+        let stacking = if let Some(presented) = self.presented_stacking() {
+            presented
+        } else {
+            fallback = effective_stacking(tree, computed);
+            &fallback
+        };
+        let mut best: Option<((i32, usize), NodeId)> = None;
         let mut seen: FastSet<NodeId> = HashSet::default();
         for probe in Self::query_points(tree, screen, scrolls) {
             for hit in self.index.hits_at(probe) {
@@ -158,13 +156,8 @@ impl HitTesting {
                     continue;
                 }
                 let key = (
-                    zmap.get(&node).copied().unwrap_or(0),
-                    layermap
-                        .get(&node)
-                        .copied()
-                        .unwrap_or(PaintLayer::NonPositioned),
-                    Self::logical_depth(tree, node),
-                    preorder.get(&node).copied().unwrap_or(0),
+                    stacking.paint_band.get(&node).copied().unwrap_or(0),
+                    stacking.paint_index.get(&node).copied().unwrap_or(0),
                 );
                 if best.is_none_or(|(bk, _)| key > bk) {
                     best = Some((key, node));
@@ -174,115 +167,76 @@ impl HitTesting {
         best.map(|(_, node)| node)
     }
 
-    #[doc = include_str!("hit_testing.doc/folded_point.md")]
+    #[doc = include_str!("../../docs/api/runtime/hit_testing.doc/folded_point.md")]
     pub(crate) fn folded_point(
         tree: &RetainedTree,
-        scrolls: &FastMap<NodeId, f32>,
+        scrolls: &FastMap<NodeId, Point>,
         node: NodeId,
         screen: Point,
     ) -> Point {
-        Point::new(screen.x, screen.y + Self::scroll_fold(tree, scrolls, node))
+        let fold = Self::scroll_fold(tree, scrolls, node);
+        Point::new(screen.x + fold.x, screen.y + fold.y)
     }
 
-    #[doc = include_str!("hit_testing.doc/content_point.md")]
+    #[doc = include_str!("../../docs/api/runtime/hit_testing.doc/content_point.md")]
     pub(crate) fn content_point(
         tree: &RetainedTree,
-        scrolls: &FastMap<NodeId, f32>,
+        scrolls: &FastMap<NodeId, Point>,
         node: NodeId,
         screen: Point,
     ) -> Point {
-        let own = scrolls.get(&node).copied().unwrap_or(0.0);
+        let own = scrolls.get(&node).copied().unwrap_or_default();
         let folded = Self::folded_point(tree, scrolls, node, screen);
-        Point::new(folded.x, folded.y + own)
+        Point::new(folded.x + own.x, folded.y + own.y)
     }
 
-    #[doc = include_str!("hit_testing.doc/scroll_fold.md")]
-    fn scroll_fold(tree: &RetainedTree, scrolls: &FastMap<NodeId, f32>, node: NodeId) -> f32 {
+    #[doc = include_str!("../../docs/api/runtime/hit_testing.doc/scroll_fold.md")]
+    fn scroll_fold(tree: &RetainedTree, scrolls: &FastMap<NodeId, Point>, node: NodeId) -> Point {
         if scrolls.is_empty() {
-            return 0.0;
+            return Point::ORIGIN;
         }
-        let mut total = 0.0;
+        let mut total = Point::ORIGIN;
         let mut current = node;
         let ancestor_walk_limit = tree.len();
         for _ in 0..ancestor_walk_limit {
-            let Some(parent) = tree.get(current).and_then(|n| n.logical_parent().parent()) else {
+            let Some(parent) = tree.visual_parent_of(current) else {
                 break;
             };
-            total += scrolls.get(&parent).copied().unwrap_or(0.0);
+            if let Some(offset) = scrolls.get(&parent) {
+                total.x += offset.x;
+                total.y += offset.y;
+            }
             current = parent;
         }
         total
     }
 
-    #[doc = include_str!("hit_testing.doc/query_points.md")]
+    #[doc = include_str!("../../docs/api/runtime/hit_testing.doc/query_points.md")]
     fn query_points(
         tree: &RetainedTree,
         screen: Point,
-        scrolls: &FastMap<NodeId, f32>,
+        scrolls: &FastMap<NodeId, Point>,
     ) -> Vec<Point> {
         let mut points = vec![screen];
         for (&container, &own) in scrolls {
-            let fold = Self::scroll_fold(tree, scrolls, container) + own;
+            let above = Self::scroll_fold(tree, scrolls, container);
+            let fold = Point::new(above.x + own.x, above.y + own.y);
             // A container scrolled nowhere (and under nothing scrolled) adds no
             // probe: its subtree is already covered by the screen point.
-            if fold.abs() > 0.0 {
-                points.push(Point::new(screen.x, screen.y + fold));
+            if fold != Point::ORIGIN {
+                points.push(Point::new(screen.x + fold.x, screen.y + fold.y));
             }
         }
         points
     }
 
-    #[doc = include_str!("hit_testing.doc/logical_depth.md")]
-    fn logical_depth(tree: &RetainedTree, node: NodeId) -> i32 {
-        let mut depth: i32 = 0;
-        let mut current = node;
-        // The tree is a DAG in practice; cap the walk at the node count so a
-        // pathological cycle terminates deterministically.
-        let ancestor_walk_limit = tree.len();
-        for _ in 0..ancestor_walk_limit {
-            match tree.get(current).and_then(|n| n.logical_parent().parent()) {
-                Some(parent) => {
-                    depth = depth.saturating_add(1);
-                    current = parent;
-                }
-                None => break,
-            }
-        }
-        depth
-    }
-
-    #[doc = include_str!("hit_testing.doc/preorder_index.md")]
-    fn preorder_index(tree: &RetainedTree) -> FastMap<NodeId, usize> {
-        let mut out = HashMap::default();
-        let Some(root) = tree.root() else {
-            return out;
-        };
-        // Explicit stack DFS, children pushed in reverse so they pop in order. The
-        // visited guard makes a malformed (cyclic) child list terminate.
-        let mut stack = vec![root];
-        let mut next = 0usize;
-        while let Some(node) = stack.pop() {
-            if out.contains_key(&node) {
-                continue;
-            }
-            out.insert(node, next);
-            next += 1;
-            if let Some(n) = tree.get(node) {
-                for &child in n.child_nodes().iter().rev() {
-                    stack.push(child);
-                }
-            }
-        }
-        out
-    }
-
-    #[doc = include_str!("hit_testing.doc/is_hittable.md")]
-    fn is_hittable(
+    #[doc = include_str!("../../docs/api/runtime/hit_testing.doc/is_hittable.md")]
+    pub(crate) fn is_hittable(
         &self,
         tree: &RetainedTree,
         computed: &ComputedStyles,
         boxes: &LayoutBoxes,
-        scrolls: &FastMap<NodeId, f32>,
+        scrolls: &FastMap<NodeId, Point>,
         node: NodeId,
         screen: Point,
     ) -> bool {
@@ -296,78 +250,109 @@ impl HitTesting {
         // climb costs one lookup where recomputing the chain costs a walk.
         let mut fold = Self::scroll_fold(tree, scrolls, node);
         for _ in 0..ancestor_walk_limit {
-            let Some(parent) = tree.get(current).and_then(|n| n.logical_parent().parent()) else {
+            let Some(parent) = tree.visual_parent_of(current) else {
                 break;
             };
-            fold -= scrolls.get(&parent).copied().unwrap_or(0.0);
-            // The clip is that ancestor's own border box, which a transform on or
-            // above it moves on screen; the point has to enter the ancestor's
-            // space before it can be compared against the untransformed rect —
-            // and that space is scrolled by whatever scrolls ABOVE the ancestor,
-            // not by the ancestor's own scroll, which never moves its own box.
-            if Self::overflow_clips(computed, parent)
-                && let Some(b) = boxes.get(&parent)
-                && !b
-                    .bounds
-                    .contains(self.local_point(parent, Point::new(screen.x, screen.y + fold)))
-            {
-                return false;
+            if let Some(offset) = scrolls.get(&parent) {
+                fold.x -= offset.x;
+                fold.y -= offset.y;
+            }
+            if let Some(layout) = boxes.get(&parent) {
+                let style = computed.get(&parent);
+                let bounds = layout.bounds;
+                let radii = corner_radii_of(style, Some(bounds)).normalized(bounds);
+                let overflow = OverflowAxes::of(style).clips();
+                let clip_path = ResolvedClipPath::of(style, *layout);
+                if overflow || radii.any_positive() || clip_path.is_some() {
+                    let at =
+                        self.local_point(parent, Point::new(screen.x + fold.x, screen.y + fold.y));
+                    if clip_path.is_some_and(|clip| !clip_path_contains(clip, at)) {
+                        return false;
+                    }
+                    // The outer radius clips the subtree even with visible overflow.
+                    if radii.any_positive()
+                        && !rounded_rect_contains(bounds, corner_pairs(radii), at)
+                    {
+                        return false;
+                    }
+                    if overflow {
+                        let clip = overflow_padding_box(style, bounds);
+                        if !clip.contains(at) {
+                            return false;
+                        }
+                        if clip != bounds && radii.any_positive() {
+                            let inner = overflow_padding_radii(style, bounds, clip);
+                            if !rounded_rect_contains(clip, corner_pairs(inner), at) {
+                                return false;
+                            }
+                        }
+                    }
+                }
             }
             current = parent;
         }
         if let Some(b) = boxes.get(&node) {
-            let radii = Self::corner_radii(computed, node, b.bounds);
+            let radii = corner_radii_of(computed.get(&node), Some(b.bounds)).normalized(b.bounds);
             let at = self.local_point(node, Self::folded_point(tree, scrolls, node, screen));
-            if !rounded_rect_contains(b.bounds, radii, at) {
+            if ResolvedClipPath::of(computed.get(&node), *b)
+                .is_some_and(|clip| !clip_path_contains(clip, at))
+            {
+                return false;
+            }
+            if !rounded_rect_contains(b.bounds, corner_pairs(radii), at) {
                 return false;
             }
         }
         true
     }
 
-    #[doc = include_str!("hit_testing.doc/is_pointer_transparent.md")]
+    #[doc = include_str!("../../docs/api/runtime/hit_testing.doc/is_pointer_transparent.md")]
     fn is_pointer_transparent(computed: &ComputedStyles, node: NodeId) -> bool {
+        let style = computed.get(&node);
+        if style.is_some_and(|style| style.is_visibility_hidden()) {
+            return true;
+        }
         matches!(
-            computed
-                .get(&node)
+            style
                 .and_then(|style| style.get(PropertyId::PointerEvents))
                 .map(ComputedValue::value),
             Some(&PropertyValue::Keyword(sym))
                 if sym == obscur_style::property::layout_keyword::POINTER_EVENTS_NONE
         )
     }
+}
 
-    #[doc = include_str!("hit_testing.doc/overflow_clips.md")]
-    fn overflow_clips(computed: &ComputedStyles, node: NodeId) -> bool {
-        OverflowAxes::of(computed.get(&node)).clips()
-    }
-
-    #[doc = include_str!("hit_testing.doc/corner_radii.md")]
-    fn corner_radii(computed: &ComputedStyles, node: NodeId, bounds: Rect) -> [(f32, f32); 4] {
-        let corner = |id: PropertyId| -> (f32, f32) {
-            match computed
-                .get(&node)
-                .and_then(|style| style.get(id))
-                .and_then(ComputedValue::as_length)
-            {
-                Some(Length::Px(px)) => (px.0, px.0),
-                Some(Length::Percent(pct)) => (
-                    pct / 100.0 * bounds.size.width,
-                    pct / 100.0 * bounds.size.height,
-                ),
-                _ => (0.0, 0.0),
-            }
-        };
-        [
-            corner(PropertyId::BorderTopLeftRadius),
-            corner(PropertyId::BorderTopRightRadius),
-            corner(PropertyId::BorderBottomRightRadius),
-            corner(PropertyId::BorderBottomLeftRadius),
-        ]
+fn clip_path_contains(clip: ResolvedClipPath<'_>, point: Point) -> bool {
+    match clip {
+        ResolvedClipPath::Polygon(polygon) => polygon.contains(point),
+        ResolvedClipPath::Svg {
+            path,
+            outline,
+            origin,
+        } => outline.contains_with_rule(
+            Point::new(point.x - origin.x, point.y - origin.y),
+            path.fill_rule(),
+        ),
+        ResolvedClipPath::Box(bounds, radii) => {
+            bounds.size.width > 0.0
+                && bounds.size.height > 0.0
+                && rounded_rect_contains(bounds, corner_pairs(radii), point)
+        }
     }
 }
 
-#[doc = include_str!("hit_testing.doc/rounded_rect_contains.md")]
+/// Returns normalized radii in clockwise hit-test order.
+fn corner_pairs(radii: CornerRadii) -> [(f32, f32); 4] {
+    [
+        radii.top_left,
+        radii.top_right,
+        radii.bottom_right,
+        radii.bottom_left,
+    ]
+    .map(|radius| (radius.x, radius.y))
+}
+
+#[doc = include_str!("../../docs/api/runtime/hit_testing.doc/rounded_rect_contains.md")]
 fn rounded_rect_contains(bounds: Rect, radii: [(f32, f32); 4], point: Point) -> bool {
     if !bounds.contains(point) {
         return false;
@@ -469,7 +454,7 @@ mod tests {
 
     /// The scroll map of a frame in which nothing scrolls — the shape every
     /// pre-scroll-container test ran in, and the fast path of the folding.
-    fn unscrolled() -> FastMap<NodeId, f32> {
+    fn unscrolled() -> FastMap<NodeId, Point> {
         HashMap::default()
     }
 
@@ -807,6 +792,31 @@ mod tests {
     }
 
     #[test]
+    fn refreshing_the_index_moves_and_removes_existing_entries() {
+        let (tree, mut boxes, mut computed, mut hits, card) =
+            card_with_transform(Some([0.0, 0.0, 0.0, 1.0, 0.0, 0.0]), CARD);
+        let collapsed = computed.remove(&card).unwrap();
+        hits.rebuild(&tree, &computed, &boxes);
+        let moved = Rect::new(Point::new(150.0, 0.0), CARD.size);
+        boxes.insert(card, LayoutBox::new(moved));
+        hits.rebuild(&tree, &computed, &boxes);
+        assert!(hits.index.topmost_at(CARD.origin).is_none());
+        assert_eq!(hits.index.topmost_at(moved.origin).unwrap().node(), card);
+
+        computed.insert(card, collapsed);
+        hits.rebuild(&tree, &computed, &boxes);
+        assert!(!hits.index.contains(card));
+
+        computed.remove(&card);
+        hits.rebuild(&tree, &computed, &boxes);
+        assert!(hits.index.contains(card));
+
+        boxes.remove(&card);
+        hits.rebuild(&tree, &computed, &boxes);
+        assert!(!hits.index.contains(card));
+    }
+
+    #[test]
     fn an_empty_index_resolves_nothing() {
         let hits = HitTesting::new();
         let tree = RetainedTree::new();
@@ -980,7 +990,7 @@ mod tests {
 
         let on_toolbar = Point::new(50.0, 20.0);
         for offset in [0.0_f32, 100.0, 300.0, 1500.0] {
-            let scrolls = FastMap::from_iter([(scroller, offset)]);
+            let scrolls = FastMap::from_iter([(scroller, Point::new(0.0, offset))]);
             assert_eq!(
                 hits.resolve(&tree, &computed, &boxes, on_toolbar, &scrolls),
                 Some(toolbar),
@@ -1037,7 +1047,7 @@ mod tests {
 
         let mut hits = HitTesting::new();
         hits.rebuild(&tree, &computed, &boxes);
-        let scrolls = FastMap::from_iter([(outer, 100.0_f32)]);
+        let scrolls = FastMap::from_iter([(outer, Point::new(0.0, 100.0))]);
 
         // `mid` shows content from unscrolled y 100..250, which after the 100px
         // scroll is screen y 0..150. At screen y 170 `inner` is folded to y 270 —

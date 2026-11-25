@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+#![doc = include_str!("../../docs/api/ast/mod.doc/_module.md")]
 
 mod attribute;
 pub use attribute::Attribute;

@@ -1,4 +1,4 @@
-#![doc = include_str!("cpu_renderer.doc/_module.md")]
+#![doc = include_str!("../../docs/api/renderer/cpu_renderer.doc/_module.md")]
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -12,41 +12,62 @@ use obscur_render::{
     RendererId, SceneEffect, text_run_font_handles, unsupported_effects,
 };
 use obscur_scene::command::PaintCommand;
-use obscur_scene::paint::{Brush, Paint};
+use obscur_scene::layer::{CompositionMode, LayerEffect};
+use obscur_scene::paint::{Brush, Paint, SceneImage};
+use obscur_scene::path::Path;
 use skrifa::FontRef;
 
 use crate::error::CpuRenderError;
-use crate::renderer::brush_fill::{brush_color, fill_conic, fill_linear};
-use crate::renderer::clip_mask::resolve_clip_entry;
+use crate::renderer::brush_fill::{brush_color, fill_conic, fill_linear, radial_paint};
+use crate::renderer::clip_mask::{build_clip_mask, image_mask, resolve_clip_entry};
+use crate::renderer::gaussian_blur::{MAX_SIGMA, blur_backdrop};
 use crate::renderer::glyph_raster::draw_text_run;
-use crate::renderer::group_compositing::composite_top_layer;
 use crate::renderer::image_tiling::draw_image;
+use crate::renderer::layer_composite::LayerComposite;
+use crate::renderer::render_scope::RenderScope;
 use crate::renderer::shadow_approximation::draw_shadow_approx;
 use crate::renderer::skia_lowering::{
     sk_dimensions, solid_paint, to_sk_blend_mode, to_sk_fill_rule, to_sk_path, to_sk_transform,
 };
 
-#[doc = include_str!("cpu_renderer.doc/CpuRenderer.md")]
+fn device_scale(transform: tiny_skia::Transform) -> f32 {
+    (transform.sx * transform.sy - transform.kx * transform.ky)
+        .abs()
+        .sqrt()
+}
+
+#[doc = include_str!("../../docs/api/renderer/cpu_renderer.doc/CpuRenderer.md")]
 #[derive(Clone)]
 pub struct CpuRenderer {
-    #[doc = include_str!("cpu_renderer.doc/id.md")]
+    /// The stable identity of this backend instance.
     id: RendererId,
-    #[doc = include_str!("cpu_renderer.doc/capabilities.md")]
+    /// The software capability profile advertised to callers.
     capabilities: RendererCapabilities,
-    #[doc = include_str!("cpu_renderer.doc/last_pixmap.md")]
+    /// The pixels of the most recently rendered frame, if any.
     last_pixmap: Option<tiny_skia::Pixmap>,
-    #[doc = include_str!("cpu_renderer.doc/frames_rendered.md")]
+    /// How many frames this renderer has rasterized.
     frames_rendered: u64,
-    #[doc = include_str!("cpu_renderer.doc/fonts.md")]
+    /// Host-registered font faces keyed by the run font handle (spec §5.2). A run
+    /// tagged with handle `run.font()` is rasterized against the matching sfnt
+    /// bytes; when no font is registered for the handle the run falls back to
+    /// box-coverage cells. The bytes are shared (`Arc`) so `clone` is cheap and a
+    /// borrowed [`FontRef`] is rebuilt per draw (bytes must outlive the borrow).
     fonts: HashMap<u32, Arc<[u8]>>,
-    #[doc = include_str!("cpu_renderer.doc/diagnostics.md")]
+    /// Where the §5.2 explicit fallback diagnostics go. Defaults to
+    /// [`NullDiagnosticSink`], so an effect this backend will not reproduce follows
+    /// exactly the same code path whether or not a host is listening. Shared
+    /// (`Arc`) because a `CpuRenderer` is [`Clone`] and a clone reports to the same
+    /// host sink.
     diagnostics: Arc<dyn DiagnosticSink>,
-    #[doc = include_str!("cpu_renderer.doc/fallbacks.md")]
+    /// Which unsupported effects have already been reported to `diagnostics`, so a
+    /// standing gradient does not re-raise its diagnostic every frame.
     fallbacks: EffectFallbackReporter,
 }
 
 impl CpuRenderer {
-    #[doc = include_str!("cpu_renderer.doc/new.md")]
+    /// Creates a software renderer with the given `id` and a conservative
+    /// software capability profile: offscreen output available, and no MSAA,
+    /// HDR, or custom shaders. It has rendered no frames.
     #[must_use]
     pub fn new(id: RendererId) -> Self {
         Self {
@@ -64,30 +85,30 @@ impl CpuRenderer {
         }
     }
 
-    #[doc = include_str!("cpu_renderer.doc/set_diagnostic_sink.md")]
+    #[doc = include_str!("../../docs/api/renderer/cpu_renderer.doc/set_diagnostic_sink.md")]
     pub fn set_diagnostic_sink(&mut self, sink: Arc<dyn DiagnosticSink>) {
         self.diagnostics = sink;
     }
 
-    #[doc = include_str!("cpu_renderer.doc/register_font.md")]
+    #[doc = include_str!("../../docs/api/renderer/cpu_renderer.doc/register_font.md")]
     pub fn register_font(&mut self, id: u32, font_bytes: Vec<u8>) {
         self.fonts
             .insert(id, Arc::from(font_bytes.into_boxed_slice()));
     }
 
-    #[doc = include_str!("cpu_renderer.doc/pixmap.md")]
+    #[doc = include_str!("../../docs/api/renderer/cpu_renderer.doc/pixmap.md")]
     #[must_use]
     pub fn pixmap(&self) -> Option<&tiny_skia::Pixmap> {
         self.last_pixmap.as_ref()
     }
 
-    #[doc = include_str!("cpu_renderer.doc/frames_rendered_2.md")]
+    /// The number of frames this renderer has rasterized so far.
     #[must_use]
     pub const fn frames_rendered(&self) -> u64 {
         self.frames_rendered
     }
 
-    #[doc = include_str!("cpu_renderer.doc/text_fallbacks.md")]
+    #[doc = include_str!("../../docs/api/renderer/cpu_renderer.doc/text_fallbacks.md")]
     fn text_fallbacks(&self, list: &obscur_scene::command::DisplayList) -> Vec<EffectFallback> {
         text_run_font_handles(list)
             .into_iter()
@@ -105,7 +126,7 @@ impl CpuRenderer {
             .collect()
     }
 
-    #[doc = include_str!("cpu_renderer.doc/has_outlines_for.md")]
+    /// Whether a run tagged with `handle` will draw real outlines here.
     fn has_outlines_for(&self, handle: u32) -> bool {
         self.fonts
             .get(&handle)
@@ -114,14 +135,17 @@ impl CpuRenderer {
 }
 
 impl Default for CpuRenderer {
-    #[doc = include_str!("cpu_renderer.doc/default.md")]
+    /// The default renderer has identity `0` and the software capability profile
+    /// of [`CpuRenderer::new`].
     fn default() -> Self {
         Self::new(RendererId::from_raw(0))
     }
 }
 
 impl std::fmt::Debug for CpuRenderer {
-    #[doc = include_str!("cpu_renderer.doc/fmt.md")]
+    /// Hand-written because [`tiny_skia::Pixmap`] is not [`Debug`]; the pixel
+    /// buffer is summarized by its presence rather than dumped, and the host's
+    /// diagnostic sink is elided (it is a trait object).
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CpuRenderer")
             .field("id", &self.id)
@@ -143,35 +167,68 @@ impl Renderer for CpuRenderer {
         self.capabilities
     }
 
-    #[doc = include_str!("cpu_renderer.doc/render.md")]
+    #[doc = include_str!("../../docs/api/renderer/cpu_renderer.doc/render.md")]
     fn render(
         &mut self,
         submission: &FrameSubmission,
         target: &RenderTarget,
     ) -> Result<PresentResult, RendererError> {
-        let (width, height) = sk_dimensions(target.size());
+        self.render_with_pixmap_allocator(submission, target, allocate_pixmap)
+    }
+
+    #[doc = include_str!("../../docs/api/renderer/cpu_renderer.doc/supports_effect.md")]
+    fn supports_effect(&self, effect: SceneEffect) -> SupportLevel {
+        match effect {
+            SceneEffect::Image => SupportLevel::Native,
+            SceneEffect::Clip => SupportLevel::Emulated,
+            SceneEffect::Shadow
+            | SceneEffect::Text
+            | SceneEffect::Gradient
+            | SceneEffect::BlendMode
+            | SceneEffect::ColorMatrix
+            | SceneEffect::Blur
+            | SceneEffect::BackdropFilter => SupportLevel::Limited,
+            SceneEffect::ImageMask => SupportLevel::Emulated,
+            SceneEffect::Mask => SupportLevel::Unavailable,
+        }
+    }
+}
+
+impl CpuRenderer {
+    fn render_with_pixmap_allocator(
+        &mut self,
+        submission: &FrameSubmission,
+        target: &RenderTarget,
+        mut allocate_pixmap: impl FnMut(u32, u32) -> Result<tiny_skia::Pixmap, RendererError>,
+    ) -> Result<PresentResult, RendererError> {
+        let size = target.size();
+        let (width, height) = sk_dimensions(size).ok_or_else(|| {
+            RendererError::InvalidTarget(
+                format!(
+                    "cpu renderer target has invalid dimensions {}x{}",
+                    size.width, size.height
+                )
+                .into(),
+            )
+        })?;
         if width == 0 || height == 0 {
             return Err(CpuRenderError::EmptyTarget.into_renderer_error());
         }
+        if SceneImage::rgba8_byte_size(width, height).is_none() {
+            return Err(RendererError::InvalidTarget(
+                format!("RGBA8 buffer for {width}x{height} pixels exceeds addressable size").into(),
+            ));
+        }
+        let root_pixmap = allocate_pixmap(width, height)?;
 
-        // Spec §5.2: "Unsupported effects and fallbacks are explicit diagnostics."
-        // Tell the host, before drawing, every effect this scene asks for that the
-        // rasterization below will not reproduce — then draw the documented
-        // approximation anyway, which is the CPU backend's standing policy.
         let display_list = submission.frame().scene().display_list();
-        let unsupported = unsupported_effects(&*self, display_list);
-        let sink = Arc::clone(&self.diagnostics);
-        self.fallbacks.report(&unsupported, sink.as_ref());
-        // The other half of that sentence: an effect this backend *does* draw, but
-        // whose documented restriction bites on THIS scene. Unlike the list above,
-        // it cannot be read off `supports_effect` — `Text` is `Limited` whether or
-        // not the host registered the font a given run needs.
-        let degraded = self.text_fallbacks(display_list);
-        self.fallbacks.report_fallbacks(&degraded, sink.as_ref());
-
-        let root_pixmap = tiny_skia::Pixmap::new(width, height).ok_or_else(|| {
-            CpuRenderError::PixmapAllocationFailed { width, height }.into_renderer_error()
-        })?;
+        // Repeated draw commands can hit the same fallback in one frame.
+        let mut frame_fallbacks = Vec::new();
+        let mut record_fallback = |effect, reason| {
+            if !frame_fallbacks.contains(&(effect, reason)) {
+                frame_fallbacks.push((effect, reason));
+            }
+        };
 
         // The layer/target stack: every fill / text / shadow op draws into the
         // *top* target. The root frame buffer is the bottom entry; a non-trivial
@@ -182,18 +239,8 @@ impl Renderer for CpuRenderer {
         // (real group compositing, not per-element alpha). Trivial layers stay a
         // cheap passthrough (no offscreen), keeping the plain path byte-identical.
         let mut targets: Vec<tiny_skia::Pixmap> = vec![root_pixmap];
-        // One entry per open `PushLayer`. A layer that pushed an offscreen records
-        // how to composite it back: its opacity and its (separable) blend mode.
-        // `None` marks a trivial (passthrough) layer that pushed nothing. Keeps
-        // pushes and pops balanced regardless of whether a layer needed an
-        // offscreen pass.
-        let mut layer_stack: Vec<Option<(f32, tiny_skia::BlendMode)>> = Vec::new();
-
-        // The clip stack: each entry is the effective clip mask in force after a
-        // `PushClip`, or `None` when no representable clip is active at that depth.
-        // Keeping one entry per push (even an inherited `None`) keeps pushes and
-        // pops balanced regardless of what a clip could be rasterized into.
-        let mut clip_stack: Vec<Option<tiny_skia::Mask>> = Vec::new();
+        // A single entry keeps clipping and compositing in sync for each push.
+        let mut scopes: Vec<RenderScope> = Vec::new();
         let identity = tiny_skia::Transform::identity();
         // The active CSS 2D `transform` stack: each `PushTransform` composes its
         // affine onto the running transform, and every path / glyph / shadow drawn
@@ -209,7 +256,7 @@ impl Renderer for CpuRenderer {
                     let Some(sk_path) = to_sk_path(path) else {
                         continue;
                     };
-                    let clip = clip_stack.last().and_then(Option::as_ref);
+                    let clip = scopes.last().and_then(RenderScope::clip);
                     let Some(pixmap) = targets.last_mut() else {
                         continue;
                     };
@@ -217,8 +264,7 @@ impl Renderer for CpuRenderer {
                         // A conic (angular) gradient is rasterized for real on the
                         // CPU backend: it is decomposed into angular wedges filled at
                         // their swept color, clipped to the element outline (§5.1's
-                        // "conic gradients"). The radial brush still flattens
-                        // (documented approximation, `brush_color`).
+                        // "conic gradients").
                         Paint::Fill(Brush::Conic(conic)) => {
                             fill_conic(
                                 pixmap,
@@ -248,6 +294,17 @@ impl Renderer for CpuRenderer {
                                 current,
                             );
                         }
+                        Paint::Fill(Brush::Radial(gradient)) => {
+                            if let Some(paint) = radial_paint(gradient) {
+                                pixmap.fill_path(
+                                    &sk_path,
+                                    &paint,
+                                    to_sk_fill_rule(path.fill_rule()),
+                                    current,
+                                    clip,
+                                );
+                            }
+                        }
                         Paint::Fill(brush) => {
                             let Some(color) = brush_color(brush) else {
                                 continue;
@@ -264,10 +321,11 @@ impl Renderer for CpuRenderer {
                             );
                         }
                         Paint::Stroke(stroke) => {
-                            let Some(color) = brush_color(stroke.brush()) else {
-                                continue;
+                            let paint = match stroke.brush() {
+                                Brush::Radial(gradient) => radial_paint(gradient),
+                                brush => brush_color(brush).and_then(solid_paint),
                             };
-                            let Some(sk_paint) = solid_paint(color) else {
+                            let Some(sk_paint) = paint else {
                                 continue;
                             };
                             let sk_stroke = tiny_skia::Stroke {
@@ -295,15 +353,36 @@ impl Renderer for CpuRenderer {
                     transform_stack.push(current.pre_concat(to_sk_transform(transform)));
                 }
                 PaintCommand::PopTransform => {
-                    let _ = transform_stack.pop();
+                    let layer_depth = scopes
+                        .iter()
+                        .rev()
+                        .find_map(|scope| scope.layer_transform_depth);
+                    if layer_depth.is_none_or(|depth| transform_stack.len() > depth + 1) {
+                        transform_stack.pop();
+                    }
                 }
                 PaintCommand::PushClip(clip) => {
-                    let parent = clip_stack.last().and_then(Option::as_ref);
-                    let entry = resolve_clip_entry(clip, parent, width, height, current);
-                    clip_stack.push(entry);
-                }
-                PaintCommand::PopClip => {
-                    let _ = clip_stack.pop();
+                    let parent = scopes.last().and_then(RenderScope::clip);
+                    if let Some(mask) = image_mask(clip, parent, width, height, current) {
+                        targets.push(allocate_pixmap(width, height)?);
+                        scopes.push(RenderScope {
+                            clip: None,
+                            layer_transform_depth: None,
+                            composite: Some(LayerComposite {
+                                opacity: 1.0,
+                                blend: tiny_skia::BlendMode::SourceOver,
+                                color_matrix: None,
+                                blur: 0.0,
+                                mask: Some(mask),
+                            }),
+                        });
+                    } else {
+                        scopes.push(RenderScope {
+                            clip: resolve_clip_entry(clip, parent, width, height, current),
+                            composite: None,
+                            layer_transform_depth: None,
+                        });
+                    }
                 }
                 // A CSS `opacity` / `mix-blend-mode` group layer. A layer with
                 // reduced opacity OR a non-`Normal` blend mode pushes a fresh
@@ -313,60 +392,117 @@ impl Renderer for CpuRenderer {
                 // darkened, and the group multiplies/screens/… onto the backdrop as
                 // a whole — compositing-1 §5). A trivial layer (opacity `1.0`, blend
                 // `Normal`) stays a passthrough: it pushes no offscreen, so the plain
-                // path is byte-identical. The layer's own transform / effect fields
-                // are still not honored here — a documented approximation.
+                // path is byte-identical. A color matrix also opens an offscreen
+                // and filters the group before blending it back.
                 PaintCommand::PushLayer(layer) => {
-                    // A layer's own clip confines its subtree exactly as a
-                    // `PushClip` of the same region would, and it reaches this
-                    // backend in production: the coordinator brackets every
-                    // `filter: blur()` / color-matrix group with `with_clip`.
-                    // Vello honors it (`push_layer`'s bounding shape), so ignoring
-                    // it here painted content the author clipped away and made the
-                    // two backends disagree (spec §5.2: clipping must match). One
-                    // entry per push keeps the stack balanced with `PopLayer`
-                    // whether or not the layer carries a clip.
-                    let parent = clip_stack.last().and_then(Option::as_ref);
-                    let entry = layer.clip().map_or_else(
-                        || parent.cloned(),
-                        |clip| resolve_clip_entry(clip, parent, width, height, current),
-                    );
-                    clip_stack.push(entry);
-                    let blend = to_sk_blend_mode(layer.blend_mode());
-                    let needs_offscreen =
-                        layer.opacity() < 1.0 || blend != tiny_skia::BlendMode::SourceOver;
-                    if needs_offscreen {
-                        match targets
-                            .last()
-                            .and_then(|top| tiny_skia::Pixmap::new(top.width(), top.height()))
-                        {
-                            Some(offscreen) => {
-                                targets.push(offscreen);
-                                layer_stack.push(Some((layer.opacity().clamp(0.0, 1.0), blend)));
-                            }
-                            // Allocation failed: fall back to passthrough so the
-                            // group still paints (at full opacity) and the list
-                            // stays balanced.
-                            None => layer_stack.push(None),
-                        }
-                    } else {
-                        layer_stack.push(None);
+                    let layer_transform_depth = transform_stack.len();
+                    let current = current.pre_concat(to_sk_transform(&layer.transform()));
+                    transform_stack.push(current);
+                    let composition = layer.composition();
+                    let blend = match composition {
+                        CompositionMode::SrcOver => to_sk_blend_mode(layer.blend_mode()),
+                        CompositionMode::Src => tiny_skia::BlendMode::Source,
+                        CompositionMode::DstOver => tiny_skia::BlendMode::DestinationOver,
+                        CompositionMode::Clear => tiny_skia::BlendMode::Clear,
+                    };
+                    let replaces_destination =
+                        matches!(composition, CompositionMode::Src | CompositionMode::Clear);
+                    if !composition.is_src_over() && !layer.blend_mode().is_normal() {
+                        record_fallback(
+                            SceneEffect::BlendMode,
+                            "CPU applies the composition operator without the non-normal blend mode",
+                        );
                     }
+                    let color_matrix = layer
+                        .effects()
+                        .iter()
+                        .find_map(|effect| effect.as_color_matrix());
+                    let blur = layer
+                        .effects()
+                        .iter()
+                        .find_map(|effect| match effect {
+                            LayerEffect::Blur { radius } if *radius > 0.0 => Some(*radius),
+                            _ => None,
+                        })
+                        .unwrap_or(0.0);
+                    let scale = device_scale(current);
+                    let blur = blur * scale;
+                    if blur > MAX_SIGMA {
+                        record_fallback(
+                            SceneEffect::Blur,
+                            "CPU layer blur is capped at 16 device pixels",
+                        );
+                    }
+                    let inherited_clip = scopes.last().and_then(RenderScope::clip);
+                    let mask = layer.clip().and_then(|clip| {
+                        image_mask(clip, inherited_clip, width, height, current).or_else(|| {
+                            replaces_destination
+                                .then(|| {
+                                    resolve_clip_entry(clip, inherited_clip, width, height, current)
+                                })
+                                .flatten()
+                        })
+                    });
+                    let needs_offscreen = mask.is_some()
+                        || blur > 0.0
+                        || color_matrix.is_some()
+                        || layer.is_isolated()
+                        || layer.opacity() < 1.0
+                        || blend != tiny_skia::BlendMode::SourceOver;
+                    let offscreen = needs_offscreen
+                        .then(|| allocate_pixmap(width, height))
+                        .transpose()?;
+                    // Apply the enclosing clip after convolution so pixels beyond
+                    // its edge can still contribute to the filtered result.
+                    let parent = if (blur > 0.0 || mask.is_some() || replaces_destination)
+                        && offscreen.is_some()
+                    {
+                        None
+                    } else {
+                        scopes.last().and_then(RenderScope::clip)
+                    };
+                    let entry = if replaces_destination && offscreen.is_some() {
+                        None
+                    } else {
+                        layer.clip().map_or_else(
+                            || parent.cloned(),
+                            |clip| resolve_clip_entry(clip, parent, width, height, current),
+                        )
+                    };
+                    let composite = offscreen.map(|offscreen| {
+                        targets.push(offscreen);
+                        LayerComposite {
+                            opacity: layer.opacity(),
+                            blend,
+                            color_matrix,
+                            blur,
+                            mask,
+                        }
+                    });
+                    scopes.push(RenderScope {
+                        clip: entry,
+                        composite,
+                        layer_transform_depth: Some(layer_transform_depth),
+                    });
                 }
-                PaintCommand::PopLayer => {
-                    // The layer's clip leaves force with the layer that opened it.
-                    // Popping unconditionally (rather than only when a layer is
-                    // open) is what keeps a malformed list agreeing with Vello,
-                    // which counts clips and layers on one shared depth and pops
-                    // whatever is on top for either kind of pop.
-                    let _ = clip_stack.pop();
-                    // Balance a stray pop; composite the offscreen when this layer
-                    // opened one.
-                    if let Some(Some((opacity, blend))) = layer_stack.pop() {
-                        composite_top_layer(&mut targets, opacity, blend);
+                PaintCommand::PopLayer | PaintCommand::PopClip => {
+                    let closes_layer = matches!(command, PaintCommand::PopLayer);
+                    if !scopes
+                        .last()
+                        .is_some_and(|scope| scope.layer_transform_depth.is_some() == closes_layer)
+                    {
+                        continue;
+                    }
+                    if let Some(scope) = scopes.pop() {
+                        scope.finish(
+                            &mut transform_stack,
+                            &mut targets,
+                            scopes.last().and_then(RenderScope::clip),
+                        );
                     }
                 }
                 PaintCommand::DrawText { origin, run, brush } => {
-                    let clip = clip_stack.last().and_then(Option::as_ref);
+                    let clip = scopes.last().and_then(RenderScope::clip);
                     let Some(pixmap) = targets.last_mut() else {
                         continue;
                     };
@@ -381,12 +517,19 @@ impl Renderer for CpuRenderer {
                     offset,
                     inset,
                 } => {
-                    let clip = clip_stack.last().and_then(Option::as_ref);
+                    let clip = scopes.last().and_then(RenderScope::clip);
                     let Some(pixmap) = targets.last_mut() else {
                         continue;
                     };
+                    let sigma = (blur.max(0.0) / 2.0) * device_scale(current);
+                    if sigma > MAX_SIGMA {
+                        record_fallback(
+                            SceneEffect::Blur,
+                            "CPU shadow blur is capped at 16 device pixels",
+                        );
+                    }
                     draw_shadow_approx(
-                        pixmap, *rect, *radii, *color, *blur, *spread, *offset, *inset, clip,
+                        pixmap, *rect, *radii, *color, sigma, *spread, *offset, *inset, clip,
                         current,
                     );
                 }
@@ -397,7 +540,7 @@ impl Renderer for CpuRenderer {
                     repeat_x,
                     repeat_y,
                 } => {
-                    let clip = clip_stack.last().and_then(Option::as_ref);
+                    let clip = scopes.last().and_then(RenderScope::clip);
                     let Some(pixmap) = targets.last_mut() else {
                         continue;
                     };
@@ -405,54 +548,90 @@ impl Renderer for CpuRenderer {
                         pixmap, image, *tile, *region, *repeat_x, *repeat_y, clip, current,
                     );
                 }
-                // `backdrop-filter` (frosted glass) is a GPU-class effect: it needs
-                // to blur the already-composited frame in place, which the software
-                // rasterizer has no pass for. The CPU backend honestly skips it (the
-                // panel's own translucent background still paints over the SHARP
-                // backdrop) rather than faking a blur — a documented limitation, this
-                // effect is Vello-only (spec §5.2, CPU/GPU effect split).
-                PaintCommand::BackdropFilter { .. } => {}
+                PaintCommand::BackdropFilter {
+                    bounds,
+                    radii,
+                    blur,
+                } => {
+                    let scale = device_scale(current);
+                    let sigma = blur * scale;
+                    if sigma.is_nan()
+                        || sigma <= 0.0
+                        || bounds.size.width <= 0.0
+                        || bounds.size.height <= 0.0
+                    {
+                        continue;
+                    }
+                    if sigma > MAX_SIGMA {
+                        record_fallback(
+                            SceneEffect::BackdropFilter,
+                            "CPU backdrop blur is capped at 16 device pixels",
+                        );
+                    }
+                    let parent = scopes.last().and_then(RenderScope::clip);
+                    let Some(panel) = to_sk_path(&Path::rounded_rect(*bounds, *radii)) else {
+                        continue;
+                    };
+                    let Some(coverage) = build_clip_mask(
+                        width,
+                        height,
+                        &panel,
+                        tiny_skia::FillRule::Winding,
+                        parent,
+                        current,
+                    ) else {
+                        continue;
+                    };
+                    if let Some(target) = targets.last_mut() {
+                        blur_backdrop(target, &coverage, sigma);
+                    }
+                }
             }
         }
 
         // Unwind any layer left open by an unbalanced list: composite each dangling
         // offscreen back at its opacity so its content is not lost, leaving only the
         // root frame buffer.
-        while let Some(entry) = layer_stack.pop() {
-            if let Some((opacity, blend)) = entry {
-                composite_top_layer(&mut targets, opacity, blend);
-            }
+        while let Some(scope) = scopes.pop() {
+            scope.finish(
+                &mut transform_stack,
+                &mut targets,
+                scopes.last().and_then(RenderScope::clip),
+            );
         }
         // The root frame buffer is the only remaining target (a well-formed list
         // leaves exactly one; the unwind above guarantees it for a malformed one).
-        let pixmap = targets.pop().unwrap_or_else(|| {
-            // Unreachable in practice (the root is never popped), but keep the
-            // renderer panic-free: fall back to a fresh empty buffer.
-            tiny_skia::Pixmap::new(width, height)
-                .unwrap_or_else(|| tiny_skia::Pixmap::new(1, 1).expect("1x1 pixmap allocates"))
-        });
+        let pixmap = targets.pop().ok_or_else(|| {
+            RendererError::Backend("cpu renderer lost the root pixel buffer".into())
+        })?;
 
+        let unsupported = unsupported_effects(&*self, display_list);
+        let mut degraded = self.text_fallbacks(display_list);
+        degraded.extend(
+            frame_fallbacks
+                .into_iter()
+                .map(|(effect, reason)| EffectFallback::new(effect, reason)),
+        );
+        self.fallbacks
+            .report(&unsupported, self.diagnostics.as_ref());
+        self.fallbacks
+            .report_fallbacks(&degraded, self.diagnostics.as_ref());
         self.last_pixmap = Some(pixmap);
         self.frames_rendered += 1;
         Ok(PresentResult::Presented {
             generation: submission.generation(),
         })
     }
+}
 
-    #[doc = include_str!("cpu_renderer.doc/supports_effect.md")]
-    fn supports_effect(&self, effect: SceneEffect) -> SupportLevel {
-        match effect {
-            SceneEffect::Image => SupportLevel::Native,
-            SceneEffect::Clip => SupportLevel::Emulated,
-            SceneEffect::Shadow | SceneEffect::Text => SupportLevel::Limited,
-            SceneEffect::Blur
-            | SceneEffect::BackdropFilter
-            | SceneEffect::ColorMatrix
-            | SceneEffect::Gradient
-            | SceneEffect::Mask
-            | SceneEffect::BlendMode => SupportLevel::Unavailable,
+fn allocate_pixmap(width_px: u32, height_px: u32) -> Result<tiny_skia::Pixmap, RendererError> {
+    tiny_skia::Pixmap::new(width_px, height_px).ok_or_else(|| {
+        CpuRenderError::PixmapAllocationFailed {
+            width: width_px,
+            height: height_px,
         }
-    }
+        .into_renderer_error()
+    })
 }
 
 #[cfg(test)]
@@ -464,7 +643,6 @@ mod tests {
     use obscur_scene::clip::Clip;
     use obscur_scene::color::{AlphaMode, Color};
     use obscur_scene::command::DisplayList;
-    use obscur_scene::paint::SceneImage;
     use obscur_scene::path::Path;
     use obscur_scene::scene::{SceneGeneration, SceneSnapshot};
     use obscur_scene::text::{GlyphRun, PositionedGlyph};
@@ -741,6 +919,76 @@ mod tests {
     }
 
     #[test]
+    fn failed_layer_buffer_preserves_the_last_rendered_frame() {
+        use obscur_scene::layer::SceneLayer;
+        use obscur_scene::paint::BlendMode;
+
+        let mut renderer = CpuRenderer::new(RendererId::from_raw(1));
+        let sink = Arc::new(RecordingSink::default());
+        renderer.set_diagnostic_sink(sink.clone());
+        let target = bitmap_target(16.0, 16.0);
+        renderer.render(&red_rect_submission(), &target).unwrap();
+        let previous = renderer.pixmap().unwrap().data().to_vec();
+        let commands = DisplayList::from_commands(vec![
+            PaintCommand::PushLayer(
+                SceneLayer::new()
+                    .with_composition(CompositionMode::Src)
+                    .with_blend_mode(BlendMode::Multiply),
+            ),
+            PaintCommand::PopLayer,
+        ]);
+        let frame = FrameSubmission::new(RenderFrame::new(
+            SceneSnapshot::new(commands, SceneGeneration::from_raw(2)),
+            Size::new(16.0, 16.0),
+        ));
+        let failure = RendererError::Backend("test offscreen allocation failure".into());
+        let mut allocations = 0;
+        let result = renderer.render_with_pixmap_allocator(&frame, &target, |width, height| {
+            allocations += 1;
+            if allocations == 1 {
+                allocate_pixmap(width, height)
+            } else {
+                Err(failure.clone())
+            }
+        });
+
+        assert_eq!(allocations, 2);
+        assert_eq!(result, Err(failure));
+        assert_eq!(renderer.frames_rendered(), 1);
+        assert_eq!(renderer.pixmap().unwrap().data(), previous);
+        assert!(sink.messages().is_empty());
+
+        renderer.render(&frame, &target).unwrap();
+        assert_eq!(sink.messages().len(), 1);
+        assert!(sink.messages()[0].contains("without the non-normal blend mode"));
+    }
+
+    #[test]
+    fn invalid_target_preserves_the_last_rendered_frame() {
+        let mut renderer = CpuRenderer::new(RendererId::from_raw(1));
+        let submission = red_rect_submission();
+        renderer
+            .render(&submission, &bitmap_target(16.0, 16.0))
+            .unwrap();
+        let previous = renderer.pixmap().unwrap().data().to_vec();
+        for width in [f32::INFINITY, 4_294_967_296.0] {
+            assert!(matches!(
+                renderer.render(&submission, &bitmap_target(width, 16.0)),
+                Err(RendererError::InvalidTarget(_))
+            ));
+            assert_eq!(renderer.frames_rendered(), 1);
+            assert_eq!(renderer.pixmap().unwrap().data(), previous);
+        }
+        let huge = bitmap_target(3_000_000_000.0, 3_000_000_000.0);
+        assert!(matches!(
+            renderer.render(&submission, &huge),
+            Err(RendererError::InvalidTarget(reason)) if reason.contains("exceeds addressable size")
+        ));
+        assert_eq!(renderer.frames_rendered(), 1);
+        assert_eq!(renderer.pixmap().unwrap().data(), previous);
+    }
+
+    #[test]
     fn frames_rendered_increments_per_render() {
         let mut renderer = CpuRenderer::default();
         assert_eq!(renderer.frames_rendered(), 0);
@@ -774,56 +1022,28 @@ mod tests {
     #[test]
     fn supports_effect_reports_the_gpu_class_effects_unavailable() {
         let renderer = CpuRenderer::default();
-        // There is no gaussian pass anywhere in this backend: a blurred shadow
-        // draws hard, a `filter: blur()` layer draws sharp, a backdrop-filter draws
-        // nothing, a color-matrix layer draws unfiltered. Dropping the parameter is
-        // NOT emulation.
-        for effect in [
-            SceneEffect::Blur,
-            SceneEffect::BackdropFilter,
-            SceneEffect::ColorMatrix,
-        ] {
-            assert_eq!(
-                renderer.supports_effect(effect),
-                SupportLevel::Unavailable,
-                "{effect} has no pass in the software rasterizer"
-            );
-        }
-        // A gradient brush lands as a flat solid of its first stop, and a layer's
-        // blend mode and a mask clip's coverage are dropped outright.
-        for effect in [
-            SceneEffect::Gradient,
-            SceneEffect::BlendMode,
-            SceneEffect::Mask,
-        ] {
-            assert_eq!(
-                renderer.supports_effect(effect),
-                SupportLevel::Unavailable,
-                "{effect} is dropped, not approximated"
-            );
-        }
-        // What it does do: shadows without their blur, text against a registered
-        // font, per-pixel clip masks, and real sampled images.
         assert_eq!(
-            renderer.supports_effect(SceneEffect::Shadow),
+            renderer.supports_effect(SceneEffect::BackdropFilter),
+            SupportLevel::Limited
+        );
+        // Fills and radial strokes use gradients. Other strokes and text
+        // still take the representative first-stop color.
+        assert_eq!(
+            renderer.supports_effect(SceneEffect::Gradient),
             SupportLevel::Limited
         );
         assert_eq!(
-            renderer.supports_effect(SceneEffect::Text),
+            renderer.supports_effect(SceneEffect::BlendMode),
             SupportLevel::Limited
         );
         assert_eq!(
-            renderer.supports_effect(SceneEffect::Clip),
-            SupportLevel::Emulated
-        );
-        assert_eq!(
-            renderer.supports_effect(SceneEffect::Image),
-            SupportLevel::Native
+            renderer.supports_effect(SceneEffect::Mask),
+            SupportLevel::Unavailable
         );
     }
 
     #[test]
-    fn blur_is_unavailable_because_a_blurred_shadow_rasterizes_hard_edged() {
+    fn shadow_blur_spreads_coverage_beyond_the_silhouette() {
         // The pixels are the authority on the table. A 24x24 box shadow with an
         // 8px blur radius, no offset and no spread: if this backend blurred, the
         // shadow would spill well outside the box and fade across its edge.
@@ -845,25 +1065,16 @@ mod tests {
         let _ = renderer.render(&submission, &bitmap_target(48.0, 48.0));
         let pixmap = renderer.pixmap().expect("a frame was rendered");
 
-        // 4px outside the box, well inside an 8px blur's reach: untouched.
         let outside = pixmap.pixel(8, 24).expect("pixel left of the box");
-        assert_eq!(outside.alpha(), 0, "an 8px blur would have tinted this");
-        // 1px inside the edge vs. the center: identical, so the edge is a step, not
-        // a ramp.
         let edge = pixmap.pixel(13, 24).expect("pixel inside the left edge");
         let center = pixmap.pixel(24, 24).expect("center pixel");
-        assert_eq!(
-            edge.alpha(),
-            center.alpha(),
-            "a blurred edge would fade toward the boundary"
-        );
-        assert!(center.alpha() > 0, "the shadow itself is drawn");
+        assert!(outside.alpha() > 0);
+        assert!(outside.alpha() < edge.alpha());
+        assert!(edge.alpha() < center.alpha());
 
-        // Which is exactly what the table must say. Should a real gaussian ever
-        // land here, the asserts above fail first and this claim gets revisited.
         assert_eq!(
             renderer.supports_effect(SceneEffect::Blur),
-            SupportLevel::Unavailable
+            SupportLevel::Limited
         );
         // The shadow is still drawn — offset, spread, radii and color are honored —
         // so the shadow itself is Limited, not Unavailable.
@@ -996,9 +1207,7 @@ mod tests {
     }
 
     #[test]
-    fn rendering_an_unsupported_effect_tells_the_host_which_one() {
-        // Spec §5.2: unsupported effects are EXPLICIT diagnostics. Rendering a
-        // blurred shadow must name the blur it is about to drop.
+    fn shadow_blur_radius_cap_is_reported_once() {
         let sink = Arc::new(RecordingSink::default());
         let mut renderer = CpuRenderer::default();
         renderer.set_diagnostic_sink(sink.clone());
@@ -1007,7 +1216,7 @@ mod tests {
             rect: Rect::new(Point::new(2.0, 2.0), Size::new(8.0, 8.0)),
             radii: CornerRadii::uniform(0.0),
             color: Color::BLACK,
-            blur: 4.0,
+            blur: 40.0,
             spread: 0.0,
             offset: (0.0, 0.0),
             inset: false,
@@ -1023,8 +1232,10 @@ mod tests {
         assert!(result.expect("presented").is_presented());
         assert_eq!(
             sink.messages(),
-            vec!["unsupported effect: blur".to_string()],
-            "the shadow itself is drawn (Limited); only its blur is unavailable"
+            vec![
+                "degraded effect: blur (CPU shadow blur is capped at 16 device pixels)".to_string()
+            ],
+            "the shadow is drawn at the reported radius cap"
         );
 
         // A second frame demanding the same effect does not re-raise it: this is a
@@ -1554,10 +1765,7 @@ mod tests {
     }
 
     #[test]
-    fn draw_shadow_fills_offset_rect_at_reduced_alpha() {
-        // A drop shadow of the box (2,2)-(10,10) offset by (4,4): the software
-        // backend fills the offset rounded rect at half the color's alpha (no
-        // blur). A pixel inside the offset rect is painted but semi-transparent.
+    fn blurred_shadow_follows_its_offset() {
         let list = DisplayList::from_commands(vec![PaintCommand::DrawShadow {
             rect: obscur_geometry::Rect::new(Point::new(2.0, 2.0), Size::new(8.0, 8.0)),
             radii: CornerRadii::default(),
@@ -1577,17 +1785,36 @@ mod tests {
             .expect("renders");
         let pixmap = renderer.pixmap().expect("a frame was rendered");
 
-        // The offset rect spans (6,6)-(14,14); a pixel inside is painted at ~half
-        // alpha (0.5 of opaque black), not fully opaque.
         let inside = pixmap.pixel(9, 9).expect("pixel exists");
         assert!(inside.alpha() > 60, "shadow painted: {}", inside.alpha());
         assert!(
-            inside.alpha() < 200,
+            inside.alpha() < 255,
             "shadow is reduced alpha: {}",
             inside.alpha()
         );
         // A pixel outside the offset rect (top-left corner) is untouched.
-        assert_eq!(pixmap.pixel(0, 0).expect("pixel exists").alpha(), 0);
+        assert_eq!(pixmap.pixel(23, 23).expect("pixel exists").alpha(), 0);
+    }
+
+    #[test]
+    fn blurred_inset_shadow_softens_the_hole_and_stays_inside_the_box() {
+        let pixels = render_commands(
+            vec![PaintCommand::DrawShadow {
+                rect: Rect::new(Point::new(4.0, 4.0), Size::new(24.0, 24.0)),
+                radii: CornerRadii::uniform(2.0),
+                color: Color::BLACK,
+                blur: 8.0,
+                spread: 0.0,
+                offset: (0.0, 0.0),
+                inset: true,
+            }],
+            32.0,
+        );
+        let alpha = |x| pixels.pixel(x, 16).unwrap().alpha();
+        assert_eq!(alpha(3), 0);
+        assert!(alpha(4) > alpha(7));
+        assert!(alpha(7) > alpha(16));
+        assert!(alpha(16) <= 1);
     }
 
     #[test]
@@ -1700,6 +1927,101 @@ mod tests {
     }
 
     #[test]
+    fn alpha_image_mask_composites_overlapping_children_once() {
+        use obscur_scene::clip::Mask;
+        use obscur_scene::paint::SceneImage;
+
+        let image = SceneImage::new(1, 1, vec![255, 255, 255, 128], AlphaMode::Straight).unwrap();
+        let bounds = Rect::new(Point::new(0.0, 0.0), Size::new(8.0, 8.0));
+        let pixels = render_commands(
+            vec![
+                PaintCommand::PushTransform(AffineTransform::translate(4.0, 4.0)),
+                PaintCommand::PushClip(Clip::image_mask(Mask::alpha(), image, bounds)),
+                PaintCommand::PopTransform,
+                rect_fill_cmd(0.0, 0.0, 16.0, 16.0, Color::WHITE),
+                rect_fill_cmd(6.0, 6.0, 4.0, 4.0, Color::WHITE),
+                PaintCommand::PopClip,
+            ],
+            16.0,
+        );
+        assert_eq!(pixels.pixel(5, 5).unwrap().alpha(), 128);
+        assert_eq!(pixels.pixel(8, 8).unwrap().alpha(), 128);
+        assert_eq!(pixels.pixel(3, 8).unwrap().alpha(), 0);
+    }
+
+    #[test]
+    fn luminance_image_mask_multiplies_linear_luminance_and_alpha() {
+        use obscur_scene::clip::Mask;
+        use obscur_scene::layer::SceneLayer;
+        use obscur_scene::paint::SceneImage;
+
+        let image = SceneImage::new(1, 1, vec![128, 0, 0, 128], AlphaMode::Premultiplied).unwrap();
+        let bounds = Rect::new(Point::new(2.0, 2.0), Size::new(8.0, 8.0));
+        let layer = SceneLayer::new().with_clip(Clip::image_mask(Mask::luminance(), image, bounds));
+        let pixels = render_commands(
+            vec![
+                PaintCommand::PushLayer(layer),
+                rect_fill_cmd(0.0, 0.0, 16.0, 16.0, Color::WHITE),
+                PaintCommand::PopLayer,
+            ],
+            16.0,
+        );
+        assert_eq!(pixels.pixel(5, 5).unwrap().alpha(), 27);
+        assert_eq!(pixels.pixel(1, 5).unwrap().alpha(), 0);
+    }
+
+    #[test]
+    fn backdrop_blur_replaces_pixels_inside_the_rounded_panel_and_parent_clip() {
+        let white = Color::rgba(1.0, 1.0, 1.0, 0.5);
+        let panel = Rect::new(Point::new(8.0, 4.0), Size::new(16.0, 24.0));
+        let commands = vec![
+            rect_fill_cmd(0.0, 0.0, 16.0, 32.0, white),
+            PaintCommand::PushClip(Clip::rect(Rect::new(
+                Point::new(0.0, 0.0),
+                Size::new(32.0, 20.0),
+            ))),
+            PaintCommand::BackdropFilter {
+                bounds: panel,
+                radii: CornerRadii::uniform(6.0),
+                blur: 2.0,
+            },
+            PaintCommand::PopClip,
+        ];
+        let pixels = render_commands(commands, 32.0);
+        let alpha = |x, y| pixels.pixel(x, y).unwrap().alpha();
+        assert!((50..100).contains(&alpha(15, 16)));
+        assert!((20..80).contains(&alpha(16, 16)));
+        assert_eq!(alpha(8, 4), 128);
+        assert_eq!(alpha(16, 21), 0);
+        assert_eq!(alpha(15, 2), 128);
+    }
+
+    #[test]
+    fn color_matrix_filters_the_layer_in_straight_alpha() {
+        use obscur_scene::layer::{LayerEffect, SceneLayer};
+
+        let mut layer = SceneLayer::new();
+        layer.add_effect(LayerEffect::color_matrix([
+            0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0,
+            0.0, 0.0, 0.0,
+        ]));
+        let pixmap = render_commands(
+            vec![
+                PaintCommand::PushLayer(layer),
+                rect_fill_cmd(4.0, 4.0, 8.0, 8.0, Color::rgba(1.0, 0.0, 0.0, 0.5)),
+                PaintCommand::PopLayer,
+            ],
+            16.0,
+        );
+        let pixel = pixmap.pixel(8, 8).unwrap();
+        assert_eq!(
+            [pixel.red(), pixel.green(), pixel.blue(), pixel.alpha()],
+            [0, 64, 0, 64]
+        );
+        assert_eq!(pixmap.pixel(0, 0).unwrap().alpha(), 0);
+    }
+
+    #[test]
     fn half_opaque_layer_blends_solid_box_over_white() {
         use obscur_scene::layer::SceneLayer;
         // A white backdrop, then an opaque black box inside an opacity-0.5 layer.
@@ -1799,6 +2121,92 @@ mod tests {
     }
 
     #[test]
+    fn isolated_group_does_not_blend_its_children_with_the_outer_backdrop() {
+        use obscur_scene::layer::SceneLayer;
+        use obscur_scene::paint::BlendMode;
+
+        let sample = |isolated| {
+            render_commands(
+                vec![
+                    rect_fill_cmd(0.0, 0.0, 16.0, 16.0, Color::rgba(1.0, 0.0, 0.0, 1.0)),
+                    PaintCommand::PushLayer(SceneLayer::new().with_isolation(isolated)),
+                    PaintCommand::PushLayer(SceneLayer::new().with_blend_mode(BlendMode::Multiply)),
+                    rect_fill_cmd(0.0, 0.0, 16.0, 16.0, Color::rgba(0.0, 0.0, 1.0, 1.0)),
+                    PaintCommand::PopLayer,
+                    PaintCommand::PopLayer,
+                ],
+                16.0,
+            )
+            .pixel(8, 8)
+            .expect("center pixel")
+        };
+        assert_eq!(sample(false).blue(), 0);
+        assert_eq!(sample(true).blue(), 255);
+    }
+
+    #[test]
+    fn blend_effect_overrides_the_layer_mode() {
+        use obscur_scene::layer::SceneLayer;
+        use obscur_scene::paint::BlendMode;
+
+        let mut layer = SceneLayer::new().with_blend_mode(BlendMode::Screen);
+        layer.add_effect(LayerEffect::blend(BlendMode::Multiply));
+        let image = render_commands(
+            vec![
+                rect_fill_cmd(0.0, 0.0, 16.0, 16.0, Color::rgba(1.0, 0.0, 0.0, 1.0)),
+                PaintCommand::PushLayer(layer),
+                rect_fill_cmd(0.0, 0.0, 16.0, 16.0, Color::rgba(0.0, 0.0, 1.0, 1.0)),
+                PaintCommand::PopLayer,
+            ],
+            16.0,
+        );
+        let pixel = image.pixel(8, 8).unwrap();
+        assert_eq!(
+            [pixel.red(), pixel.green(), pixel.blue(), pixel.alpha()],
+            [0, 0, 0, 255]
+        );
+    }
+
+    #[test]
+    fn layer_composition_respects_the_destination_and_clip() {
+        use obscur_geometry::{Point, Rect, Size};
+        use obscur_scene::{clip::Clip, layer::SceneLayer};
+
+        for (mode, overlap, empty_source) in [
+            (CompositionMode::Src, [0, 0, 255, 255], [0; 4]),
+            (CompositionMode::Clear, [0; 4], [0; 4]),
+            (CompositionMode::DstOver, [255, 0, 0, 255], [255, 0, 0, 255]),
+        ] {
+            let bounds =
+                |x, width| Clip::rect(Rect::new(Point::new(x, 0.0), Size::new(width, 16.0)));
+            let image = render_commands(
+                vec![
+                    rect_fill_cmd(0.0, 0.0, 16.0, 16.0, Color::rgba(1.0, 0.0, 0.0, 1.0)),
+                    PaintCommand::PushClip(bounds(2.0, 10.0)),
+                    PaintCommand::PushLayer(
+                        SceneLayer::new()
+                            .with_composition(mode)
+                            .with_clip(bounds(4.0, 10.0)),
+                    ),
+                    rect_fill_cmd(0.0, 0.0, 8.0, 16.0, Color::rgba(0.0, 0.0, 1.0, 1.0)),
+                    PaintCommand::PopLayer,
+                    PaintCommand::PopClip,
+                ],
+                16.0,
+            );
+            let pixel = |x| {
+                let pixel = image.pixel(x, 8).unwrap();
+                [pixel.red(), pixel.green(), pixel.blue(), pixel.alpha()]
+            };
+            assert_eq!(pixel(6), overlap, "{mode:?}");
+            assert_eq!(pixel(10), empty_source, "{mode:?}");
+            for outside in [3, 13] {
+                assert_eq!(pixel(outside), [255, 0, 0, 255], "{mode:?}");
+            }
+        }
+    }
+
+    #[test]
     fn trivial_layer_is_byte_identical_passthrough() {
         use obscur_scene::layer::SceneLayer;
         // A trivial (opacity 1.0) layer must not change any pixel vs. drawing the
@@ -1820,6 +2228,59 @@ mod tests {
             render_commands(layered, 16.0).data(),
             "a trivial layer is a byte-identical passthrough"
         );
+    }
+
+    #[test]
+    fn mismatched_pop_does_not_remove_a_clip_or_layer() {
+        use obscur_scene::layer::SceneLayer;
+
+        let clip = PaintCommand::PushClip(Clip::rect(obscur_geometry::Rect::new(
+            Point::new(0.0, 0.0),
+            Size::new(4.0, 4.0),
+        )));
+        let layer = PaintCommand::PushLayer(SceneLayer::new().with_opacity(0.5));
+        for (open, stray, close) in [
+            (clip, PaintCommand::PopLayer, PaintCommand::PopClip),
+            (layer, PaintCommand::PopClip, PaintCommand::PopLayer),
+        ] {
+            let draw = rect_fill_cmd(0.0, 0.0, 8.0, 8.0, Color::WHITE);
+            let expected = render_commands(vec![open.clone(), draw.clone(), close.clone()], 8.0);
+            let actual = render_commands(vec![open, stray, draw, close], 8.0);
+            assert_eq!(actual.data(), expected.data());
+        }
+    }
+
+    #[test]
+    fn transform_pops_cannot_cross_layer_boundaries() {
+        use obscur_geometry::AffineTransform;
+        use obscur_scene::layer::SceneLayer;
+
+        let open = PaintCommand::PushLayer(
+            SceneLayer::new().with_transform(AffineTransform::translate(3.0, 0.0)),
+        );
+        let inside = rect_fill_cmd(0.0, 0.0, 2.0, 2.0, Color::WHITE);
+        let outside = rect_fill_cmd(0.0, 4.0, 2.0, 2.0, Color::WHITE);
+        let expected = render_commands(
+            vec![
+                open.clone(),
+                inside.clone(),
+                PaintCommand::PopLayer,
+                outside.clone(),
+            ],
+            8.0,
+        );
+        let actual = render_commands(
+            vec![
+                open,
+                PaintCommand::PopTransform,
+                inside,
+                PaintCommand::PushTransform(AffineTransform::translate(2.0, 0.0)),
+                PaintCommand::PopLayer,
+                outside,
+            ],
+            8.0,
+        );
+        assert_eq!(actual.data(), expected.data());
     }
 
     #[test]

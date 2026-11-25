@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+#![doc = include_str!("../../docs/api/source/mod.doc/_module.md")]
 
 mod css_source;
 pub use css_source::CssSource;

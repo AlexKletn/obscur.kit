@@ -1,17 +1,17 @@
-#![doc = include_str!("layer_id.doc/_module.md")]
+//! An opaque identifier for a compositing layer.
 
-#[doc = include_str!("layer_id.doc/LayerId.md")]
+#[doc = include_str!("../../docs/api/layer/layer_id.doc/LayerId.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct LayerId(u32);
 
 impl LayerId {
-    #[doc = include_str!("layer_id.doc/from_raw.md")]
+    /// Creates a layer id from a raw integer value.
     #[must_use]
     pub const fn from_raw(raw: u32) -> Self {
         Self(raw)
     }
 
-    #[doc = include_str!("layer_id.doc/raw.md")]
+    /// Returns the raw integer value backing this id.
     #[must_use]
     pub const fn raw(self) -> u32 {
         self.0

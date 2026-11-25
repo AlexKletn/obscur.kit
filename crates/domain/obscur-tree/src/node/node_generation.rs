@@ -1,28 +1,28 @@
-#![doc = include_str!("node_generation.doc/_module.md")]
+//! Per-node generation used to detect stale `NodeId` references.
 
 use obscur_identity::Generation;
 
-#[doc = include_str!("node_generation.doc/NodeGeneration.md")]
+#[doc = include_str!("../../docs/api/node/node_generation.doc/NodeGeneration.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct NodeGeneration(Generation);
 
 impl NodeGeneration {
-    #[doc = include_str!("node_generation.doc/FIRST.md")]
+    /// The first live generation for a freshly created node.
     pub const FIRST: Self = Self(Generation::FIRST);
 
-    #[doc = include_str!("node_generation.doc/new.md")]
+    /// Creates a node generation at [`NodeGeneration::FIRST`].
     #[must_use]
     pub const fn new() -> Self {
         Self::FIRST
     }
 
-    #[doc = include_str!("node_generation.doc/next.md")]
+    /// Returns the next generation, used when a slot is reused.
     #[must_use]
     pub const fn next(self) -> Self {
         Self(self.0.next())
     }
 
-    #[doc = include_str!("node_generation.doc/raw.md")]
+    /// Returns the raw generation value.
     #[must_use]
     pub const fn raw(self) -> u32 {
         self.0.raw()

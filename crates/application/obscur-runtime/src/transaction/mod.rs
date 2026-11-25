@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Transaction module.
 mod provisional_transaction;
 pub use provisional_transaction::ProvisionalTransaction;
 mod reconcile_enactor;

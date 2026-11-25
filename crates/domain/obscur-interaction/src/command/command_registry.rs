@@ -1,4 +1,5 @@
-#![doc = include_str!("command_registry.doc/_module.md")]
+//! The [`CommandRegistry`] mapping command symbols to their descriptor and
+//! state (spec §6.7).
 
 use std::collections::HashMap;
 
@@ -6,15 +7,15 @@ use obscur_identity::{FastMap, InternedSymbol};
 
 use crate::command::{Command, CommandState};
 
-#[doc = include_str!("command_registry.doc/CommandRegistry.md")]
+#[doc = include_str!("../../docs/api/command/command_registry.doc/CommandRegistry.md")]
 #[derive(Debug, Clone, Default)]
 pub struct CommandRegistry {
-    #[doc = include_str!("command_registry.doc/entries.md")]
+    /// Descriptor and live state, keyed by the routed command symbol.
     entries: FastMap<InternedSymbol, (Command, CommandState)>,
 }
 
 impl CommandRegistry {
-    #[doc = include_str!("command_registry.doc/new.md")]
+    /// Creates an empty registry.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -22,7 +23,7 @@ impl CommandRegistry {
         }
     }
 
-    #[doc = include_str!("command_registry.doc/register.md")]
+    #[doc = include_str!("../../docs/api/command/command_registry.doc/register.md")]
     pub fn register(&mut self, command: Command) -> Option<Command> {
         let id = command.id();
         self.entries
@@ -30,19 +31,21 @@ impl CommandRegistry {
             .map(|(previous, _)| previous)
     }
 
-    #[doc = include_str!("command_registry.doc/get.md")]
+    /// Returns the descriptor registered for `id`, if any.
     #[must_use]
     pub fn get(&self, id: InternedSymbol) -> Option<&Command> {
         self.entries.get(&id).map(|(command, _)| command)
     }
 
-    #[doc = include_str!("command_registry.doc/state.md")]
+    /// Returns the live state registered for `id`, if any.
     #[must_use]
     pub fn state(&self, id: InternedSymbol) -> Option<CommandState> {
         self.entries.get(&id).map(|&(_, state)| state)
     }
 
-    #[doc = include_str!("command_registry.doc/set_state.md")]
+    /// Sets the live state of `id`, returning whether a command was registered
+    /// under that symbol (a state set on an unregistered symbol is discarded,
+    /// since there is no descriptor for it to belong to).
     pub fn set_state(&mut self, id: InternedSymbol, state: CommandState) -> bool {
         match self.entries.get_mut(&id) {
             Some((_, slot)) => {
@@ -53,26 +56,26 @@ impl CommandRegistry {
         }
     }
 
-    #[doc = include_str!("command_registry.doc/permits_dispatch.md")]
+    #[doc = include_str!("../../docs/api/command/command_registry.doc/permits_dispatch.md")]
     #[must_use]
     pub fn permits_dispatch(&self, id: InternedSymbol) -> bool {
         self.state(id)
             .is_none_or(|state: CommandState| state.is_actionable())
     }
 
-    #[doc = include_str!("command_registry.doc/contains.md")]
+    /// Returns whether a command is registered under `id`.
     #[must_use]
     pub fn contains(&self, id: InternedSymbol) -> bool {
         self.entries.contains_key(&id)
     }
 
-    #[doc = include_str!("command_registry.doc/len.md")]
+    /// Returns the number of registered commands.
     #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
-    #[doc = include_str!("command_registry.doc/is_empty.md")]
+    /// Returns whether the registry has no registered commands.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()

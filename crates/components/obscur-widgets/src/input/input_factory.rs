@@ -1,4 +1,4 @@
-#![doc = include_str!("input_factory.doc/_module.md")]
+//! The registry entry that mints text-entry components (spec §2.2).
 
 use obscur_identity::ComponentId;
 use obscur_view::component::{
@@ -7,27 +7,28 @@ use obscur_view::component::{
 
 use super::{Input, InputComponent, InputProps};
 
-#[doc = include_str!("input_factory.doc/InputFactory.md")]
+#[doc = include_str!("../../docs/api/input/input_factory.doc/InputFactory.md")]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct InputFactory;
 
 impl ComponentFactory for InputFactory {
-    #[doc = include_str!("input_factory.doc/component_id.md")]
+    #[doc = include_str!("../../docs/api/input/input_factory.doc/component_id.md")]
     fn component_id(&self) -> ComponentId {
         Input::COMPONENT_ID
     }
 
-    #[doc = include_str!("input_factory.doc/contract.md")]
+    #[doc = include_str!("../../docs/api/input/input_factory.doc/contract.md")]
     fn contract(&self) -> ComponentContract {
         InputProps::contract()
     }
 
-    #[doc = include_str!("input_factory.doc/create_instance.md")]
+    /// A fresh instance handle for one mounted field.
     fn create_instance(&self, instance: InstanceId) -> ComponentInstance {
         ComponentInstance::new(instance, Input::COMPONENT_ID)
     }
 
-    #[doc = include_str!("input_factory.doc/create_component.md")]
+    /// A fresh [`InputComponent`](super::InputComponent) behind the erased handle
+    /// the registry stores.
     fn create_component(&self) -> Box<dyn ErasedComponent> {
         Box::new(InputComponent)
     }

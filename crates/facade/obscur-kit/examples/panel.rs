@@ -70,15 +70,13 @@ impl Panel {
     }
 
     #[doc = include_str!("panel.doc/toggle_presentation.md")]
-    fn toggle_presentation(&mut self) -> LayerSettings {
+    fn toggle_presentation(&mut self, docked: &LayerSettings) -> LayerSettings {
         self.reserving = !self.reserving;
         if self.reserving {
-            LayerSettings::top_bar(BAR_HEIGHT)
+            docked.clone()
         } else {
-            // The same bar, floating: still anchored across the top, but taking
-            // no space from anyone and held clear of the edge. Only the height
-            // is stated — the width is the anchor's to stretch.
-            LayerSettings::top_bar(BAR_HEIGHT)
+            docked
+                .clone()
                 .with_reservation(LayerReservation::None)
                 .with_margin(LayerMargins::uniform(12))
         }
@@ -162,6 +160,7 @@ fn main() -> Result<(), obscur_kit::AppError> {
         }
     }
 
+    let docked = settings.clone();
     let app = App::new("obscur.kit panel")
         .app_id("obscur-kit-panel")
         .layer(settings);
@@ -188,11 +187,32 @@ fn main() -> Result<(), obscur_kit::AppError> {
             reset_state.borrow_mut().reset();
         })
         .on_command(InternedSymbol::named("float"), move || {
-            let settings = float_state.borrow_mut().toggle_presentation();
+            let settings = float_state.borrow_mut().toggle_presentation(&docked);
             float_control.reconfigure(settings);
         })
         .waker(waker)
         .run()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use obscur_kit::windowing::display::DisplayId;
+
+    #[test]
+    fn toggling_presentation_preserves_the_selected_display() {
+        let docked = LayerSettings::top_bar(48).with_display(DisplayId::from_raw(5));
+        let mut panel = Panel::new();
+        let floating = panel.toggle_presentation(&docked);
+        assert_eq!(
+            floating,
+            docked
+                .clone()
+                .with_reservation(LayerReservation::None)
+                .with_margin(LayerMargins::uniform(12))
+        );
+        assert_eq!(panel.toggle_presentation(&docked), docked);
+    }
 }
 
 #[doc = include_str!("panel.doc/now.md")]

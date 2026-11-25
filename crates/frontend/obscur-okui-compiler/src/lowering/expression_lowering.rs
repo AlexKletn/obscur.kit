@@ -1,28 +1,30 @@
-#![doc = include_str!("expression_lowering.doc/_module.md")]
+//! `ExpressionLowering`: lowers a `.okui` `{expr}` interpolation into a
+//! [`UiIrExpression`] (spec §2.10).
 
 use std::str::FromStr;
 
 use obscur_okui_syntax::ast::Expression;
 use obscur_ui_ir::document::{UiIrExpression, UiIrValue};
 
-#[doc = include_str!("expression_lowering.doc/ExpressionLowering.md")]
+#[doc = include_str!("../../docs/api/lowering/expression_lowering.doc/ExpressionLowering.md")]
 #[derive(Debug, Clone, Default)]
 pub struct ExpressionLowering;
 
 impl ExpressionLowering {
-    #[doc = include_str!("expression_lowering.doc/new.md")]
+    /// Creates an expression lowering pass.
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    #[doc = include_str!("expression_lowering.doc/lower.md")]
+    /// Lowers the AST `expr`'s inner text into a [`UiIrExpression`].
     #[must_use]
     pub fn lower(&self, expr: &Expression) -> UiIrExpression {
         self.lower_text(&expr.text())
     }
 
-    #[doc = include_str!("expression_lowering.doc/lower_text.md")]
+    /// Lowers a raw expression string into a [`UiIrExpression`], classifying it
+    /// per the [type docs](ExpressionLowering).
     #[must_use]
     pub fn lower_text(&self, text: &str) -> UiIrExpression {
         let trimmed = text.trim();

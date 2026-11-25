@@ -1,1 +1,0 @@
-Snap outer edges only.

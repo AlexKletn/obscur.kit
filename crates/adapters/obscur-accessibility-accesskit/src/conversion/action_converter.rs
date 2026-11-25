@@ -1,20 +1,20 @@
-#![doc = include_str!("action_converter.doc/_module.md")]
+//! Maps between domain [`SemanticAction`] and AccessKit [`Action`] (§7.1).
 
 use accesskit::Action;
 use obscur_accessibility::semantic::SemanticAction;
 
-#[doc = include_str!("action_converter.doc/ActionConverter.md")]
+#[doc = include_str!("../../docs/api/conversion/action_converter.doc/ActionConverter.md")]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct ActionConverter;
 
 impl ActionConverter {
-    #[doc = include_str!("action_converter.doc/new.md")]
+    /// Creates the stateless converter.
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    #[doc = include_str!("action_converter.doc/to_accesskit.md")]
+    #[doc = include_str!("../../docs/api/conversion/action_converter.doc/to_accesskit.md")]
     #[must_use]
     pub const fn to_accesskit(&self, action: SemanticAction) -> Option<Action> {
         match action {
@@ -26,6 +26,7 @@ impl ActionConverter {
             SemanticAction::Collapse => Some(Action::Collapse),
             SemanticAction::ScrollIntoView => Some(Action::ScrollIntoView),
             SemanticAction::ShowContextMenu => Some(Action::ShowContextMenu),
+            SemanticAction::SetTextSelection => Some(Action::SetTextSelection),
             SemanticAction::SetValue => Some(Action::SetValue),
             SemanticAction::Dismiss
             | SemanticAction::Select
@@ -35,7 +36,7 @@ impl ActionConverter {
         }
     }
 
-    #[doc = include_str!("action_converter.doc/from_accesskit.md")]
+    #[doc = include_str!("../../docs/api/conversion/action_converter.doc/from_accesskit.md")]
     #[must_use]
     pub const fn from_accesskit(&self, action: Action) -> Option<SemanticAction> {
         match action {
@@ -47,6 +48,7 @@ impl ActionConverter {
             Action::Collapse => Some(SemanticAction::Collapse),
             Action::ScrollIntoView => Some(SemanticAction::ScrollIntoView),
             Action::ShowContextMenu => Some(SemanticAction::ShowContextMenu),
+            Action::SetTextSelection => Some(SemanticAction::SetTextSelection),
             Action::SetValue => Some(SemanticAction::SetValue),
             _ => None,
         }

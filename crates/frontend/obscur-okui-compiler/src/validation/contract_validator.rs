@@ -1,171 +1,32 @@
-#![doc = include_str!("contract_validator.doc/_module.md")]
+//! Checks an element against a component contract (spec §2.13).
 
-// xtask:allow(multiple-entities) — the validator and the `ComponentContract`
-// it validates against; see tools/xtask/src/rule/main_entity.rs.
+mod ast_instance;
+mod attribute_value_type;
+mod slot;
 
-use obscur_okui_syntax::ast::{Attribute, Element};
-use obscur_okui_syntax::syntax::SyntaxKind;
-use obscur_view::contract::PropTypeSurface;
+use obscur_okui_syntax::ast::Element;
+
+use ast_instance::AstInstance;
+use attribute_value_type::{
+    attribute_value_type, describe_prop_type, describe_value_type, value_type_matches,
+};
 
 use crate::lowering::event_local_name;
-use crate::validation::contract_rule::{
-    AttributeUse, ElementUse, MemberArity, MemberUse, SlotUse, ViolationAnchor, check_contract,
-    is_reserved_attribute,
-};
-use crate::validation::{ChildPolicy, SlotRule, ValidationDiagnostic};
+use crate::validation::contract_rule::check_contract;
+use crate::validation::{ComponentContract, ValidationDiagnostic};
 
-#[doc = include_str!("contract_validator.doc/ComponentContract.md")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ComponentContract {
-    component: Box<str>,
-    required_props: Vec<Box<str>>,
-    allowed_props: Vec<Box<str>>,
-    allowed_events: Vec<Box<str>>,
-    children: ChildPolicy,
-    prop_types: Vec<(Box<str>, PropTypeSurface)>,
-    slots: Vec<SlotRule>,
-}
-
-impl ComponentContract {
-    #[doc = include_str!("contract_validator.doc/new.md")]
-    #[must_use]
-    pub fn new(component: impl Into<Box<str>>) -> Self {
-        Self {
-            component: component.into(),
-            required_props: Vec::new(),
-            allowed_props: Vec::new(),
-            allowed_events: Vec::new(),
-            children: ChildPolicy::Any,
-            prop_types: Vec::new(),
-            slots: Vec::new(),
-        }
-    }
-
-    #[doc = include_str!("contract_validator.doc/with_prop_type.md")]
-    #[must_use]
-    pub fn with_prop_type(mut self, name: impl Into<Box<str>>, ty: PropTypeSurface) -> Self {
-        self.prop_types.push((name.into(), ty));
-        self
-    }
-
-    #[doc = include_str!("contract_validator.doc/prop_type.md")]
-    #[must_use]
-    pub fn prop_type(&self, name: &str) -> Option<PropTypeSurface> {
-        self.prop_types
-            .iter()
-            .find(|(prop, _)| prop.as_ref() == name)
-            .map(|(_, ty)| *ty)
-    }
-
-    #[doc = include_str!("contract_validator.doc/requiring_prop.md")]
-    #[must_use]
-    pub fn requiring_prop(mut self, name: impl Into<Box<str>>) -> Self {
-        self.required_props.push(name.into());
-        self
-    }
-
-    #[doc = include_str!("contract_validator.doc/allowing_prop.md")]
-    #[must_use]
-    pub fn allowing_prop(mut self, name: impl Into<Box<str>>) -> Self {
-        self.allowed_props.push(name.into());
-        self
-    }
-
-    #[doc = include_str!("contract_validator.doc/allowing_event.md")]
-    #[must_use]
-    pub fn allowing_event(mut self, name: impl Into<Box<str>>) -> Self {
-        self.allowed_events.push(name.into());
-        self
-    }
-
-    #[doc = include_str!("contract_validator.doc/allowing_child.md")]
-    #[must_use]
-    pub fn allowing_child(mut self, tag: impl Into<Box<str>>) -> Self {
-        self.children.allow(tag);
-        self
-    }
-
-    #[doc = include_str!("contract_validator.doc/no_children.md")]
-    #[must_use]
-    pub fn no_children(mut self) -> Self {
-        self.children = ChildPolicy::None;
-        self
-    }
-
-    #[doc = include_str!("contract_validator.doc/with_slot.md")]
-    #[must_use]
-    pub fn with_slot(mut self, slot: SlotRule) -> Self {
-        self.slots.push(slot);
-        self
-    }
-
-    #[doc = include_str!("contract_validator.doc/component.md")]
-    #[must_use]
-    pub fn component(&self) -> &str {
-        &self.component
-    }
-
-    #[doc = include_str!("contract_validator.doc/slots.md")]
-    #[must_use]
-    pub fn slots(&self) -> &[SlotRule] {
-        &self.slots
-    }
-
-    #[doc = include_str!("contract_validator.doc/slot.md")]
-    #[must_use]
-    pub fn slot(&self, name: &str) -> Option<&SlotRule> {
-        self.slots.iter().find(|slot| slot.name() == name)
-    }
-
-    #[doc = include_str!("contract_validator.doc/required_props.md")]
-    #[must_use]
-    pub fn required_props(&self) -> &[Box<str>] {
-        &self.required_props
-    }
-
-    #[doc = include_str!("contract_validator.doc/allowed_props.md")]
-    #[must_use]
-    pub fn allowed_props(&self) -> &[Box<str>] {
-        &self.allowed_props
-    }
-
-    #[doc = include_str!("contract_validator.doc/allowed_events.md")]
-    #[must_use]
-    pub fn allowed_events(&self) -> &[Box<str>] {
-        &self.allowed_events
-    }
-
-    #[doc = include_str!("contract_validator.doc/children.md")]
-    #[must_use]
-    pub const fn children(&self) -> &ChildPolicy {
-        &self.children
-    }
-
-    #[doc = include_str!("contract_validator.doc/permits_prop.md")]
-    pub(crate) fn permits_prop(&self, name: &str) -> bool {
-        is_reserved_attribute(name)
-            || self.required_props.iter().any(|p| p.as_ref() == name)
-            || self.allowed_props.iter().any(|p| p.as_ref() == name)
-    }
-
-    #[doc = include_str!("contract_validator.doc/permits_event.md")]
-    pub(crate) fn permits_event(&self, event: &str) -> bool {
-        self.allowed_events.iter().any(|e| e.as_ref() == event)
-    }
-}
-
-#[doc = include_str!("contract_validator.doc/ContractValidator.md")]
+#[doc = include_str!("../../docs/api/validation/contract_validator.doc/ContractValidator.md")]
 #[derive(Debug, Clone, Default)]
 pub struct ContractValidator;
 
 impl ContractValidator {
-    #[doc = include_str!("contract_validator.doc/new_2.md")]
+    /// Creates a new contract validator.
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    #[doc = include_str!("contract_validator.doc/validate_element.md")]
+    #[doc = include_str!("../../docs/api/validation/contract_validator.doc/validate_element.md")]
     #[must_use]
     pub fn validate_element(
         &self,
@@ -189,7 +50,7 @@ impl ContractValidator {
         diagnostics
     }
 
-    #[doc = include_str!("contract_validator.doc/check_prop_types.md")]
+    #[doc = include_str!("../../docs/api/validation/contract_validator.doc/check_prop_types.md")]
     fn check_prop_types(
         element: &Element,
         contract: &ComponentContract,
@@ -222,7 +83,7 @@ impl ContractValidator {
         }
     }
 
-    #[doc = include_str!("contract_validator.doc/check_string_dispatch.md")]
+    #[doc = include_str!("../../docs/api/validation/contract_validator.doc/check_string_dispatch.md")]
     fn check_string_dispatch(
         element: &Element,
         contract: &ComponentContract,
@@ -244,231 +105,6 @@ impl ContractValidator {
                 ));
             }
         }
-    }
-}
-
-#[doc = include_str!("contract_validator.doc/AstInstance.md")]
-struct AstInstance {
-    tag: String,
-    attributes: Vec<(String, bool)>,
-    attribute_offsets: Vec<u32>,
-    members: Vec<(String, Option<Slot>, MemberArity)>,
-    member_offsets: Vec<u32>,
-    #[doc = include_str!("contract_validator.doc/content.md")]
-    content: bool,
-}
-
-#[doc = include_str!("contract_validator.doc/Slot.md")]
-enum Slot {
-    #[doc = include_str!("contract_validator.doc/Named.md")]
-    Named(String),
-    #[doc = include_str!("contract_validator.doc/Dynamic.md")]
-    Dynamic,
-}
-
-impl AstInstance {
-    #[doc = include_str!("contract_validator.doc/of.md")]
-    fn of(element: &Element, offset: u32) -> Self {
-        let mut instance = Self {
-            tag: element.tag_name().unwrap_or_default(),
-            attributes: Vec::new(),
-            attribute_offsets: Vec::new(),
-            members: Vec::new(),
-            member_offsets: Vec::new(),
-            content: false,
-        };
-        for attribute in element.attributes() {
-            let event = attribute.is_event();
-            let name = if event {
-                event_local_name(&attribute)
-            } else {
-                attribute.name().unwrap_or_default()
-            };
-            instance.attributes.push((name, event));
-            instance
-                .attribute_offsets
-                .push(attribute.syntax().offset().unwrap_or(offset));
-        }
-        instance.collect_members(element, MemberArity::Once, offset);
-        instance
-    }
-
-    #[doc = include_str!("contract_validator.doc/collect_members.md")]
-    fn collect_members(&mut self, element: &Element, arity: MemberArity, offset: u32) {
-        for child in element.children() {
-            if matches!(child.kind(), SyntaxKind::Expression)
-                || (child.kind() == SyntaxKind::TextNode && !child.text().trim().is_empty())
-            {
-                self.content = true;
-            }
-            let Some(child) = Element::cast(child) else {
-                continue;
-            };
-            let Some(tag) = child.tag_name() else {
-                continue;
-            };
-            let child_offset = child.syntax().offset().unwrap_or(offset);
-            if child.is_conditional() {
-                self.collect_members(
-                    &child,
-                    degrade(arity, MemberArity::AtMostOnce),
-                    child_offset,
-                );
-                continue;
-            }
-            if child.is_loop() {
-                self.collect_members(&child, MemberArity::Any, child_offset);
-                continue;
-            }
-            if arity == MemberArity::Any && matches!(tag.as_str(), "Empty" | "Separator") {
-                self.collect_members(&child, MemberArity::Any, child_offset);
-                continue;
-            }
-            let slot = child
-                .attribute("slot")
-                .map(|attribute| attribute.string_value().map_or(Slot::Dynamic, Slot::Named));
-            self.members.push((tag, slot, arity));
-            self.member_offsets.push(child_offset);
-        }
-    }
-
-    #[doc = include_str!("contract_validator.doc/as_use.md")]
-    fn as_use(&self) -> ElementUse<'_> {
-        ElementUse {
-            tag: &self.tag,
-            attributes: self
-                .attributes
-                .iter()
-                .map(|(name, event)| AttributeUse {
-                    name,
-                    event: *event,
-                })
-                .collect(),
-            members: self
-                .members
-                .iter()
-                .map(|(tag, slot, arity)| MemberUse {
-                    tag,
-                    slot: slot.as_ref().map(|slot| match slot {
-                        Slot::Named(name) => SlotUse::Named(name),
-                        Slot::Dynamic => SlotUse::Dynamic,
-                    }),
-                    arity: *arity,
-                })
-                .collect(),
-            content: self.content,
-        }
-    }
-
-    #[doc = include_str!("contract_validator.doc/offset_of.md")]
-    fn offset_of(&self, anchor: ViolationAnchor, element: u32) -> u32 {
-        match anchor {
-            ViolationAnchor::Element => element,
-            ViolationAnchor::Attribute(index) => self
-                .attribute_offsets
-                .get(index)
-                .copied()
-                .unwrap_or(element),
-            ViolationAnchor::Member(index) => {
-                self.member_offsets.get(index).copied().unwrap_or(element)
-            }
-        }
-    }
-}
-
-#[doc = include_str!("contract_validator.doc/degrade.md")]
-const fn degrade(arity: MemberArity, inner: MemberArity) -> MemberArity {
-    match arity {
-        MemberArity::Any => MemberArity::Any,
-        MemberArity::Once | MemberArity::AtMostOnce => inner,
-    }
-}
-
-#[doc = include_str!("contract_validator.doc/AttributeValueType.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AttributeValueType {
-    #[doc = include_str!("contract_validator.doc/String.md")]
-    String,
-    #[doc = include_str!("contract_validator.doc/Int.md")]
-    Int,
-    #[doc = include_str!("contract_validator.doc/Float.md")]
-    Float,
-    #[doc = include_str!("contract_validator.doc/Bool.md")]
-    Bool,
-    #[doc = include_str!("contract_validator.doc/Unknown.md")]
-    Unknown,
-}
-
-#[doc = include_str!("contract_validator.doc/attribute_value_type.md")]
-fn attribute_value_type(attribute: &Attribute) -> AttributeValueType {
-    if let Some(expression) = attribute.value_expression() {
-        let Ok(expr) = syn::parse_str::<syn::Expr>(&expression.text()) else {
-            return AttributeValueType::Unknown;
-        };
-        return literal_expr_type(&expr);
-    }
-    if attribute.string_value().is_some() {
-        return AttributeValueType::String;
-    }
-    AttributeValueType::Unknown
-}
-
-#[doc = include_str!("contract_validator.doc/literal_expr_type.md")]
-fn literal_expr_type(expr: &syn::Expr) -> AttributeValueType {
-    match expr {
-        syn::Expr::Lit(lit) => match &lit.lit {
-            syn::Lit::Str(_) => AttributeValueType::String,
-            syn::Lit::Int(_) => AttributeValueType::Int,
-            syn::Lit::Float(_) => AttributeValueType::Float,
-            syn::Lit::Bool(_) => AttributeValueType::Bool,
-            _ => AttributeValueType::Unknown,
-        },
-        // A negative numeric literal is `-` applied to the literal.
-        syn::Expr::Unary(unary) if matches!(unary.op, syn::UnOp::Neg(_)) => {
-            match literal_expr_type(&unary.expr) {
-                ty @ (AttributeValueType::Int | AttributeValueType::Float) => ty,
-                _ => AttributeValueType::Unknown,
-            }
-        }
-        _ => AttributeValueType::Unknown,
-    }
-}
-
-#[doc = include_str!("contract_validator.doc/value_type_matches.md")]
-fn value_type_matches(expected: PropTypeSurface, found: AttributeValueType) -> bool {
-    if found == AttributeValueType::Unknown || expected == PropTypeSurface::Other {
-        return true;
-    }
-    match expected {
-        PropTypeSurface::String => found == AttributeValueType::String,
-        PropTypeSurface::Int => found == AttributeValueType::Int,
-        PropTypeSurface::Float => {
-            matches!(found, AttributeValueType::Float | AttributeValueType::Int)
-        }
-        PropTypeSurface::Bool => found == AttributeValueType::Bool,
-        PropTypeSurface::Other => true,
-    }
-}
-
-#[doc = include_str!("contract_validator.doc/describe_prop_type.md")]
-fn describe_prop_type(ty: PropTypeSurface) -> &'static str {
-    match ty {
-        PropTypeSurface::String => "a string",
-        PropTypeSurface::Int => "an integer",
-        PropTypeSurface::Float => "a number",
-        PropTypeSurface::Bool => "a boolean",
-        PropTypeSurface::Other => "a value",
-    }
-}
-
-#[doc = include_str!("contract_validator.doc/describe_value_type.md")]
-fn describe_value_type(ty: AttributeValueType) -> &'static str {
-    match ty {
-        AttributeValueType::String => "a string",
-        AttributeValueType::Int => "an integer",
-        AttributeValueType::Float => "a number",
-        AttributeValueType::Bool => "a boolean",
-        AttributeValueType::Unknown => "an expression",
     }
 }
 

@@ -1,135 +1,307 @@
-#![doc = include_str!("rule_condition.doc/_module.md")]
+#![doc = include_str!("../../docs/api/matching/rule_condition.doc/_module.md")]
 
-use crate::matching::MediaEnvironment;
+use obscur_identity::InternedSymbol;
 
-#[doc = include_str!("rule_condition.doc/ConditionAxis.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConditionAxis {
-    #[doc = include_str!("rule_condition.doc/ViewportWidth.md")]
-    ViewportWidth,
-    #[doc = include_str!("rule_condition.doc/ViewportHeight.md")]
-    ViewportHeight,
-    #[doc = include_str!("rule_condition.doc/ContainerWidth.md")]
-    ContainerWidth,
-    #[doc = include_str!("rule_condition.doc/ContainerHeight.md")]
-    ContainerHeight,
-}
+use super::{
+    ConditionAxis, ConditionComparator, FeatureQuery, MediaEnvironment, PointerAccuracy,
+    StylePropertyValue, StyleRangeBound,
+};
+use crate::property::{PropertyId, PropertyValue};
 
-impl ConditionAxis {
-    #[doc = include_str!("rule_condition.doc/is_container.md")]
-    #[must_use]
-    pub const fn is_container(self) -> bool {
-        matches!(self, Self::ContainerWidth | Self::ContainerHeight)
-    }
-}
-
-#[doc = include_str!("rule_condition.doc/ConditionComparator.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConditionComparator {
-    #[doc = include_str!("rule_condition.doc/Lt.md")]
-    Lt,
-    #[doc = include_str!("rule_condition.doc/Le.md")]
-    Le,
-    #[doc = include_str!("rule_condition.doc/Eq.md")]
-    Eq,
-    #[doc = include_str!("rule_condition.doc/Ge.md")]
-    Ge,
-    #[doc = include_str!("rule_condition.doc/Gt.md")]
-    Gt,
-}
-
-#[doc = include_str!("rule_condition.doc/FeatureQuery.md")]
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct FeatureQuery {
-    axis: ConditionAxis,
-    comparator: ConditionComparator,
-    reference_px: f32,
-}
-
-impl FeatureQuery {
-    #[doc = include_str!("rule_condition.doc/new.md")]
-    #[must_use]
-    pub const fn new(
-        axis: ConditionAxis,
-        comparator: ConditionComparator,
-        reference_px: f32,
-    ) -> Self {
-        Self {
-            axis,
-            comparator,
-            reference_px,
-        }
-    }
-
-    #[doc = include_str!("rule_condition.doc/axis.md")]
-    #[must_use]
-    pub const fn axis(&self) -> ConditionAxis {
-        self.axis
-    }
-
-    #[doc = include_str!("rule_condition.doc/comparator.md")]
-    #[must_use]
-    pub const fn comparator(&self) -> ConditionComparator {
-        self.comparator
-    }
-
-    #[doc = include_str!("rule_condition.doc/reference_px.md")]
-    #[must_use]
-    pub const fn reference_px(&self) -> f32 {
-        self.reference_px
-    }
-
-    #[doc = include_str!("rule_condition.doc/holds.md")]
-    #[must_use]
-    pub fn holds(&self, env: &MediaEnvironment) -> bool {
-        let actual = match self.axis {
-            ConditionAxis::ViewportWidth => env.viewport_width(),
-            ConditionAxis::ViewportHeight => env.viewport_height(),
-            ConditionAxis::ContainerWidth => env.container_width(),
-            ConditionAxis::ContainerHeight => env.container_height(),
-        };
-        let Some(actual) = actual else {
-            return !self.axis.is_container();
-        };
-        match self.comparator {
-            ConditionComparator::Lt => actual < self.reference_px,
-            ConditionComparator::Le => actual <= self.reference_px,
-            ConditionComparator::Eq => (actual - self.reference_px).abs() < f32::EPSILON,
-            ConditionComparator::Ge => actual >= self.reference_px,
-            ConditionComparator::Gt => actual > self.reference_px,
-        }
-    }
-}
-
-#[doc = include_str!("rule_condition.doc/RuleCondition.md")]
+#[doc = include_str!("../../docs/api/matching/rule_condition.doc/RuleCondition.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum RuleCondition {
-    #[doc = include_str!("rule_condition.doc/Feature.md")]
+    /// A style query over a custom property on the selected container.
+    ContainerStyle {
+        /// The case-sensitive custom property symbol.
+        property: InternedSymbol,
+        /// The expected value, or no value for a presence query.
+        value: Option<PropertyValue>,
+    },
+    /// A numerical range comparison of a custom property on the selected container.
+    ContainerStyleRange {
+        /// The case-sensitive custom property symbol.
+        property: InternedSymbol,
+        /// The operation comparing the property against the reference.
+        comparator: ConditionComparator,
+        /// The comparison threshold.
+        reference: StyleRangeBound,
+    },
+    /// Two comparisons of a single custom property on the selected container.
+    ContainerStyleChain {
+        /// The case-sensitive custom property symbol.
+        property: InternedSymbol,
+        /// The comparison operators and thresholds of both bounds.
+        bounds: [(ConditionComparator, StyleRangeBound); 2],
+    },
+    /// A test of a supported computed CSS longhand on a style container.
+    ContainerProperty {
+        /// The longhand property to test.
+        property: PropertyId,
+        /// The expected computed value, or no value to test against the initial.
+        value: Option<StylePropertyValue>,
+    },
+    /// A single feature comparison.
     Feature(FeatureQuery),
-    #[doc = include_str!("rule_condition.doc/All.md")]
+    /// Equals the screen's dark color scheme preference.
+    PrefersDark(bool),
+    /// Matches landscape when the viewport is wider than it is tall. A square viewport is portrait.
+    Landscape(bool),
+    /// A primary or aggregate pointer accuracy query.
+    Pointer {
+        /// Include secondary pointers as well as the primary pointer.
+        any: bool,
+        /// Restrict the query to this accuracy when supplied.
+        accuracy: Option<PointerAccuracy>,
+        /// Test for presence when true and absence when false.
+        present: bool,
+    },
+    /// A primary or aggregate hover capability query.
+    Hover {
+        /// Include secondary pointers as well as the primary pointer.
+        any: bool,
+        /// Match support for hovering when true and lack of support when false.
+        enabled: bool,
+    },
+    /// Compares the viewport hardware pixel ratio to a reference in dppx.
+    Resolution(ConditionComparator, f32),
+    /// Equals the screen's reduced motion preference.
+    PrefersReducedMotion(bool),
+    /// Equals the screen's increased contrast preference.
+    PrefersIncreasedContrast(bool),
+    /// Conjunction: holds when every child holds (an empty `All` holds).
     All(Vec<RuleCondition>),
-    #[doc = include_str!("rule_condition.doc/Any.md")]
+    /// Disjunction: holds when any child holds (an empty `Any` never holds).
     Any(Vec<RuleCondition>),
-    #[doc = include_str!("rule_condition.doc/Not.md")]
+    /// Negation of the inner condition.
     Not(Box<RuleCondition>),
-    #[doc = include_str!("rule_condition.doc/Always.md")]
+    /// Always holds (an unconstrained `screen` query, or a non-restrictive but
+    /// unrepresentable feature).
     Always,
-    #[doc = include_str!("rule_condition.doc/Never.md")]
+    /// Never holds (for example a `print`-only query in a screen environment).
     Never,
+    /// An unsupported feature that remains unknown under negation. A known size axis still affects container selection.
+    Unknown(Option<ConditionAxis>),
+    /// Evaluates a condition using the nearest eligible container ancestor, optionally identified by name.
+    Container {
+        /// Optional name of the eligible ancestor.
+        name: Option<Box<str>>,
+        /// Condition evaluated against the selected ancestor.
+        condition: Box<RuleCondition>,
+    },
 }
 
 impl RuleCondition {
-    #[doc = include_str!("rule_condition.doc/holds_2.md")]
+    /// Evaluates the condition against `env`.
     #[must_use]
     pub fn holds(&self, env: &MediaEnvironment) -> bool {
+        self.evaluate(env) == Some(true)
+    }
+
+    fn evaluate(&self, env: &MediaEnvironment) -> Option<bool> {
         match self {
-            Self::Feature(query) => query.holds(env),
-            Self::All(children) => children.iter().all(|child| child.holds(env)),
-            Self::Any(children) => children.iter().any(|child| child.holds(env)),
-            Self::Not(inner) => !inner.holds(env),
-            Self::Always => true,
-            Self::Never => false,
+            Self::Feature(query) => Some(query.holds(env)),
+            Self::PrefersDark(value) => Some(env.preferences().dark == *value),
+            Self::Pointer {
+                any,
+                accuracy,
+                present,
+            } => env.input().map(|input| {
+                use PointerAccuracy::{Coarse, Fine};
+                let matches = match accuracy {
+                    Some(accuracy) => input.has_pointer(*accuracy, *any),
+                    None => input.has_pointer(Coarse, *any) || input.has_pointer(Fine, *any),
+                };
+                matches == *present
+            }),
+            Self::Hover { any, enabled } => {
+                env.input().map(|input| input.can_hover(*any) == *enabled)
+            }
+            Self::Resolution(comparator, reference) => env
+                .resolution_dppx()
+                .map(|actual| comparator.compare(actual, *reference)),
+            Self::Landscape(landscape) => env
+                .viewport_width()
+                .zip(env.viewport_height())
+                .map(|(width, height)| (width > height) == *landscape),
+            Self::PrefersReducedMotion(value) => Some(env.preferences().reduced_motion == *value),
+            Self::PrefersIncreasedContrast(value) => {
+                Some(env.preferences().increased_contrast == *value)
+            }
+            Self::ContainerStyle { property, value } => {
+                Some(env.matches_container_style(*property, value.as_ref()))
+            }
+            Self::ContainerStyleRange {
+                property,
+                comparator,
+                reference,
+            } => {
+                let value = env
+                    .container_style_range(*property)?
+                    .numeric()
+                    .and_then(|value| value.resolve(env));
+                Some(
+                    value
+                        .zip(reference.resolve(env))
+                        .is_some_and(|(actual, bound)| actual.compare(*comparator, &bound)),
+                )
+            }
+            Self::ContainerStyleChain {
+                property,
+                bounds: [(left_cmp, left), (right_cmp, right)],
+            } => {
+                let value = env
+                    .container_style_range(*property)?
+                    .numeric()
+                    .and_then(|value| value.resolve(env));
+                let result = value
+                    .zip(left.resolve(env))
+                    .zip(right.resolve(env))
+                    .is_some_and(|((actual, left), right)| {
+                        left.same_dimension(&right)
+                            && actual.compare(*left_cmp, &left)
+                            && actual.compare(*right_cmp, &right)
+                    });
+                Some(result)
+            }
+            Self::ContainerProperty { property, value } => {
+                env.test_container_property(*property, value.as_ref())
+            }
+            Self::All(children) => Self::evaluate_group(children, env, false),
+            Self::Any(children) => Self::evaluate_group(children, env, true),
+            Self::Not(inner) => inner.evaluate(env).map(|result| !result),
+            Self::Always => Some(true),
+            Self::Never => Some(false),
+            Self::Unknown(_) => None,
+            Self::Container { name, condition } => {
+                let mut required = [false; 4];
+                condition.require_container_axes(&mut required);
+                let container = env.resolve_container(
+                    name.as_deref(),
+                    required,
+                    condition.uses_container_style(),
+                )?;
+                condition.evaluate(&container)
+            }
         }
+    }
+
+    fn evaluate_group(children: &[Self], env: &MediaEnvironment, decisive: bool) -> Option<bool> {
+        let mut incomplete = false;
+        for child in children {
+            match child.evaluate(env) {
+                Some(value) if value == decisive => return Some(decisive),
+                Some(_) => {}
+                None => incomplete = true,
+            }
+        }
+        (!incomplete).then_some(!decisive)
+    }
+
+    /// Returns whether this condition needs a container style snapshot.
+    #[must_use]
+    pub fn uses_container_style(&self) -> bool {
+        match self {
+            Self::ContainerStyle { .. }
+            | Self::ContainerProperty { .. }
+            | Self::ContainerStyleRange { .. }
+            | Self::ContainerStyleChain { .. } => true,
+            Self::All(children) | Self::Any(children) => {
+                children.iter().any(Self::uses_container_style)
+            }
+            Self::Not(inner)
+            | Self::Container {
+                condition: inner, ..
+            } => inner.uses_container_style(),
+            _ => false,
+        }
+    }
+
+    pub(super) fn collect_container_properties(
+        &self,
+        properties: &mut Vec<PropertyId>,
+        ranges: &mut Vec<InternedSymbol>,
+        references: &mut Vec<(PropertyId, InternedSymbol)>,
+        needs_ch: &mut bool,
+    ) {
+        match self {
+            Self::ContainerProperty { property, value } => {
+                if !properties.contains(property) {
+                    properties.push(*property);
+                }
+                if let Some(value) = value {
+                    for name in value.variables() {
+                        let reference = (*property, name);
+                        if !references.contains(&reference) {
+                            references.push(reference);
+                        }
+                    }
+                    *needs_ch |= value.terminal_literal().is_some_and(PropertyValue::uses_ch);
+                }
+            }
+            Self::ContainerStyleRange {
+                property,
+                reference,
+                ..
+            } => {
+                record_range_property(ranges, *property);
+                record_range_bound(ranges, reference);
+                *needs_ch |= reference.uses_ch();
+            }
+            Self::ContainerStyleChain { property, bounds } => {
+                record_range_property(ranges, *property);
+                for (_, bound) in bounds {
+                    record_range_bound(ranges, bound);
+                    *needs_ch |= bound.uses_ch();
+                }
+            }
+            Self::All(children) | Self::Any(children) => {
+                for child in children {
+                    child.collect_container_properties(properties, ranges, references, needs_ch);
+                }
+            }
+            Self::Not(inner)
+            | Self::Container {
+                condition: inner, ..
+            } => {
+                inner.collect_container_properties(properties, ranges, references, needs_ch);
+            }
+            _ => {}
+        }
+    }
+
+    fn require_container_axes(&self, required: &mut [bool; 4]) {
+        match self {
+            Self::Feature(query) => {
+                if let Some(index) = query.axis().container_index() {
+                    required[index] = true;
+                }
+            }
+            Self::Unknown(Some(axis)) => {
+                if let Some(index) = axis.container_index() {
+                    required[index] = true;
+                }
+            }
+            Self::All(children) | Self::Any(children) => {
+                for child in children {
+                    child.require_container_axes(required);
+                }
+            }
+            Self::Not(inner) => inner.require_container_axes(required),
+            _ => {}
+        }
+    }
+}
+
+fn record_range_property(ranges: &mut Vec<InternedSymbol>, name: InternedSymbol) {
+    if !ranges.contains(&name) {
+        ranges.push(name);
+    }
+}
+
+fn record_range_bound(ranges: &mut Vec<InternedSymbol>, bound: &StyleRangeBound) {
+    for name in bound.variables() {
+        record_range_property(ranges, name);
     }
 }
 

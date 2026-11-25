@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Semantic selectors: which node is the one the test means.
 mod node_path;
 mod semantic_selector;
 

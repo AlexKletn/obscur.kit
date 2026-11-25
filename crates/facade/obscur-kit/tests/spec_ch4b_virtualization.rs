@@ -159,3 +159,69 @@ fn ch4_9_c_materialization_overscans_past_the_visible_range() {
         "materializing all 1000 items is not virtualization: got {range:?}"
     );
 }
+
+#[test]
+fn tree_grid_virtualizes_visible_rows_with_stable_identity_and_selection() {
+    use std::{num::NonZeroU32, sync::Arc};
+
+    use obscur_kit::bootstrap::CssPipeline;
+    use obscur_kit::css::source::CssSource;
+    use obscur_kit::identity::InternedSymbol;
+    use obscur_kit::widgets::table::Column;
+    use obscur_kit::widgets::tree::{TreeGrid, TreeNode};
+
+    let mut grid = TreeGrid::new()
+        .column(Column::new("Name"))
+        .column(Column::new("Value"))
+        .row(TreeNode::new("Parent", 0, true), ["branch"]);
+    for i in 1..120 {
+        grid = grid.row(
+            TreeNode::new(format!("Row {i}"), u16::from(i < 8), false),
+            ["value"],
+        );
+    }
+    assert_eq!(grid.logical_row_at(2), Some(8));
+    assert!(grid.set_expanded(0, true));
+    assert_eq!(grid.logical_row_at(2), Some(1));
+    assert_eq!(grid.virtual_slot_of(40), Some(41));
+    assert!(grid.select(40));
+    let grid = Arc::new(grid);
+    let list = InternedSymbol::named("treegrid-test");
+    let height = NonZeroU32::new(20).unwrap();
+
+    let mut rt = runtime(200.0, 100.0);
+    let mut css = CssPipeline::new();
+    css.install(
+        &mut rt,
+        &[CssSource::anonymous(
+            "treegrid { display:block; height:100px; overflow:auto } tr { display:block }",
+        )],
+    );
+    let v = Arc::clone(&grid).virtual_view(list, height);
+    let _ = rt.render_now(&v, css.sheets());
+    let scroller = at(&rt, &[0]);
+    assert_eq!(
+        rt.scroll_metrics(scroller).unwrap().content_extent.height,
+        2420.0
+    );
+    let visible = rt.virtual_window(list).unwrap();
+    assert!(visible.end < 40);
+
+    assert_eq!(
+        rt.handle_scroll(820.0, obscur_kit::geometry::Point::new(10.0, 10.0)),
+        Some(scroller)
+    );
+    assert!(rt.run_due_frame(&v, css.sheets()).is_some());
+    assert!(rt.virtual_window(list).unwrap().contains(&41));
+    let selected = |rt: &obscur_kit::runtime::UiRuntime| {
+        rt.semantic_snapshot()
+            .iter()
+            .find(|(_, node)| node.state().selected)
+            .unwrap()
+            .0
+    };
+    let row = selected(&rt);
+    rt.set_scroll_top(scroller, 840.0);
+    let _ = rt.render_now(&grid.virtual_view(list, height), css.sheets());
+    assert_eq!(selected(&rt), row);
+}

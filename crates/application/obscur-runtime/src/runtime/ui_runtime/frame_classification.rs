@@ -1,4 +1,4 @@
-#![doc = include_str!("frame_classification.doc/_module.md")]
+#![doc = include_str!("../../../docs/api/runtime/ui_runtime/frame_classification.doc/_module.md")]
 
 use crate::frame::{FrameContext, FrameReason};
 use crate::runtime::FramePlan;
@@ -6,7 +6,7 @@ use crate::runtime::FramePlan;
 use super::UiRuntime;
 
 impl UiRuntime {
-    #[doc = include_str!("frame_classification.doc/plan_for_frame.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/frame_classification.doc/plan_for_frame.md")]
     pub(super) fn plan_for_frame(
         &mut self,
         ctx: &FrameContext,

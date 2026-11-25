@@ -1,32 +1,35 @@
-#![doc = include_str!("navigation_direction.doc/_module.md")]
+//! How a navigation moves through the history stack (spec §6.13).
 
-#[doc = include_str!("navigation_direction.doc/NavigationDirection.md")]
+#[doc = include_str!("../../docs/api/history/navigation_direction.doc/NavigationDirection.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NavigationDirection {
-    #[doc = include_str!("navigation_direction.doc/Push.md")]
+    /// Push a new entry, truncating any forward history (standard browser
+    /// semantics).
     Push,
-    #[doc = include_str!("navigation_direction.doc/Replace.md")]
+    /// Replace the current entry in place, leaving the rest of the stack.
     Replace,
-    #[doc = include_str!("navigation_direction.doc/Back.md")]
+    /// Move the cursor one entry backward toward the start of history.
     Back,
-    #[doc = include_str!("navigation_direction.doc/Forward.md")]
+    /// Move the cursor one entry forward toward the end of history.
     Forward,
 }
 
 impl NavigationDirection {
-    #[doc = include_str!("navigation_direction.doc/is_backward.md")]
+    /// Returns whether this direction moves the cursor backward
+    /// ([`Back`](NavigationDirection::Back)).
     #[must_use]
     pub const fn is_backward(self) -> bool {
         matches!(self, Self::Back)
     }
 
-    #[doc = include_str!("navigation_direction.doc/is_forward.md")]
+    /// Returns whether this direction moves the cursor forward
+    /// ([`Forward`](NavigationDirection::Forward)).
     #[must_use]
     pub const fn is_forward(self) -> bool {
         matches!(self, Self::Forward)
     }
 
-    #[doc = include_str!("navigation_direction.doc/mutates_stack.md")]
+    #[doc = include_str!("../../docs/api/history/navigation_direction.doc/mutates_stack.md")]
     #[must_use]
     pub const fn mutates_stack(self) -> bool {
         matches!(self, Self::Push | Self::Replace)

@@ -1,12 +1,13 @@
-#![doc = include_str!("task_scope.doc/_module.md")]
+//! Ownership scope of a task.
 
-#[doc = include_str!("task_scope.doc/TaskScope.md")]
+/// The scope a task is bound to; when the scope ends the task is cancelled
+/// automatically (spec §3.3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskScope {
-    #[doc = include_str!("task_scope.doc/Component.md")]
+    /// Bound to a component instance.
     Component,
-    #[doc = include_str!("task_scope.doc/Window.md")]
+    /// Bound to a window.
     Window,
-    #[doc = include_str!("task_scope.doc/Runtime.md")]
+    /// Bound to the runtime.
     Runtime,
 }

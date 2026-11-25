@@ -1,25 +1,26 @@
-#![doc = include_str!("foreign_surface.doc/_module.md")]
+//! `ForeignSurface`: descriptor for externally-produced content in the scene (§5.5).
 
 use obscur_geometry::Size;
 
 use super::foreign_surface_kind::ForeignSurfaceKind;
 use super::foreign_surface_limits::ForeignSurfaceLimits;
 
-#[doc = include_str!("foreign_surface.doc/ForeignSurface.md")]
+#[doc = include_str!("../../docs/api/surface/foreign_surface.doc/ForeignSurface.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ForeignSurface {
-    #[doc = include_str!("foreign_surface.doc/kind.md")]
+    /// The kind of external content the surface hosts.
     kind: ForeignSurfaceKind,
-    #[doc = include_str!("foreign_surface.doc/size.md")]
+    /// The logical size of the surface in logical pixels.
     size: Size,
-    #[doc = include_str!("foreign_surface.doc/texture_backed.md")]
+    /// Whether the surface is composited as a texture (`true`) or is a native
+    /// child surface/window (`false`).
     texture_backed: bool,
-    #[doc = include_str!("foreign_surface.doc/limits.md")]
+    /// The explicit operations the surface permits.
     limits: ForeignSurfaceLimits,
 }
 
 impl ForeignSurface {
-    #[doc = include_str!("foreign_surface.doc/new.md")]
+    #[doc = include_str!("../../docs/api/surface/foreign_surface.doc/new.md")]
     #[must_use]
     pub const fn new(kind: ForeignSurfaceKind, size: Size) -> Self {
         Self {
@@ -30,7 +31,7 @@ impl ForeignSurface {
         }
     }
 
-    #[doc = include_str!("foreign_surface.doc/native_child.md")]
+    #[doc = include_str!("../../docs/api/surface/foreign_surface.doc/native_child.md")]
     #[must_use]
     pub const fn native_child(kind: ForeignSurfaceKind, size: Size) -> Self {
         Self {
@@ -41,39 +42,39 @@ impl ForeignSurface {
         }
     }
 
-    #[doc = include_str!("foreign_surface.doc/with_texture_backed.md")]
+    /// Returns a copy of this descriptor with `texture_backed` set.
     #[must_use]
     pub const fn with_texture_backed(mut self, texture_backed: bool) -> Self {
         self.texture_backed = texture_backed;
         self
     }
 
-    #[doc = include_str!("foreign_surface.doc/with_limits.md")]
+    /// Returns a copy of this descriptor with the given limits.
     #[must_use]
     pub const fn with_limits(mut self, limits: ForeignSurfaceLimits) -> Self {
         self.limits = limits;
         self
     }
 
-    #[doc = include_str!("foreign_surface.doc/kind_2.md")]
+    /// Returns the kind of external content the surface hosts.
     #[must_use]
     pub const fn kind(self) -> ForeignSurfaceKind {
         self.kind
     }
 
-    #[doc = include_str!("foreign_surface.doc/size_2.md")]
+    /// Returns the logical size of the surface.
     #[must_use]
     pub const fn size(self) -> Size {
         self.size
     }
 
-    #[doc = include_str!("foreign_surface.doc/limits_2.md")]
+    /// Returns the explicit limits the surface imposes.
     #[must_use]
     pub const fn limits(self) -> ForeignSurfaceLimits {
         self.limits
     }
 
-    #[doc = include_str!("foreign_surface.doc/is_texture_backed.md")]
+    /// Returns whether the surface is composited as a texture.
     #[must_use]
     pub const fn is_texture_backed(self) -> bool {
         self.texture_backed

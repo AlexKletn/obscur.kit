@@ -1,9 +1,9 @@
-#![doc = include_str!("dpi_variant.doc/_module.md")]
+//! The DPI-variant candidate ladder for an authored image path (spec §5.16).
 
-#[doc = include_str!("dpi_variant.doc/MAX_DENSITY.md")]
+#[doc = include_str!("../../docs/api/source/dpi_variant.doc/MAX_DENSITY.md")]
 const MAX_DENSITY: u32 = 3;
 
-#[doc = include_str!("dpi_variant.doc/dpi_variants.md")]
+#[doc = include_str!("../../docs/api/source/dpi_variant.doc/dpi_variants.md")]
 #[must_use]
 pub fn dpi_variants(path: &str, scale: f32) -> Vec<(Box<str>, f32)> {
     let base: (Box<str>, f32) = (path.into(), 1.0);
@@ -20,7 +20,7 @@ pub fn dpi_variants(path: &str, scale: f32) -> Vec<(Box<str>, f32)> {
     candidates
 }
 
-#[doc = include_str!("dpi_variant.doc/requested_density.md")]
+#[doc = include_str!("../../docs/api/source/dpi_variant.doc/requested_density.md")]
 #[must_use]
 pub fn requested_density(scale: f32) -> u32 {
     if !scale.is_finite() || scale <= 1.0 {
@@ -34,7 +34,7 @@ pub fn requested_density(scale: f32) -> u32 {
     ceiled.min(MAX_DENSITY)
 }
 
-#[doc = include_str!("dpi_variant.doc/variant_path.md")]
+/// Inserts the `@{density}x` suffix into `path` before its extension.
 fn variant_path(path: &str, density: u32) -> Box<str> {
     let suffix = format!("@{density}x");
     match extension_dot(path) {
@@ -43,7 +43,7 @@ fn variant_path(path: &str, density: u32) -> Box<str> {
     }
 }
 
-#[doc = include_str!("dpi_variant.doc/extension_dot.md")]
+#[doc = include_str!("../../docs/api/source/dpi_variant.doc/extension_dot.md")]
 fn extension_dot(path: &str) -> Option<usize> {
     let segment_start = path.rfind(['/', '\\']).map_or(0, |slash| slash + 1);
     let segment = &path[segment_start..];

@@ -1,1 +1,0 @@
-The `display: none` keyword.

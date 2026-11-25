@@ -22,8 +22,7 @@ The following are deferred. Each is documented at its site in code.
   scene coordinator paints as a `DrawImage` over the node's box (above
   `background-color`, below the border/content). The `DrawImage` now carries a
   placement model `{ image, tile, region, repeat_x, repeat_y }` (see below).
-  Remaining: multiple background layers, and the fs resolve is synchronous (an
-  unready URL simply paints a later frame).
+  An unready URL paints on a later frame once its resource is available.
 - ~~**`background-size` / `-position` / `-repeat`**~~ — DONE. Three new NOT-inherited
   computed properties (`BackgroundSize` = `auto` / `cover` / `contain` / explicit
   per-axis `<length|%|auto>`; `BackgroundPosition` = per-axis `<length|%|keyword>`,
@@ -38,12 +37,19 @@ The following are deferred. Each is documented at its site in code.
   single instance, so extend is not used for tiling). The CSS **initial** background
   is the CSS-correct intrinsic-size tile at `0% 0%` repeated on both axes — NOT a
   full-box stretch (a plain full-box stretch is `tile == region` + no repeat).
-  Deferred: `space` / `round` fold to `repeat` (no gap-distribution / integer-fit);
-  multiple background layers; sub-pixel tiling can show a hairline seam at some
-  scales; `em`/`vw`/… size/position units fall back (px + % are exact).
+  Raster, SVG and gradient layers resolve size, position and repeat by
+  cycling each authored list. `space` distributes gaps between whole tiles
+  and `round` resizes tiles to fit a whole number.
 - ~~**Multiple background layers**~~ — DONE. `PropertyValue::BackgroundLayers`
-  (comma list of `{Linear|Radial|Conic|Url}` layers) painted back-to-front; a
-  single layer is byte-identical to before.
+  holds linear, radial, conic, URL and empty layers in authored order. The
+  coordinator paints them back-to-front over the base color.
+- **`background-clip`** clips each background layer to its selected border,
+  padding or content box. The last image layer selects the clip for the base
+  color. `background-origin` selects the positioning box separately and
+  defaults to the padding box. Both box choices can be set in `background`.
+  `background-attachment` supports scroll, local and fixed. Local uses the
+  scrollable extent for placement and clips the requested box against the
+  stationary scrollport.
 - ~~**`repeating-linear-gradient`**~~ — DONE. A repeating flag + period on the
   linear gradient; the coordinator sizes the axis to one period and tiles via
   `ExtendMode::Repeat` (Vello tiles; CPU flattens to the first stop). Combined
@@ -80,25 +86,21 @@ The following are deferred. Each is documented at its site in code.
   unsupported; a single radius per corner only.
 
 ## Shadow
-- **CPU gaussian blur** — the CPU backend paints a flat reduced-alpha offset rect
-  (no blur); Vello does real `draw_blurred_rounded_rect`.
-- ~~**Inset shadow fidelity (Vello)**~~ — DONE. Vello now clips+isolates to the
-  box and punches the lit interior via `Compose::DestOut` (soft inner frame);
-  CPU draws an even-odd rounded-rect ring. (Drop shadows byte-identical.)
+- **Gaussian shadows**. CPU and Vello blur outset and inset shadows. For an
+  inset shadow both use a blurred hole inside the rounded box.
 - **Shadow on a rounded element** — a drop shadow sits inside the element's own
   subtree clip (documented approximation of the paint order).
 - **`filter: drop-shadow(...)`** — DONE. Lowered to a drop `BoxShadow` (spread `0`,
   not inset) and painted BEHIND the element via the same `DrawShadow` path as
-  `box-shadow` (Vello real gaussian, CPU flat offset approx), emitted after the
+  `box-shadow` (Gaussian on CPU and Vello), emitted after the
   box-shadow drop shadows. The shadow follows the element's border BOX, not its
   content alpha (a documented approximation — real CSS drop-shadow follows the
   rendered content's alpha, including its `box-shadow`).
 
 ## Transform
-- **Percentage `translate`** — `translate(50%)` is treated as `0` (the box size
-  is not known at CSS-lower time); resolve against the box in the runtime.
-- **Transformed hit-testing** — the pointer/hit-test path is NOT transformed, so
-  a transformed element's interactive region is still its untransformed box.
+Percentage translations resolve against the current border box. Hit testing
+uses the inverse accumulated transform.
+
 - **3D transforms** — `translate3d`/`perspective`/`rotateX`… unsupported (2D only).
 
 ## Done
@@ -107,29 +109,48 @@ The following are deferred. Each is documented at its site in code.
   in the scene coordinator (nested transform → opacity layer → rounded clip), and
   is honored end-to-end: Vello via `scene.push_layer(alpha)`, and the CPU backend
   via a real offscreen-pixmap group blend (overlapping opaque children composite as
-  one group, nested layers multiply). The layer's own clip / blend-mode / transform
-  / effects are still approximated on the CPU backend (only opacity is honored).
+  one group, nested layers multiply). CPU also honors layer clips and
+  separable blend modes.
+
+- **`visibility: hidden`** preserves layout and suppresses the node's own
+  paint and pointer targeting. Descendants inherit visibility and can override
+  it with `visibility: visible`. Hidden nodes are excluded from focus and the
+  accessibility tree. The `collapse` keyword remains open.
 
 ## Not started
-- **`filter` / `backdrop-filter` — color-matrix subset only** — `filter: blur()`
-  and `backdrop-filter` (acrylic) ARE now implemented on the Vello backend via our
-  own gaussian + composite **wgpu passes on offscreen textures** over the scene
-  (this is what the Fluent theme's acrylic uses); `filter: drop-shadow()` is
-  implemented via the `DrawShadow` path (see Shadow). What remains BLOCKED on
-  Vello 0.9 is the **color-matrix** family — `brightness()`, `contrast()`,
-  `saturate()`, `grayscale()`, `invert()`, `sepia()`, `hue-rotate()` — which has
-  no Vello primitive and is **silently dropped** at CSS lower time (not faked).
-  `supports_effect` reports the color-matrix subset as `Unavailable`.
+- **CPU filter coverage**. Vello's GPU compositor supports blur, backdrop
+  blur, and the supported CSS color-matrix functions, including brightness,
+  contrast, saturation, grayscale, invert, sepia and hue rotation. CPU layers
+  apply the folded CSS color matrix, Gaussian layer blur and backdrop blur.
+  CPU Gaussian blur, including shadows, is limited to a sigma of 16 device
+  pixels.
 - ~~**`outline` / `outline-offset`**~~ — DONE. Painted as one stroked `DrawPath` at
   the border box inflated by `offset + width/2` (rounded if a radius, dashed via
-  the dash stroke); reserves no layout space; emitted outside the node's clip.
-- ~~**`overflow` clipping**~~ — DONE. `overflow: hidden`/`clip`/`scroll`/`auto`
-  bracket the subtree with a `PushClip` to the box; `scroll`/`auto` clip but paint
-  no scrollbars (no scroll UI / gesture wiring yet).
-- **`clip-path`** — arbitrary clip shapes (the scene has path clips).
-- **`mix-blend-mode` / `background-blend-mode`** — the scene has blend on layers.
-- **`visibility: hidden` vs `display: none`** paint suppression — confirm
-  `visibility` is honored at paint time.
+  the dash stroke). It reserves no layout space, escapes the node's overflow
+  clip and remains subject to its CSS `clip-path`.
+- **`overflow` clipping and scrolling** are implemented. Scroll containers
+  can paint scrollbar tracks and thumbs.
+- **CSS `clip-path: polygon(...)`** clips painting and hit testing. Polygon
+  vertices use the selected border, padding or content box. Each box can also
+  serve as a rounded clip on its own. For kit layout boxes, `fill-box` resolves
+  to the content box, and `stroke-box` and `view-box` resolve to the border box.
+  `circle()` and `ellipse()` support
+  explicit radii, side distances and an authored center. `inset()`, `rect()`
+  and `xywh()` support elliptical corner radii. `rect()` uses edge coordinates
+  with `auto` defaults, and `xywh()` uses an origin and size. `path()` accepts
+  SVG path data with either fill rule. Math functions in polygon vertices,
+  rectangle coordinates and corner radii, and circle/ellipse radii and centers
+  resolve against the applicable geometry during painting and hit testing.
+  Curved hit regions use the flattened path outline.
+- **Image masks (§5.8)**. The scene carries an image, bounds and coverage mode.
+  CPU, classic Vello and Lyon apply alpha and luminance image masks to isolated
+  groups. Hybrid renders those frames through classic Vello and reports the
+  fallback. A mask declaration without a coverage source always needs a
+  fallback.
+- **`background-blend-mode`** cycles the authored blend modes over the image
+  layers. The background color and images form an isolated group. Both CSS
+  blend properties accept the nonseparable modes `hue`, `saturation`,
+  `color` and `luminosity`.
 
 ## Paint-time units
 - Only absolute `px` lengths are honored at PAINT time (border width, radius,
@@ -139,5 +160,10 @@ The following are deferred. Each is documented at its site in code.
 
 ---
 
-Ranked by likely value: transformed hit-testing > `outline` >
-`background-size`/`repeat`/`position` for `url()` images > the rest.
+## CPU and Vello verification
+
+The `fractional_edge`, `svg_vector` and `text_cross_backend` facade suites
+were run with default options and again with `-- --ignored --test-threads=1`.
+All 13 default cases and all 10 GPU cases passed. This covers fractional-scale
+edges, gradient sampling, premultiplied alpha, SVG clipping and text pixels.
+Filter and mask parity are outside these suites.

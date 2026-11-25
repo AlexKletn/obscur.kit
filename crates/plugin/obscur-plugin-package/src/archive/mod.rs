@@ -1,3 +1,4 @@
+mod byte_limit;
 mod compression;
 pub use compression::Compression;
 mod tar_package_reader;

@@ -1,29 +1,30 @@
-#![doc = include_str!("input_purpose.doc/_module.md")]
+//! The semantic purpose of a text field, guiding IME and keyboard behaviour
+//! (spec §5.12 IME).
 
-#[doc = include_str!("input_purpose.doc/InputPurpose.md")]
+#[doc = include_str!("../../docs/api/ime/input_purpose.doc/InputPurpose.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum InputPurpose {
-    #[doc = include_str!("input_purpose.doc/FreeForm.md")]
+    /// Ordinary free-form text with no special semantics. The default.
     #[default]
     FreeForm,
-    #[doc = include_str!("input_purpose.doc/Password.md")]
+    /// A secret password; sensitive-mode handling applies.
     Password,
-    #[doc = include_str!("input_purpose.doc/Pin.md")]
+    /// A numeric PIN; sensitive-mode handling applies.
     Pin,
-    #[doc = include_str!("input_purpose.doc/Email.md")]
+    /// An email address.
     Email,
-    #[doc = include_str!("input_purpose.doc/Url.md")]
+    /// A URL.
     Url,
-    #[doc = include_str!("input_purpose.doc/Number.md")]
+    /// A numeric value.
     Number,
-    #[doc = include_str!("input_purpose.doc/Phone.md")]
+    /// A telephone number.
     Phone,
-    #[doc = include_str!("input_purpose.doc/Search.md")]
+    /// A search query.
     Search,
 }
 
 impl InputPurpose {
-    #[doc = include_str!("input_purpose.doc/is_sensitive.md")]
+    #[doc = include_str!("../../docs/api/ime/input_purpose.doc/is_sensitive.md")]
     #[must_use]
     pub const fn is_sensitive(&self) -> bool {
         matches!(self, Self::Password | Self::Pin)

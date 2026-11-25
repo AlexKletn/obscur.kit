@@ -11,6 +11,7 @@ publish = false
 workspace = true
 
 [dependencies]
+obscur-diagnostics = { workspace = true }
 obscur-identity = { workspace = true }
 obscur-geometry = { workspace = true }
 obscur-view = { workspace = true }
@@ -20,3 +21,4 @@ obscur-layout = { workspace = true }
 obscur-accessibility = { workspace = true }
 obscur-text = { workspace = true }
 obscur-scene = { workspace = true }
+serde = { workspace = true }

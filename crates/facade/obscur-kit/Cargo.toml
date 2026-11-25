@@ -11,6 +11,15 @@ publish = false
 workspace = true
 
 [features]
+plugins = [
+    "dep:obscur-plugin-api",
+    "dep:obscur-plugin-host",
+    "dep:obscur-plugin-model",
+    "dep:obscur-plugin-package",
+]
+plugin-process = ["plugins", "dep:obscur-plugin-executor-process"]
+plugin-native = ["plugins", "dep:obscur-plugin-executor-native"]
+plugin-wasm = ["plugins", "dep:obscur-plugin-executor-wasm", "obscur-plugin-host/plugin-wasm"]
 # The portable default adapter set: works on any target with no display/GPU
 # (software renderer + smol executor + filesystem resources + image decode + the
 # real text shaping stack).
@@ -43,6 +52,7 @@ default = [
 ]
 # Convenience: every optional adapter (needs a display/GPU/AT at runtime).
 full = [
+    "plugin-process",
     "resource-fs",
     "resource-decode",
     "cache-fs",
@@ -52,7 +62,7 @@ full = [
     "render-vello",
     "window-winit",
     "shell-layer",
-    "accesskit",
+    "accesskit-window",
     "text-harfrust",
     "text-unicode",
     "font-fontconfig",
@@ -67,16 +77,20 @@ render-cpu = ["dep:obscur-render-cpu"]
 # build the swapchain (same pins as the adapter); `window-winit` pulls raw winit for
 # the event loop + converters.
 render-vello = ["dep:obscur-render-vello", "dep:wgpu", "dep:pollster"]
-window-winit = ["dep:obscur-window-winit", "dep:winit", "surface"]
+render-vello-hybrid = ["render-vello", "obscur-render-vello/hybrid"]
+render-lyon = ["render-vello", "obscur-render-vello/lyon"]
+window-winit = ["dep:obscur-window-winit", "dep:obscur-wayland-effects", "dep:winit", "surface"]
+gamepad = ["window-winit", "obscur-window-winit/gamepad"]
 # `wlr-layer-shell` surfaces (panels, docks, overlays). Linux/Wayland only; the
 # adapter answers `Unsupported` rather than failing where the protocol is absent.
-shell-layer = ["dep:obscur-shell-layer", "surface"]
+shell-layer = ["dep:obscur-shell-layer", "dep:obscur-wayland-effects", "surface", "render-cpu"]
 # Marker, enabled by every backend that can put a surface on screen. `App` needs a
 # renderer and *one of* them, and `App::layer` chooses which — so the module gate is
 # `render-vello` + this, rather than a disjunction that grows a term per backend and
 # has to be edited in every `#[cfg]` when one is added.
 surface = []
 accesskit = ["dep:obscur-accessibility-accesskit"]
+accesskit-window = ["accesskit", "window-winit", "dep:accesskit_winit"]
 text-harfrust = ["dep:obscur-text-harfrust"]
 text-unicode = ["dep:obscur-text-unicode"]
 # System font enumeration via fontconfig (`fc-match`/`fc-list`). Linux only in
@@ -104,6 +118,13 @@ obscur-render = { workspace = true }
 obscur-windowing = { workspace = true }
 obscur-resources = { workspace = true }
 obscur-routing = { workspace = true }
+obscur-plugin-host = { workspace = true, optional = true }
+obscur-plugin-executor-native = { workspace = true, optional = true }
+obscur-plugin-executor-process = { workspace = true, optional = true }
+obscur-plugin-executor-wasm = { workspace = true, optional = true }
+obscur-plugin-api = { workspace = true, optional = true }
+obscur-plugin-model = { workspace = true, optional = true }
+obscur-plugin-package = { workspace = true, optional = true }
 obscur-accessibility = { workspace = true }
 obscur-data-transfer = { workspace = true }
 obscur-system = { workspace = true }
@@ -117,6 +138,8 @@ obscur-primitives = { workspace = true }
 obscur-widgets = { workspace = true }
 # frontends (UI authoring surfaces)
 obscur-ui-ir = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 obscur-okui-syntax = { workspace = true }
 obscur-okui-compiler = { workspace = true }
 obscur-css = { workspace = true }
@@ -135,6 +158,7 @@ obscur-render-vello = { workspace = true, optional = true }
 obscur-window-winit = { workspace = true, optional = true }
 obscur-shell-layer = { workspace = true, optional = true }
 obscur-accessibility-accesskit = { workspace = true, optional = true }
+accesskit_winit = { version = "0.23.1", optional = true }
 obscur-text-harfrust = { workspace = true, optional = true }
 obscur-text-unicode = { workspace = true, optional = true }
 obscur-font-fontconfig = { workspace = true, optional = true }
@@ -148,6 +172,7 @@ pollster = { version = "0.4", optional = true }
 # The platform system provider is selected automatically by target.
 [target.'cfg(target_os = "linux")'.dependencies]
 obscur-system-linux = { workspace = true }
+obscur-wayland-effects = { workspace = true, optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 obscur-system-web = { workspace = true }
@@ -163,6 +188,8 @@ obscur-okui-syntax = { workspace = true }
 obscur-okui-compiler = { workspace = true }
 
 [dev-dependencies]
+sha2 = { workspace = true }
+wat = "1"
 # The AccessKit bridge, UNCONDITIONALLY, for the same reason the render backends
 # below are: `accesskit` is not in `default`, so a feature-gated test of the §7.1
 # output path would be silently skipped by a plain `cargo test --workspace` — and
@@ -189,6 +216,14 @@ pollster = "0.4"
 # PNG encoding for the headless-Vello example's read-back pixels (already a
 # workspace dependency via the CPU renderer; not a new external dependency).
 tiny-skia = "0.11"
+
+[[test]]
+name = "plugin_settings"
+required-features = ["plugins"]
+
+[[test]]
+name = "plugin_ui"
+required-features = ["plugins"]
 
 [[example]]
 name = "windowed_counter"
@@ -673,3 +708,7 @@ required-features = ["render-cpu", "text-harfrust", "text-unicode"]
 [[example]]
 name = "panel"
 required-features = ["full"]
+
+[[example]]
+name = "frame_probe"
+required-features = ["full", "render-lyon", "render-vello-hybrid"]

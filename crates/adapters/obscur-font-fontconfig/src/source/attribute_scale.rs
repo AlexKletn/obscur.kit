@@ -1,9 +1,10 @@
-#![doc = include_str!("attribute_scale.doc/_module.md")]
+//! Conversion from fontconfig's own weight/slant/width scales to the CSS ones
+//! [`FontAttributes`] carries (spec §5.18).
 
 use obscur_text::font::FontStretch;
 use obscur_text::span::{FontSlant, FontWeight};
 
-#[doc = include_str!("attribute_scale.doc/WEIGHT_ANCHORS.md")]
+#[doc = include_str!("../../docs/api/source/attribute_scale.doc/WEIGHT_ANCHORS.md")]
 const WEIGHT_ANCHORS: &[(i32, u16)] = &[
     (0, 100),    // FC_WEIGHT_THIN
     (40, 200),   // FC_WEIGHT_EXTRALIGHT
@@ -19,7 +20,7 @@ const WEIGHT_ANCHORS: &[(i32, u16)] = &[
     (215, 1000), // FC_WEIGHT_EXTRABLACK
 ];
 
-#[doc = include_str!("attribute_scale.doc/css_weight.md")]
+#[doc = include_str!("../../docs/api/source/attribute_scale.doc/css_weight.md")]
 pub(super) fn css_weight(fc_weight: i32) -> FontWeight {
     let first = WEIGHT_ANCHORS[0];
     let last = WEIGHT_ANCHORS[WEIGHT_ANCHORS.len() - 1];
@@ -48,7 +49,7 @@ pub(super) fn css_weight(fc_weight: i32) -> FontWeight {
     FontWeight::NORMAL
 }
 
-#[doc = include_str!("attribute_scale.doc/css_slant.md")]
+#[doc = include_str!("../../docs/api/source/attribute_scale.doc/css_slant.md")]
 pub(super) fn css_slant(fc_slant: i32) -> FontSlant {
     match fc_slant {
         i32::MIN..=0 => FontSlant::Normal,
@@ -57,7 +58,7 @@ pub(super) fn css_slant(fc_slant: i32) -> FontSlant {
     }
 }
 
-#[doc = include_str!("attribute_scale.doc/css_stretch.md")]
+#[doc = include_str!("../../docs/api/source/attribute_scale.doc/css_stretch.md")]
 pub(super) fn css_stretch(fc_width: i32) -> FontStretch {
     const STEPS: &[FontStretch] = &[
         FontStretch::UltraCondensed,

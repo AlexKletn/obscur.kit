@@ -1,1 +1,0 @@
-The left `Shift` key.

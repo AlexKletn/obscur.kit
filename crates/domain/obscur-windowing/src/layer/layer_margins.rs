@@ -1,6 +1,6 @@
-#![doc = include_str!("layer_margins.doc/_module.md")]
+//! The gap between a layer surface and the edges it is anchored to.
 
-#[doc = include_str!("layer_margins.doc/LayerMargins.md")]
+#[doc = include_str!("../../docs/api/layer/layer_margins.doc/LayerMargins.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct LayerMargins {
     /// The gap from the top edge.
@@ -14,7 +14,7 @@ pub struct LayerMargins {
 }
 
 impl LayerMargins {
-    #[doc = include_str!("layer_margins.doc/uniform.md")]
+    /// The same gap on all four sides.
     #[must_use]
     pub const fn uniform(px: i32) -> Self {
         Self {

@@ -1,18 +1,18 @@
-#![doc = include_str!("route_match.doc/_module.md")]
+//! The result of matching a [`Route`] against a [`RoutePattern`] (spec §6.13).
 
 use crate::route::{Route, RouteParams, RoutePattern};
 
-#[doc = include_str!("route_match.doc/RouteMatch.md")]
+#[doc = include_str!("../../docs/api/route/route_match.doc/RouteMatch.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RouteMatch {
-    #[doc = include_str!("route_match.doc/params.md")]
+    /// The parameters captured by the pattern.
     params: RouteParams,
-    #[doc = include_str!("route_match.doc/matched_path.md")]
+    /// The path that was matched.
     matched_path: Box<str>,
 }
 
 impl RouteMatch {
-    #[doc = include_str!("route_match.doc/new.md")]
+    /// Creates a match from captured `params` and the `matched_path`.
     #[must_use]
     pub fn new(params: RouteParams, matched_path: impl Into<Box<str>>) -> Self {
         Self {
@@ -21,7 +21,7 @@ impl RouteMatch {
         }
     }
 
-    #[doc = include_str!("route_match.doc/try_match.md")]
+    #[doc = include_str!("../../docs/api/route/route_match.doc/try_match.md")]
     #[must_use]
     pub fn try_match(route: &Route, pattern: &RoutePattern) -> Option<Self> {
         pattern
@@ -29,13 +29,13 @@ impl RouteMatch {
             .map(|params| Self::new(params, route.path()))
     }
 
-    #[doc = include_str!("route_match.doc/params_2.md")]
+    /// Returns the captured parameters.
     #[must_use]
     pub fn params(&self) -> &RouteParams {
         &self.params
     }
 
-    #[doc = include_str!("route_match.doc/matched_path_2.md")]
+    /// Returns the path that matched.
     #[must_use]
     pub fn matched_path(&self) -> &str {
         &self.matched_path

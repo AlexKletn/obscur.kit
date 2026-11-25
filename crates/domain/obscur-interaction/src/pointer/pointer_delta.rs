@@ -1,31 +1,31 @@
-#![doc = include_str!("pointer_delta.doc/_module.md")]
+//! The movement a pointer reported since its previous event (spec §2.4).
 
-#[doc = include_str!("pointer_delta.doc/PointerDelta.md")]
+#[doc = include_str!("../../docs/api/pointer/pointer_delta.doc/PointerDelta.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct PointerDelta {
-    #[doc = include_str!("pointer_delta.doc/x.md")]
+    /// Horizontal movement in logical pixels, positive to the right.
     pub x: f32,
-    #[doc = include_str!("pointer_delta.doc/y.md")]
+    /// Vertical movement in logical pixels, positive downward.
     pub y: f32,
 }
 
 impl PointerDelta {
-    #[doc = include_str!("pointer_delta.doc/ZERO.md")]
+    /// No movement — a press, a release, or an enter.
     pub const ZERO: Self = Self { x: 0.0, y: 0.0 };
 
-    #[doc = include_str!("pointer_delta.doc/new.md")]
+    /// Creates a delta of `x` horizontal and `y` vertical logical pixels.
     #[must_use]
     pub const fn new(x: f32, y: f32) -> Self {
         Self { x, y }
     }
 
-    #[doc = include_str!("pointer_delta.doc/is_zero.md")]
+    /// Returns whether this delta reports no movement at all.
     #[must_use]
     pub fn is_zero(self) -> bool {
         self.x == 0.0 && self.y == 0.0
     }
 
-    #[doc = include_str!("pointer_delta.doc/magnitude.md")]
+    /// Returns the straight-line distance this delta covers, in logical pixels.
     #[must_use]
     pub fn magnitude(self) -> f32 {
         self.x.hypot(self.y)

@@ -1,5 +1,7 @@
 mod abi_buffer;
 pub use abi_buffer::AbiBuffer;
+mod abi_call_result;
+pub use abi_call_result::AbiCallResult;
 mod abi_handle;
 pub use abi_handle::AbiHandle;
 mod abi_slice;

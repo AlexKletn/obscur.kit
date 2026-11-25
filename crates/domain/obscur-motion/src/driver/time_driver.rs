@@ -1,21 +1,25 @@
-#![doc = include_str!("time_driver.doc/_module.md")]
+//! The [`TimeDriver`] time-driven motion source (spec §4.17).
 
 use crate::driver::MotionDriver;
 
-#[doc = include_str!("time_driver.doc/TimeDriver.md")]
+#[doc = include_str!("../../docs/api/driver/time_driver.doc/TimeDriver.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TimeDriver {
-    #[doc = include_str!("time_driver.doc/elapsed.md")]
+    /// Accumulated logical seconds since the last [`reset`](Self::reset)
+    /// (or construction). Never decreases through normal advancing.
     elapsed: f32,
-    #[doc = include_str!("time_driver.doc/duration.md")]
+    /// Logical seconds the driver spans. Always strictly positive: a zero,
+    /// negative or `NaN` `duration` passed to [`new`](Self::new) is clamped up
+    /// to [`MIN_DURATION`](Self::MIN_DURATION) to keep the progress division
+    /// well-defined.
     duration: f32,
 }
 
 impl TimeDriver {
-    #[doc = include_str!("time_driver.doc/MIN_DURATION.md")]
+    #[doc = include_str!("../../docs/api/driver/time_driver.doc/MIN_DURATION.md")]
     pub const MIN_DURATION: f32 = f32::EPSILON;
 
-    #[doc = include_str!("time_driver.doc/new.md")]
+    #[doc = include_str!("../../docs/api/driver/time_driver.doc/new.md")]
     #[must_use]
     pub fn new(duration: f32) -> Self {
         Self {
@@ -24,25 +28,26 @@ impl TimeDriver {
         }
     }
 
-    #[doc = include_str!("time_driver.doc/advance.md")]
+    #[doc = include_str!("../../docs/api/driver/time_driver.doc/advance.md")]
     pub fn advance(&mut self, delta: f32) {
         if delta > 0.0 {
             self.elapsed += delta;
         }
     }
 
-    #[doc = include_str!("time_driver.doc/reset.md")]
+    /// Resets accumulated time back to `0` (progress `0`), leaving `duration`
+    /// unchanged so the driver can be replayed.
     pub fn reset(&mut self) {
         self.elapsed = 0.0;
     }
 
-    #[doc = include_str!("time_driver.doc/elapsed_2.md")]
+    /// Returns the accumulated logical seconds.
     #[must_use]
     pub const fn elapsed(&self) -> f32 {
         self.elapsed
     }
 
-    #[doc = include_str!("time_driver.doc/duration_2.md")]
+    /// Returns the span in logical seconds (always strictly positive).
     #[must_use]
     pub const fn duration(&self) -> f32 {
         self.duration
@@ -50,12 +55,13 @@ impl TimeDriver {
 }
 
 impl MotionDriver for TimeDriver {
-    #[doc = include_str!("time_driver.doc/progress.md")]
+    /// Returns `(elapsed / duration).clamp(0.0, 1.0)` (spec §4.17).
     fn progress(&self) -> f32 {
         (self.elapsed / self.duration).clamp(0.0, 1.0)
     }
 
-    #[doc = include_str!("time_driver.doc/is_active.md")]
+    /// Returns `elapsed < duration`: the driver is active until accumulated time
+    /// reaches its span, after which it has settled.
     fn is_active(&self) -> bool {
         self.elapsed < self.duration
     }

@@ -196,3 +196,128 @@ fn the_widget_and_hand_written_markup_are_styled_by_the_same_rules() {
         );
     }
 }
+
+#[test]
+fn sorting_and_moving_table_rows_preserve_their_nodes() {
+    let mut table = sample();
+    let mut rt = rendered(&table.view());
+    let header = at(&rt, &[0, 0]);
+    let alice = at(&rt, &[0, 1]);
+    let bob = at(&rt, &[0, 2]);
+
+    assert!(table.sort_by(0));
+    assert!(table.sort_by(0));
+    let _ = rt.render_now(&table.view(), &[]);
+    assert_eq!(at(&rt, &[0, 0]), header);
+    assert_eq!(at(&rt, &[0, 1]), bob);
+    assert_eq!(at(&rt, &[0, 2]), alice);
+
+    assert!(!table.move_row(2, 0));
+    assert!(table.move_row(0, 1));
+    assert!(table.sorted_column().is_none());
+    let _ = rt.render_now(&table.view(), &[]);
+    assert_eq!(at(&rt, &[0, 0]), header);
+    assert_eq!(at(&rt, &[0, 1]), alice);
+    assert_eq!(at(&rt, &[0, 2]), bob);
+}
+
+#[test]
+fn moving_and_resizing_a_column_keeps_its_cells_and_sort_state() {
+    use obscur_kit::bootstrap::CssPipeline;
+
+    let mut table = sample();
+    assert!(table.sort_by(0));
+    let mut rt = rendered(&table.view());
+    CssPipeline::new().install(&mut rt, &[]);
+    let header = at(&rt, &[0, 0, 0]);
+    let first_cell = at(&rt, &[0, 1, 0]);
+    assert!(table.resize_column(0, Some(85)));
+    assert!(table.move_column(0, 1));
+    assert_eq!(table.sorted_column(), Some(1));
+    assert_eq!(table.column_width(1), Some(85));
+
+    let _ = rt.render_now(&table.view(), &[]);
+    assert_eq!(at(&rt, &[0, 0, 1]), header);
+    assert_eq!(at(&rt, &[0, 1, 1]), first_cell);
+    assert_eq!(rt.layout_boxes()[&header].size().width, 85.0);
+    assert_eq!(rt.layout_boxes()[&first_cell].size().width, 85.0);
+
+    assert!(table.resize_column(1, None));
+    assert_eq!(table.column_width(1), None);
+    assert!(!table.move_column(1, 5));
+}
+
+#[test]
+fn tree_grid_keeps_visible_rows_keyed_and_publishes_hierarchy_state() {
+    use obscur_kit::accessibility::semantic::SemanticRole;
+    use obscur_kit::interaction::command::NamedKey;
+    use obscur_kit::widgets::tree::{TreeGrid, TreeNode};
+
+    let mut grid = TreeGrid::new()
+        .column(Column::new("Name"))
+        .column(Column::new("Value"))
+        .row(TreeNode::new("Parent", 0, true), ["folder"])
+        .row(TreeNode::new("Child", 1, false), ["file"])
+        .row(TreeNode::new("Sibling", 0, false), ["file"]);
+    let mut rt = rendered(&grid.view());
+    let root = at(&rt, &[0]);
+    let parent = at(&rt, &[0, 1]);
+    let sibling = at(&rt, &[0, 2]);
+    let snapshot = rt.semantic_snapshot();
+    assert_eq!(snapshot.get(root).unwrap().role(), SemanticRole::TreeGrid);
+    assert_eq!(snapshot.get(parent).unwrap().state().expanded, Some(false));
+
+    assert!(!grid.select(1));
+    assert!(grid.move_selection(1));
+    assert_eq!(grid.selected_index(), Some(0));
+    assert!(grid.navigate(NamedKey::ArrowRight));
+    assert!(grid.navigate(NamedKey::ArrowRight));
+    assert_eq!(grid.selected_index(), Some(1));
+    let _ = rt.render_now(&grid.view(), &[]);
+    let child = at(&rt, &[0, 2]);
+    assert_eq!(at(&rt, &[0, 3]), sibling);
+    let snapshot = rt.semantic_snapshot();
+    assert_eq!(snapshot.get(parent).unwrap().state().expanded, Some(true));
+    assert!(snapshot.get(child).unwrap().state().selected);
+
+    assert!(grid.navigate(NamedKey::ArrowLeft));
+    assert_eq!(grid.selected_index(), Some(0));
+    assert!(grid.navigate(NamedKey::ArrowLeft));
+    assert_eq!(grid.selected_index(), Some(0));
+    assert!(grid.navigate(NamedKey::End));
+    assert_eq!(grid.selected_index(), Some(2));
+    let _ = rt.render_now(&grid.view(), &[]);
+    assert!(!rt.tree().contains(child));
+    assert_eq!(at(&rt, &[0, 2]), sibling);
+}
+
+#[test]
+fn a_sticky_table_header_uses_the_viewport_scroll_geometry() {
+    use obscur_kit::bootstrap::CssPipeline;
+    use obscur_kit::style::property::layout_keyword::POSITION_STICKY;
+
+    let table = Table::new()
+        .column(Column::new("Name"))
+        .with_rows((0..30).map(|_| ["row"]))
+        .sticky_header(true);
+    let view = table.view();
+    let mut rt = rendered(&view);
+    CssPipeline::new().install(&mut rt, &[]);
+    let _ = rt.render_now(&view, &[]);
+    let header = at(&rt, &[0, 0]);
+    let before = rt.layout_boxes()[&header].origin().y;
+    assert_eq!(
+        rt.computed_style(header)
+            .unwrap()
+            .get(PropertyId::Position)
+            .unwrap()
+            .value(),
+        &obscur_kit::style::property::PropertyValue::Keyword(POSITION_STICKY),
+    );
+    rt.set_viewport_scroll(0.0, 30.0);
+    let _ = rt.render_now(&view, &[]);
+    let bounds = rt.layout_boxes()[&header].bounds;
+    assert!(bounds.origin.y > before);
+    let point = obscur_kit::geometry::Point::new(bounds.origin.x + 5.0, bounds.origin.y + 5.0);
+    assert!(rt.hit_test(point).contains_node(header));
+}

@@ -1,7 +1,8 @@
-#![doc = include_str!("blocking_executor.doc/_module.md")]
+//! Blocking-work port.
 
-#[doc = include_str!("blocking_executor.doc/BlockingExecutor.md")]
+/// Runs an explicitly blocking job off the UI thread. Blocking work is opt-in
+/// and capability-dependent (spec §3.3).
 pub trait BlockingExecutor {
-    #[doc = include_str!("blocking_executor.doc/run_blocking.md")]
+    /// Submits a blocking job for execution.
     fn run_blocking(&self, job: Box<dyn FnOnce() + Send + 'static>);
 }

@@ -1,31 +1,28 @@
-#![doc = include_str!("scene_snapshot.doc/_module.md")]
+//! The immutable, versioned snapshot handed off to a renderer.
 
 use std::sync::Arc;
 
 use crate::command::DisplayList;
 use crate::scene::{Scene, SceneGeneration, SceneStatistics};
 
-#[doc = include_str!("scene_snapshot.doc/SceneSnapshot.md")]
+#[doc = include_str!("../../docs/api/scene/scene_snapshot.doc/SceneSnapshot.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct SceneSnapshot {
     display_list: Arc<DisplayList>,
     generation: SceneGeneration,
-    statistics: SceneStatistics,
 }
 
 impl SceneSnapshot {
-    #[doc = include_str!("scene_snapshot.doc/new.md")]
+    #[doc = include_str!("../../docs/api/scene/scene_snapshot.doc/new.md")]
     #[must_use]
     pub fn new(display_list: DisplayList, generation: SceneGeneration) -> Self {
-        let statistics = SceneStatistics::from_display_list(&display_list);
         Self {
             display_list: Arc::new(display_list),
             generation,
-            statistics,
         }
     }
 
-    #[doc = include_str!("scene_snapshot.doc/from_scene.md")]
+    #[doc = include_str!("../../docs/api/scene/scene_snapshot.doc/from_scene.md")]
     #[must_use]
     pub fn from_scene(scene: &Scene) -> Self {
         Self {
@@ -33,41 +30,41 @@ impl SceneSnapshot {
             // costs a refcount bump, not a copy of every command in it.
             display_list: Arc::clone(scene.shared_root()),
             generation: scene.generation(),
-            statistics: scene.statistics(),
         }
     }
 
-    #[doc = include_str!("scene_snapshot.doc/display_list.md")]
+    /// The display list a renderer consumes: the frozen geometry, paint order,
+    /// and clipping contract (spec §5.2).
     #[must_use]
     pub fn display_list(&self) -> &DisplayList {
         &self.display_list
     }
 
-    #[doc = include_str!("scene_snapshot.doc/shared_display_list.md")]
+    #[doc = include_str!("../../docs/api/scene/scene_snapshot.doc/shared_display_list.md")]
     #[must_use]
     pub fn shared_display_list(&self) -> &Arc<DisplayList> {
         &self.display_list
     }
 
-    #[doc = include_str!("scene_snapshot.doc/generation.md")]
+    /// The generation of the scene at the moment this snapshot was captured.
     #[must_use]
     pub fn generation(&self) -> SceneGeneration {
         self.generation
     }
 
-    #[doc = include_str!("scene_snapshot.doc/statistics.md")]
+    #[doc = include_str!("../../docs/api/scene/scene_snapshot.doc/statistics.md")]
     #[must_use]
     pub fn statistics(&self) -> SceneStatistics {
-        self.statistics
+        SceneStatistics::from_display_list(&self.display_list)
     }
 
-    #[doc = include_str!("scene_snapshot.doc/is_stale_against.md")]
+    #[doc = include_str!("../../docs/api/scene/scene_snapshot.doc/is_stale_against.md")]
     #[must_use]
     pub fn is_stale_against(&self, current: SceneGeneration) -> bool {
         current > self.generation
     }
 
-    #[doc = include_str!("scene_snapshot.doc/is_balanced.md")]
+    #[doc = include_str!("../../docs/api/scene/scene_snapshot.doc/is_balanced.md")]
     #[must_use]
     pub fn is_balanced(&self) -> bool {
         self.display_list.is_balanced()
@@ -92,7 +89,7 @@ mod tests {
     }
 
     #[test]
-    fn new_computes_statistics_from_list() {
+    fn statistics_are_counted_from_the_list_it_holds() {
         let list = DisplayList::from_commands(vec![draw(), draw()]);
         let snapshot = SceneSnapshot::new(list, SceneGeneration::from_raw(7));
         assert_eq!(snapshot.generation().raw(), 7);

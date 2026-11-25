@@ -15,6 +15,7 @@ workspace = true
 # pointer events, resource ports) — and nothing depends on it except test
 # targets, which take it as a dev-dependency.
 [dependencies]
+obscur-accessibility = { workspace = true }
 obscur-identity = { workspace = true }
 obscur-geometry = { workspace = true }
 obscur-interaction = { workspace = true }

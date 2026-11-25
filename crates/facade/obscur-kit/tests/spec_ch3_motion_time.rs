@@ -101,6 +101,25 @@ fn an_active_animation_arms_the_scheduler_and_then_retires_it() {
     );
 }
 
+#[test]
+fn a_timeline_continuation_waits_for_a_positive_tick() {
+    let (mut rt, sheet, _) = started(1.0, 0.0, 100.0);
+    let sheets = std::slice::from_ref(&sheet);
+    let view = scene();
+
+    assert!(rt.run_due_frame(&view, sheets).is_some());
+    assert!(rt.has_pending_timeline_frame());
+    rt.advance_motion(0.0);
+    assert!(rt.run_due_frame(&view, sheets).is_none());
+
+    rt.advance_motion(VSYNC);
+    assert!(rt.run_due_frame(&view, sheets).is_some());
+    assert!(rt.run_due_frame(&view, sheets).is_none());
+
+    rt.request_frame(obscur_kit::runtime::frame::FrameReason::UiCommit);
+    assert!(rt.run_due_frame(&view, sheets).is_some());
+}
+
 #[doc = include_str!("spec_ch3_motion_time.doc/sixty_frames_on_a_frozen_clock_sample_one_identical_value.md")]
 #[test]
 fn sixty_frames_on_a_frozen_clock_sample_one_identical_value() {

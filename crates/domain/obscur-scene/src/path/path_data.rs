@@ -1,48 +1,26 @@
-#![doc = include_str!("path_data.doc/_module.md")]
-
-use core::f32::consts::PI;
+#![doc = include_str!("../../docs/api/path/path_data.doc/_module.md")]
 
 use obscur_geometry::Point;
 
-use super::Path;
+use super::{
+    Path, PathDataError, PathDataFault, path_data_cursor::PathDataCursor, svg_arc::SvgArc,
+};
 
-#[doc = include_str!("path_data.doc/PathDataError.md")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PathDataError {
-    #[doc = include_str!("path_data.doc/at.md")]
-    pub at: usize,
-    #[doc = include_str!("path_data.doc/what.md")]
-    pub what: PathDataFault,
-}
-
-#[doc = include_str!("path_data.doc/PathDataFault.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PathDataFault {
-    #[doc = include_str!("path_data.doc/UnknownCommand.md")]
-    UnknownCommand,
-    #[doc = include_str!("path_data.doc/MissingNumber.md")]
-    MissingNumber,
-    #[doc = include_str!("path_data.doc/LeadingCommand.md")]
-    LeadingCommand,
-    #[doc = include_str!("path_data.doc/StrayNumber.md")]
-    StrayNumber,
-}
-
-#[doc = include_str!("path_data.doc/parse_path_data.md")]
+/// Parses SVG path data into a [`Path`].
 ///
 /// # Errors
 ///
 /// Returns the byte offset and the kind of the first fault: a number where a
 /// command was expected, a letter naming no command, a command whose numbers ran
-/// out, or a number trailing a `Z`, which takes none.
+/// out, a number trailing a `Z`, an invalid arc flag, or a coordinate that
+/// cannot be represented in the scene.
 pub fn parse_path_data(data: &str) -> Result<Path, PathDataError> {
-    Scanner::new(data).run()
+    PathDataParser::new(data).run()
 }
 
-#[doc = include_str!("path_data.doc/Scanner.md")]
-struct Scanner<'a> {
-    bytes: &'a [u8],
-    at: usize,
+/// The parse in progress: where the pen is, and what the previous curve left behind for `S` and `T` to reflect.
+struct PathDataParser<'a> {
+    cursor: PathDataCursor<'a>,
     path: Path,
     current: Point,
     subpath_start: Point,
@@ -52,11 +30,10 @@ struct Scanner<'a> {
     started: bool,
 }
 
-impl<'a> Scanner<'a> {
+impl<'a> PathDataParser<'a> {
     fn new(data: &'a str) -> Self {
         Self {
-            bytes: data.as_bytes(),
-            at: 0,
+            cursor: PathDataCursor::new(data),
             path: Path::new(),
             current: Point::new(0.0, 0.0),
             subpath_start: Point::new(0.0, 0.0),
@@ -69,19 +46,18 @@ impl<'a> Scanner<'a> {
     fn run(mut self) -> Result<Path, PathDataError> {
         let mut command = 0_u8;
         loop {
-            self.skip_separators();
-            if self.at >= self.bytes.len() {
+            self.cursor.skip_separators();
+            let Some(byte) = self.cursor.peek() else {
                 return Ok(self.path);
-            }
-            let entry = self.at;
-            let byte = self.bytes[self.at];
+            };
+            let entry = self.cursor.offset();
             if byte.is_ascii_alphabetic() {
                 command = byte;
-                self.at += 1;
+                self.cursor.advance();
             } else if command == 0 {
                 // A number before any command: SVG has no implicit opening verb,
                 // and guessing one would turn a typo into a drawing.
-                return Err(self.fault(PathDataFault::LeadingCommand));
+                return Err(self.cursor.fault(PathDataFault::LeadingCommand));
             } else if matches!(command, b'Z' | b'z') {
                 // A standing command repeats by consuming another argument list.
                 // `Z` has none to consume, and SVG's grammar allows nothing but
@@ -89,7 +65,7 @@ impl<'a> Scanner<'a> {
                 // no verb. Left to repeat, `Z` read nothing and closed the
                 // subpath again, forever, growing the path until the machine
                 // ran out of memory.
-                return Err(self.fault(PathDataFault::StrayNumber));
+                return Err(self.cursor.fault(PathDataFault::StrayNumber));
             } else if matches!(command, b'M') {
                 // "If a moveto is followed by multiple pairs of coordinates,
                 // the subsequent pairs are treated as implicit lineto commands."
@@ -98,7 +74,7 @@ impl<'a> Scanner<'a> {
                 command = b'l';
             }
             self.step(command)?;
-            if self.at == entry {
+            if self.cursor.offset() == entry {
                 // Every turn of this loop must consume a byte. As the arms of
                 // `step` stand each one either reads a number — which cannot
                 // succeed on nothing — or returns, so this is unreachable; it
@@ -106,7 +82,7 @@ impl<'a> Scanner<'a> {
                 // trusted to advance. A parser that spins here does not merely
                 // hang: a canvas re-parses its path data on every paint, so it
                 // takes the frame thread and then the machine's memory with it.
-                self.at += 1;
+                self.cursor.advance();
             }
         }
     }
@@ -133,13 +109,13 @@ impl<'a> Scanner<'a> {
                 self.forget_controls();
             }
             b'H' => {
-                let x = self.number()? + origin.x;
+                let x = self.coordinate(origin.x)?;
                 let p = Point::new(x, self.current.y);
                 self.line(p);
                 self.forget_controls();
             }
             b'V' => {
-                let y = self.number()? + origin.y;
+                let y = self.coordinate(origin.y)?;
                 let p = Point::new(self.current.x, y);
                 self.line(p);
                 self.forget_controls();
@@ -153,7 +129,7 @@ impl<'a> Scanner<'a> {
                 self.cubic(c1, c2, end);
             }
             b'S' => {
-                let c1 = self.reflected_cubic();
+                let c1 = self.reflected_control(self.last_cubic_control)?;
                 let (c2, end) = (self.point(origin)?, self.point(origin)?);
                 self.cubic(c1, c2, end);
             }
@@ -162,17 +138,25 @@ impl<'a> Scanner<'a> {
                 self.quad(control, end);
             }
             b'T' => {
-                let control = self.reflected_quad();
+                let control = self.reflected_control(self.last_quad_control)?;
                 let end = self.point(origin)?;
                 self.quad(control, end);
             }
             b'A' => {
-                let (rx, ry) = (self.number()?, self.number()?);
-                let rotation = self.number()?;
-                let large = self.number()? != 0.0;
-                let sweep = self.number()? != 0.0;
+                let (rx, ry) = (self.cursor.number()?, self.cursor.number()?);
+                let rotation = self.cursor.number()?;
+                let large = self.cursor.flag()?;
+                let sweep = self.cursor.flag()?;
                 let end = self.point(origin)?;
-                self.arc(rx, ry, rotation, large, sweep, end);
+                self.arc(
+                    SvgArc {
+                        radii: [rx, ry],
+                        rotation_degrees: rotation,
+                        large,
+                        sweep,
+                    },
+                    end,
+                )?;
                 self.forget_controls();
             }
             b'Z' => {
@@ -182,7 +166,7 @@ impl<'a> Scanner<'a> {
                 }
                 self.forget_controls();
             }
-            _ => return Err(self.fault(PathDataFault::UnknownCommand)),
+            _ => return Err(self.cursor.fault(PathDataFault::UnknownCommand)),
         }
         Ok(())
     }
@@ -225,206 +209,54 @@ impl<'a> Scanner<'a> {
         self.last_quad_control = None;
     }
 
-    fn reflected_cubic(&self) -> Point {
-        // "If there is no previous command or if the previous command was not a
-        // C, c, S or s, assume the first control point is coincident with the
-        // current point."
-        self.last_cubic_control.map_or(self.current, |c| {
-            Point::new(2.0 * self.current.x - c.x, 2.0 * self.current.y - c.y)
-        })
-    }
-
-    fn reflected_quad(&self) -> Point {
-        self.last_quad_control.map_or(self.current, |c| {
-            Point::new(2.0 * self.current.x - c.x, 2.0 * self.current.y - c.y)
-        })
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn arc(&mut self, rx: f32, ry: f32, rotation: f32, large: bool, sweep: bool, end: Point) {
-        // SVG 1.1 F.6: endpoint parameterisation to centre parameterisation,
-        // then the arc as cubics. An arc with either radius zero, or with
-        // coincident endpoints, is a straight line by the spec's own words —
-        // "if rx = 0 or ry = 0 then this arc is treated as a straight line".
-        let (start, rx, ry) = (self.current, rx.abs(), ry.abs());
-        if rx == 0.0 || ry == 0.0 || (start.x == end.x && start.y == end.y) {
-            self.line(end);
-            return;
-        }
-        let phi = rotation.to_radians();
-        let (cos, sin) = (phi.cos(), phi.sin());
-        let (dx2, dy2) = ((start.x - end.x) / 2.0, (start.y - end.y) / 2.0);
-        let x1 = cos * dx2 + sin * dy2;
-        let y1 = -sin * dx2 + cos * dy2;
-
-        // F.6.6: scale the radii up when they are too small to span the chord.
-        let lambda = (x1 * x1) / (rx * rx) + (y1 * y1) / (ry * ry);
-        let (rx, ry) = if lambda > 1.0 {
-            let s = lambda.sqrt();
-            (rx * s, ry * s)
-        } else {
-            (rx, ry)
+    #[allow(clippy::cast_possible_truncation)]
+    fn reflected_control(&self, previous: Option<Point>) -> Result<Point, PathDataError> {
+        let Some(previous) = previous else {
+            return Ok(self.current);
         };
-
-        let numerator = (rx * rx * ry * ry - rx * rx * y1 * y1 - ry * ry * x1 * x1).max(0.0);
-        let denominator = rx * rx * y1 * y1 + ry * ry * x1 * x1;
-        let coefficient = if denominator == 0.0 {
-            0.0
-        } else {
-            let sign = if large == sweep { -1.0 } else { 1.0 };
-            sign * (numerator / denominator).sqrt()
-        };
-        let cx1 = coefficient * rx * y1 / ry;
-        let cy1 = -coefficient * ry * x1 / rx;
-        let cx = cos * cx1 - sin * cy1 + start.x.midpoint(end.x);
-        let cy = sin * cx1 + cos * cy1 + start.y.midpoint(end.y);
-
-        let theta = angle(1.0, 0.0, (x1 - cx1) / rx, (y1 - cy1) / ry);
-        let mut delta = angle(
-            (x1 - cx1) / rx,
-            (y1 - cy1) / ry,
-            (-x1 - cx1) / rx,
-            (-y1 - cy1) / ry,
+        // Double precision avoids overflowing the intermediate even when the reflection fits.
+        let reflect = |end, control| (2.0 * f64::from(end) - f64::from(control)) as f32;
+        let (x, y) = (
+            reflect(self.current.x, previous.x),
+            reflect(self.current.y, previous.y),
         );
-        if !sweep && delta > 0.0 {
-            delta -= 2.0 * PI;
-        } else if sweep && delta < 0.0 {
-            delta += 2.0 * PI;
+        if !(x.is_finite() && y.is_finite()) {
+            return Err(self.cursor.fault(PathDataFault::CoordinateOutOfRange));
         }
+        Ok(Point::new(x, y))
+    }
 
-        // One cubic per quarter turn or less: the standard bound at which a
-        // cubic's error against a circular arc stays under a fraction of a pixel.
-        let segments = (delta.abs() / (PI / 2.0)).ceil().max(1.0);
-        // Bounded above by construction: `delta` is at most a full turn, so this
-        // is at most four, and the cast can neither truncate meaningfully nor
-        // lose a sign.
-        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        let count = segments as usize;
-        let step = delta / segments;
-        let k = 4.0 / 3.0 * (step / 4.0).tan();
-        let mut angle_at = theta;
-        for _ in 0..count {
-            let next = angle_at + step;
-            let (c0, s0) = (angle_at.cos(), angle_at.sin());
-            let (c1a, s1a) = (next.cos(), next.sin());
-            let ellipse = Ellipse {
-                centre: Point::new(cx, cy),
-                rx,
-                ry,
-                cos,
-                sin,
-            };
-            let p0 = ellipse.at(c0, s0);
-            let p3 = ellipse.at(c1a, s1a);
-            let d0 = ellipse_tangent(rx, ry, cos, sin, c0, s0);
-            let d3 = ellipse_tangent(rx, ry, cos, sin, c1a, s1a);
-            self.cubic(
-                Point::new(p0.x + k * d0.x, p0.y + k * d0.y),
-                Point::new(p3.x - k * d3.x, p3.y - k * d3.y),
-                p3,
-            );
-            angle_at = next;
+    fn arc(&mut self, arc: SvgArc, end: Point) -> Result<(), PathDataError> {
+        let start = self.current;
+        if start == end {
+            return Ok(());
         }
+        self.ensure_started();
+        arc.append(&mut self.path, start, end)
+            .map_err(|fault| self.cursor.fault(fault))?;
         self.current = end;
+        Ok(())
     }
 
     fn point(&mut self, origin: Point) -> Result<Point, PathDataError> {
-        let x = self.number()?;
-        let y = self.number()?;
-        Ok(Point::new(origin.x + x, origin.y + y))
+        Ok(Point::new(
+            self.coordinate(origin.x)?,
+            self.coordinate(origin.y)?,
+        ))
     }
 
-    fn number(&mut self) -> Result<f32, PathDataError> {
-        self.skip_separators();
-        let start = self.at;
-        if self.at < self.bytes.len() && matches!(self.bytes[self.at], b'+' | b'-') {
-            self.at += 1;
-        }
-        while self.at < self.bytes.len() && self.bytes[self.at].is_ascii_digit() {
-            self.at += 1;
-        }
-        if self.at < self.bytes.len() && self.bytes[self.at] == b'.' {
-            self.at += 1;
-            while self.at < self.bytes.len() && self.bytes[self.at].is_ascii_digit() {
-                self.at += 1;
-            }
-        }
-        if self.at < self.bytes.len() && matches!(self.bytes[self.at], b'e' | b'E') {
-            let mark = self.at;
-            self.at += 1;
-            if self.at < self.bytes.len() && matches!(self.bytes[self.at], b'+' | b'-') {
-                self.at += 1;
-            }
-            if self.at < self.bytes.len() && self.bytes[self.at].is_ascii_digit() {
-                while self.at < self.bytes.len() && self.bytes[self.at].is_ascii_digit() {
-                    self.at += 1;
-                }
-            } else {
-                // An `e` that begins no exponent is the next command, not part
-                // of this number.
-                self.at = mark;
-            }
-        }
-        core::str::from_utf8(&self.bytes[start..self.at])
-            .ok()
-            .and_then(|text| text.parse::<f32>().ok())
-            .filter(|value| value.is_finite())
+    fn coordinate(&mut self, origin: f32) -> Result<f32, PathDataError> {
+        self.cursor.skip_separators();
+        let at = self.cursor.offset();
+        let coordinate = self.cursor.number()? + origin;
+        coordinate
+            .is_finite()
+            .then_some(coordinate)
             .ok_or(PathDataError {
-                at: start,
-                what: PathDataFault::MissingNumber,
+                at,
+                what: PathDataFault::CoordinateOutOfRange,
             })
     }
-
-    fn skip_separators(&mut self) {
-        while self.at < self.bytes.len()
-            && matches!(self.bytes[self.at], b' ' | b',' | b'\t' | b'\n' | b'\r')
-        {
-            self.at += 1;
-        }
-    }
-
-    fn fault(&self, what: PathDataFault) -> PathDataError {
-        PathDataError { at: self.at, what }
-    }
-}
-
-#[doc = include_str!("path_data.doc/angle.md")]
-fn angle(ux: f32, uy: f32, vx: f32, vy: f32) -> f32 {
-    let dot = ux * vx + uy * vy;
-    let len = (ux * ux + uy * uy).sqrt() * (vx * vx + vy * vy).sqrt();
-    if len == 0.0 {
-        return 0.0;
-    }
-    let sign = if ux * vy - uy * vx < 0.0 { -1.0 } else { 1.0 };
-    sign * (dot / len).clamp(-1.0, 1.0).acos()
-}
-
-#[doc = include_str!("path_data.doc/Ellipse.md")]
-#[derive(Debug, Clone, Copy)]
-struct Ellipse {
-    centre: Point,
-    rx: f32,
-    ry: f32,
-    cos: f32,
-    sin: f32,
-}
-
-impl Ellipse {
-    #[doc = include_str!("path_data.doc/on_ellipse.md")]
-    fn at(self, ct: f32, st: f32) -> Point {
-        Point::new(
-            self.centre.x + self.rx * ct * self.cos - self.ry * st * self.sin,
-            self.centre.y + self.rx * ct * self.sin + self.ry * st * self.cos,
-        )
-    }
-}
-
-#[doc = include_str!("path_data.doc/ellipse_tangent.md")]
-fn ellipse_tangent(rx: f32, ry: f32, cos: f32, sin: f32, ct: f32, st: f32) -> Point {
-    Point::new(
-        -rx * st * cos - ry * ct * sin,
-        -rx * st * sin + ry * ct * cos,
-    )
 }
 
 #[cfg(test)]
@@ -432,6 +264,22 @@ mod tests {
     use super::{PathDataFault, parse_path_data};
     use crate::path::{PathSegment, PathTrim};
     use obscur_geometry::Point;
+
+    #[test]
+    fn rejects_relative_coordinates_that_overflow() {
+        for data in ["M3e38 0 h3e38", "M0 3e38 v3e38", "M3e38 0 l3e38 0"] {
+            let error = parse_path_data(data).unwrap_err();
+            assert_eq!(error.what, PathDataFault::CoordinateOutOfRange);
+            assert_eq!(&data[error.at..error.at + 4], "3e38");
+        }
+    }
+
+    #[test]
+    fn smooth_controls_are_checked_after_reflection() {
+        assert!(parse_path_data("M3e38 0 Q3e38 0 3e38 1 T3e38 2").is_ok());
+        let error = parse_path_data("M3e38 0 Q0 0 3e38 1 T3e38 2").unwrap_err();
+        assert_eq!(error.what, PathDataFault::CoordinateOutOfRange);
+    }
 
     fn parse(data: &str) -> crate::path::Path {
         parse_path_data(data).expect("valid path data")
@@ -516,6 +364,53 @@ mod tests {
         // After `Z` the pen is back at (10, 10), so the next line starts there.
         let length = PathTrim::of(&parse("M10 10 L20 10 Z")).length();
         assert!((length - 20.0).abs() < 0.01, "out and back: {length}");
+    }
+
+    /// Verifies bounds and cubic controls of shallow arcs with very large radii.
+    #[test]
+    fn shallow_arcs_with_large_radii_keep_their_chord() {
+        for radius in ["1e18", "2e19", "1e30", "3e38"] {
+            let path = parse(&format!("M0 0 A{radius} {radius} 0 0 1 100 0"));
+            let [
+                _,
+                PathSegment::CubicTo {
+                    control1,
+                    control2,
+                    end,
+                },
+            ] = path.segments()
+            else {
+                panic!("expected one shallow cubic");
+            };
+            assert_eq!(*end, Point::new(100.0, 0.0));
+            assert!((control1.x - 100.0 / 3.0).abs() < 1e-4);
+            assert!((control2.x - 200.0 / 3.0).abs() < 1e-4);
+            assert!(control1.y.abs() < 1e-4 && control2.y.abs() < 1e-4);
+            assert_eq!(path.bounds().unwrap().size.width, 100.0);
+        }
+        assert_eq!(
+            parse_path_data("M0 0 A3e38 3e38 0 1 1 100 0")
+                .unwrap_err()
+                .what,
+            PathDataFault::ArcOutOfRange,
+        );
+    }
+
+    /// Compares compact and spaced arc flags and rejects non-binary flags.
+    #[test]
+    fn arc_flags_can_touch_one_another_and_the_coordinate() {
+        for (compact, spaced) in [
+            ("M0 0 A50 50 0 11 100 0", "M0 0 A50 50 0 1 1 100 0"),
+            ("M0 0 A50 50 0 1 1100 0", "M0 0 A50 50 0 1 1 100 0"),
+            ("M0 0 A50 50 0 0150 0", "M0 0 A50 50 0 0 1 50 0"),
+            ("M0 0 a50 50 0 0150 0", "M0 0 a50 50 0 0 1 50 0"),
+        ] {
+            assert_eq!(parse(compact), parse(spaced));
+        }
+        assert_eq!(
+            parse_path_data("M0 0 A50 50 0 2 1 100 0").unwrap_err().what,
+            PathDataFault::InvalidArcFlag,
+        );
     }
 
     #[test]

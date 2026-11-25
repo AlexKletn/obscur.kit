@@ -1,4 +1,4 @@
-#![doc = include_str!("builtin_painters.doc/_module.md")]
+#![doc = include_str!("../../docs/api/bootstrap/builtin_painters.doc/_module.md")]
 
 use crate::runtime::UiRuntime;
 use crate::scene::color::Color;
@@ -6,15 +6,16 @@ use crate::scene::paint::Brush;
 use crate::widgets::progress::{Progress, paint_progress};
 use crate::widgets::slider::{Slider, paint_slider};
 
-#[doc = include_str!("builtin_painters.doc/BuiltinPainters.md")]
+#[doc = include_str!("../../docs/api/bootstrap/builtin_painters.doc/BuiltinPainters.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BuiltinPainters {
-    #[doc = include_str!("builtin_painters.doc/accent.md")]
+    /// The brush colour the fill of a progress bar and the thumb of a slider are
+    /// drawn in.
     accent: Color,
 }
 
 impl BuiltinPainters {
-    #[doc = include_str!("builtin_painters.doc/ACCENT.md")]
+    #[doc = include_str!("../../docs/api/bootstrap/builtin_painters.doc/ACCENT.md")]
     pub const ACCENT: Color = Color::rgba(
         0x2b as f32 / 255.0,
         0x2a as f32 / 255.0,
@@ -22,7 +23,7 @@ impl BuiltinPainters {
         1.0,
     );
 
-    #[doc = include_str!("builtin_painters.doc/new.md")]
+    #[doc = include_str!("../../docs/api/bootstrap/builtin_painters.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -30,20 +31,20 @@ impl BuiltinPainters {
         }
     }
 
-    #[doc = include_str!("builtin_painters.doc/with_accent.md")]
+    /// The same set, drawn in `accent` instead of the default.
     #[must_use]
     pub const fn with_accent(mut self, accent: Color) -> Self {
         self.accent = accent;
         self
     }
 
-    #[doc = include_str!("builtin_painters.doc/accent_2.md")]
+    /// The accent this set will register its painters with.
     #[must_use]
     pub const fn accent(&self) -> Color {
         self.accent
     }
 
-    #[doc = include_str!("builtin_painters.doc/install.md")]
+    #[doc = include_str!("../../docs/api/bootstrap/builtin_painters.doc/install.md")]
     pub fn install(&self, runtime: &mut UiRuntime) {
         // Registered under the SYMBOL the widget binds on its own canvas, not
         // under a name: `Progress::contents` writes `canvas_painter_prop`, and a

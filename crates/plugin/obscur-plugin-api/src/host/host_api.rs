@@ -1,5 +1,6 @@
-#![doc = include_str!("host_api.doc/_module.md")]
+//! `HostApi` (skeleton stub for the spec-defined entity; not yet implemented).
 
-#[doc = include_str!("host_api.doc/HostApi.md")]
+/// Placeholder for the `HostApi` entity. See the Obscur Kit 2 specs for its
+/// contract; this stub exists to materialise the target source layout.
 #[derive(Debug)]
 pub struct HostApi;

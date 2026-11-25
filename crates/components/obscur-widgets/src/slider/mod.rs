@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! A slider: one value or two, over a scale, free or stepped.
 
 mod slider;
 pub use slider::Slider;

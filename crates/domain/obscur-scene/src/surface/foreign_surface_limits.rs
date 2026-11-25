@@ -1,20 +1,20 @@
-#![doc = include_str!("foreign_surface_limits.doc/_module.md")]
+//! `ForeignSurfaceLimits`: explicit restrictions a foreign surface may impose (§5.5).
 
-#[doc = include_str!("foreign_surface_limits.doc/ForeignSurfaceLimits.md")]
+#[doc = include_str!("../../docs/api/surface/foreign_surface_limits.doc/ForeignSurfaceLimits.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ForeignSurfaceLimits {
-    #[doc = include_str!("foreign_surface_limits.doc/allows_transform.md")]
+    /// Whether the surface may be transformed (translate/scale/rotate/etc.).
     allows_transform: bool,
-    #[doc = include_str!("foreign_surface_limits.doc/allows_clip.md")]
+    /// Whether the surface may be clipped by ancestor clips.
     allows_clip: bool,
-    #[doc = include_str!("foreign_surface_limits.doc/allows_opacity.md")]
+    /// Whether the surface may be composited with reduced opacity.
     allows_opacity: bool,
-    #[doc = include_str!("foreign_surface_limits.doc/allows_blur.md")]
+    /// Whether a blur effect may be applied to the surface.
     allows_blur: bool,
 }
 
 impl ForeignSurfaceLimits {
-    #[doc = include_str!("foreign_surface_limits.doc/unrestricted.md")]
+    #[doc = include_str!("../../docs/api/surface/foreign_surface_limits.doc/unrestricted.md")]
     #[must_use]
     pub const fn unrestricted() -> Self {
         Self {
@@ -25,7 +25,7 @@ impl ForeignSurfaceLimits {
         }
     }
 
-    #[doc = include_str!("foreign_surface_limits.doc/native_child.md")]
+    #[doc = include_str!("../../docs/api/surface/foreign_surface_limits.doc/native_child.md")]
     #[must_use]
     pub const fn native_child() -> Self {
         Self {
@@ -36,25 +36,25 @@ impl ForeignSurfaceLimits {
         }
     }
 
-    #[doc = include_str!("foreign_surface_limits.doc/allows_transform_2.md")]
+    /// Returns whether the surface may be transformed.
     #[must_use]
     pub const fn allows_transform(self) -> bool {
         self.allows_transform
     }
 
-    #[doc = include_str!("foreign_surface_limits.doc/allows_clip_2.md")]
+    /// Returns whether the surface may be clipped.
     #[must_use]
     pub const fn allows_clip(self) -> bool {
         self.allows_clip
     }
 
-    #[doc = include_str!("foreign_surface_limits.doc/allows_opacity_2.md")]
+    /// Returns whether the surface may be composited with reduced opacity.
     #[must_use]
     pub const fn allows_opacity(self) -> bool {
         self.allows_opacity
     }
 
-    #[doc = include_str!("foreign_surface_limits.doc/allows_blur_2.md")]
+    /// Returns whether a blur effect may be applied to the surface.
     #[must_use]
     pub const fn allows_blur(self) -> bool {
         self.allows_blur
@@ -62,7 +62,7 @@ impl ForeignSurfaceLimits {
 }
 
 impl Default for ForeignSurfaceLimits {
-    #[doc = include_str!("foreign_surface_limits.doc/default.md")]
+    /// Defaults to [`unrestricted`](Self::unrestricted).
     fn default() -> Self {
         Self::unrestricted()
     }

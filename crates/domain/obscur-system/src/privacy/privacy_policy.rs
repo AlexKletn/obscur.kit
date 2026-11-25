@@ -1,20 +1,24 @@
-#![doc = include_str!("privacy_policy.doc/_module.md")]
+#![doc = include_str!("../../docs/api/privacy/privacy_policy.doc/_module.md")]
 
 use crate::privacy::PrivacyClass;
 
-#[doc = include_str!("privacy_policy.doc/PrivacyPolicy.md")]
+#[doc = include_str!("../../docs/api/privacy/privacy_policy.doc/PrivacyPolicy.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PrivacyPolicy {
-    #[doc = include_str!("privacy_policy.doc/redact_diagnostics.md")]
+    /// Redact [`PrivacyClass::Sensitive`] and above from diagnostic snapshots
+    /// (spec §7.12).
     redact_diagnostics: bool,
-    #[doc = include_str!("privacy_policy.doc/enforce_capture_protection.md")]
+    /// Honour [`PrivacyClass::CaptureProtected`] / [`PrivacyClass::Secret`] in
+    /// screen capture and sharing (spec §6.17).
     enforce_capture_protection: bool,
-    #[doc = include_str!("privacy_policy.doc/hide_from_task_switcher.md")]
+    /// Hide protected windows from the task switcher and previews (spec §6.17).
     hide_from_task_switcher: bool,
 }
 
 impl PrivacyPolicy {
-    #[doc = include_str!("privacy_policy.doc/new.md")]
+    /// Creates the safe-by-default policy: diagnostics are redacted and capture
+    /// protection is enforced, but windows are not hidden from the task switcher
+    /// (spec §7.12).
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -24,40 +28,46 @@ impl PrivacyPolicy {
         }
     }
 
-    #[doc = include_str!("privacy_policy.doc/redact_diagnostics_2.md")]
+    /// Sets whether sensitive data is redacted from diagnostic snapshots
+    /// (spec §7.12).
     #[must_use]
     pub const fn redact_diagnostics(mut self, redact: bool) -> Self {
         self.redact_diagnostics = redact;
         self
     }
 
-    #[doc = include_str!("privacy_policy.doc/enforce_capture_protection_2.md")]
+    /// Sets whether capture protection is honoured in screen capture and sharing
+    /// (spec §6.17).
     #[must_use]
     pub const fn enforce_capture_protection(mut self, enforce: bool) -> Self {
         self.enforce_capture_protection = enforce;
         self
     }
 
-    #[doc = include_str!("privacy_policy.doc/hide_from_task_switcher_2.md")]
+    /// Sets whether protected windows are hidden from the task switcher and
+    /// previews (spec §6.17).
     #[must_use]
     pub const fn hide_from_task_switcher(mut self, hide: bool) -> Self {
         self.hide_from_task_switcher = hide;
         self
     }
 
-    #[doc = include_str!("privacy_policy.doc/should_redact.md")]
+    /// Returns whether data of `class` must be redacted from a diagnostic
+    /// snapshot under this policy (spec §7.12).
     #[must_use]
     pub const fn should_redact(&self, class: PrivacyClass) -> bool {
         self.redact_diagnostics && class.redact_in_diagnostics()
     }
 
-    #[doc = include_str!("privacy_policy.doc/should_exclude_from_capture.md")]
+    /// Returns whether data of `class` must be excluded from screen capture and
+    /// sharing under this policy (spec §6.17).
     #[must_use]
     pub const fn should_exclude_from_capture(&self, class: PrivacyClass) -> bool {
         self.enforce_capture_protection && class.exclude_from_capture()
     }
 
-    #[doc = include_str!("privacy_policy.doc/hides_from_task_switcher.md")]
+    /// Returns whether protected windows are hidden from the task switcher and
+    /// previews (spec §6.17).
     #[must_use]
     pub const fn hides_from_task_switcher(&self) -> bool {
         self.hide_from_task_switcher

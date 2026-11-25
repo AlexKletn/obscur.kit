@@ -310,3 +310,69 @@ fn an_evicted_image_reloads_when_referenced_again() {
         "an evicted image comes back rather than silently never painting again"
     );
 }
+
+#[doc = include_str!("image_cache_budget.doc/fixed_working_set_stops_reloading.md")]
+#[test]
+fn fixed_working_set_stops_reloading() {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use obscur_kit::diagnostics::{Diagnostic, DiagnosticSink};
+
+    #[derive(Clone, Default)]
+    struct PressureReports(Rc<RefCell<usize>>);
+
+    impl DiagnosticSink for PressureReports {
+        fn emit(&self, diagnostic: &Diagnostic) {
+            if diagnostic.code.as_str() == "resource.image_cache_pressure" {
+                *self.0.borrow_mut() += 1;
+            }
+        }
+    }
+
+    let dir = temp_asset_dir();
+    let mut runtime = runtime_at(&dir);
+    runtime.set_image_cache_budget(CacheBudget::entries(1));
+    let reports = PressureReports::default();
+    runtime.set_diagnostic_sink(Box::new(reports.clone()));
+    let view = View::from_fragment(ViewFragment::from_nodes(vec![
+        img("a.png", "a"),
+        img("b.png", "b"),
+    ]));
+    let sheet = compile(
+        ".a { position: absolute; left: 0; top: 0; }
+         .b { position: absolute; left: 0; top: 80px; }",
+    );
+    let sheets = [sheet];
+
+    // The first pass needs decoded intrinsic sizes, and visibility uses the
+    // resulting retained boxes on the following frame.
+    for _ in 0..3 {
+        runtime.render_now(&view, &sheets);
+        let _ = runtime.poll_resource_tasks();
+    }
+    let frame = runtime.render_now(&view, &sheets);
+    assert!(painted_at_y(&frame, 0.0), "visible A replaced offscreen B");
+
+    let settled = runtime.image_cache_statistics();
+    for _ in 0..8 {
+        runtime.render_now(&view, &sheets);
+        assert_eq!(runtime.poll_resource_tasks(), 0);
+    }
+    assert_eq!(
+        runtime.image_cache_statistics().insertions(),
+        settled.insertions()
+    );
+    assert_eq!(
+        runtime.image_cache_statistics().evictions(),
+        settled.evictions()
+    );
+
+    assert_eq!(*reports.0.borrow(), 1);
+
+    runtime.set_image_cache_budget(CacheBudget::entries(2));
+    runtime.render_now(&view, &sheets);
+    let _ = runtime.poll_resource_tasks();
+    assert_eq!(runtime.cached_resource_counts().0, 2);
+    std::fs::remove_dir_all(dir).expect("remove image fixtures");
+}

@@ -1,41 +1,45 @@
-#![doc = include_str!("position.doc/_module.md")]
+//! A layout node's positioning scheme (`position`).
 
-#[doc = include_str!("position.doc/Position.md")]
+#[doc = include_str!("../../docs/api/model/position.doc/Position.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Position {
-    #[doc = include_str!("position.doc/Static.md")]
+    /// The node is laid out in normal flow; insets are ignored (CSS `static`).
     #[default]
     Static,
-    #[doc = include_str!("position.doc/Relative.md")]
+    /// The node is laid out in normal flow, then offset by its insets without
+    /// affecting its siblings (CSS `relative`).
     Relative,
-    #[doc = include_str!("position.doc/Absolute.md")]
+    /// Out-of-flow, positioned against the nearest positioned ancestor's padding
+    /// box (CSS `absolute`).
     Absolute,
-    #[doc = include_str!("position.doc/Fixed.md")]
+    /// Out-of-flow, positioned against the viewport (CSS `fixed`).
     Fixed,
-    #[doc = include_str!("position.doc/Sticky.md")]
+    /// In flow like [`Relative`](Self::Relative), but its used position is
+    /// scroll-clamped to stick to the scrollport edge within its containing block
+    /// (CSS `sticky`).
     Sticky,
 }
 
 impl Position {
-    #[doc = include_str!("position.doc/is_relative.md")]
+    #[doc = include_str!("../../docs/api/model/position.doc/is_relative.md")]
     #[must_use]
     pub const fn is_relative(self) -> bool {
         matches!(self, Self::Relative)
     }
 
-    #[doc = include_str!("position.doc/is_out_of_flow.md")]
+    #[doc = include_str!("../../docs/api/model/position.doc/is_out_of_flow.md")]
     #[must_use]
     pub const fn is_out_of_flow(self) -> bool {
         matches!(self, Self::Absolute | Self::Fixed)
     }
 
-    #[doc = include_str!("position.doc/is_sticky.md")]
+    #[doc = include_str!("../../docs/api/model/position.doc/is_sticky.md")]
     #[must_use]
     pub const fn is_sticky(self) -> bool {
         matches!(self, Self::Sticky)
     }
 
-    #[doc = include_str!("position.doc/is_positioned.md")]
+    #[doc = include_str!("../../docs/api/model/position.doc/is_positioned.md")]
     #[must_use]
     pub const fn is_positioned(self) -> bool {
         !matches!(self, Self::Static)

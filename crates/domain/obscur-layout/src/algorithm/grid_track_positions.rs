@@ -1,8 +1,9 @@
-#![doc = include_str!("grid_track_positions.doc/_module.md")]
+#![doc = include_str!("../../docs/api/algorithm/grid_track_positions.doc/_module.md")]
 
+use super::content_distribution::content_distribution;
 use crate::model::JustifyContent;
 
-#[doc = include_str!("grid_track_positions.doc/track_offsets.md")]
+#[doc = include_str!("../../docs/api/algorithm/grid_track_positions.doc/track_offsets.md")]
 fn track_offsets(sizes: &[f32], gap: f32, origin: f32, collapsed: &[bool]) -> Vec<f32> {
     let mut offsets = Vec::with_capacity(sizes.len());
     let mut cursor = origin;
@@ -18,36 +19,7 @@ fn track_offsets(sizes: &[f32], gap: f32, origin: f32, collapsed: &[bool]) -> Ve
     offsets
 }
 
-#[doc = include_str!("grid_track_positions.doc/content_distribution.md")]
-fn content_distribution(n: usize, leftover: f32, mode: JustifyContent) -> (f32, f32) {
-    if n == 0 || leftover <= 0.0 {
-        return (0.0, 0.0);
-    }
-    match mode {
-        // `stretch` grows the tracks themselves to consume the leftover (handled by
-        // the track-stretch step), so it leaves no gaps to distribute here.
-        JustifyContent::FlexStart | JustifyContent::Stretch => (0.0, 0.0),
-        JustifyContent::FlexEnd => (leftover, 0.0),
-        JustifyContent::Center => (leftover / 2.0, 0.0),
-        JustifyContent::SpaceBetween => {
-            if n >= 2 {
-                (0.0, leftover / (n - 1) as f32)
-            } else {
-                (0.0, 0.0)
-            }
-        }
-        JustifyContent::SpaceAround => {
-            let unit = leftover / n as f32;
-            (unit / 2.0, unit)
-        }
-        JustifyContent::SpaceEvenly => {
-            let unit = leftover / (n + 1) as f32;
-            (unit, unit)
-        }
-    }
-}
-
-#[doc = include_str!("grid_track_positions.doc/distributed_track_offsets.md")]
+#[doc = include_str!("../../docs/api/algorithm/grid_track_positions.doc/distributed_track_offsets.md")]
 pub(super) fn distributed_track_offsets(
     sizes: &[f32],
     gap: f32,
@@ -56,18 +28,8 @@ pub(super) fn distributed_track_offsets(
     content_extent: f32,
     mode: JustifyContent,
 ) -> Vec<f32> {
-    // Non-collapsed track count and total size, for the leftover computation. A
-    // collapsed (empty `auto-fit`) track contributes neither size nor gap.
-    let mut n = 0_usize;
-    let mut sum = 0.0_f32;
-    for (i, &size) in sizes.iter().enumerate() {
-        if collapsed.get(i).copied().unwrap_or(false) {
-            continue;
-        }
-        n += 1;
-        sum += size;
-    }
-    let leftover = content_extent - (sum + gap * (n.saturating_sub(1) as f32));
+    let (n, track_extent) = active_track_extent(sizes, gap, collapsed);
+    let leftover = content_extent - track_extent;
     let (leading, extra_gap) = content_distribution(n, leftover, mode);
     // The un-distributed default path stays byte-identical to `track_offsets`.
     if leading == 0.0 && extra_gap == 0.0 {
@@ -86,7 +48,26 @@ pub(super) fn distributed_track_offsets(
     offsets
 }
 
-#[doc = include_str!("grid_track_positions.doc/collapsed_tracks.md")]
+/// Counts non-collapsed tracks and measures their extent, including internal gaps.
+pub(super) fn active_track_extent(sizes: &[f32], gap: f32, collapsed: &[bool]) -> (usize, f32) {
+    // Non-collapsed track count and total size, for the leftover computation. A
+    // collapsed (empty `auto-fit`) track contributes neither size nor gap.
+    let mut n = 0_usize;
+    let mut sum = 0.0_f32;
+    for (i, &size) in sizes.iter().enumerate() {
+        if collapsed.get(i).copied().unwrap_or(false) {
+            continue;
+        }
+        n += 1;
+        sum += size;
+    }
+    (n, sum + gap * n.saturating_sub(1) as f32)
+}
+
+/// Marks which tracks of an `auto-fit` repeat region collapse: a track inside the
+/// `[start, end)` generated range that no placed item covers. Returns an
+/// all-`false` vector (nothing collapses) when there is no `auto-fit` region — so
+/// an `auto-fill` or plain template is untouched.
 pub(super) fn collapsed_tracks(
     len: usize,
     auto_fit: Option<(usize, usize)>,
@@ -116,7 +97,8 @@ pub(super) fn collapsed_tracks(
     collapsed
 }
 
-#[doc = include_str!("grid_track_positions.doc/span_extent.md")]
+/// The pixel extent a `span`-track cell covers: the sum of the spanned track
+/// sizes plus the `span - 1` interior gaps between them.
 pub(super) fn span_extent(sizes: &[f32], start: usize, span: usize, gap: f32) -> f32 {
     let end = (start + span).min(sizes.len());
     let base: f32 = sizes

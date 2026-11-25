@@ -1,17 +1,19 @@
-#![doc = include_str!("transaction_error.doc/_module.md")]
+//! [`TransactionError`]: typed validation failure for UI transactions (spec §3.2).
 
 use core::error::Error;
 use core::fmt;
 
 use obscur_identity::NodeId;
 
-#[doc = include_str!("transaction_error.doc/TransactionError.md")]
+#[doc = include_str!("../../docs/api/transaction/transaction_error.doc/TransactionError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum TransactionError {
-    #[doc = include_str!("transaction_error.doc/ConflictingRootReplacement.md")]
+    /// The batch contains more than one root replacement, which is ambiguous:
+    /// a single frame can reconcile at most one new root.
     ConflictingRootReplacement,
-    #[doc = include_str!("transaction_error.doc/DuplicateNodeOperation.md")]
+    /// The same node is targeted by two conflicting operations of the same kind
+    /// within one batch. Carries the offending node.
     DuplicateNodeOperation(NodeId),
 }
 

@@ -1,42 +1,22 @@
-#![doc = include_str!("theme_asset.doc/_module.md")]
+//! A font/icon/image/stylesheet resource bundled by a theme (spec §2.6).
 
 use std::sync::Arc;
 
-#[doc = include_str!("theme_asset.doc/AssetKind.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AssetKind {
-    #[doc = include_str!("theme_asset.doc/Font.md")]
-    Font,
-    #[doc = include_str!("theme_asset.doc/Icon.md")]
-    Icon,
-    #[doc = include_str!("theme_asset.doc/Image.md")]
-    Image,
-    #[doc = include_str!("theme_asset.doc/Stylesheet.md")]
-    Stylesheet,
-}
+use super::{AssetKind, AssetSource};
 
-#[doc = include_str!("theme_asset.doc/AssetSource.md")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AssetSource {
-    #[doc = include_str!("theme_asset.doc/Embedded.md")]
-    Embedded(Arc<[u8]>),
-    #[doc = include_str!("theme_asset.doc/Path.md")]
-    Path(Box<str>),
-}
-
-#[doc = include_str!("theme_asset.doc/ThemeAsset.md")]
+#[doc = include_str!("../../docs/api/asset/theme_asset.doc/ThemeAsset.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ThemeAsset {
-    #[doc = include_str!("theme_asset.doc/name.md")]
+    /// The asset's name (e.g. `"font.body"` or `"icon.close"`).
     pub name: Box<str>,
-    #[doc = include_str!("theme_asset.doc/kind.md")]
+    /// The kind of resource.
     pub kind: AssetKind,
-    #[doc = include_str!("theme_asset.doc/source.md")]
+    /// Where the asset's data comes from.
     pub source: AssetSource,
 }
 
 impl ThemeAsset {
-    #[doc = include_str!("theme_asset.doc/embedded.md")]
+    /// Creates an asset whose bytes are embedded directly in the theme.
     #[must_use]
     pub fn embedded(
         name: impl Into<Box<str>>,
@@ -50,7 +30,7 @@ impl ThemeAsset {
         }
     }
 
-    #[doc = include_str!("theme_asset.doc/path.md")]
+    /// Creates an asset referenced by a host-resolved path.
     #[must_use]
     pub fn path(name: impl Into<Box<str>>, kind: AssetKind, path: impl Into<Box<str>>) -> Self {
         Self {
@@ -60,25 +40,25 @@ impl ThemeAsset {
         }
     }
 
-    #[doc = include_str!("theme_asset.doc/name_2.md")]
+    /// Returns the asset's name.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    #[doc = include_str!("theme_asset.doc/kind_2.md")]
+    /// Returns the asset's kind.
     #[must_use]
     pub const fn kind(&self) -> AssetKind {
         self.kind
     }
 
-    #[doc = include_str!("theme_asset.doc/source_2.md")]
+    /// Returns the asset's source.
     #[must_use]
     pub const fn source(&self) -> &AssetSource {
         &self.source
     }
 
-    #[doc = include_str!("theme_asset.doc/bytes.md")]
+    /// Returns the embedded bytes, or `None` for a path-backed asset.
     #[must_use]
     pub fn bytes(&self) -> Option<&[u8]> {
         match &self.source {
@@ -87,7 +67,7 @@ impl ThemeAsset {
         }
     }
 
-    #[doc = include_str!("theme_asset.doc/is_embedded.md")]
+    /// Returns whether the asset's bytes are embedded (rather than a path).
     #[must_use]
     pub const fn is_embedded(&self) -> bool {
         matches!(self.source, AssetSource::Embedded(_))

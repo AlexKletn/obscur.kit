@@ -103,6 +103,80 @@ fn css_transition_registers_and_interpolates_on_change() {
     );
 }
 
+/// A clock-driven timeline keeps scheduling frames after the current request is drained.
+#[test]
+fn due_frames_keep_css_transition_running_until_it_finishes() {
+    let mut runtime = TestFixture::runtime();
+    let view = HoverBox::view();
+    let sheet = HoverBox::layout_hover_sheet();
+    let sheets = std::slice::from_ref(&sheet);
+    runtime.set_css_motion(CssMotionRules::from_parts(
+        vec![CssTransitionRule::new(
+            HoverBox::selectors(),
+            PropertyId::Width,
+            1.0,
+            Easing::Linear,
+        )],
+        Vec::new(),
+    ));
+    let _ = runtime.render_now(&view, sheets);
+    let node = NodePath::new(&[0]).resolve(&runtime);
+    runtime.set_pseudo_state(node, PseudoState::HOVER);
+    let _ = runtime.render_now(&view, sheets);
+
+    for expected_width in [125.0, 150.0, 175.0, 200.0] {
+        assert!(runtime.has_pending_frame());
+        runtime.advance_motion(0.25);
+        assert!(runtime.run_due_frame(&view, sheets).is_some());
+        assert!((box_width(&runtime, node) - expected_width).abs() < 0.01);
+    }
+    assert!(!runtime.has_pending_frame());
+}
+
+/// Runtime ticks retain the tree, while animation requests from a host can rebuild it.
+#[test]
+fn reactive_frames_build_only_when_application_requests_a_view() {
+    use obscur_runtime::frame::FrameReason;
+    use std::{cell::Cell, rc::Rc};
+
+    let mut runtime = TestFixture::runtime();
+    let builds = Rc::new(Cell::new(0));
+    runtime.set_root_view({
+        let builds = Rc::clone(&builds);
+        move || {
+            builds.set(builds.get() + 1);
+            CounterPanel::view()
+        }
+    });
+    runtime.request_frame(FrameReason::UiCommit);
+    assert!(runtime.run_due_frame_reactive().is_some());
+    let node = NodePath::new(&[0]).resolve(&runtime);
+    runtime.animate(
+        node,
+        PropertyId::Width,
+        scalar_track(0.0, 100.0),
+        1.0,
+        AnimatedKind::LengthPx,
+        TransitionInterruption::Blend,
+    );
+
+    runtime.advance_motion(0.25);
+    assert!(runtime.has_pending_timeline_frame());
+    assert!(runtime.run_due_frame_reactive().is_some());
+    assert_eq!(builds.get(), 1);
+    assert!((box_width(&runtime, node) - 25.0).abs() < 0.01);
+
+    runtime.request_frame(FrameReason::Animation);
+    assert!(!runtime.has_pending_timeline_frame());
+    assert!(runtime.run_due_frame_reactive().is_some());
+    assert_eq!(builds.get(), 2);
+
+    runtime.request_frame(FrameReason::UiCommit);
+    assert!(!runtime.has_pending_timeline_frame());
+    assert!(runtime.run_due_frame_reactive().is_some());
+    assert_eq!(builds.get(), 3);
+}
+
 /// A transition rule over a property that never moves starts nothing.
 #[test]
 fn css_transition_does_not_fire_without_a_change() {
@@ -306,4 +380,31 @@ fn animate_requests_an_animation_frame() {
         runtime.has_pending_frame(),
         "starting an animation schedules a frame"
     );
+}
+
+#[test]
+fn scrubbing_a_timeline_paints_the_sample_and_holds_it_until_resumed() {
+    let mut runtime = TestFixture::runtime();
+    let view = HoverBox::view();
+    let sheet = HoverBox::layout_hover_sheet();
+    let sheets = std::slice::from_ref(&sheet);
+    let _ = runtime.render_now(&view, sheets);
+    let node = NodePath::new(&[0]).resolve(&runtime);
+    let timeline = runtime.animate(
+        node,
+        PropertyId::Width,
+        scalar_track(100.0, 200.0),
+        1.0,
+        AnimatedKind::LengthPx,
+        TransitionInterruption::Restart,
+    );
+    assert!(runtime.set_animation_progress(timeline, 0.75));
+    runtime.advance_motion(0.5);
+    let _ = runtime.render_now(&view, sheets);
+    assert_eq!(box_width(&runtime, node), 175.0);
+    assert!(runtime.set_animation_progress(timeline, 0.5));
+    assert!(runtime.resume_animation(timeline));
+    runtime.advance_motion(0.125);
+    let _ = runtime.render_now(&view, sheets);
+    assert_eq!(box_width(&runtime, node), 162.5);
 }

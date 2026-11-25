@@ -1,1 +1,0 @@
-An editable text field.

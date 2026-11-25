@@ -1,82 +1,83 @@
-#![doc = include_str!("window_properties.doc/_module.md")]
+//! Desired, mutable properties of a window (spec §6.2).
 
 use obscur_geometry::{Point, Size};
 
 use crate::window::WindowState;
 
-#[doc = include_str!("window_properties.doc/WindowProperties.md")]
+#[doc = include_str!("../../docs/api/window/window_properties.doc/WindowProperties.md")]
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct WindowProperties {
-    #[doc = include_str!("window_properties.doc/title.md")]
+    /// The window title shown in its title bar and task switchers.
     pub title: Box<str>,
-    #[doc = include_str!("window_properties.doc/size.md")]
+    /// The desired content size in logical pixels.
     pub size: Size,
-    #[doc = include_str!("window_properties.doc/position.md")]
+    /// The desired top-left position, or `None` to let the platform choose.
     pub position: Option<Point>,
-    #[doc = include_str!("window_properties.doc/state.md")]
+    /// The desired presentation state (normal, minimized, maximized, fullscreen).
     pub state: WindowState,
-    #[doc = include_str!("window_properties.doc/resizable.md")]
+    /// Whether the user may resize the window.
     pub resizable: bool,
-    #[doc = include_str!("window_properties.doc/decorated.md")]
+    /// Whether the window has server-side decorations (title bar, borders).
     pub decorated: bool,
-    #[doc = include_str!("window_properties.doc/always_on_top.md")]
+    /// Whether the window stays above ordinary windows in the z-order.
     pub always_on_top: bool,
-    #[doc = include_str!("window_properties.doc/transparent.md")]
+    /// Whether the window surface is transparent (allows per-pixel alpha).
     pub transparent: bool,
 }
 
 impl WindowProperties {
-    #[doc = include_str!("window_properties.doc/with_title.md")]
+    /// Sets the title, returning the updated properties.
     #[must_use]
     pub fn with_title(mut self, title: impl Into<Box<str>>) -> Self {
         self.title = title.into();
         self
     }
 
-    #[doc = include_str!("window_properties.doc/with_size.md")]
+    /// Sets the desired size, returning the updated properties.
     #[must_use]
     pub fn with_size(mut self, size: Size) -> Self {
         self.size = size;
         self
     }
 
-    #[doc = include_str!("window_properties.doc/with_position.md")]
+    /// Sets an explicit desired position, returning the updated properties.
     #[must_use]
     pub fn with_position(mut self, position: Point) -> Self {
         self.position = Some(position);
         self
     }
 
-    #[doc = include_str!("window_properties.doc/with_state.md")]
+    /// Sets the desired presentation state, returning the updated properties.
     #[must_use]
     pub fn with_state(mut self, state: WindowState) -> Self {
         self.state = state;
         self
     }
 
-    #[doc = include_str!("window_properties.doc/resizable_2.md")]
+    /// Sets whether the window is resizable, returning the updated properties.
     #[must_use]
     pub fn resizable(mut self, resizable: bool) -> Self {
         self.resizable = resizable;
         self
     }
 
-    #[doc = include_str!("window_properties.doc/decorated_2.md")]
+    /// Sets whether the window is decorated, returning the updated properties.
     #[must_use]
     pub fn decorated(mut self, decorated: bool) -> Self {
         self.decorated = decorated;
         self
     }
 
-    #[doc = include_str!("window_properties.doc/always_on_top_2.md")]
+    /// Sets whether the window is always on top, returning the updated properties.
     #[must_use]
     pub fn always_on_top(mut self, always_on_top: bool) -> Self {
         self.always_on_top = always_on_top;
         self
     }
 
-    #[doc = include_str!("window_properties.doc/transparent_2.md")]
+    /// Sets whether the window surface is transparent, returning the updated
+    /// properties.
     #[must_use]
     pub fn transparent(mut self, transparent: bool) -> Self {
         self.transparent = transparent;
@@ -85,7 +86,8 @@ impl WindowProperties {
 }
 
 impl Default for WindowProperties {
-    #[doc = include_str!("window_properties.doc/default.md")]
+    /// A resizable, decorated 800x600 window with an empty title, no explicit
+    /// position, and the [`WindowState::Normal`] presentation state.
     fn default() -> Self {
         Self {
             title: Box::from(""),

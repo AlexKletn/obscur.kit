@@ -1,6 +1,12 @@
 mod capability_issuer;
 pub use capability_issuer::CapabilityIssuer;
+mod capability_access_error;
+pub use capability_access_error::CapabilityAccessError;
+mod capability_handle;
+pub use capability_handle::CapabilityHandle;
+mod grant;
+mod service_scope;
+pub use service_scope::ServiceScope;
 mod capability_revoker;
 pub use capability_revoker::CapabilityRevoker;
 mod delegation_graph;
-pub use delegation_graph::DelegationGraph;

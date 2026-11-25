@@ -1,4 +1,4 @@
-#![doc = include_str!("slider_painter.doc/_module.md")]
+#![doc = include_str!("../../docs/api/slider/slider_painter.doc/_module.md")]
 
 use obscur_geometry::Point;
 use obscur_scene::color::Color;
@@ -9,13 +9,13 @@ use obscur_view::view::{
     CanvasPaint, SLIDER_HIGH, SLIDER_LOW, SLIDER_RANGED, SliderScale, ViewProperty, ViewValue,
 };
 
-#[doc = include_str!("slider_painter.doc/TRACK_THICKNESS.md")]
+/// How thick the track is, in logical pixels.
 const TRACK_THICKNESS: f32 = 4.0;
 
-#[doc = include_str!("slider_painter.doc/THUMB_RADIUS.md")]
+#[doc = include_str!("../../docs/api/slider/slider_painter.doc/THUMB_RADIUS.md")]
 const THUMB_RADIUS: f32 = 8.0;
 
-#[doc = include_str!("slider_painter.doc/paint_slider.md")]
+/// Draws the track, the filled span and the thumbs.
 pub fn paint_slider(region: &mut CanvasRegion<'_>, paint: &CanvasPaint<'_>, accent: Brush) -> bool {
     let props = paint.props();
     let size = region.size();
@@ -69,7 +69,7 @@ pub fn paint_slider(region: &mut CanvasRegion<'_>, paint: &CanvasPaint<'_>, acce
     false
 }
 
-#[doc = include_str!("slider_painter.doc/line.md")]
+/// A horizontal segment.
 fn line(from_x: f32, to_x: f32, y: f32) -> Path {
     let mut path = Path::new();
     path.move_to(Point::new(from_x, y));
@@ -77,7 +77,7 @@ fn line(from_x: f32, to_x: f32, y: f32) -> Path {
     path
 }
 
-#[doc = include_str!("slider_painter.doc/thumb.md")]
+/// A circle, as four cubics.
 fn thumb(cx: f32, cy: f32, radius: f32) -> Path {
     const K: f32 = 0.552_285;
     let mut path = Path::new();
@@ -110,12 +110,12 @@ fn thumb(cx: f32, cy: f32, radius: f32) -> Path {
     path
 }
 
-#[doc = include_str!("slider_painter.doc/track_brush.md")]
+/// The unfilled track's brush.
 fn track_brush() -> Brush {
     Brush::solid(Color::rgba(0.17, 0.16, 0.15, 0.25))
 }
 
-#[doc = include_str!("slider_painter.doc/read_flag.md")]
+/// A boolean property, defaulting to false.
 fn read_flag(props: &[ViewProperty], name: obscur_identity::InternedSymbol) -> bool {
     props
         .iter()
@@ -127,7 +127,7 @@ fn read_flag(props: &[ViewProperty], name: obscur_identity::InternedSymbol) -> b
         .unwrap_or(false)
 }
 
-#[doc = include_str!("slider_painter.doc/number.md")]
+/// A numeric property, whichever way it was written.
 fn number(props: &[ViewProperty], name: obscur_identity::InternedSymbol) -> Option<f32> {
     props
         .iter()

@@ -1,0 +1,20 @@
+[package]
+name = "obscur-plugin-executor-native"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[target.'cfg(any(unix, windows))'.dependencies]
+libloading = "0.8.9"
+obscur-plugin-abi = { workspace = true }
+obscur-plugin-api = { workspace = true }
+obscur-plugin-host = { workspace = true }
+obscur-plugin-model = { workspace = true }
+obscur-plugin-package = { workspace = true }
+serde = { workspace = true }
+
+[lints]
+workspace = true

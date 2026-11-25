@@ -1,11 +1,21 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Observer module.
 mod intersection_observer;
-pub use intersection_observer::{IntersectionChange, IntersectionObserver};
+pub use intersection_observer::IntersectionObserver;
+mod intersection_change;
+pub use intersection_change::IntersectionChange;
 mod layout_observer;
-pub use layout_observer::{LayoutChange, LayoutObserver};
+pub use layout_observer::LayoutObserver;
+mod layout_change;
+pub use layout_change::LayoutChange;
 mod resize_observer;
-pub use resize_observer::{ResizeChange, ResizeObserver};
+pub use resize_observer::ResizeObserver;
+mod resize_change;
+pub use resize_change::ResizeChange;
 mod transform_observer;
-pub use transform_observer::{TransformChange, TransformObserver};
+pub use transform_observer::TransformObserver;
+mod transform_change;
+pub use transform_change::TransformChange;
 mod visibility_observer;
-pub use visibility_observer::{VisibilityChange, VisibilityObserver};
+pub use visibility_observer::VisibilityObserver;
+mod visibility_change;
+pub use visibility_change::VisibilityChange;

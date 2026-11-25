@@ -1,4 +1,4 @@
-#![doc = include_str!("custom_layout.doc/_module.md")]
+//! `CustomLayout`: the labeled extension-point formatting context.
 
 use obscur_geometry::{BoxConstraints, Point, Rect, Size};
 
@@ -6,21 +6,21 @@ use crate::model::{LayoutBox, LayoutStyle};
 
 use super::{ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput};
 
-#[doc = include_str!("custom_layout.doc/CustomLayout.md")]
+#[doc = include_str!("../../docs/api/algorithm/custom_layout.doc/CustomLayout.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct CustomLayout {
-    #[doc = include_str!("custom_layout.doc/name.md")]
+    /// Diagnostic identifier for this custom context.
     name: Box<str>,
 }
 
 impl CustomLayout {
-    #[doc = include_str!("custom_layout.doc/new.md")]
+    /// Creates a custom layout labeled `name`.
     #[must_use]
     pub fn new(name: impl Into<Box<str>>) -> Self {
         Self { name: name.into() }
     }
 
-    #[doc = include_str!("custom_layout.doc/name_2.md")]
+    /// The diagnostic name of this custom context.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
@@ -28,7 +28,7 @@ impl CustomLayout {
 }
 
 impl Default for CustomLayout {
-    #[doc = include_str!("custom_layout.doc/default.md")]
+    /// A custom layout labeled `"custom"`.
     fn default() -> Self {
         Self::new("custom")
     }
@@ -53,7 +53,11 @@ impl LayoutAlgorithm for CustomLayout {
         let mut y = 0.0_f32;
         for index in 0..children.len() {
             if index > 0 {
-                y += style.gap;
+                y += style
+                    .row_gap
+                    .as_ref()
+                    .and_then(|gap| gap.resolve(0.0))
+                    .unwrap_or(style.gap);
             }
             let remaining_height = (avail_height - y).max(0.0);
             let size = measurer.measure_child(

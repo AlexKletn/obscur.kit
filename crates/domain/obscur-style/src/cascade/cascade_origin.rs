@@ -1,24 +1,26 @@
-#![doc = include_str!("cascade_origin.doc/_module.md")]
+//! The origin a declaration comes from: [`CascadeOrigin`] (§4.14).
 
-#[doc = include_str!("cascade_origin.doc/CascadeOrigin.md")]
+#[doc = include_str!("../../docs/api/cascade/cascade_origin.doc/CascadeOrigin.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum CascadeOrigin {
-    #[doc = include_str!("cascade_origin.doc/SystemDefault.md")]
+    /// Built-in system default styles — the lowest-precedence origin (§4.14).
     SystemDefault,
-    #[doc = include_str!("cascade_origin.doc/Theme.md")]
+    /// The active theme stylesheet (§4.14).
     Theme,
-    #[doc = include_str!("cascade_origin.doc/GlobalApp.md")]
+    /// Global, application-wide CSS (§4.14).
     GlobalApp,
-    #[doc = include_str!("cascade_origin.doc/ComponentModule.md")]
+    /// Component- or module-scoped CSS (§4.14).
     ComponentModule,
-    #[doc = include_str!("cascade_origin.doc/Inline.md")]
+    /// Inline CSS applied directly to a node (§4.14).
     Inline,
-    #[doc = include_str!("cascade_origin.doc/RuntimeOverride.md")]
+    /// The explicit runtime override layer. This layer sits above all authored
+    /// CSS — including authored `!important` — so a runtime override always wins
+    /// over authored declarations regardless of their importance (§4.14).
     RuntimeOverride,
 }
 
 impl CascadeOrigin {
-    #[doc = include_str!("cascade_origin.doc/is_runtime_override.md")]
+    #[doc = include_str!("../../docs/api/cascade/cascade_origin.doc/is_runtime_override.md")]
     #[must_use]
     pub const fn is_runtime_override(self) -> bool {
         matches!(self, Self::RuntimeOverride)

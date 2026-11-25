@@ -1,4 +1,4 @@
-#![doc = include_str!("text_buffer.doc/_module.md")]
+#![doc = include_str!("../../docs/api/editing/text_buffer.doc/_module.md")]
 
 use crate::selection::TextSelection;
 use crate::span::TextRange;
@@ -7,21 +7,21 @@ use super::{
     DeletionUnit, EditCommand, EditDirection, EditTransaction, NavigationUnit, UndoKind, UndoUnit,
 };
 
-#[doc = include_str!("text_buffer.doc/TextBuffer.md")]
+#[doc = include_str!("../../docs/api/editing/text_buffer.doc/TextBuffer.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct TextBuffer {
-    #[doc = include_str!("text_buffer.doc/text.md")]
+    /// The UTF-8 buffer contents.
     text: String,
-    #[doc = include_str!("text_buffer.doc/selection.md")]
+    /// The current selection (collapsed selections behave as a plain caret).
     selection: TextSelection,
-    #[doc = include_str!("text_buffer.doc/undo.md")]
+    /// Undo stack; the top is the most recent unit and the next to be undone.
     undo: Vec<UndoUnit>,
-    #[doc = include_str!("text_buffer.doc/redo.md")]
+    /// Redo stack; the top is the most recently undone unit.
     redo: Vec<UndoUnit>,
 }
 
 impl TextBuffer {
-    #[doc = include_str!("text_buffer.doc/new.md")]
+    /// Creates an empty buffer with a collapsed selection (caret) at offset `0`.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -32,7 +32,8 @@ impl TextBuffer {
         }
     }
 
-    #[doc = include_str!("text_buffer.doc/from_text.md")]
+    /// Creates a buffer seeded with `text` and a collapsed selection at offset
+    /// `0`. The undo/redo history starts empty.
     #[must_use]
     pub fn from_text(text: impl Into<String>) -> Self {
         Self {
@@ -43,50 +44,52 @@ impl TextBuffer {
         }
     }
 
-    #[doc = include_str!("text_buffer.doc/text_2.md")]
+    /// Returns the current buffer contents.
     #[must_use]
     pub fn text(&self) -> &str {
         &self.text
     }
 
-    #[doc = include_str!("text_buffer.doc/selection_2.md")]
+    /// Returns the current selection.
     #[must_use]
     pub const fn selection(&self) -> TextSelection {
         self.selection
     }
 
-    #[doc = include_str!("text_buffer.doc/len.md")]
+    /// Returns the length of the buffer in bytes.
     #[must_use]
     pub fn len(&self) -> usize {
         self.text.len()
     }
 
-    #[doc = include_str!("text_buffer.doc/is_empty.md")]
+    /// Returns whether the buffer contains no text.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.text.is_empty()
     }
 
-    #[doc = include_str!("text_buffer.doc/can_undo.md")]
+    /// Returns whether there is at least one undo step available.
     #[must_use]
     pub fn can_undo(&self) -> bool {
         !self.undo.is_empty()
     }
 
-    #[doc = include_str!("text_buffer.doc/can_redo.md")]
+    /// Returns whether there is at least one redo step available.
     #[must_use]
     pub fn can_redo(&self) -> bool {
         !self.redo.is_empty()
     }
 
-    #[doc = include_str!("text_buffer.doc/set_selection.md")]
+    /// Replaces the current selection with `selection`, clamping both endpoints
+    /// into `0..=len` and snapping each to the nearest character boundary. The
+    /// focus affinity is preserved.
     pub fn set_selection(&mut self, selection: TextSelection) {
         let anchor = self.snap_to_boundary(selection.anchor());
         let focus = self.snap_to_boundary(selection.focus());
         self.selection = TextSelection::new(anchor, focus).with_affinity(selection.affinity());
     }
 
-    #[doc = include_str!("text_buffer.doc/apply.md")]
+    #[doc = include_str!("../../docs/api/editing/text_buffer.doc/apply.md")]
     pub fn apply(&mut self, command: EditCommand) {
         match command {
             EditCommand::Insert(text) => {
@@ -125,7 +128,8 @@ impl TextBuffer {
         }
     }
 
-    #[doc = include_str!("text_buffer.doc/undo_2.md")]
+    /// Undoes the most recent undo unit, restoring the text and the selection
+    /// that preceded it, and returns whether a step was undone.
     pub fn undo(&mut self) -> bool {
         let Some(unit) = self.undo.pop() else {
             return false;
@@ -141,7 +145,8 @@ impl TextBuffer {
         true
     }
 
-    #[doc = include_str!("text_buffer.doc/redo_2.md")]
+    /// Re-applies the most recently undone unit, restoring the text and the
+    /// selection that followed it, and returns whether a step was redone.
     pub fn redo(&mut self) -> bool {
         let Some(unit) = self.redo.pop() else {
             return false;
@@ -154,7 +159,8 @@ impl TextBuffer {
         true
     }
 
-    #[doc = include_str!("text_buffer.doc/snap_to_boundary.md")]
+    /// Snaps `offset` into `0..=len` and down to the nearest character boundary
+    /// at or below it, so it is always safe to slice on.
     fn snap_to_boundary(&self, offset: usize) -> usize {
         let mut offset = offset.min(self.text.len());
         while offset > 0 && !self.text.is_char_boundary(offset) {
@@ -163,7 +169,9 @@ impl TextBuffer {
         offset
     }
 
-    #[doc = include_str!("text_buffer.doc/replace_range.md")]
+    /// Splices `new_text` into `range`, records the invertible transaction (with
+    /// coalescing per `kind`), and moves the caret to the end of the inserted
+    /// text. A no-op when the replacement leaves the bytes unchanged.
     fn replace_range(&mut self, range: TextRange, new_text: &str, kind: UndoKind) {
         let snapped_start = self.snap_to_boundary(range.start);
         let snapped_end = self.snap_to_boundary(range.end);
@@ -207,7 +215,7 @@ impl TextBuffer {
         self.redo.clear();
     }
 
-    #[doc = include_str!("text_buffer.doc/is_contiguous.md")]
+    #[doc = include_str!("../../docs/api/editing/text_buffer.doc/is_contiguous.md")]
     fn is_contiguous(unit: &UndoUnit, edit: &EditTransaction, kind: UndoKind) -> bool {
         let Some(last) = unit.edits().last() else {
             return false;
@@ -221,7 +229,9 @@ impl TextBuffer {
         }
     }
 
-    #[doc = include_str!("text_buffer.doc/apply_edits_raw.md")]
+    /// Splices each edit in order without generating new transactions — used by
+    /// [`undo`](Self::undo) and [`redo`](Self::redo). Each edit's range is in the
+    /// coordinate space produced by the edits before it, so they apply in order.
     fn apply_edits_raw(&mut self, edits: &[EditTransaction]) {
         for edit in edits {
             let range = edit.range();
@@ -230,7 +240,8 @@ impl TextBuffer {
         }
     }
 
-    #[doc = include_str!("text_buffer.doc/resolve_navigation.md")]
+    /// Resolves the target caret offset for a navigation command from `offset`.
+    /// See the module-level notes on the Grapheme/Word/Line simplifications.
     fn resolve_navigation(
         &self,
         offset: usize,
@@ -263,7 +274,9 @@ impl TextBuffer {
         }
     }
 
-    #[doc = include_str!("text_buffer.doc/resolve_deletion.md")]
+    /// Resolves the byte range a deletion command removes when starting from a
+    /// collapsed caret at `offset`. Returns an empty range when there is nothing
+    /// to delete (e.g. Backspace at offset `0`).
     fn resolve_deletion(
         &self,
         offset: usize,
@@ -288,7 +301,7 @@ impl TextBuffer {
         }
     }
 
-    #[doc = include_str!("text_buffer.doc/prev_boundary.md")]
+    /// Returns the character boundary immediately before `offset`, or `0`.
     fn prev_boundary(&self, offset: usize) -> usize {
         if offset == 0 {
             return 0;
@@ -300,7 +313,7 @@ impl TextBuffer {
         i
     }
 
-    #[doc = include_str!("text_buffer.doc/next_boundary.md")]
+    /// Returns the character boundary immediately after `offset`, or `len`.
     fn next_boundary(&self, offset: usize) -> usize {
         let len = self.text.len();
         if offset >= len {
@@ -313,26 +326,30 @@ impl TextBuffer {
         i
     }
 
-    #[doc = include_str!("text_buffer.doc/line_start.md")]
+    /// Byte offset of the start of the logical line containing `offset` (the
+    /// byte after the previous `'\n'`, or `0`).
     fn line_start(&self, offset: usize) -> usize {
         self.text[..offset].rfind('\n').map_or(0, |i| i + 1)
     }
 
-    #[doc = include_str!("text_buffer.doc/line_end.md")]
+    /// Byte offset of the end of the logical line containing `offset` (the byte
+    /// of the next `'\n'`, or `len`).
     fn line_end(&self, offset: usize) -> usize {
         self.text[offset..]
             .find('\n')
             .map_or(self.text.len(), |i| offset + i)
     }
 
-    #[doc = include_str!("text_buffer.doc/next_word.md")]
+    /// Simplified forward word motion: skip a run of whitespace then a run of
+    /// non-whitespace, returning the resulting offset.
     fn next_word(&self, offset: usize) -> usize {
         let tail = &self.text[offset..];
         let whitespace = leading_whitespace_len(tail);
         offset + whitespace + leading_word_len(&tail[whitespace..])
     }
 
-    #[doc = include_str!("text_buffer.doc/prev_word.md")]
+    /// Simplified backward word motion: skip a run of whitespace then a run of
+    /// non-whitespace (walking backward), returning the resulting offset.
     fn prev_word(&self, offset: usize) -> usize {
         let whitespace = trailing_whitespace_len(&self.text[..offset]);
         let word_end = offset - whitespace;

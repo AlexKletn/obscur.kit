@@ -1,26 +1,26 @@
-#![doc = include_str!("font_id.doc/_module.md")]
+//! A stable identifier for a resolved font face in a registry (spec §5.10).
 
-#[doc = include_str!("font_id.doc/FontId.md")]
+#[doc = include_str!("../../docs/api/font/font_id.doc/FontId.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct FontId(u32);
 
 impl FontId {
-    #[doc = include_str!("font_id.doc/PRIMARY.md")]
+    /// The primary (first-choice) face, id `0`; also the [`Default`].
     pub const PRIMARY: FontId = FontId(0);
 
-    #[doc = include_str!("font_id.doc/new.md")]
+    /// Creates a `FontId` from its raw registry index.
     #[must_use]
     pub const fn new(index: u32) -> Self {
         Self(index)
     }
 
-    #[doc = include_str!("font_id.doc/get.md")]
+    /// Returns the raw registry index as a `u32`.
     #[must_use]
     pub const fn get(self) -> u32 {
         self.0
     }
 
-    #[doc = include_str!("font_id.doc/index.md")]
+    /// Returns the raw registry index as a `usize`, for slice indexing.
     #[must_use]
     pub const fn index(self) -> usize {
         self.0 as usize

@@ -1,0 +1,21 @@
+[package]
+name = "obscur-wayland-effects"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+obscur-geometry.workspace = true
+obscur-interaction.workspace = true
+rustix = { version = "1", features = ["event", "time"] }
+raw-window-handle = "0.6"
+wayland-backend = { version = "0.3", features = ["client_system"] }
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "staging", "unstable"] }
+wayland-protocols-plasma = { version = "0.3", features = ["client"] }

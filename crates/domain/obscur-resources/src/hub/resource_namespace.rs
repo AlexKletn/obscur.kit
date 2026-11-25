@@ -1,30 +1,31 @@
-#![doc = include_str!("resource_namespace.doc/_module.md")]
+//! A disposal and hot-reload scope grouping resources (spec §5.15).
 
 use obscur_identity::NamespaceId;
 
-#[doc = include_str!("resource_namespace.doc/ResourceNamespace.md")]
+#[doc = include_str!("../../docs/api/hub/resource_namespace.doc/ResourceNamespace.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ResourceNamespace {
-    #[doc = include_str!("resource_namespace.doc/id.md")]
+    /// The opaque identity the hub keys disposal and hot reload on.
     id: NamespaceId,
-    #[doc = include_str!("resource_namespace.doc/label.md")]
+    /// An optional human-readable label, for diagnostics only.
     label: Option<Box<str>>,
 }
 
 impl ResourceNamespace {
-    #[doc = include_str!("resource_namespace.doc/DEFAULT.md")]
+    /// The implicit global namespace (id raw `0`), owning every resource that is
+    /// requested without an explicit scope (spec §5.15).
     pub const DEFAULT: Self = Self {
         id: NamespaceId::from_raw(0),
         label: None,
     };
 
-    #[doc = include_str!("resource_namespace.doc/new.md")]
+    /// Creates an unlabeled namespace for the given identity.
     #[must_use]
     pub const fn new(id: NamespaceId) -> Self {
         Self { id, label: None }
     }
 
-    #[doc = include_str!("resource_namespace.doc/with_label.md")]
+    /// Creates a namespace carrying a human-readable diagnostic label.
     #[must_use]
     pub fn with_label(id: NamespaceId, label: impl Into<Box<str>>) -> Self {
         Self {
@@ -33,25 +34,25 @@ impl ResourceNamespace {
         }
     }
 
-    #[doc = include_str!("resource_namespace.doc/default_namespace.md")]
+    #[doc = include_str!("../../docs/api/hub/resource_namespace.doc/default_namespace.md")]
     #[must_use]
     pub const fn default_namespace() -> Self {
         Self::DEFAULT
     }
 
-    #[doc = include_str!("resource_namespace.doc/id_2.md")]
+    /// Returns the opaque identity the hub keys on.
     #[must_use]
     pub const fn id(&self) -> NamespaceId {
         self.id
     }
 
-    #[doc = include_str!("resource_namespace.doc/label_2.md")]
+    /// Returns the human-readable label, if any (diagnostics only).
     #[must_use]
     pub fn label(&self) -> Option<&str> {
         self.label.as_deref()
     }
 
-    #[doc = include_str!("resource_namespace.doc/is_global.md")]
+    /// Returns whether this is the implicit global namespace (id raw `0`).
     #[must_use]
     pub const fn is_global(&self) -> bool {
         self.id.raw() == 0
@@ -59,7 +60,8 @@ impl ResourceNamespace {
 }
 
 impl Default for ResourceNamespace {
-    #[doc = include_str!("resource_namespace.doc/default.md")]
+    /// The default namespace is the implicit global one
+    /// ([`ResourceNamespace::DEFAULT`]).
     fn default() -> Self {
         Self::DEFAULT
     }

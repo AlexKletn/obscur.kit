@@ -1,8 +1,8 @@
-#![doc = include_str!("directory_handle.doc/_module.md")]
+//! An opaque handle to a directory/container (spec §6.10 — enumerated via the service).
 
 use crate::document::{DocumentMetadata, DocumentPermission};
 
-#[doc = include_str!("directory_handle.doc/DirectoryHandle.md")]
+#[doc = include_str!("../../docs/api/document/directory_handle.doc/DirectoryHandle.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DirectoryHandle {
     token: Box<str>,
@@ -12,7 +12,8 @@ pub struct DirectoryHandle {
 }
 
 impl DirectoryHandle {
-    #[doc = include_str!("directory_handle.doc/new.md")]
+    /// Creates a directory handle from its opaque token, metadata, and permission
+    /// (spec §6.10).
     #[must_use]
     pub fn new(
         token: impl Into<Box<str>>,
@@ -27,44 +28,46 @@ impl DirectoryHandle {
         }
     }
 
-    #[doc = include_str!("directory_handle.doc/with_path_hint.md")]
+    #[doc = include_str!("../../docs/api/document/directory_handle.doc/with_path_hint.md")]
     #[must_use]
     pub fn with_path_hint(mut self, path_hint: impl Into<Box<str>>) -> Self {
         self.path_hint = Some(path_hint.into());
         self
     }
 
-    #[doc = include_str!("directory_handle.doc/token.md")]
+    /// Returns the opaque host token identifying the directory (spec §6.10).
     #[must_use]
     pub fn token(&self) -> &str {
         &self.token
     }
 
-    #[doc = include_str!("directory_handle.doc/metadata.md")]
+    /// Returns the descriptive metadata (spec §6.10).
     #[must_use]
     pub const fn metadata(&self) -> &DocumentMetadata {
         &self.metadata
     }
 
-    #[doc = include_str!("directory_handle.doc/permission.md")]
+    /// Returns the granted permission (spec §6.10).
     #[must_use]
     pub const fn permission(&self) -> &DocumentPermission {
         &self.permission
     }
 
-    #[doc = include_str!("directory_handle.doc/path_hint.md")]
+    /// Returns the advisory path hint, if any (spec §6.10 — not a real path).
     #[must_use]
     pub fn path_hint(&self) -> Option<&str> {
         self.path_hint.as_deref()
     }
 
-    #[doc = include_str!("directory_handle.doc/can_write.md")]
+    /// Returns whether writing is permitted, delegating to the permission
+    /// (spec §6.10).
     #[must_use]
     pub const fn can_write(&self) -> bool {
         self.permission.can_write()
     }
 
-    #[doc = include_str!("directory_handle.doc/name.md")]
+    /// Returns the directory's display name, delegating to the metadata
+    /// (spec §6.10).
     #[must_use]
     pub fn name(&self) -> &str {
         self.metadata.name()

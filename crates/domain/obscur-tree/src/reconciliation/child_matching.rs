@@ -1,10 +1,10 @@
-#![doc = include_str!("child_matching.doc/_module.md")]
+//! `ChildMatching`: the pure output of matching one parent's children.
 
 use obscur_identity::NodeId;
 
 use super::IdentityMatch;
 
-#[doc = include_str!("child_matching.doc/ChildMatching.md")]
+#[doc = include_str!("../../docs/api/reconciliation/child_matching.doc/ChildMatching.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ChildMatching {
     matches: Vec<IdentityMatch>,
@@ -12,25 +12,28 @@ pub struct ChildMatching {
 }
 
 impl ChildMatching {
-    #[doc = include_str!("child_matching.doc/new.md")]
+    /// Builds a matching from the per-desired-child decisions and the list of
+    /// unmatched existing children to remove.
     #[must_use]
     pub fn new(matches: Vec<IdentityMatch>, removed: Vec<NodeId>) -> Self {
         Self { matches, removed }
     }
 
-    #[doc = include_str!("child_matching.doc/matches.md")]
+    /// Returns the per-desired-child decisions, aligned with the desired
+    /// children in order.
     #[must_use]
     pub fn matches(&self) -> &[IdentityMatch] {
         &self.matches
     }
 
-    #[doc = include_str!("child_matching.doc/removed.md")]
+    /// Returns the existing children left unmatched, which must be removed
+    /// together with their subtrees.
     #[must_use]
     pub fn removed(&self) -> &[NodeId] {
         &self.removed
     }
 
-    #[doc = include_str!("child_matching.doc/into_parts.md")]
+    /// Consumes this matching, returning its `(matches, removed)` parts.
     #[must_use]
     pub fn into_parts(self) -> (Vec<IdentityMatch>, Vec<NodeId>) {
         (self.matches, self.removed)

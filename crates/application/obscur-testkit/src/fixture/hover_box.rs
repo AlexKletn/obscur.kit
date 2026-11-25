@@ -1,4 +1,4 @@
-#![doc = include_str!("hover_box.doc/_module.md")]
+//! The box whose hover is either layout-affecting or paint-only.
 
 use obscur_identity::ComponentId;
 use obscur_style::cascade::CascadeOrigin;
@@ -9,18 +9,18 @@ use obscur_view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewV
 
 use crate::fixture::ClassRule;
 
-#[doc = include_str!("hover_box.doc/HoverBox.md")]
+#[doc = include_str!("../../docs/api/fixture/hover_box.doc/HoverBox.md")]
 #[derive(Debug)]
 pub struct HoverBox;
 
 impl HoverBox {
-    #[doc = include_str!("hover_box.doc/view.md")]
+    /// A single `.box` element.
     #[must_use]
     pub fn view() -> View {
         View::from_fragment(ViewFragment::from_nodes(vec![Self::element(10)]))
     }
 
-    #[doc = include_str!("hover_box.doc/row_view.md")]
+    /// Three sibling `.box` elements, so a hover on one has clean siblings to be about.
     #[must_use]
     pub fn row_view() -> View {
         View::from_fragment(ViewFragment::from_nodes(
@@ -28,13 +28,13 @@ impl HoverBox {
         ))
     }
 
-    #[doc = include_str!("hover_box.doc/sheet.md")]
+    /// `.box { width: 100px; height: 50px }` and nothing else.
     #[must_use]
     pub fn sheet() -> Stylesheet {
         Stylesheet::new(CascadeOrigin::GlobalApp, vec![Self::base_rule()])
     }
 
-    #[doc = include_str!("hover_box.doc/layout_hover_sheet.md")]
+    /// `.box { width: 100px; height: 50px } .box:hover { width: 200px }`.
     #[must_use]
     pub fn layout_hover_sheet() -> Stylesheet {
         Stylesheet::new(
@@ -51,7 +51,8 @@ impl HoverBox {
         )
     }
 
-    #[doc = include_str!("hover_box.doc/paint_hover_sheet.md")]
+    /// `.box { width: 100px; height: 50px } .box:hover { background-color: red }` — a
+    /// hover that shifts only a fill (the wireframe kit's own hover model).
     #[must_use]
     pub fn paint_hover_sheet() -> Stylesheet {
         Stylesheet::new(
@@ -68,7 +69,7 @@ impl HoverBox {
         )
     }
 
-    #[doc = include_str!("hover_box.doc/selectors.md")]
+    /// The selector list `.box`.
     #[must_use]
     pub fn selectors() -> SelectorList {
         SelectorList::new(vec![ComplexSelector::new(
@@ -77,12 +78,12 @@ impl HoverBox {
         )])
     }
 
-    #[doc = include_str!("hover_box.doc/base_rule.md")]
+    /// The unhovered `.box` rule both hover sheets open with.
     fn base_rule() -> obscur_style::matching::StyleRule {
         ClassRule::new("box").sized(100.0, 50.0).build()
     }
 
-    #[doc = include_str!("hover_box.doc/element.md")]
+    /// One `.box` element under the given component id.
     fn element(component: u64) -> ViewNode {
         ViewNode::element(ComponentId::from_raw(component))
             .with_prop(ViewProperty::new(CLASS, ViewValue::Text("box".into())))

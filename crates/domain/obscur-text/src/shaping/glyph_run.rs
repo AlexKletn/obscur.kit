@@ -1,23 +1,24 @@
-#![doc = include_str!("glyph_run.doc/_module.md")]
+//! The shaped glyph output of one text run (spec §5.10).
 
 use crate::shaping::{ShapedGlyph, TextDirection};
 use crate::span::TextRange;
 
-#[doc = include_str!("glyph_run.doc/GlyphRun.md")]
+#[doc = include_str!("../../docs/api/shaping/glyph_run.doc/GlyphRun.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct GlyphRun {
-    #[doc = include_str!("glyph_run.doc/glyphs.md")]
+    /// The shaped glyphs, in pen order.
     glyphs: Vec<ShapedGlyph>,
-    #[doc = include_str!("glyph_run.doc/direction.md")]
+    /// The base direction the run was shaped for.
     direction: TextDirection,
-    #[doc = include_str!("glyph_run.doc/font_size.md")]
+    /// The font size the run was shaped at, in logical pixels.
     font_size: f32,
-    #[doc = include_str!("glyph_run.doc/source.md")]
+    /// The byte range of the source text this run covers.
     source: TextRange,
 }
 
 impl GlyphRun {
-    #[doc = include_str!("glyph_run.doc/new.md")]
+    /// Creates a run from its shaped `glyphs`, base `direction`, `font_size`, and
+    /// the `source` byte range it covers.
     #[must_use]
     pub const fn new(
         glyphs: Vec<ShapedGlyph>,
@@ -33,49 +34,50 @@ impl GlyphRun {
         }
     }
 
-    #[doc = include_str!("glyph_run.doc/glyphs_2.md")]
+    /// Returns the shaped glyphs, in pen order.
     #[must_use]
     pub fn glyphs(&self) -> &[ShapedGlyph] {
         &self.glyphs
     }
 
-    #[doc = include_str!("glyph_run.doc/direction_2.md")]
+    /// Returns the base direction the run was shaped for.
     #[must_use]
     pub const fn direction(&self) -> TextDirection {
         self.direction
     }
 
-    #[doc = include_str!("glyph_run.doc/font_size_2.md")]
+    /// Returns the font size the run was shaped at, in logical pixels.
     #[must_use]
     pub const fn font_size(&self) -> f32 {
         self.font_size
     }
 
-    #[doc = include_str!("glyph_run.doc/source_2.md")]
+    /// Returns the byte range of the source text this run covers.
     #[must_use]
     pub const fn source(&self) -> TextRange {
         self.source
     }
 
-    #[doc = include_str!("glyph_run.doc/len.md")]
+    /// Returns the number of glyphs in the run.
     #[must_use]
     pub fn len(&self) -> usize {
         self.glyphs.len()
     }
 
-    #[doc = include_str!("glyph_run.doc/is_empty.md")]
+    /// Returns whether the run contains no glyphs.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.glyphs.is_empty()
     }
 
-    #[doc = include_str!("glyph_run.doc/glyph_at.md")]
+    /// Returns the glyph at index `index`, or `None` if out of bounds.
     #[must_use]
     pub fn glyph_at(&self, index: usize) -> Option<&ShapedGlyph> {
         self.glyphs.get(index)
     }
 
-    #[doc = include_str!("glyph_run.doc/advance.md")]
+    /// Returns the run's total advance width: the sum of every glyph's
+    /// [`x_advance`](ShapedGlyph::x_advance), in logical pixels (spec §5.10).
     #[must_use]
     pub fn advance(&self) -> f32 {
         self.glyphs.iter().map(ShapedGlyph::x_advance).sum()

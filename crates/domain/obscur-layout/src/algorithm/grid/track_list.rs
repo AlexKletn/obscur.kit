@@ -1,11 +1,13 @@
-#![doc = include_str!("track_list.doc/_module.md")]
+//! `TrackList`: one axis of a grid template — explicit tracks plus an optional
+//! `repeat(auto-fill | auto-fit, …)` auto-repetition (CSS §4.1).
 
 use super::{AutoRepeat, AutoRepeatMode, TrackSize};
 
-#[doc = include_str!("track_list.doc/MAX_AUTO_REPEAT.md")]
+/// The largest repetition count an auto-repeat may expand to, so a pathological
+/// container extent / pattern size cannot blow the track list up unboundedly.
 const MAX_AUTO_REPEAT: usize = 10_000;
 
-#[doc = include_str!("track_list.doc/TrackList.md")]
+#[doc = include_str!("../../../docs/api/algorithm/grid/track_list.doc/TrackList.md")]
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct TrackList {
     leading: Vec<TrackSize>,
@@ -14,7 +16,8 @@ pub struct TrackList {
 }
 
 impl TrackList {
-    #[doc = include_str!("track_list.doc/new.md")]
+    /// Builds a track list with an explicit `leading` run, an optional
+    /// `auto_repeat`, and an explicit `trailing` run.
     #[must_use]
     pub fn new(
         leading: Vec<TrackSize>,
@@ -28,7 +31,7 @@ impl TrackList {
         }
     }
 
-    #[doc = include_str!("track_list.doc/from_tracks.md")]
+    #[doc = include_str!("../../../docs/api/algorithm/grid/track_list.doc/from_tracks.md")]
     #[must_use]
     pub fn from_tracks(tracks: Vec<TrackSize>) -> Self {
         Self {
@@ -38,31 +41,34 @@ impl TrackList {
         }
     }
 
-    #[doc = include_str!("track_list.doc/leading.md")]
+    /// The leading explicit tracks (before any auto-repeat).
     #[must_use]
     pub fn leading(&self) -> &[TrackSize] {
         &self.leading
     }
 
-    #[doc = include_str!("track_list.doc/auto_repeat.md")]
+    /// The auto-repeat pattern, if this axis has one.
     #[must_use]
     pub const fn auto_repeat(&self) -> Option<&AutoRepeat> {
         self.auto_repeat.as_ref()
     }
 
-    #[doc = include_str!("track_list.doc/trailing.md")]
+    /// The trailing explicit tracks (after any auto-repeat).
     #[must_use]
     pub fn trailing(&self) -> &[TrackSize] {
         &self.trailing
     }
 
-    #[doc = include_str!("track_list.doc/is_empty.md")]
+    /// Whether the list has no explicit tracks and no auto-repeat.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.leading.is_empty() && self.auto_repeat.is_none() && self.trailing.is_empty()
     }
 
-    #[doc = include_str!("track_list.doc/explicit_len.md")]
+    /// A representative explicit track count: the explicit tracks plus one copy of
+    /// any auto-repeat pattern. Used only for the informational
+    /// [`GridLayout::columns`](super::super::GridLayout::columns) reporting; the
+    /// real per-content count comes from [`expand`](Self::expand).
     #[must_use]
     pub fn explicit_len(&self) -> usize {
         self.leading.len()
@@ -70,11 +76,21 @@ impl TrackList {
             + self.trailing.len()
     }
 
-    #[doc = include_str!("track_list.doc/expand.md")]
+    #[doc = include_str!("../../../docs/api/algorithm/grid/track_list.doc/expand.md")]
     #[must_use]
     pub fn expand(
         &self,
         content_extent: f32,
+        gap: f32,
+    ) -> (Vec<TrackSize>, Option<(usize, usize)>) {
+        self.expand_for_bounds(0.0, content_extent, gap)
+    }
+
+    /// Expands auto-repeat against a finite ceiling or, if absent, a floor.
+    pub(crate) fn expand_for_bounds(
+        &self,
+        minimum: f32,
+        maximum: f32,
         gap: f32,
     ) -> (Vec<TrackSize>, Option<(usize, usize)>) {
         let Some(repeat) = self.auto_repeat.as_ref() else {
@@ -84,7 +100,14 @@ impl TrackList {
             return (out, None);
         };
         let pattern = repeat.tracks();
-        let count = repetition_count(&self.leading, pattern, &self.trailing, content_extent, gap);
+        let count = repetition_count(
+            &self.leading,
+            pattern,
+            &self.trailing,
+            minimum,
+            maximum,
+            gap,
+        );
 
         let mut out =
             Vec::with_capacity(self.leading.len() + pattern.len() * count + self.trailing.len());
@@ -101,46 +124,67 @@ impl TrackList {
     }
 }
 
-#[doc = include_str!("track_list.doc/definite_extent.md")]
-fn definite_extent(track: &TrackSize, content_extent: f32) -> f32 {
+/// Returns the definite extent used to count auto-repeat copies. A `minmax()`
+/// uses its definite maximum floored by the minimum when both are definite.
+/// When only one bound is definite, it supplies the extent.
+fn definite_extent(track: &TrackSize, content_extent: f32) -> Option<f32> {
     match track {
-        TrackSize::Fixed(px) => px.max(0.0),
-        TrackSize::Percent(f) => (f * content_extent).max(0.0),
-        TrackSize::MinMax(min, _) => definite_extent(min, content_extent),
-        TrackSize::Fr(_) | TrackSize::Auto | TrackSize::MinContent | TrackSize::MaxContent => 0.0,
+        TrackSize::Fixed(px) => Some(px.max(0.0)),
+        TrackSize::Percent(f) if content_extent.is_finite() => Some((f * content_extent).max(0.0)),
+        TrackSize::MinMax(min, max) => {
+            let minimum = definite_extent(min, content_extent);
+            let maximum = definite_extent(max, content_extent);
+            match (minimum, maximum) {
+                (Some(min), Some(max)) => Some(max.max(min)),
+                _ => maximum.or(minimum),
+            }
+        }
+        _ => None,
     }
 }
 
-#[doc = include_str!("track_list.doc/repetition_count.md")]
+/// Finds the largest positive count that fits a finite ceiling beside the
+/// surrounding tracks and gaps. If only a minimum is supplied, finds the smallest
+/// positive count that reaches it. Repeated tracks have a one-pixel floor for
+/// counting. An indefinite track extent yields one repetition.
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn repetition_count(
     leading: &[TrackSize],
     pattern: &[TrackSize],
     trailing: &[TrackSize],
-    content_extent: f32,
+    minimum: f32,
+    maximum: f32,
     gap: f32,
 ) -> usize {
-    let definite_sum = |tracks: &[TrackSize]| -> f32 {
-        tracks
-            .iter()
-            .map(|t| definite_extent(t, content_extent))
-            .sum()
+    let fit_ceiling = maximum.is_finite();
+    let content_extent = if fit_ceiling { maximum } else { minimum };
+    if !content_extent.is_finite() || pattern.is_empty() {
+        return 1;
+    }
+    let Some(pattern_size) = pattern
+        .iter()
+        .map(|t| definite_extent(t, content_extent).map(|size| size.max(1.0)))
+        .sum::<Option<f32>>()
+    else {
+        return 1;
     };
-    let pattern_size = definite_sum(pattern);
-    // `pattern_extent + gap`: one whole pattern plus the gap that precedes each copy.
+    let Some(outer_size) = leading
+        .iter()
+        .chain(trailing)
+        .map(|t| definite_extent(t, content_extent))
+        .sum::<Option<f32>>()
+    else {
+        return 1;
+    };
     let per = pattern_size + pattern.len() as f32 * gap;
-    if per <= 0.0 {
-        return 1;
-    }
     let outer = (leading.len() + trailing.len()) as f32;
-    let free = content_extent + gap - definite_sum(leading) - definite_sum(trailing) - outer * gap;
-    if free <= 0.0 {
-        return 1;
-    }
-    let n = (free / per).floor();
-    if !n.is_finite() || n < 1.0 {
-        return 1;
-    }
+    let free = content_extent + gap - outer_size - outer * gap;
+    let copies = free / per;
+    let n = if fit_ceiling {
+        copies.floor()
+    } else {
+        copies.ceil()
+    };
     (n as usize).clamp(1, MAX_AUTO_REPEAT)
 }
 
@@ -216,9 +260,29 @@ mod tests {
     }
 
     #[test]
+    fn auto_fill_fits_the_definite_maximum_floored_by_the_minimum() {
+        let minmax = |min, max| TrackSize::MinMax(Box::new(min), Box::new(max));
+        let fixed = TrackSize::Fixed;
+        for (track, expected) in [
+            (minmax(fixed(40.0), fixed(100.0)), 3),
+            (minmax(fixed(100.0), fixed(40.0)), 3),
+            (minmax(TrackSize::Auto, fixed(100.0)), 3),
+            (minmax(fixed(40.0), TrackSize::Fr(1.0)), 8),
+        ] {
+            assert_eq!(fill(vec![track]).expand(350.0, 0.0).0.len(), expected);
+        }
+    }
+
+    #[test]
+    fn a_zero_sized_repeat_uses_the_one_pixel_floor_for_counting() {
+        let (tracks, _) = fill(vec![TrackSize::Fixed(0.0)]).expand(4.0, 0.0);
+        assert_eq!(tracks, vec![TrackSize::Fixed(0.0); 4]);
+    }
+
+    #[test]
     fn non_definite_pattern_falls_back_to_single_repetition() {
         // An `fr` pattern has no definite size to fit; count clamps to 1.
-        let (tracks, _) = fill(vec![TrackSize::Fr(1.0)]).expand(350.0, 0.0);
+        let (tracks, _) = fill(vec![TrackSize::Fr(1.0)]).expand(350.0, 10.0);
         assert_eq!(tracks.len(), 1);
     }
 }

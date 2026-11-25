@@ -1,28 +1,30 @@
-#![doc = include_str!("font_family.doc/_module.md")]
+//! A requested font family — a specific name or a CSS generic (spec §5.18).
 
-#[doc = include_str!("font_family.doc/FontFamily.md")]
+use super::GenericFamily;
+
+#[doc = include_str!("../../docs/api/font/font_family.doc/FontFamily.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FontFamily {
-    #[doc = include_str!("font_family.doc/Named.md")]
+    /// A specific family requested by name (e.g. `"Inter"`, `"Helvetica"`).
     Named(Box<str>),
-    #[doc = include_str!("font_family.doc/Generic.md")]
+    /// A CSS generic family keyword the provider resolves to a concrete family.
     Generic(GenericFamily),
 }
 
 impl FontFamily {
-    #[doc = include_str!("font_family.doc/named.md")]
+    /// Creates a [`FontFamily::Named`] from `name`.
     #[must_use]
     pub fn named(name: impl Into<Box<str>>) -> Self {
         Self::Named(name.into())
     }
 
-    #[doc = include_str!("font_family.doc/generic.md")]
+    /// Creates a [`FontFamily::Generic`] from `generic`.
     #[must_use]
     pub const fn generic(generic: GenericFamily) -> Self {
         Self::Generic(generic)
     }
 
-    #[doc = include_str!("font_family.doc/from_name.md")]
+    #[doc = include_str!("../../docs/api/font/font_family.doc/from_name.md")]
     #[must_use]
     pub fn from_name(name: &str) -> Self {
         match name {
@@ -36,44 +38,14 @@ impl FontFamily {
         }
     }
 
-    #[doc = include_str!("font_family.doc/name.md")]
+    /// Returns the family name: the specific name for [`FontFamily::Named`], or
+    /// the CSS keyword ([`GenericFamily::fallback_name`]) for
+    /// [`FontFamily::Generic`] (spec §5.18).
     #[must_use]
     pub fn name(&self) -> &str {
         match self {
             Self::Named(name) => name,
             Self::Generic(generic) => generic.fallback_name(),
-        }
-    }
-}
-
-#[doc = include_str!("font_family.doc/GenericFamily.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum GenericFamily {
-    #[doc = include_str!("font_family.doc/Serif.md")]
-    Serif,
-    #[doc = include_str!("font_family.doc/SansSerif.md")]
-    SansSerif,
-    #[doc = include_str!("font_family.doc/Monospace.md")]
-    Monospace,
-    #[doc = include_str!("font_family.doc/Cursive.md")]
-    Cursive,
-    #[doc = include_str!("font_family.doc/Fantasy.md")]
-    Fantasy,
-    #[doc = include_str!("font_family.doc/SystemUi.md")]
-    SystemUi,
-}
-
-impl GenericFamily {
-    #[doc = include_str!("font_family.doc/fallback_name.md")]
-    #[must_use]
-    pub const fn fallback_name(&self) -> &'static str {
-        match self {
-            Self::Serif => "serif",
-            Self::SansSerif => "sans-serif",
-            Self::Monospace => "monospace",
-            Self::Cursive => "cursive",
-            Self::Fantasy => "fantasy",
-            Self::SystemUi => "system-ui",
         }
     }
 }
@@ -130,15 +102,5 @@ mod tests {
             FontFamily::generic(GenericFamily::Monospace).name(),
             "monospace"
         );
-    }
-
-    #[test]
-    fn fallback_names() {
-        assert_eq!(GenericFamily::Serif.fallback_name(), "serif");
-        assert_eq!(GenericFamily::SansSerif.fallback_name(), "sans-serif");
-        assert_eq!(GenericFamily::Monospace.fallback_name(), "monospace");
-        assert_eq!(GenericFamily::Cursive.fallback_name(), "cursive");
-        assert_eq!(GenericFamily::Fantasy.fallback_name(), "fantasy");
-        assert_eq!(GenericFamily::SystemUi.fallback_name(), "system-ui");
     }
 }

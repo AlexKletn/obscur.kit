@@ -1,19 +1,21 @@
-#![doc = include_str!("text_overflow.doc/_module.md")]
+//! What happens to text that does not fit its available width (spec §5.10).
 
-#[doc = include_str!("text_overflow.doc/TextOverflow.md")]
+#[doc = include_str!("../../docs/api/layout/text_overflow.doc/TextOverflow.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum TextOverflow {
-    #[doc = include_str!("text_overflow.doc/Visible.md")]
+    /// Let overflowing text spill visibly past the available width.
     Visible,
-    #[doc = include_str!("text_overflow.doc/Clip.md")]
+    /// Hard-clip overflowing text at the boundary. The default.
     #[default]
     Clip,
-    #[doc = include_str!("text_overflow.doc/Ellipsis.md")]
+    /// Truncate overflowing text and mark the cut with an ellipsis.
     Ellipsis,
 }
 
 impl TextOverflow {
-    #[doc = include_str!("text_overflow.doc/is_truncating.md")]
+    /// Returns whether this policy truncates overflowing text — true for
+    /// [`Clip`](Self::Clip) and [`Ellipsis`](Self::Ellipsis), false for
+    /// [`Visible`](Self::Visible) (spec §5.10).
     #[must_use]
     pub const fn is_truncating(&self) -> bool {
         matches!(self, Self::Clip | Self::Ellipsis)

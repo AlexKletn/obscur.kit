@@ -1,4 +1,4 @@
-#![doc = include_str!("canned_image_loader.doc/_module.md")]
+//! A loader that always answers the same way.
 
 use std::sync::Arc;
 
@@ -6,21 +6,21 @@ use obscur_resources::port::{LoadedBytes, ResourceLoader};
 use obscur_resources::source::ResourceSource;
 use obscur_resources::state::{ResourceError, ResourceMetadata};
 
-#[doc = include_str!("canned_image_loader.doc/CannedImageLoader.md")]
+#[doc = include_str!("../../docs/api/mock/canned_image_loader.doc/CannedImageLoader.md")]
 #[derive(Debug, Clone)]
 pub struct CannedImageLoader {
-    #[doc = include_str!("canned_image_loader.doc/fails.md")]
+    /// Whether every source fails instead of loading.
     fails: bool,
 }
 
 impl CannedImageLoader {
-    #[doc = include_str!("canned_image_loader.doc/working.md")]
+    /// A loader that resolves every file source.
     #[must_use]
     pub fn working() -> Self {
         Self { fails: false }
     }
 
-    #[doc = include_str!("canned_image_loader.doc/failing.md")]
+    /// A loader that answers `NotFound` for every source.
     #[must_use]
     pub fn failing() -> Self {
         Self { fails: true }

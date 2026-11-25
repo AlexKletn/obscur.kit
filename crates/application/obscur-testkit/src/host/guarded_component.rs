@@ -1,24 +1,28 @@
-#![doc = include_str!("guarded_component.doc/_module.md")]
+//! The component that fails on purpose, so a §1.7 boundary has something to
+//! contain.
+
+mod guarded;
+mod guarded_factory;
+
+use guarded_factory::GuardedFactory;
 
 use obscur_identity::ComponentId;
 use obscur_view::boundary::ErrorBoundaryPolicy;
-use obscur_view::component::{
-    Component, ComponentContext, ComponentContract, ComponentFactory, ComponentInstance,
-    ComponentRegistration, ComponentVersion, ErasedComponent, InstanceId,
-};
+use obscur_view::component::{ComponentRegistration, ComponentVersion};
 use obscur_view::view::{View, ViewFragment, ViewNode, ViewValue};
 
-use crate::host::{CounterComponent, CounterProps};
+use crate::host::CounterComponent;
 
-#[doc = include_str!("guarded_component.doc/GuardedComponent.md")]
+#[doc = include_str!("../../docs/api/host/guarded_component.doc/GuardedComponent.md")]
 #[derive(Debug)]
 pub struct GuardedComponent;
 
 impl GuardedComponent {
-    #[doc = include_str!("guarded_component.doc/ID.md")]
+    /// The kind a view element names to mount this component.
     pub const ID: ComponentId = ComponentId::from_raw(0x0BAD_C0DE);
 
-    #[doc = include_str!("guarded_component.doc/registration.md")]
+    /// A registration for this component under `policy`, with `fallback` as the UI its
+    /// boundary shows once the budget is spent.
     #[must_use]
     pub fn registration(
         policy: ErrorBoundaryPolicy,
@@ -30,13 +34,15 @@ impl GuardedComponent {
         )
     }
 
-    #[doc = include_str!("guarded_component.doc/view.md")]
+    /// A view with one `<Guarded step=…/>` element. Pass a
+    /// [`ViewValue::Int`](obscur_view::view::ViewValue::Int) for the healthy path and a
+    /// [`ViewValue::Text`](obscur_view::view::ViewValue::Text) for the failing one.
     #[must_use]
     pub fn view(step: ViewValue) -> View {
         View::from_fragment(ViewFragment::from_nodes(vec![Self::element(step)]))
     }
 
-    #[doc = include_str!("guarded_component.doc/element.md")]
+    /// The bare element, for a caller that needs to nest it.
     #[must_use]
     pub fn element(step: ViewValue) -> ViewNode {
         ViewNode::element(Self::ID).with_prop(obscur_view::view::ViewProperty::new(
@@ -45,54 +51,9 @@ impl GuardedComponent {
         ))
     }
 
-    #[doc = include_str!("guarded_component.doc/text_view.md")]
+    /// A view that is a single text node — every fallback in these tests.
     #[must_use]
     pub fn text_view(content: &str) -> View {
         View::from_fragment(ViewFragment::from_nodes(vec![ViewNode::text(content)]))
-    }
-}
-
-/// A component with the same props as [`CounterComponent`] — so the same bad
-/// `step` fails it — whose boundary policy and fallback the test picks.
-struct Guarded {
-    policy: ErrorBoundaryPolicy,
-    fallback: Option<View>,
-}
-
-impl Component for Guarded {
-    type Props = CounterProps;
-    fn render(&mut self, _ctx: &mut ComponentContext<'_>, _props: &Self::Props) -> View {
-        GuardedComponent::text_view("healthy")
-    }
-    fn error_boundary(&self) -> ErrorBoundaryPolicy {
-        self.policy
-    }
-    fn fallback(&self) -> Option<View> {
-        self.fallback.clone()
-    }
-}
-
-/// Mints [`Guarded`]s carrying the caller's policy and fallback.
-#[derive(Debug)]
-struct GuardedFactory {
-    policy: ErrorBoundaryPolicy,
-    fallback: Option<View>,
-}
-
-impl ComponentFactory for GuardedFactory {
-    fn component_id(&self) -> ComponentId {
-        GuardedComponent::ID
-    }
-    fn contract(&self) -> ComponentContract {
-        ComponentContract::new(GuardedComponent::ID)
-    }
-    fn create_instance(&self, instance: InstanceId) -> ComponentInstance {
-        ComponentInstance::new(instance, GuardedComponent::ID)
-    }
-    fn create_component(&self) -> Box<dyn ErasedComponent> {
-        Box::new(Guarded {
-            policy: self.policy,
-            fallback: self.fallback.clone(),
-        })
     }
 }

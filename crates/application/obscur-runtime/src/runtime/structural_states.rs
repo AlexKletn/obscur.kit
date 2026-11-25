@@ -1,4 +1,4 @@
-#![doc = include_str!("structural_states.doc/_module.md")]
+//! The reserved structural states that make a control inert: [`StructuralStates`].
 
 use obscur_identity::NodeId;
 use obscur_tree::tree::RetainedTree;
@@ -6,29 +6,29 @@ use obscur_view::view::StyleAttributes;
 
 use super::AncestorChain;
 
-#[doc = include_str!("structural_states.doc/StructuralStates.md")]
+#[doc = include_str!("../../docs/api/runtime/structural_states.doc/StructuralStates.md")]
 pub(crate) struct StructuralStates<'a> {
-    #[doc = include_str!("structural_states.doc/tree.md")]
+    /// The retained tree the ancestor walk and the attribute reads run over.
     tree: &'a RetainedTree,
 }
 
 impl<'a> StructuralStates<'a> {
-    #[doc = include_str!("structural_states.doc/of.md")]
+    /// Bundles `tree` for one question about one node.
     pub(crate) const fn of(tree: &'a RetainedTree) -> Self {
         Self { tree }
     }
 
-    #[doc = include_str!("structural_states.doc/is_within_disabled.md")]
+    #[doc = include_str!("../../docs/api/runtime/structural_states.doc/is_within_disabled.md")]
     pub(crate) fn is_within_disabled(&self, node: NodeId) -> bool {
         self.any_ancestor(node, StyleAttributes::is_disabled)
     }
 
-    #[doc = include_str!("structural_states.doc/is_within_readonly.md")]
+    #[doc = include_str!("../../docs/api/runtime/structural_states.doc/is_within_readonly.md")]
     pub(crate) fn is_within_readonly(&self, node: NodeId) -> bool {
         self.any_ancestor(node, StyleAttributes::is_readonly)
     }
 
-    #[doc = include_str!("structural_states.doc/any_ancestor.md")]
+    #[doc = include_str!("../../docs/api/runtime/structural_states.doc/any_ancestor.md")]
     fn any_ancestor(&self, node: NodeId, state: impl Fn(&StyleAttributes) -> bool) -> bool {
         AncestorChain::of(self.tree, Some(node))
             .into_iter()

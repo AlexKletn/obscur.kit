@@ -1,29 +1,30 @@
-#![doc = include_str!("pointer_id.doc/_module.md")]
+//! The [`PointerId`] identity for a single pointer or contact (spec §4.7).
 
-#[doc = include_str!("pointer_id.doc/PointerId.md")]
+#[doc = include_str!("../../docs/api/pointer/pointer_id.doc/PointerId.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PointerId(u64);
 
-#[doc = include_str!("pointer_id.doc/TOUCH_NAMESPACE.md")]
+/// The bit that marks a touch contact's id, keeping the platform's contact
+/// numbering clear of [`PointerId::MOUSE`] and of any host-minted handle.
 const TOUCH_NAMESPACE: u64 = 1 << 63;
 
 impl PointerId {
-    #[doc = include_str!("pointer_id.doc/MOUSE.md")]
+    /// The conventional identity for the system mouse pointer (raw `0`).
     pub const MOUSE: Self = Self::from_raw(0);
 
-    #[doc = include_str!("pointer_id.doc/from_raw.md")]
+    /// Wraps a raw handle value into a `PointerId`.
     #[must_use]
     pub const fn from_raw(raw: u64) -> Self {
         Self(raw)
     }
 
-    #[doc = include_str!("pointer_id.doc/touch.md")]
+    #[doc = include_str!("../../docs/api/pointer/pointer_id.doc/touch.md")]
     #[must_use]
     pub const fn touch(contact: u64) -> Self {
         Self(contact | TOUCH_NAMESPACE)
     }
 
-    #[doc = include_str!("pointer_id.doc/raw.md")]
+    /// Returns the raw handle value backing this identifier.
     #[must_use]
     pub const fn raw(self) -> u64 {
         self.0

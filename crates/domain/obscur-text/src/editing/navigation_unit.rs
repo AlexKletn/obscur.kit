@@ -1,24 +1,26 @@
-#![doc = include_str!("navigation_unit.doc/_module.md")]
+//! The granularity of caret movement in the editing engine (spec §5.11).
 
-#[doc = include_str!("navigation_unit.doc/NavigationUnit.md")]
+#[doc = include_str!("../../docs/api/editing/navigation_unit.doc/NavigationUnit.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum NavigationUnit {
-    #[doc = include_str!("navigation_unit.doc/Grapheme.md")]
+    /// One extended grapheme cluster — the Left/Right arrow keys.
     Grapheme,
-    #[doc = include_str!("navigation_unit.doc/Word.md")]
+    /// One word — Ctrl+Left / Ctrl+Right (Alt+Left / Alt+Right on macOS).
     Word,
-    #[doc = include_str!("navigation_unit.doc/Line.md")]
+    /// One visual (wrapped) or logical line in the move direction — the Up/Down
+    /// arrow keys.
     Line,
-    #[doc = include_str!("navigation_unit.doc/LineBoundary.md")]
+    /// The nearest line boundary — Home (start) / End (end) within the current
+    /// visual line.
     LineBoundary,
-    #[doc = include_str!("navigation_unit.doc/Paragraph.md")]
+    /// One paragraph — Ctrl+Up / Ctrl+Down (Alt+Up / Alt+Down on macOS).
     Paragraph,
-    #[doc = include_str!("navigation_unit.doc/Document.md")]
+    /// The start or end of the whole document — Ctrl+Home / Ctrl+End.
     Document,
 }
 
 impl NavigationUnit {
-    #[doc = include_str!("navigation_unit.doc/is_boundary.md")]
+    #[doc = include_str!("../../docs/api/editing/navigation_unit.doc/is_boundary.md")]
     #[must_use]
     pub const fn is_boundary(&self) -> bool {
         matches!(self, Self::LineBoundary | Self::Document)

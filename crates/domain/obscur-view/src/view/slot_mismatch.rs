@@ -1,4 +1,4 @@
-#![doc = include_str!("slot_mismatch.doc/_module.md")]
+#![doc = include_str!("../../docs/api/view/slot_mismatch.doc/_module.md")]
 
 use obscur_identity::InternedSymbol;
 
@@ -6,17 +6,17 @@ use super::{DEFAULT_SLOT, SLOT_OUTLET, View, ViewFragment, ViewNode, slot_assign
 use crate::component::ComponentContract;
 use crate::contract::ChildContract;
 
-#[doc = include_str!("slot_mismatch.doc/SlotMismatch.md")]
+#[doc = include_str!("../../docs/api/view/slot_mismatch.doc/SlotMismatch.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SlotMismatch {
-    #[doc = include_str!("slot_mismatch.doc/UndeclaredOutlet.md")]
+    #[doc = include_str!("../../docs/api/view/slot_mismatch.doc/UndeclaredOutlet.md")]
     UndeclaredOutlet(Box<str>),
-    #[doc = include_str!("slot_mismatch.doc/UndeclaredAssignment.md")]
+    #[doc = include_str!("../../docs/api/view/slot_mismatch.doc/UndeclaredAssignment.md")]
     UndeclaredAssignment(Box<str>),
 }
 
 impl SlotMismatch {
-    #[doc = include_str!("slot_mismatch.doc/find.md")]
+    #[doc = include_str!("../../docs/api/view/slot_mismatch.doc/find.md")]
     #[must_use]
     pub fn find(
         contract: &ComponentContract,
@@ -63,7 +63,7 @@ impl SlotMismatch {
         found
     }
 
-    #[doc = include_str!("slot_mismatch.doc/name.md")]
+    /// The slot name that did not match, empty for the default slot.
     #[must_use]
     pub fn name(&self) -> &str {
         match self {
@@ -72,13 +72,13 @@ impl SlotMismatch {
     }
 }
 
-#[doc = include_str!("slot_mismatch.doc/declares.md")]
+/// Whether `contract` declares a slot under `name`.
 fn declares(contract: &ComponentContract, name: &str) -> bool {
     let declared = slot_symbol(name);
     contract.slots.iter().any(|slot| slot.name == declared)
 }
 
-#[doc = include_str!("slot_mismatch.doc/slot_symbol.md")]
+#[doc = include_str!("../../docs/api/view/slot_mismatch.doc/slot_symbol.md")]
 #[must_use]
 pub const fn slot_symbol(name: &str) -> InternedSymbol {
     if name.is_empty() {
@@ -88,7 +88,7 @@ pub const fn slot_symbol(name: &str) -> InternedSymbol {
     }
 }
 
-#[doc = include_str!("slot_mismatch.doc/collect_outlets.md")]
+/// Appends every distinct outlet name in `nodes`, depth first.
 fn collect_outlets(nodes: &[ViewNode], out: &mut Vec<Box<str>>) {
     for node in nodes {
         let ViewNode::Element {
@@ -112,7 +112,7 @@ fn collect_outlets(nodes: &[ViewNode], out: &mut Vec<Box<str>>) {
     }
 }
 
-#[doc = include_str!("slot_mismatch.doc/push_once.md")]
+/// Appends `mismatch` unless an equal one is already there.
 fn push_once(found: &mut Vec<SlotMismatch>, mismatch: SlotMismatch) {
     if !found.contains(&mismatch) {
         found.push(mismatch);

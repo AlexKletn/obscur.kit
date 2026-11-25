@@ -1,30 +1,36 @@
-#![doc = include_str!("scene_segment.doc/_module.md")]
+//! One ordered piece of a display list split at `backdrop-filter` boundaries
+//! (spec §5.2).
 
 use vello::Scene;
 
 use super::blur_layer::BlurLayer;
 
-#[doc = include_str!("scene_segment.doc/SceneSegment.md")]
+#[doc = include_str!("../../docs/api/conversion/scene_segment.doc/SceneSegment.md")]
 // A `Content` segment owns a `vello::Scene` (inherently large, like `BlurLayer`),
 // while `Backdrop` is a few floats; boxing the scene would only add an allocation
 // to the common variant. The size difference is expected.
 #[allow(clippy::large_enum_variant)]
 pub enum SceneSegment {
-    #[doc = include_str!("scene_segment.doc/Content.md")]
+    /// A run of drawable content (between two backdrop boundaries) as a Vello
+    /// [`Scene`] plus any `filter: blur` layers extracted from it (composited on
+    /// top exactly as the non-segmented path does).
     Content {
-        #[doc = include_str!("scene_segment.doc/scene.md")]
+        /// The converted sub-scene for this run, in absolute coordinates.
         scene: Scene,
-        #[doc = include_str!("scene_segment.doc/blurs.md")]
+        /// The `filter: blur` layers extracted from this run.
         blurs: Vec<BlurLayer>,
     },
-    #[doc = include_str!("scene_segment.doc/Backdrop.md")]
+    /// A `backdrop-filter` boundary: frost (gaussian-blur) the accumulated frame
+    /// within `bounds`, clipped to the rounded `radii`, by `blur` logical pixels.
     Backdrop {
-        #[doc = include_str!("scene_segment.doc/bounds.md")]
+        /// The panel's border box (the frost region), absolute logical pixels.
         bounds: obscur_geometry::Rect,
-        #[doc = include_str!("scene_segment.doc/radii.md")]
+        /// The panel's per-corner radii (the frost is clipped to this shape).
         radii: obscur_geometry::CornerRadii,
-        #[doc = include_str!("scene_segment.doc/blur.md")]
+        /// The CSS blur radius in logical pixels (`> 0`).
         blur: f32,
+        /// Panel coverage intersected with the active clips.
+        coverage: Scene,
     },
 }
 
@@ -40,6 +46,7 @@ impl std::fmt::Debug for SceneSegment {
                 bounds,
                 radii,
                 blur,
+                ..
             } => f
                 .debug_struct("SceneSegment::Backdrop")
                 .field("bounds", bounds)

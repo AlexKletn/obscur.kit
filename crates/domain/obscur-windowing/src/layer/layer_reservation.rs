@@ -1,25 +1,25 @@
-#![doc = include_str!("layer_reservation.doc/_module.md")]
+//! The screen space a layer surface asks other windows to keep clear of.
 
-#[doc = include_str!("layer_reservation.doc/LayerReservation.md")]
+#[doc = include_str!("../../docs/api/layer/layer_reservation.doc/LayerReservation.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum LayerReservation {
-    #[doc = include_str!("layer_reservation.doc/None.md")]
+    /// Reserve nothing: other windows may sit underneath this surface.
     #[default]
     None,
-    #[doc = include_str!("layer_reservation.doc/Reserve.md")]
+    #[doc = include_str!("../../docs/api/layer/layer_reservation.doc/Reserve.md")]
     Reserve(u32),
-    #[doc = include_str!("layer_reservation.doc/Ignore.md")]
+    #[doc = include_str!("../../docs/api/layer/layer_reservation.doc/Ignore.md")]
     Ignore,
 }
 
 impl LayerReservation {
-    #[doc = include_str!("layer_reservation.doc/reserves.md")]
+    #[doc = include_str!("../../docs/api/layer/layer_reservation.doc/reserves.md")]
     #[must_use]
     pub const fn reserves(self) -> bool {
         matches!(self, Self::Reserve(px) if px > 0)
     }
 
-    #[doc = include_str!("layer_reservation.doc/reserved_pixels.md")]
+    #[doc = include_str!("../../docs/api/layer/layer_reservation.doc/reserved_pixels.md")]
     #[must_use]
     pub const fn reserved_pixels(self) -> Option<u32> {
         match self {

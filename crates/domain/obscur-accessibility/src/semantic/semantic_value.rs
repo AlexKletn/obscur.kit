@@ -1,62 +1,62 @@
-#![doc = include_str!("semantic_value.doc/_module.md")]
+//! The current value of an accessibility node (spec §7.1).
 
-#[doc = include_str!("semantic_value.doc/SemanticValue.md")]
+#[doc = include_str!("../../docs/api/semantic/semantic_value.doc/SemanticValue.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum SemanticValue {
-    #[doc = include_str!("semantic_value.doc/None.md")]
+    /// The node has no value.
     None,
-    #[doc = include_str!("semantic_value.doc/Text.md")]
+    /// Textual content, e.g. a text field's current string.
     Text(Box<str>),
-    #[doc = include_str!("semantic_value.doc/Bool.md")]
+    /// A boolean toggle value.
     Bool(bool),
-    #[doc = include_str!("semantic_value.doc/Number.md")]
+    /// A numeric value bounded by an inclusive `[min, max]` range.
     Number {
-        #[doc = include_str!("semantic_value.doc/value.md")]
+        /// The current value.
         value: f32,
-        #[doc = include_str!("semantic_value.doc/min.md")]
+        /// The inclusive lower bound.
         min: f32,
-        #[doc = include_str!("semantic_value.doc/max.md")]
+        /// The inclusive upper bound.
         max: f32,
     },
-    #[doc = include_str!("semantic_value.doc/Range.md")]
+    #[doc = include_str!("../../docs/api/semantic/semantic_value.doc/Range.md")]
     Range {
-        #[doc = include_str!("semantic_value.doc/low.md")]
+        /// The lower of the two values.
         low: f32,
-        #[doc = include_str!("semantic_value.doc/high.md")]
+        /// The upper of the two values.
         high: f32,
-        #[doc = include_str!("semantic_value.doc/min.md")]
+        /// The inclusive lower bound.
         min: f32,
-        #[doc = include_str!("semantic_value.doc/max.md")]
+        /// The inclusive upper bound.
         max: f32,
     },
 }
 
 impl SemanticValue {
-    #[doc = include_str!("semantic_value.doc/none.md")]
+    /// Creates the absent value, [`None`](Self::None).
     #[must_use]
     pub const fn none() -> Self {
         Self::None
     }
 
-    #[doc = include_str!("semantic_value.doc/text.md")]
+    /// Creates a textual value from anything convertible into a boxed string.
     #[must_use]
     pub fn text(text: impl Into<Box<str>>) -> Self {
         Self::Text(text.into())
     }
 
-    #[doc = include_str!("semantic_value.doc/bool.md")]
+    /// Creates a boolean toggle value.
     #[must_use]
     pub const fn bool(value: bool) -> Self {
         Self::Bool(value)
     }
 
-    #[doc = include_str!("semantic_value.doc/number.md")]
+    /// Creates a bounded numeric value.
     #[must_use]
     pub const fn number(value: f32, min: f32, max: f32) -> Self {
         Self::Number { value, min, max }
     }
 
-    #[doc = include_str!("semantic_value.doc/range.md")]
+    /// Creates a two-ended value over an inclusive `[min, max]` scale.
     #[must_use]
     pub const fn range(low: f32, high: f32, min: f32, max: f32) -> Self {
         Self::Range {
@@ -67,13 +67,13 @@ impl SemanticValue {
         }
     }
 
-    #[doc = include_str!("semantic_value.doc/is_none.md")]
+    /// Returns whether this is the absent value, [`None`](Self::None).
     #[must_use]
     pub const fn is_none(&self) -> bool {
         matches!(self, Self::None)
     }
 
-    #[doc = include_str!("semantic_value.doc/as_text.md")]
+    /// Returns the textual content if this is a [`Text`](Self::Text) value.
     #[must_use]
     pub fn as_text(&self) -> Option<&str> {
         match self {
@@ -82,7 +82,7 @@ impl SemanticValue {
         }
     }
 
-    #[doc = include_str!("semantic_value.doc/as_number.md")]
+    /// Returns the numeric value if this is a [`Number`](Self::Number).
     #[must_use]
     pub const fn as_number(&self) -> Option<f32> {
         match self {
@@ -91,7 +91,7 @@ impl SemanticValue {
         }
     }
 
-    #[doc = include_str!("semantic_value.doc/as_range.md")]
+    /// Returns the two ends if this is a [`Range`](Self::Range).
     #[must_use]
     pub const fn as_range(&self) -> Option<(f32, f32)> {
         match self {
@@ -100,7 +100,7 @@ impl SemanticValue {
         }
     }
 
-    #[doc = include_str!("semantic_value.doc/ratio.md")]
+    #[doc = include_str!("../../docs/api/semantic/semantic_value.doc/ratio.md")]
     #[must_use]
     pub fn ratio(&self) -> f32 {
         match self {

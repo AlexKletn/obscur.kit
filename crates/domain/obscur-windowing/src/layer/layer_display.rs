@@ -1,8 +1,8 @@
-#![doc = include_str!("layer_display.doc/_module.md")]
+//! A display a desktop surface can be opened on.
 
 use crate::display::DisplayId;
 
-#[doc = include_str!("layer_display.doc/LayerDisplay.md")]
+#[doc = include_str!("../../docs/api/layer/layer_display.doc/LayerDisplay.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LayerDisplay {
     id: DisplayId,
@@ -10,7 +10,7 @@ pub struct LayerDisplay {
 }
 
 impl LayerDisplay {
-    #[doc = include_str!("layer_display.doc/new.md")]
+    /// A display with the id a backend assigned it and the name it reports.
     #[must_use]
     pub fn new(id: DisplayId, name: impl Into<String>) -> Self {
         Self {
@@ -19,13 +19,13 @@ impl LayerDisplay {
         }
     }
 
-    #[doc = include_str!("layer_display.doc/id.md")]
+    /// The handle to pass to `LayerSettings::with_display`.
     #[must_use]
     pub const fn id(&self) -> DisplayId {
         self.id
     }
 
-    #[doc = include_str!("layer_display.doc/name.md")]
+    /// The display's human-readable name, for showing rather than for matching.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name

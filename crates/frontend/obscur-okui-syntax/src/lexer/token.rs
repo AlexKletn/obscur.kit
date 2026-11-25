@@ -1,8 +1,8 @@
-#![doc = include_str!("token.doc/_module.md")]
+//! A single lexed token: its kind, exact source slice and byte offset.
 
 use crate::lexer::TokenKind;
 
-#[doc = include_str!("token.doc/Token.md")]
+#[doc = include_str!("../../docs/api/lexer/token.doc/Token.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token {
     kind: TokenKind,
@@ -11,7 +11,7 @@ pub struct Token {
 }
 
 impl Token {
-    #[doc = include_str!("token.doc/new.md")]
+    /// Creates a token of `kind` covering `text`, starting at byte `offset`.
     #[must_use]
     pub fn new(kind: TokenKind, text: impl Into<Box<str>>, offset: u32) -> Self {
         Self {
@@ -21,37 +21,38 @@ impl Token {
         }
     }
 
-    #[doc = include_str!("token.doc/kind.md")]
+    /// Returns the token's kind.
     #[must_use]
     pub const fn kind(&self) -> TokenKind {
         self.kind
     }
 
-    #[doc = include_str!("token.doc/text.md")]
+    /// Returns the exact source slice this token was lexed from.
     #[must_use]
     pub fn text(&self) -> &str {
         &self.text
     }
 
-    #[doc = include_str!("token.doc/offset.md")]
+    /// Returns the byte offset of the token's start in the source.
     #[must_use]
     pub const fn offset(&self) -> u32 {
         self.offset
     }
 
-    #[doc = include_str!("token.doc/len.md")]
+    /// Returns the token's length in bytes.
     #[must_use]
     pub fn len(&self) -> u32 {
         u32::try_from(self.text.len()).unwrap_or(u32::MAX)
     }
 
-    #[doc = include_str!("token.doc/is_empty.md")]
+    /// Returns `true` if the token covers no bytes (only the [`TokenKind::Eof`]
+    /// marker is empty).
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.text.is_empty()
     }
 
-    #[doc = include_str!("token.doc/end.md")]
+    /// Returns the byte offset just past the end of this token.
     #[must_use]
     pub fn end(&self) -> u32 {
         self.offset.saturating_add(self.len())

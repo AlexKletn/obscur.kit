@@ -1,63 +1,71 @@
-#![doc = include_str!("pseudo_class_selector.doc/_module.md")]
+//! Structural and state pseudo-classes: [`PseudoClassSelector`] and [`AnB`].
 
 use super::complex_selector::ComplexSelector;
 use super::pseudo_state::PseudoState;
 use super::selector_list::SelectorList;
 use super::selector_specificity::SelectorSpecificity;
 
-#[doc = include_str!("pseudo_class_selector.doc/PseudoClassSelector.md")]
+use super::AnB;
+
+#[doc = include_str!("../../docs/api/selector/pseudo_class_selector.doc/PseudoClassSelector.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PseudoClassSelector {
-    #[doc = include_str!("pseudo_class_selector.doc/Hover.md")]
+    /// `:hover` — the pointer is over the element.
     Hover,
-    #[doc = include_str!("pseudo_class_selector.doc/Focus.md")]
+    /// `:focus` — the element holds keyboard focus.
     Focus,
-    #[doc = include_str!("pseudo_class_selector.doc/FocusVisible.md")]
+    /// `:focus-visible` — focus that the UA deems should be indicated.
     FocusVisible,
-    #[doc = include_str!("pseudo_class_selector.doc/FocusWithin.md")]
+    /// `:focus-within` — the element or a descendant holds focus.
     FocusWithin,
-    #[doc = include_str!("pseudo_class_selector.doc/Active.md")]
+    /// `:active` — the element is being activated (pressed).
     Active,
-    #[doc = include_str!("pseudo_class_selector.doc/Disabled.md")]
+    /// `:disabled` — the element is disabled.
     Disabled,
-    #[doc = include_str!("pseudo_class_selector.doc/Enabled.md")]
+    /// `:enabled` — the element is not disabled.
     Enabled,
-    #[doc = include_str!("pseudo_class_selector.doc/Checked.md")]
+    /// `:checked` — the element is a checked control.
     Checked,
-    #[doc = include_str!("pseudo_class_selector.doc/FirstChild.md")]
+    /// `:first-child` — the element is the first element among its siblings.
     FirstChild,
-    #[doc = include_str!("pseudo_class_selector.doc/LastChild.md")]
+    /// `:last-child` — the element is the last element among its siblings.
     LastChild,
-    #[doc = include_str!("pseudo_class_selector.doc/OnlyChild.md")]
+    /// `:only-child` — the element is the sole element among its siblings.
     OnlyChild,
-    #[doc = include_str!("pseudo_class_selector.doc/Root.md")]
+    /// `:root` — the element is the root of the document tree.
     Root,
-    #[doc = include_str!("pseudo_class_selector.doc/Empty.md")]
+    /// `:empty` — the element has no element children.
     Empty,
-    #[doc = include_str!("pseudo_class_selector.doc/NthChild.md")]
+    /// `:nth-child(An+B)` — position among siblings, counting from the front.
     NthChild(AnB),
-    #[doc = include_str!("pseudo_class_selector.doc/NthLastChild.md")]
+    /// `:nth-last-child(An+B)` — position among siblings, counting from the back.
     NthLastChild(AnB),
-    #[doc = include_str!("pseudo_class_selector.doc/NthOfType.md")]
+    /// `:nth-of-type(An+B)` — position among same-type siblings, from the front.
     NthOfType(AnB),
-    #[doc = include_str!("pseudo_class_selector.doc/NthLastOfType.md")]
+    /// `:nth-last-of-type(An+B)` — position among same-type siblings, from the back.
     NthLastOfType(AnB),
-    #[doc = include_str!("pseudo_class_selector.doc/NthChildOf.md")]
+    #[doc = include_str!("../../docs/api/selector/pseudo_class_selector.doc/NthChildOf.md")]
     NthChildOf(AnB, SelectorList),
-    #[doc = include_str!("pseudo_class_selector.doc/Is.md")]
+    /// `:is(S)` — matches any element that matches any selector in `S`
+    /// (selectors-4 §4.2).
     Is(SelectorList),
-    #[doc = include_str!("pseudo_class_selector.doc/Where.md")]
+    /// `:where(S)` — matches exactly as [`Is`](Self::Is) does, but contributes
+    /// **zero** specificity (selectors-4 §4.4).
     Where(SelectorList),
-    #[doc = include_str!("pseudo_class_selector.doc/Not.md")]
+    /// `:not(S)` — matches any element that matches *no* selector in `S`
+    /// (selectors-4 §4.3).
     Not(SelectorList),
-    #[doc = include_str!("pseudo_class_selector.doc/Has.md")]
+    #[doc = include_str!("../../docs/api/selector/pseudo_class_selector.doc/Has.md")]
     Has(SelectorList),
-    #[doc = include_str!("pseudo_class_selector.doc/Other.md")]
+    /// An unmodeled pseudo-class, preserved by name. Matches nothing.
     Other(Box<str>),
 }
 
 impl PseudoClassSelector {
-    #[doc = include_str!("pseudo_class_selector.doc/required_state.md")]
+    /// Returns the interaction [`PseudoState`] bit this pseudo-class requires,
+    /// or [`None`] for structural pseudo-classes (and for the negation-based
+    /// [`Enabled`](Self::Enabled), which is evaluated as "not disabled" by the
+    /// matcher rather than by a single required bit).
     #[must_use]
     pub const fn required_state(&self) -> Option<PseudoState> {
         match self {
@@ -87,10 +95,10 @@ impl PseudoClassSelector {
         }
     }
 
-    #[doc = include_str!("pseudo_class_selector.doc/specificity_contribution.md")]
+    #[doc = include_str!("../../docs/api/selector/pseudo_class_selector.doc/specificity_contribution.md")]
     #[must_use]
     pub fn specificity_contribution(&self) -> SelectorSpecificity {
-        #[doc = include_str!("pseudo_class_selector.doc/BASE.md")]
+        /// One class-level selector: what an ordinary pseudo-class contributes.
         const BASE: SelectorSpecificity = SelectorSpecificity::new(0, 1, 0);
         match self {
             Self::Is(list) | Self::Not(list) | Self::Has(list) => most_specific(list),
@@ -101,41 +109,14 @@ impl PseudoClassSelector {
     }
 }
 
-#[doc = include_str!("pseudo_class_selector.doc/most_specific.md")]
+/// Returns the specificity of the most specific complex selector in `list`, or
+/// [`SelectorSpecificity::ZERO`] when the list is empty.
 fn most_specific(list: &SelectorList) -> SelectorSpecificity {
     list.selectors()
         .iter()
         .map(ComplexSelector::specificity)
         .max()
         .unwrap_or(SelectorSpecificity::ZERO)
-}
-
-#[doc = include_str!("pseudo_class_selector.doc/AnB.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct AnB {
-    #[doc = include_str!("pseudo_class_selector.doc/a.md")]
-    pub a: i32,
-    #[doc = include_str!("pseudo_class_selector.doc/b.md")]
-    pub b: i32,
-}
-
-impl AnB {
-    #[doc = include_str!("pseudo_class_selector.doc/new.md")]
-    #[must_use]
-    pub const fn new(a: i32, b: i32) -> Self {
-        Self { a, b }
-    }
-
-    #[doc = include_str!("pseudo_class_selector.doc/matches_index.md")]
-    #[must_use]
-    pub const fn matches_index(&self, one_based_index: i32) -> bool {
-        let diff = one_based_index - self.b;
-        if self.a == 0 {
-            return diff == 0;
-        }
-        // `n = diff / a` must be a non-negative integer.
-        diff % self.a == 0 && diff / self.a >= 0
-    }
 }
 
 #[cfg(test)]
@@ -270,48 +251,5 @@ mod tests {
                 .specificity_contribution(),
             SelectorSpecificity::new(0, 1, 0)
         );
-    }
-
-    #[test]
-    fn anb_two_n_plus_one_matches_odd() {
-        let anb = AnB::new(2, 1);
-        assert!(anb.matches_index(1));
-        assert!(anb.matches_index(3));
-        assert!(anb.matches_index(5));
-        assert!(!anb.matches_index(2));
-        assert!(!anb.matches_index(4));
-    }
-
-    #[test]
-    fn anb_constant_matches_only_that_index() {
-        let anb = AnB::new(0, 3);
-        assert!(anb.matches_index(3));
-        assert!(!anb.matches_index(1));
-        assert!(!anb.matches_index(6));
-    }
-
-    #[test]
-    fn anb_zero_matches_nothing_for_one_based() {
-        let anb = AnB::new(0, 0);
-        assert!(!anb.matches_index(1));
-        assert!(!anb.matches_index(2));
-    }
-
-    #[test]
-    fn anb_negative_step_matches_leading_range() {
-        let anb = AnB::new(-1, 3);
-        assert!(anb.matches_index(1));
-        assert!(anb.matches_index(2));
-        assert!(anb.matches_index(3));
-        assert!(!anb.matches_index(4));
-    }
-
-    #[test]
-    fn anb_even_matches_two_n() {
-        let anb = AnB::new(2, 0);
-        assert!(anb.matches_index(2));
-        assert!(anb.matches_index(4));
-        assert!(!anb.matches_index(1));
-        assert!(!anb.matches_index(3));
     }
 }

@@ -1,4 +1,4 @@
-#![doc = include_str!("layer_settings.doc/_module.md")]
+//! Everything an application says about a desktop surface before it opens.
 
 use crate::display::DisplayId;
 
@@ -7,37 +7,37 @@ use super::{
     LayerReservation,
 };
 
-#[doc = include_str!("layer_settings.doc/LayerSettings.md")]
+#[doc = include_str!("../../docs/api/layer/layer_settings.doc/LayerSettings.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct LayerSettings {
-    #[doc = include_str!("layer_settings.doc/band.md")]
+    /// Which stacking band the surface sits in.
     pub band: LayerBand,
-    #[doc = include_str!("layer_settings.doc/anchor.md")]
+    #[doc = include_str!("../../docs/api/layer/layer_settings.doc/anchor.md")]
     pub anchor: LayerAnchor,
-    #[doc = include_str!("layer_settings.doc/width.md")]
+    #[doc = include_str!("../../docs/api/layer/layer_settings.doc/width.md")]
     pub width: Option<u32>,
-    #[doc = include_str!("layer_settings.doc/height.md")]
+    #[doc = include_str!("../../docs/api/layer/layer_settings.doc/height.md")]
     pub height: Option<u32>,
-    #[doc = include_str!("layer_settings.doc/reservation.md")]
+    /// The space other windows are asked to keep clear.
     pub reservation: LayerReservation,
-    #[doc = include_str!("layer_settings.doc/margin.md")]
+    /// The gap from each anchored edge.
     pub margin: LayerMargins,
-    #[doc = include_str!("layer_settings.doc/focus.md")]
+    /// How much of the keyboard the surface asks for.
     pub focus: LayerFocusPolicy,
-    #[doc = include_str!("layer_settings.doc/pointer.md")]
+    /// Whether the pointer stops at the surface or passes through it.
     pub pointer: LayerPointerPolicy,
-    #[doc = include_str!("layer_settings.doc/display.md")]
+    #[doc = include_str!("../../docs/api/layer/layer_settings.doc/display.md")]
     pub display: Option<DisplayId>,
 }
 
 impl LayerSettings {
-    #[doc = include_str!("layer_settings.doc/new.md")]
+    #[doc = include_str!("../../docs/api/layer/layer_settings.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    #[doc = include_str!("layer_settings.doc/top_bar.md")]
+    /// A bar across the top of the screen, reserving its own height.
     #[must_use]
     pub fn top_bar(height: u32) -> Self {
         Self {
@@ -48,7 +48,7 @@ impl LayerSettings {
         }
     }
 
-    #[doc = include_str!("layer_settings.doc/bottom_bar.md")]
+    /// A bar across the bottom of the screen, reserving its own height.
     #[must_use]
     pub fn bottom_bar(height: u32) -> Self {
         Self {
@@ -59,7 +59,7 @@ impl LayerSettings {
         }
     }
 
-    #[doc = include_str!("layer_settings.doc/left_bar.md")]
+    /// A bar down the left of the screen, reserving its own width.
     #[must_use]
     pub fn left_bar(width: u32) -> Self {
         Self {
@@ -70,7 +70,7 @@ impl LayerSettings {
         }
     }
 
-    #[doc = include_str!("layer_settings.doc/right_bar.md")]
+    /// A bar down the right of the screen, reserving its own width.
     #[must_use]
     pub fn right_bar(width: u32) -> Self {
         Self {
@@ -81,7 +81,8 @@ impl LayerSettings {
         }
     }
 
-    #[doc = include_str!("layer_settings.doc/overlay.md")]
+    /// A surface covering the whole screen, above everything, reserving nothing and
+    /// ignoring what everyone else reserved.
     #[must_use]
     pub fn overlay() -> Self {
         Self {
@@ -92,21 +93,21 @@ impl LayerSettings {
         }
     }
 
-    #[doc = include_str!("layer_settings.doc/with_band.md")]
+    /// The same settings in a different stacking band.
     #[must_use]
     pub const fn with_band(mut self, band: LayerBand) -> Self {
         self.band = band;
         self
     }
 
-    #[doc = include_str!("layer_settings.doc/with_anchor.md")]
+    /// The same settings anchored to different edges.
     #[must_use]
     pub const fn with_anchor(mut self, anchor: LayerAnchor) -> Self {
         self.anchor = anchor;
         self
     }
 
-    #[doc = include_str!("layer_settings.doc/with_size.md")]
+    /// The same settings at an explicit size.
     #[must_use]
     pub const fn with_size(mut self, width: u32, height: u32) -> Self {
         self.width = Some(width);
@@ -114,48 +115,48 @@ impl LayerSettings {
         self
     }
 
-    #[doc = include_str!("layer_settings.doc/with_reservation.md")]
+    /// The same settings reserving differently.
     #[must_use]
     pub const fn with_reservation(mut self, reservation: LayerReservation) -> Self {
         self.reservation = reservation;
         self
     }
 
-    #[doc = include_str!("layer_settings.doc/with_margin.md")]
+    /// The same settings with a different gap from the anchored edges.
     #[must_use]
     pub const fn with_margin(mut self, margin: LayerMargins) -> Self {
         self.margin = margin;
         self
     }
 
-    #[doc = include_str!("layer_settings.doc/with_focus.md")]
+    /// The same settings with a different keyboard policy.
     #[must_use]
     pub const fn with_focus(mut self, focus: LayerFocusPolicy) -> Self {
         self.focus = focus;
         self
     }
 
-    #[doc = include_str!("layer_settings.doc/with_pointer.md")]
+    /// The same settings with a different pointer policy.
     #[must_use]
     pub const fn with_pointer(mut self, pointer: LayerPointerPolicy) -> Self {
         self.pointer = pointer;
         self
     }
 
-    #[doc = include_str!("layer_settings.doc/with_display.md")]
+    /// The same settings pinned to one display.
     #[must_use]
     pub const fn with_display(mut self, display: DisplayId) -> Self {
         self.display = Some(display);
         self
     }
 
-    #[doc = include_str!("layer_settings.doc/docked_edge.md")]
+    #[doc = include_str!("../../docs/api/layer/layer_settings.doc/docked_edge.md")]
     #[must_use]
     pub const fn docked_edge(&self) -> Option<LayerEdge> {
         self.anchor.docked_edge()
     }
 
-    #[doc = include_str!("layer_settings.doc/needs_redraw_from.md")]
+    #[doc = include_str!("../../docs/api/layer/layer_settings.doc/needs_redraw_from.md")]
     #[must_use]
     pub fn needs_redraw_from(&self, previous: &Self) -> bool {
         // Only what changes the pixels. Moving a surface — a margin, a band, a
@@ -173,7 +174,7 @@ impl LayerSettings {
             || self.display != previous.display
     }
 
-    #[doc = include_str!("layer_settings.doc/reserves_space.md")]
+    #[doc = include_str!("../../docs/api/layer/layer_settings.doc/reserves_space.md")]
     #[must_use]
     pub const fn reserves_space(&self) -> bool {
         self.reservation.reserves() && self.anchor.docked_edge().is_some()

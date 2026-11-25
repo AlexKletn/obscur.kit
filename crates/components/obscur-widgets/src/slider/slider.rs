@@ -1,4 +1,4 @@
-#![doc = include_str!("slider.doc/_module.md")]
+#![doc = include_str!("../../docs/api/slider/slider.doc/_module.md")]
 
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_primitives::Canvas;
@@ -7,27 +7,27 @@ use obscur_view::view::{
     SliderScale, View, ViewFragment, ViewNode, ViewProperty, ViewValue, canvas_painter_prop,
 };
 
-#[doc = include_str!("slider.doc/Slider.md")]
+/// A slider.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Slider {
-    #[doc = include_str!("slider.doc/scale.md")]
+    /// The bounds and the step this control offers.
     scale: SliderScale,
-    #[doc = include_str!("slider.doc/low.md")]
+    /// The value, or the low end of a range.
     low: f32,
-    #[doc = include_str!("slider.doc/high.md")]
+    /// The high end of a range; equal to the low end on a single slider.
     high: f32,
-    #[doc = include_str!("slider.doc/ranged.md")]
+    /// Whether this control picks a RANGE rather than a single value.
     ranged: bool,
 }
 
 impl Slider {
-    #[doc = include_str!("slider.doc/COMPONENT_ID.md")]
+    /// The component id an authored `<slider>` binds to.
     pub const COMPONENT_ID: ComponentId = ComponentId::from_raw(0x00D0_0008);
 
-    #[doc = include_str!("slider.doc/PAINTER.md")]
+    /// The built-in painter every slider names.
     pub const PAINTER: InternedSymbol = InternedSymbol::from_raw(0x00D1_0801);
 
-    #[doc = include_str!("slider.doc/new.md")]
+    #[doc = include_str!("../../docs/api/slider/slider.doc/new.md")]
     #[must_use]
     pub fn new(value: f32) -> Self {
         Self {
@@ -38,7 +38,7 @@ impl Slider {
         }
     }
 
-    #[doc = include_str!("slider.doc/ranging.md")]
+    #[doc = include_str!("../../docs/api/slider/slider.doc/ranging.md")]
     #[must_use]
     pub fn ranging(low: f32, high: f32) -> Self {
         let scale = SliderScale::default();
@@ -50,7 +50,7 @@ impl Slider {
         }
     }
 
-    #[doc = include_str!("slider.doc/over.md")]
+    /// Returns the slider over different bounds, re-snapping its values to them.
     #[must_use]
     pub fn over(mut self, min: f32, max: f32) -> Self {
         self.scale = SliderScale {
@@ -61,20 +61,20 @@ impl Slider {
         self
     }
 
-    #[doc = include_str!("slider.doc/stepped_by.md")]
+    /// Returns the slider snapping to `step`, re-snapping its values to it.
     #[must_use]
     pub fn stepped_by(mut self, step: f32) -> Self {
         self.scale = self.scale.stepped_by(step);
         self
     }
 
-    #[doc = include_str!("slider.doc/value.md")]
+    /// The value — the low end, which on a single slider is the only end.
     #[must_use]
     pub fn value(&self) -> f32 {
         self.range().0
     }
 
-    #[doc = include_str!("slider.doc/range.md")]
+    #[doc = include_str!("../../docs/api/slider/slider.doc/range.md")]
     #[must_use]
     pub fn range(&self) -> (f32, f32) {
         // Snapped and sorted HERE — on the way out — and not as the builder
@@ -95,13 +95,13 @@ impl Slider {
         (low.min(high), low.max(high))
     }
 
-    #[doc = include_str!("slider.doc/scale_2.md")]
+    /// The bounds and step this control offers.
     #[must_use]
     pub const fn scale(&self) -> SliderScale {
         self.scale
     }
 
-    #[doc = include_str!("slider.doc/props.md")]
+    /// The host node's properties: its local name, its scale, its ends, and whether it is ranged.
     #[must_use]
     pub fn props(&self) -> Vec<ViewProperty> {
         let mut props = vec![
@@ -121,7 +121,7 @@ impl Slider {
         props
     }
 
-    #[doc = include_str!("slider.doc/contents.md")]
+    #[doc = include_str!("../../docs/api/slider/slider.doc/contents.md")]
     #[must_use]
     pub fn contents(&self) -> ViewFragment {
         // Everything the painter reads rides on the canvas, so the host node and
@@ -139,7 +139,7 @@ impl Slider {
         ViewFragment::from_nodes(vec![node])
     }
 
-    #[doc = include_str!("slider.doc/view.md")]
+    /// The slider as a view.
     #[must_use]
     pub fn view(&self) -> View {
         let mut node = ViewNode::element(Self::COMPONENT_ID);

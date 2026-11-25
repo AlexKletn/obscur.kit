@@ -1,5 +1,6 @@
-#![doc = include_str!("setting_validation.doc/_module.md")]
+//! `SettingValidation` (skeleton stub for the spec-defined entity; not yet implemented).
 
-#[doc = include_str!("setting_validation.doc/SettingValidation.md")]
+/// Placeholder for the `SettingValidation` entity. See the Obscur Kit 2 specs for its
+/// contract; this stub exists to materialise the target source layout.
 #[derive(Debug)]
 pub struct SettingValidation;

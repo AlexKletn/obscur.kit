@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Paint module.
 mod blend_mode;
 pub use blend_mode::BlendMode;
 mod buffer_format;
@@ -24,7 +24,9 @@ pub use linear_gradient::LinearGradient;
 mod paint;
 pub use paint::Paint;
 mod scene_vector;
-pub use scene_vector::{SceneVector, VectorShape};
+pub use scene_vector::SceneVector;
+mod vector_shape;
+pub use vector_shape::VectorShape;
 mod vector_paint;
 pub use vector_paint::VectorPaint;
 mod radial_gradient;

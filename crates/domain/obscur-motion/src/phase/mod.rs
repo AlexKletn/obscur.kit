@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Phase module.
 mod post_layout_sample;
 pub use post_layout_sample::PostLayoutSample;
 mod pre_layout_sample;

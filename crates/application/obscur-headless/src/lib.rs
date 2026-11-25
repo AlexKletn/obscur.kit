@@ -1,4 +1,4 @@
-#![doc = include_str!("lib.doc/_module.md")]
+//! Headless host with deterministic clock/executor for reproducible tests (skeleton).
 #![forbid(unsafe_code)]
 #![deny(unsafe_op_in_unsafe_fn)]
 

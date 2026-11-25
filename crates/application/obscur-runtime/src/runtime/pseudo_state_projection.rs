@@ -1,4 +1,5 @@
-#![doc = include_str!("pseudo_state_projection.doc/_module.md")]
+//! The interaction pseudo-states the cascade matches against:
+//! [`PseudoStateProjection`].
 
 use obscur_identity::NodeId;
 use obscur_interaction::hover::HoverChain;
@@ -8,22 +9,23 @@ use obscur_tree::tree::RetainedTree;
 use super::AncestorChain;
 use crate::orchestration::PseudoStates;
 
-#[doc = include_str!("pseudo_state_projection.doc/PseudoStateProjection.md")]
+#[doc = include_str!("../../docs/api/runtime/pseudo_state_projection.doc/PseudoStateProjection.md")]
 pub(crate) struct PseudoStateProjection<'a> {
-    #[doc = include_str!("pseudo_state_projection.doc/tree.md")]
+    /// The tree each press's ancestor chain is walked over.
     tree: &'a RetainedTree,
-    #[doc = include_str!("pseudo_state_projection.doc/hover.md")]
+    /// The chain the pointer is currently over, topmost-first.
     hover: &'a HoverChain,
-    #[doc = include_str!("pseudo_state_projection.doc/focused.md")]
+    /// The focused node, if any.
     focused: Option<NodeId>,
-    #[doc = include_str!("pseudo_state_projection.doc/pressed.md")]
+    /// The target of every outstanding press — a `Down` with no matching `Up` or
+    /// `Cancel` yet — one per pointer holding one.
     pressed: &'a [NodeId],
-    #[doc = include_str!("pseudo_state_projection.doc/focus_visible.md")]
+    #[doc = include_str!("../../docs/api/runtime/pseudo_state_projection.doc/focus_visible.md")]
     focus_visible: bool,
 }
 
 impl<'a> PseudoStateProjection<'a> {
-    #[doc = include_str!("pseudo_state_projection.doc/new.md")]
+    /// Bundles the live input state for one recomputation.
     pub(crate) const fn new(
         tree: &'a RetainedTree,
         hover: &'a HoverChain,
@@ -40,19 +42,18 @@ impl<'a> PseudoStateProjection<'a> {
         }
     }
 
-    #[doc = include_str!("pseudo_state_projection.doc/project.md")]
+    /// Builds the per-node [`PseudoStates`] from the current hover chain, focus
+    /// and outstanding presses. [`PseudoState::FOCUS_WITHIN`] applies to the focused
+    /// node and its logical ancestors, including across portal projections.
     pub(crate) fn project(&self) -> PseudoStates {
         let mut states = PseudoStates::new();
         for &node in self.hover.nodes() {
             states.set(node, PseudoState::HOVER);
         }
         if let Some(focused) = self.focused {
-            // `:focus` always; `:focus-visible` only when the focus arrived by
-            // keyboard. That distinction is the whole reason the second selector
-            // exists — a ring drawn around every clicked button is the noise
-            // `:focus-visible` was introduced to stop — and until now nothing in
-            // the workspace ever set the bit, so the rule matched nothing and the
-            // spec case asserting its absence passed vacuously.
+            for node in AncestorChain::of(self.tree, Some(focused)) {
+                states.set(node, states.get(node).union(PseudoState::FOCUS_WITHIN));
+            }
             let mut merged = states.get(focused).union(PseudoState::FOCUS);
             if self.focus_visible {
                 merged = merged.union(PseudoState::FOCUS_VISIBLE);
@@ -96,7 +97,10 @@ mod tests {
         // Focus is where keys go: `b` is hovered as `a`'s ancestor, but focusing
         // `a` must not focus `b` as well.
         let states = PseudoStateProjection::new(&tree, &hover, Some(a), &[], false).project();
-        assert_eq!(states.get(a), PseudoState::HOVER.union(PseudoState::FOCUS));
+        assert_eq!(
+            states.get(a),
+            PseudoState::HOVER.union(PseudoState::FOCUS.union(PseudoState::FOCUS_WITHIN))
+        );
         assert_eq!(states.get(b), PseudoState::HOVER);
     }
 

@@ -1,7 +1,10 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Analysis: the [`Analyzer`] core plus its result types — [`DocumentSymbol`]
+//! outlines and [`Hover`] information.
 mod analyzer;
 pub use analyzer::Analyzer;
 mod document_symbol;
-pub use document_symbol::{DocumentSymbol, SymbolKind};
+pub use document_symbol::DocumentSymbol;
+mod symbol_kind;
+pub use symbol_kind::SymbolKind;
 mod hover;
 pub use hover::Hover;

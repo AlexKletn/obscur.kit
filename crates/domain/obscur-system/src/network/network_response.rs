@@ -1,8 +1,8 @@
-#![doc = include_str!("network_response.doc/_module.md")]
+#![doc = include_str!("../../docs/api/network/network_response.doc/_module.md")]
 
 use std::sync::Arc;
 
-#[doc = include_str!("network_response.doc/NetworkResponse.md")]
+#[doc = include_str!("../../docs/api/network/network_response.doc/NetworkResponse.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NetworkResponse {
     status: u16,
@@ -11,7 +11,8 @@ pub struct NetworkResponse {
 }
 
 impl NetworkResponse {
-    #[doc = include_str!("network_response.doc/new.md")]
+    /// Creates a response with HTTP `status` and `body`, and no headers
+    /// (spec §5.15).
     #[must_use]
     pub fn new(status: u16, body: impl Into<Arc<[u8]>>) -> Self {
         Self {
@@ -21,32 +22,33 @@ impl NetworkResponse {
         }
     }
 
-    #[doc = include_str!("network_response.doc/header.md")]
+    /// Appends a `name: value` response header, preserving order (fluent;
+    /// spec §5.15).
     #[must_use]
     pub fn header(mut self, name: impl Into<Box<str>>, value: impl Into<Box<str>>) -> Self {
         self.headers.push((name.into(), value.into()));
         self
     }
 
-    #[doc = include_str!("network_response.doc/status.md")]
+    /// Returns the HTTP status code (spec §5.15).
     #[must_use]
     pub const fn status(&self) -> u16 {
         self.status
     }
 
-    #[doc = include_str!("network_response.doc/headers.md")]
+    /// Returns the ordered response header name/value pairs (spec §5.15).
     #[must_use]
     pub fn headers(&self) -> &[(Box<str>, Box<str>)] {
         &self.headers
     }
 
-    #[doc = include_str!("network_response.doc/body.md")]
+    /// Returns the response body bytes (spec §5.15).
     #[must_use]
     pub fn body(&self) -> &[u8] {
         &self.body
     }
 
-    #[doc = include_str!("network_response.doc/header_value.md")]
+    #[doc = include_str!("../../docs/api/network/network_response.doc/header_value.md")]
     #[must_use]
     pub fn header_value(&self, name: &str) -> Option<&str> {
         self.headers
@@ -55,19 +57,19 @@ impl NetworkResponse {
             .map(|(_, value)| value.as_ref())
     }
 
-    #[doc = include_str!("network_response.doc/is_success.md")]
+    /// Returns whether the status is a 2xx success code (spec §5.15).
     #[must_use]
     pub const fn is_success(&self) -> bool {
         matches!(self.status, 200..=299)
     }
 
-    #[doc = include_str!("network_response.doc/is_client_error.md")]
+    /// Returns whether the status is a 4xx client-error code (spec §5.15).
     #[must_use]
     pub const fn is_client_error(&self) -> bool {
         matches!(self.status, 400..=499)
     }
 
-    #[doc = include_str!("network_response.doc/is_server_error.md")]
+    /// Returns whether the status is a 5xx server-error code (spec §5.15).
     #[must_use]
     pub const fn is_server_error(&self) -> bool {
         matches!(self.status, 500..=599)

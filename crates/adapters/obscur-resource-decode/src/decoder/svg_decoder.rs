@@ -1,4 +1,4 @@
-#![doc = include_str!("svg_decoder.doc/_module.md")]
+#![doc = include_str!("../../docs/api/decoder/svg_decoder.doc/_module.md")]
 
 use std::sync::Arc;
 
@@ -7,15 +7,23 @@ use obscur_resources::handle::ResourceKind;
 use obscur_resources::port::{DecodedResource, ResourceDecoder};
 use obscur_resources::state::{ResourceError, ResourceMetadata};
 
-#[doc = include_str!("svg_decoder.doc/SvgDecoder.md")]
+#[doc = include_str!("../../docs/api/decoder/svg_decoder.doc/SvgDecoder.md")]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct SvgDecoder;
 
 impl SvgDecoder {
-    #[doc = include_str!("svg_decoder.doc/new.md")]
+    /// Creates an SVG decoder.
     #[must_use]
     pub const fn new() -> Self {
         Self
+    }
+
+    pub(super) fn parse(
+        bytes: &[u8],
+        options: &usvg::Options<'_>,
+    ) -> Result<usvg::Tree, ResourceError> {
+        usvg::Tree::from_data(bytes, options)
+            .map_err(|error| ResourceError::DecodeFailed(error.to_string().into()))
     }
 }
 
@@ -31,9 +39,7 @@ impl ResourceDecoder for SvgDecoder {
             ));
         }
 
-        let options = usvg::Options::default();
-        let tree = usvg::Tree::from_data(bytes, &options)
-            .map_err(|err| ResourceError::DecodeFailed(err.to_string().into()))?;
+        let tree = Self::parse(bytes, &usvg::Options::default())?;
 
         let size = tree.size();
         let metadata = ResourceMetadata::new()

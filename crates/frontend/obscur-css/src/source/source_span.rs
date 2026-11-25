@@ -1,6 +1,6 @@
-#![doc = include_str!("source_span.doc/_module.md")]
+//! A byte range within a CSS source (spec §2.5 source maps).
 
-#[doc = include_str!("source_span.doc/SourceSpan.md")]
+#[doc = include_str!("../../docs/api/source/source_span.doc/SourceSpan.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SourceSpan {
     start: u32,
@@ -8,56 +8,58 @@ pub struct SourceSpan {
 }
 
 impl SourceSpan {
-    #[doc = include_str!("source_span.doc/new.md")]
+    #[doc = include_str!("../../docs/api/source/source_span.doc/new.md")]
     #[must_use]
     pub const fn new(start: u32, end: u32) -> Self {
         let end = if end < start { start } else { end };
         Self { start, end }
     }
 
-    #[doc = include_str!("source_span.doc/empty.md")]
+    /// Creates an empty span (`start == end`) at the byte offset `at`.
     #[must_use]
     pub const fn empty(at: u32) -> Self {
         Self { start: at, end: at }
     }
 
-    #[doc = include_str!("source_span.doc/point.md")]
+    /// Creates an empty span at the byte offset `at`; an alias for
+    /// [`SourceSpan::empty`].
     #[must_use]
     pub const fn point(at: u32) -> Self {
         Self::empty(at)
     }
 
-    #[doc = include_str!("source_span.doc/start.md")]
+    /// Returns the start byte offset of the span.
     #[must_use]
     pub const fn start(&self) -> u32 {
         self.start
     }
 
-    #[doc = include_str!("source_span.doc/end.md")]
+    /// Returns the end byte offset of the span (exclusive).
     #[must_use]
     pub const fn end(&self) -> u32 {
         self.end
     }
 
-    #[doc = include_str!("source_span.doc/len.md")]
+    /// Returns the length of the span in bytes (`end - start`), saturating to `0`.
     #[must_use]
     pub const fn len(&self) -> u32 {
         self.end.saturating_sub(self.start)
     }
 
-    #[doc = include_str!("source_span.doc/is_empty.md")]
+    /// Returns whether the span is empty (`start == end`).
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.start == self.end
     }
 
-    #[doc = include_str!("source_span.doc/contains.md")]
+    /// Returns whether `offset` lies within the span (`start <= offset < end`).
     #[must_use]
     pub const fn contains(&self, offset: u32) -> bool {
         self.start <= offset && offset < self.end
     }
 
-    #[doc = include_str!("source_span.doc/union.md")]
+    /// Returns the smallest span covering both `self` and `other` (min start,
+    /// max end).
     #[must_use]
     pub const fn union(&self, other: SourceSpan) -> SourceSpan {
         let start = if self.start < other.start {

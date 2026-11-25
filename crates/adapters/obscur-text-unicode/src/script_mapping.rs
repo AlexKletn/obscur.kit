@@ -1,9 +1,9 @@
-#![doc = include_str!("script_mapping.doc/_module.md")]
+//! Maps a `unicode-script` [`Script`] to a domain [`ScriptTag`] (spec §5.10).
 
 use obscur_text::shaping::ScriptTag;
 use unicode_script::{Script, UnicodeScript};
 
-#[doc = include_str!("script_mapping.doc/script_tag_for.md")]
+#[doc = include_str!("../docs/api/script_mapping.doc/script_tag_for.md")]
 pub(crate) fn script_tag_for(ch: char) -> Option<ScriptTag> {
     match ch.script() {
         Script::Latin => Some(ScriptTag::LATIN),

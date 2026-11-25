@@ -1,11 +1,11 @@
-#![doc = include_str!("font_lowering.doc/_module.md")]
+#![doc = include_str!("../../docs/api/compiler/font_lowering.doc/_module.md")]
 
 use super::property_compiler::narrow_f32;
 use super::value_lowering::css_wide_keyword;
 use crate::parser::ParsedValue;
 use obscur_style::property::{PropertyValue, layout_keyword};
 
-#[doc = include_str!("font_lowering.doc/lower_font_family.md")]
+#[doc = include_str!("../../docs/api/compiler/font_lowering.doc/lower_font_family.md")]
 pub(super) fn lower_font_family(values: &[ParsedValue]) -> Option<PropertyValue> {
     let mut families: Vec<Box<str>> = Vec::new();
     for group in values.split(|value| matches!(value, ParsedValue::Comma)) {
@@ -19,7 +19,9 @@ pub(super) fn lower_font_family(values: &[ParsedValue]) -> Option<PropertyValue>
     Some(PropertyValue::FontFamilies(families.into_boxed_slice()))
 }
 
-#[doc = include_str!("font_lowering.doc/font_family_name.md")]
+/// Builds one family name from a comma-delimited component group: a lone quoted
+/// string verbatim, or the group's bare idents joined by single spaces. Returns
+/// [`None`] for a group with no ident/string components.
 fn font_family_name(group: &[ParsedValue]) -> Option<Box<str>> {
     let mut idents: Vec<&str> = Vec::new();
     for value in group {
@@ -36,7 +38,7 @@ fn font_family_name(group: &[ParsedValue]) -> Option<Box<str>> {
     }
 }
 
-#[doc = include_str!("font_lowering.doc/lower_font_weight.md")]
+#[doc = include_str!("../../docs/api/compiler/font_lowering.doc/lower_font_weight.md")]
 pub(super) fn lower_font_weight(values: &[ParsedValue]) -> Option<PropertyValue> {
     match values.first()? {
         ParsedValue::Number(n) => Some(PropertyValue::Number(narrow_f32(*n))),
@@ -53,7 +55,9 @@ pub(super) fn lower_font_weight(values: &[ParsedValue]) -> Option<PropertyValue>
     }
 }
 
-#[doc = include_str!("font_lowering.doc/font_weight_keyword.md")]
+/// Maps an absolute named `font-weight` keyword to its numeric weight,
+/// case-insensitively; [`None`] for any other keyword (including the relative
+/// `bolder` / `lighter`, which lower to reserved handles).
 fn font_weight_keyword(keyword: &str) -> Option<f32> {
     match keyword.to_ascii_lowercase().as_str() {
         "normal" => Some(400.0),

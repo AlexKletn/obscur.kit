@@ -1,22 +1,22 @@
-#![doc = include_str!("foreign_surface.doc/_module.md")]
+//! `ForeignSurface`: an embedded external-surface primitive (spec §2.6, §5.5).
 
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_view::view::{View, ViewNode, ViewProperty, ViewValue};
 
-#[doc = include_str!("foreign_surface.doc/ForeignSurface.md")]
+#[doc = include_str!("../docs/api/foreign_surface.doc/ForeignSurface.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForeignSurface {
     surface: Box<str>,
 }
 
 impl ForeignSurface {
-    #[doc = include_str!("foreign_surface.doc/COMPONENT_ID.md")]
+    #[doc = include_str!("../docs/api/foreign_surface.doc/COMPONENT_ID.md")]
     pub const COMPONENT_ID: ComponentId = ComponentId::from_raw(0x00C0_0008);
 
-    #[doc = include_str!("foreign_surface.doc/PROP_SURFACE.md")]
+    #[doc = include_str!("../docs/api/foreign_surface.doc/PROP_SURFACE.md")]
     pub const PROP_SURFACE: InternedSymbol = InternedSymbol::from_raw(0x00C1_0801);
 
-    #[doc = include_str!("foreign_surface.doc/new.md")]
+    /// Creates a foreign surface referencing the opaque handle `surface`.
     #[must_use]
     pub fn new(surface: impl Into<Box<str>>) -> Self {
         Self {
@@ -24,13 +24,14 @@ impl ForeignSurface {
         }
     }
 
-    #[doc = include_str!("foreign_surface.doc/surface.md")]
+    /// Returns the opaque surface handle key.
     #[must_use]
     pub fn surface(&self) -> &str {
         &self.surface
     }
 
-    #[doc = include_str!("foreign_surface.doc/into_view_node.md")]
+    /// Lowers this surface into its [`ViewNode::Element`], emitting the surface
+    /// handle as a property.
     #[must_use]
     pub fn into_view_node(self) -> ViewNode {
         ViewNode::element(Self::COMPONENT_ID).with_prop(ViewProperty::new(
@@ -39,7 +40,7 @@ impl ForeignSurface {
         ))
     }
 
-    #[doc = include_str!("foreign_surface.doc/view.md")]
+    /// Lowers this surface into a single-node [`View`].
     #[must_use]
     pub fn view(self) -> View {
         View::single(self.into_view_node())

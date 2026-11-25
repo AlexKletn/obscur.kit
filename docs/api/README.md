@@ -5,7 +5,7 @@ specification.
 
 ## Two documents, not one
 
-**`cargo doc --no-deps -p obscur-kit --features full`** is the exhaustive
+**`cargo doc --no-deps -p obscur-kit --features full,plugin-wasm`** is the exhaustive
 per-item reference. Every public type and method in this workspace carries a
 doc comment, and those comments are the authority on individual behaviour —
 including the awkward parts, which they state rather than omit. Build it and
@@ -33,6 +33,21 @@ So each page marks its claims:
 | **partial** | works for the stated cases and stops at a named boundary |
 
 An unmarked API is **wired**. Anything marked otherwise says what is missing.
+
+## API levels
+
+The specification uses these levels to describe the intended audience and
+compatibility of a surface. The Rust facade is currently versioned `0.0.0`.
+
+| Level | Surface |
+|---|---|
+| Stable | Application entry points such as `App`, `AppControl`, authored views and built-in components. |
+| Extension | Contracts for hosts and adapters, such as the window, renderer, resource and accessibility ports. |
+| Experimental | Opt-in plugin execution and integration APIs, enabled with `plugins`, `plugin-process` or `plugin-wasm`. |
+| Internal | Runtime implementation and backend details. |
+
+Rust API versions, UI IR versions, plugin contracts and diagnostics protocol
+versions are tracked independently. Cargo features select which code is built.
 
 ## The pages
 

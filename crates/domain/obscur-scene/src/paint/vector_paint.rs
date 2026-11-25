@@ -1,30 +1,34 @@
-#![doc = include_str!("vector_paint.doc/_module.md")]
+//! `VectorPaint`: a vector shape's colour, possibly deferred to `currentColor`.
 
 use crate::color::Color;
 
-#[doc = include_str!("vector_paint.doc/VectorPaint.md")]
+#[doc = include_str!("../../docs/api/paint/vector_paint.doc/VectorPaint.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum VectorPaint {
-    #[doc = include_str!("vector_paint.doc/Solid.md")]
+    /// A colour fixed by the document itself.
     Solid(Color),
-    #[doc = include_str!("vector_paint.doc/CurrentColor.md")]
+    /// The CSS `currentColor` keyword: resolves to the painting node's computed
+    /// `color` at composition time.
     CurrentColor,
+    /// The host’s computed color, with its alpha multiplied by the authored paint opacity.
+    CurrentColorWithOpacity(f32),
 }
 
 impl VectorPaint {
-    #[doc = include_str!("vector_paint.doc/resolve.md")]
+    #[doc = include_str!("../../docs/api/paint/vector_paint.doc/resolve.md")]
     #[must_use]
     pub const fn resolve(self, current: Color) -> Color {
         match self {
             Self::Solid(color) => color,
             Self::CurrentColor => current,
+            Self::CurrentColorWithOpacity(opacity) => current.with_alpha(current.a * opacity),
         }
     }
 
-    #[doc = include_str!("vector_paint.doc/is_current_color.md")]
+    /// Whether this paint defers to the computed `color`.
     #[must_use]
     pub const fn is_current_color(self) -> bool {
-        matches!(self, Self::CurrentColor)
+        matches!(self, Self::CurrentColor | Self::CurrentColorWithOpacity(_))
     }
 }
 

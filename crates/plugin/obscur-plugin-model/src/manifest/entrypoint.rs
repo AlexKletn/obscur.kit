@@ -1,5 +1,9 @@
-#![doc = include_str!("entrypoint.doc/_module.md")]
+//! Entrypoint (skeleton stub for the spec-defined entity; not yet implemented).
 
-#[doc = include_str!("entrypoint.doc/Entrypoint.md")]
-#[derive(Debug)]
-pub struct Entrypoint;
+/// A package entry that an executor may load after validation.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Entrypoint {
+    /// The package-relative path of the declared executable or module.
+    pub path: Box<str>,
+}

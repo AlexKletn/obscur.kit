@@ -14,7 +14,7 @@ use obscur_kit::css::compiler::StylesheetCompiler;
 use obscur_kit::css::parser::StylesheetParser;
 use obscur_kit::css::source::CssSource;
 use obscur_kit::geometry::Size;
-use obscur_kit::identity::RuntimeId;
+use obscur_kit::identity::{ComponentId, RuntimeId};
 use obscur_kit::primitives::Image;
 use obscur_kit::render::frame::{FrameSubmission, RenderFrame};
 use obscur_kit::render::target::{BitmapTarget, RenderTarget};
@@ -190,4 +190,218 @@ fn without_the_vector_capability_an_svg_paints_nothing_rather_than_rasterizing()
             .any(|c| matches!(c, PaintCommand::DrawImage { .. })),
         "and certainly not a rasterized fallback"
     );
+}
+
+#[doc = include_str!("svg_vector.doc/svg_cover_frame.md")]
+fn svg_cover_frame() -> obscur_kit::runtime::frame::FrameResult {
+    let dir = temp_asset_dir();
+    let sheet = compile(
+        ".icon { width: 40px; height: 50px; box-sizing: border-box;
+                 padding-left: 10px; object-fit: cover; color: red; }",
+    );
+    let view = icon_view();
+    let mut runtime = runtime_at(&dir);
+    let _ = runtime.render_now(&view, std::slice::from_ref(&sheet));
+    let _ = runtime.poll_resource_tasks();
+    let result = runtime.render_now(&view, &[sheet]);
+    let _ = std::fs::remove_dir_all(dir);
+    result
+}
+
+#[test]
+fn svg_cover_is_clipped_to_the_content_box() {
+    let result = svg_cover_frame();
+    let size = Size::new(VIEWPORT, VIEWPORT);
+    let mut renderer = CpuRenderer::new(RendererId::from_raw(2));
+    let frame = RenderFrame::new(result.snapshot().clone(), size);
+    renderer
+        .render(
+            &FrameSubmission::new(frame),
+            &RenderTarget::bitmap(BitmapTarget::new(size)),
+        )
+        .expect("renders SVG cover");
+    let pixmap = renderer.pixmap().unwrap();
+    assert!(pixmap.pixel(20, 25).unwrap().red() > 200);
+    assert_eq!(
+        pixmap.pixel(5, 25).unwrap().alpha(),
+        0,
+        "left padding is clear"
+    );
+    assert_eq!(
+        pixmap.pixel(45, 25).unwrap().alpha(),
+        0,
+        "right overflow is clipped"
+    );
+}
+
+#[doc = include_str!("svg_vector.doc/svg_cover_is_clipped_on_the_gpu.md")]
+#[test]
+#[ignore = "needs a hardware GPU adapter"]
+fn svg_cover_is_clipped_on_the_gpu() {
+    use obscur_render_vello::renderer::{VelloDevice, VelloRenderer};
+
+    let instance = wgpu::Instance::default();
+    let adapter = pollster::block_on(instance.request_adapter(&Default::default()))
+        .expect("a GPU adapter is required");
+    let info = adapter.get_info();
+    assert_ne!(info.device_type, wgpu::DeviceType::Cpu);
+    eprintln!("GPU: {} ({:?})", info.name, info.backend);
+    let (device, queue) = pollster::block_on(adapter.request_device(&Default::default()))
+        .expect("opens the GPU device");
+    let device = VelloDevice::new(device, queue).expect("creates the Vello device");
+    let mut renderer = VelloRenderer::new(RendererId::from_raw(3)).with_device(device);
+    let result = svg_cover_frame();
+    let frame = RenderFrame::new(result.snapshot().clone(), Size::new(VIEWPORT, VIEWPORT));
+    let (width, height, pixels) = renderer
+        .render_to_image(&FrameSubmission::new(frame), 64, 64)
+        .expect("renders SVG cover");
+    assert_eq!((width, height), (64, 64));
+    let pixel = |x: usize, y: usize| &pixels[(y * 64 + x) * 4..][..4];
+    assert!(pixel(20, 25)[0] > 200 && pixel(20, 25)[3] > 200);
+    assert_eq!(pixel(5, 25)[3], 0, "left padding is clear");
+    assert_eq!(pixel(45, 25)[3], 0, "right overflow is clipped");
+}
+
+#[doc = include_str!("svg_vector.doc/svg_preserves_fill_rule_and_paint_opacity.md")]
+#[test]
+fn svg_preserves_fill_rule_and_paint_opacity() {
+    let dir = temp_asset_dir();
+    std::fs::write(
+        dir.join("icon.svg"),
+        br##"<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20">
+        <path d="M0 0 H16 V20 H0 Z M5 5 H11 V15 H5 Z"
+              fill="currentColor" fill-rule="evenodd" fill-opacity=".5"/>
+        <rect x="16" width="4" height="20" fill="#00ff00" fill-opacity=".5"/>
+        </svg>"##,
+    )
+    .expect("write svg");
+    let sheet = compile(".icon { width: 20px; height: 20px; color: rgba(255, 0, 0, .5) }");
+    let mut runtime = runtime_at(&dir);
+    let view = icon_view();
+    let _ = runtime.render_now(&view, std::slice::from_ref(&sheet));
+    let _ = runtime.poll_resource_tasks();
+    let result = runtime.render_now(&view, &[sheet]);
+    std::fs::remove_dir_all(dir).expect("remove test assets");
+
+    let size = Size::new(VIEWPORT, VIEWPORT);
+    let mut renderer = CpuRenderer::new(RendererId::from_raw(2));
+    let frame = RenderFrame::new(result.snapshot().clone(), size);
+    renderer
+        .render(
+            &FrameSubmission::new(frame),
+            &RenderTarget::bitmap(BitmapTarget::new(size)),
+        )
+        .expect("renders SVG fills");
+    let pixmap = renderer.pixmap().unwrap();
+    assert_eq!(pixmap.pixel(8, 10).unwrap().alpha(), 0);
+    let current = pixmap.pixel(2, 10).unwrap();
+    assert!((63..=65).contains(&current.alpha()), "{current:?}");
+    assert_eq!(current.red(), current.alpha());
+    let solid = pixmap.pixel(18, 10).unwrap();
+    assert!((127..=129).contains(&solid.alpha()), "{solid:?}");
+    assert_eq!(solid.green(), solid.alpha());
+}
+
+#[doc = include_str!("svg_vector.doc/svg_resource_failures_report_once.md")]
+#[test]
+fn svg_resource_failures_report_once() {
+    use obscur_kit::diagnostics::{Diagnostic, DiagnosticSink};
+    use std::{cell::RefCell, rc::Rc};
+
+    struct Recorder(Rc<RefCell<Vec<Diagnostic>>>);
+
+    impl DiagnosticSink for Recorder {
+        fn emit(&self, diagnostic: &Diagnostic) {
+            self.0.borrow_mut().push(diagnostic.clone());
+        }
+    }
+
+    let dir = temp_asset_dir();
+    std::fs::write(dir.join("broken.svg"), b"invalid SVG").expect("write fixture");
+
+    for (source, loader_installed, expected_code) in [
+        ("missing.svg", true, "resource.load_failed"),
+        ("broken.svg", true, "resource.load_failed"),
+        ("icon.svg", false, "resource.no_loader"),
+    ] {
+        let mut runtime = if loader_installed {
+            runtime_at(&dir)
+        } else {
+            let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VIEWPORT, VIEWPORT));
+            KitBootstrap::new().install_image_resources(&mut runtime, &dir);
+            runtime
+        };
+        let diagnostics = Rc::new(RefCell::new(Vec::new()));
+        runtime.set_diagnostic_sink(Box::new(Recorder(Rc::clone(&diagnostics))));
+        let view = View::from_fragment(ViewFragment::from_nodes(vec![
+            Image::new(source).into_view_node(),
+        ]));
+        for _ in 0..3 {
+            let _ = runtime.render_now(&view, &[]);
+            let _ = runtime.poll_resource_tasks();
+        }
+
+        let diagnostics = diagnostics.borrow();
+        assert_eq!(diagnostics.len(), 1, "{source}: {diagnostics:?}");
+        let diagnostic = &diagnostics[0];
+        assert_eq!(diagnostic.code.as_str(), expected_code);
+        assert!(diagnostic.message.contains(source), "{diagnostic:?}");
+        if loader_installed {
+            assert!(diagnostic.context.resource.is_some());
+            assert!(diagnostic.context.node.is_some());
+            assert!(diagnostic.context.window.is_some());
+        }
+    }
+    std::fs::remove_dir_all(dir).expect("remove test assets");
+}
+
+#[doc = include_str!("svg_vector.doc/svg_background_tiles_stay_vector.md")]
+#[test]
+fn svg_background_tiles_stay_vector() {
+    let dir = temp_asset_dir();
+    let view = View::from_fragment(ViewFragment::from_nodes(vec![
+        obscur_kit::view::view::ViewNode::element(ComponentId::from_raw(42))
+            .with_prop(ViewProperty::new(CLASS, ViewValue::Text("icon".into()))),
+    ]));
+    for layers in [
+        "url(icon.svg)",
+        "url(icon.svg), linear-gradient(blue, blue)",
+    ] {
+        let sheet = compile(&format!(
+            ".icon {{ width: 21px; height: 18px; color: red;
+                      background-image: {layers}; background-size: 8px 6px;
+                      background-position: 3px 4px; background-repeat: repeat-x }}"
+        ));
+        let mut runtime = runtime_at(&dir);
+        let _ = runtime.render_now(&view, std::slice::from_ref(&sheet));
+        assert_eq!(runtime.poll_resource_tasks(), 1);
+        let result = runtime.render_now(&view, &[sheet]);
+        assert_eq!(painted_fills(&result).len(), 4);
+        assert!(
+            !result
+                .snapshot()
+                .display_list()
+                .commands()
+                .iter()
+                .any(|command| matches!(command, PaintCommand::DrawImage { .. }))
+        );
+
+        let size = Size::new(VIEWPORT, VIEWPORT);
+        let frame = RenderFrame::new(result.snapshot().clone(), size);
+        let mut renderer = CpuRenderer::new(RendererId::from_raw(2));
+        renderer
+            .render(
+                &FrameSubmission::new(frame),
+                &RenderTarget::bitmap(BitmapTarget::new(size)),
+            )
+            .expect("renders SVG background");
+        let pixels = renderer.pixmap().unwrap();
+        for x in [0, 5, 15, 20] {
+            assert_eq!(pixels.pixel(x, 6).unwrap().red(), 255, "x={x}");
+        }
+        assert_eq!(pixels.pixel(5, 3).unwrap().red(), 0);
+        assert_eq!(pixels.pixel(5, 10).unwrap().red(), 0);
+        assert_eq!(pixels.pixel(21, 6).unwrap().red(), 0);
+    }
+    std::fs::remove_dir_all(dir).expect("remove test assets");
 }

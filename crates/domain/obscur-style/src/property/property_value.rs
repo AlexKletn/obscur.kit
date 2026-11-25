@@ -1,84 +1,197 @@
-#![doc = include_str!("property_value.doc/_module.md")]
+#![doc = include_str!("../../docs/api/property/property_value.doc/_module.md")]
 
 use crate::property::{
-    BackgroundLayer, BackgroundPosition, BackgroundRepeat, BackgroundSize, BoxShadow,
-    ConicGradient, FilterFunction, FilterOp, GridAreaTemplate, GridLineValue, GridTrack,
-    GridTrackList, Length, LengthExpr, LinearGradient, ObjectFit, RadialGradient, StyleColor,
-    Transform, TransformFunction, TransformOrigin,
+    BackgroundAttachment, BackgroundBox, BackgroundLayer, BackgroundPosition, BackgroundRepeat,
+    BackgroundSize, BoxShadow, ConicGradient, FilterFunction, FilterOp, GridAreaTemplate,
+    GridLineValue, GridTrack, GridTrackList, Length, LengthExpr, LinearGradient, ObjectFit,
+    RadialGradient, StyleColor, Transform, TransformFunction, TransformOrigin,
 };
 use obscur_identity::InternedSymbol;
+use std::sync::Arc;
 
-#[doc = include_str!("property_value.doc/PropertyValue.md")]
+use super::{ClipRadius, ClipRectangleKind, ContainerComponent};
+
+#[doc = include_str!("../../docs/api/property/property_value.doc/PropertyValue.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum PropertyValue {
-    #[doc = include_str!("property_value.doc/Keyword.md")]
+    /// A keyword value, identified by its interned symbol (for example the
+    /// symbols for `block`, `flex` or `hidden`). The symbol is an identity
+    /// handle, not a string to be matched character-by-character.
     Keyword(InternedSymbol),
-    #[doc = include_str!("property_value.doc/Length.md")]
+    /// A length value (see [`Length`]).
     Length(Length),
-    #[doc = include_str!("property_value.doc/Calc.md")]
+    /// A symbolic `calc()` / `min()` / `max()` / `clamp()` length expression
+    /// (see [`LengthExpr`]), resolved to concrete pixels at the layout/compute
+    /// step against a [`LengthContext`](crate::property::LengthContext).
     Calc(LengthExpr),
-    #[doc = include_str!("property_value.doc/Number.md")]
+    /// A bare number (for example the value of `opacity`).
     Number(f32),
-    #[doc = include_str!("property_value.doc/Color.md")]
+    /// A color value (see [`StyleColor`]).
     Color(StyleColor),
-    #[doc = include_str!("property_value.doc/LinearGradient.md")]
+    /// A `linear-gradient(...)` background image (see [`LinearGradient`]): the
+    /// value of `background-image` when it is an authored linear gradient. The
+    /// gradient carries its angle (CSS convention) and resolved color stops; the
+    /// scene coordinator turns the angle plus the painted box's bounds into the
+    /// concrete gradient axis when it builds the fill brush (spec §5.2).
     LinearGradient(LinearGradient),
-    #[doc = include_str!("property_value.doc/RadialGradient.md")]
+    /// A `radial-gradient(...)` background image (see [`RadialGradient`]): the
+    /// value of `background-image` when it is an authored radial gradient. The
+    /// gradient carries its box-relative shape / size / center and resolved color
+    /// stops; the scene coordinator turns those plus the painted box's bounds into
+    /// the concrete center and radius when it builds the fill brush (spec §5.2).
     RadialGradient(RadialGradient),
-    #[doc = include_str!("property_value.doc/ConicGradient.md")]
+    #[doc = include_str!("../../docs/api/property/property_value.doc/ConicGradient.md")]
     ConicGradient(ConicGradient),
-    #[doc = include_str!("property_value.doc/BackgroundImageUrl.md")]
+    #[doc = include_str!("../../docs/api/property/property_value.doc/BackgroundImageUrl.md")]
     BackgroundImageUrl(Box<str>),
-    #[doc = include_str!("property_value.doc/BackgroundLayers.md")]
+    #[doc = include_str!("../../docs/api/property/property_value.doc/BackgroundLayers.md")]
     BackgroundLayers(Box<[BackgroundLayer]>),
-    #[doc = include_str!("property_value.doc/BackgroundSize.md")]
+    /// A `background-size` value (see [`BackgroundSize`]): how one copy of the
+    /// `background-image` is scaled (`cover` / `contain` / `auto` / explicit
+    /// per-axis lengths). The scene coordinator resolves it against the box and
+    /// the image's intrinsic size to a concrete tile width/height at paint time.
     BackgroundSize(BackgroundSize),
-    #[doc = include_str!("property_value.doc/BackgroundPosition.md")]
+    /// Background size values in authored layer order.
+    BackgroundSizes(Box<[BackgroundSize]>),
+    /// A `background-position` value (see [`BackgroundPosition`]): where the sized
+    /// image tile's origin sits within the box, one length/percentage per axis.
     BackgroundPosition(BackgroundPosition),
-    #[doc = include_str!("property_value.doc/BackgroundRepeat.md")]
+    /// Background position values in authored layer order.
+    BackgroundPositions(Box<[BackgroundPosition]>),
+    /// A `background-repeat` value (see [`BackgroundRepeat`]): whether the sized
+    /// image tile is tiled along each axis to fill the box.
     BackgroundRepeat(BackgroundRepeat),
-    #[doc = include_str!("property_value.doc/ObjectFit.md")]
+    /// Repeat values in authored background-layer order.
+    BackgroundRepeats(Box<[BackgroundRepeat]>),
+    /// Blend keywords in authored background-layer order.
+    BackgroundBlendModes(Box<[InternedSymbol]>),
+    /// Painting boundaries in authored layer order.
+    BackgroundClips(Box<[BackgroundBox]>),
+    /// A clip using the rounded edges of a layout box.
+    ClipBox(BackgroundBox),
+    /// A rectangle with optional rounded corners.
+    ClipRectangle {
+        /// Reference geometry.
+        reference_box: BackgroundBox,
+        /// Interpretation of the four coordinates.
+        kind: ClipRectangleKind,
+        /// Coordinates in CSS function order.
+        coordinates: Box<[LengthExpr; 4]>,
+        /// Horizontal and vertical radius for each corner, clockwise from top left.
+        radii: Option<Box<[[LengthExpr; 2]; 4]>>,
+    },
+    /// A CSS circle or ellipse.
+    ClipEllipse {
+        /// Reference geometry.
+        reference_box: BackgroundBox,
+        /// Center within the reference box.
+        center: [LengthExpr; 2],
+        /// Horizontal and vertical radii.
+        radii: [ClipRadius; 2],
+        /// Whether both axes use the same resolved circle radius.
+        circle: bool,
+    },
+    /// An SVG path resolved from the reference box's top-left corner.
+    ClipSvgPath {
+        /// Reference geometry.
+        reference_box: BackgroundBox,
+        /// Parsed drawing commands.
+        path: Arc<obscur_scene::path::Path>,
+        /// Flattened geometry for hit testing.
+        outline: Arc<obscur_scene::path::PathTrim>,
+    },
+    /// An authored polygon whose vertices resolve against the border box.
+    ClipPolygon {
+        /// Uses even-odd winding when true.
+        even_odd: bool,
+        /// Box used to resolve the vertex coordinates.
+        reference_box: BackgroundBox,
+        /// Pairs of horizontal and vertical offsets.
+        points: Box<[[LengthExpr; 2]]>,
+    },
+    /// Positioning boundaries in authored layer order.
+    BackgroundOrigins(Box<[BackgroundBox]>),
+    /// Background scrolling modes in layer order.
+    BackgroundAttachments(Box<[BackgroundAttachment]>),
+    /// An `object-fit` value (see [`ObjectFit`]): how a replaced element's content
+    /// (e.g. an `<img>`'s pixels) is scaled within its content box. The scene
+    /// coordinator resolves it against the box and the image's intrinsic size to a
+    /// concrete tile rect at paint time.
     ObjectFit(ObjectFit),
-    #[doc = include_str!("property_value.doc/BoxShadow.md")]
+    /// An ordered `box-shadow` list, in author order: the value of `box-shadow`.
+    /// Each [`BoxShadow`] carries its offsets, blur, spread, optional color, and
+    /// `inset` flag; `box-shadow: none` lowers to an **empty** list. CSS paints
+    /// the first-listed shadow on top, so the scene coordinator emits the list in
+    /// reverse order (spec §5.2).
     BoxShadow(Box<[BoxShadow]>),
-    #[doc = include_str!("property_value.doc/Filter.md")]
+    #[doc = include_str!("../../docs/api/property/property_value.doc/Filter.md")]
     Filter(Box<[FilterOp]>),
-    #[doc = include_str!("property_value.doc/FilterFunctions.md")]
+    #[doc = include_str!("../../docs/api/property/property_value.doc/FilterFunctions.md")]
     FilterFunctions(Box<[FilterFunction]>),
-    #[doc = include_str!("property_value.doc/FontFamilies.md")]
+    #[doc = include_str!("../../docs/api/property/property_value.doc/FontFamilies.md")]
     FontFamilies(Box<[Box<str>]>),
-    #[doc = include_str!("property_value.doc/GridTracks.md")]
+    #[doc = include_str!("../../docs/api/property/property_value.doc/GridTracks.md")]
     GridTracks(GridTrackList),
-    #[doc = include_str!("property_value.doc/GridLine.md")]
+    #[doc = include_str!("../../docs/api/property/property_value.doc/GridLine.md")]
     GridLine(GridLineValue),
-    #[doc = include_str!("property_value.doc/GridAreas.md")]
+    /// A parsed `grid-template-areas` grid: the value of a grid container's
+    /// `grid-template-areas`. The [`GridAreaTemplate`] carries every named area's
+    /// line-number rectangle (already validated as a filled rectangle at parse
+    /// time); the runtime looks a child's `grid-area: <name>` up against its
+    /// container's template to resolve a concrete placement (spec §4.2).
     GridAreas(GridAreaTemplate),
-    #[doc = include_str!("property_value.doc/GridAreaName.md")]
+    #[doc = include_str!("../../docs/api/property/property_value.doc/GridAreaName.md")]
     GridAreaName(Box<str>),
-    #[doc = include_str!("property_value.doc/Name.md")]
+    #[doc = include_str!("../../docs/api/property/property_value.doc/Name.md")]
     Name(Box<str>),
-    #[doc = include_str!("property_value.doc/String.md")]
+    /// A list of case-sensitive CSS query container names.
+    ContainerNames(Arc<[Box<str>]>),
+    #[doc = include_str!("../../docs/api/property/property_value.doc/String.md")]
     String(Box<str>),
-    #[doc = include_str!("property_value.doc/Transform.md")]
+    /// A resolved CSS 2D `transform`: the authored `<transform-function>+` list
+    /// composed left-to-right into a single 2x3 affine (see [`Transform`]).
+    /// `transform: none` lowers to an absent value, not this. The scene
+    /// coordinator wraps the affine about the element's `transform-origin` and
+    /// brackets the subtree's paint with it (spec §5.2).
     Transform(Transform),
-    #[doc = include_str!("property_value.doc/TransformFunctions.md")]
+    #[doc = include_str!("../../docs/api/property/property_value.doc/TransformFunctions.md")]
     TransformFunctions(Box<[TransformFunction]>),
-    #[doc = include_str!("property_value.doc/TransformOrigin.md")]
+    /// A resolved CSS `transform-origin` (see [`TransformOrigin`]): the point a
+    /// `transform` pivots about, defaulting to the box center (`50% 50%`).
     TransformOrigin(TransformOrigin),
-    #[doc = include_str!("property_value.doc/CustomRef.md")]
+    /// An unresolved `var(--name)` reference to a custom property, named by its
+    /// interned symbol. This is a pre-resolution placeholder: it is substituted
+    /// with the referenced custom property's value before computed-value
+    /// resolution (§4.14).
     CustomRef(InternedSymbol),
-    #[doc = include_str!("property_value.doc/RawTokens.md")]
+    /// A deferred reference replacing the complete container shorthand.
+    ContainerRef {
+        /// The custom property supplying the shorthand.
+        name: InternedSymbol,
+        /// The shorthand token fallback when the reference cannot be resolved.
+        fallback: Option<Arc<str>>,
+    },
+    /// Container shorthand fragments to substitute before lowering either longhand.
+    ContainerTemplate(Arc<[ContainerComponent]>),
+    /// Deferred flex-flow tokens to substitute and parse as one shorthand.
+    FlexFlowTemplate(Arc<[ContainerComponent]>),
+    /// A gap shorthand deferred until variable substitution is complete.
+    GapTemplate(Arc<[ContainerComponent]>),
+    /// An ordinary declaration deferred until its variable and fallback tokens can be resolved.
+    VariableTemplate(Arc<[ContainerComponent]>),
+    #[doc = include_str!("../../docs/api/property/property_value.doc/RawTokens.md")]
     RawTokens(Box<str>),
-    #[doc = include_str!("property_value.doc/Inherit.md")]
+    /// The CSS-wide `inherit` keyword.
     Inherit,
-    #[doc = include_str!("property_value.doc/Initial.md")]
+    /// The CSS-wide `initial` keyword.
     Initial,
-    #[doc = include_str!("property_value.doc/Unset.md")]
+    /// The CSS-wide `unset` keyword (behaves as `inherit` for inherited
+    /// properties and `initial` otherwise).
     Unset,
 }
 
 impl PropertyValue {
-    #[doc = include_str!("property_value.doc/uses_ch.md")]
+    #[doc = include_str!("../../docs/api/property/property_value.doc/uses_ch.md")]
     #[must_use]
     pub fn uses_ch(&self) -> bool {
         match self {
@@ -89,9 +202,19 @@ impl PropertyValue {
             Self::Filter(ops) => ops.iter().any(FilterOp::uses_ch),
             Self::FilterFunctions(list) => list.iter().any(FilterFunction::uses_ch),
             Self::TransformFunctions(list) => list.iter().any(TransformFunction::uses_ch),
+            Self::ClipEllipse { center, radii, .. } => {
+                center.iter().any(LengthExpr::uses_ch)
+                    || radii.iter().any(|radius| matches!(radius, ClipRadius::Length(length) if length.uses_ch()))
+            }
+            Self::ClipRectangle { coordinates, radii, .. } => coordinates.iter().any(|length| length.uses_ch())
+                || radii.as_ref().is_some_and(|radii| radii.iter().flatten().any(|length| length.uses_ch())),
+            Self::ClipPolygon { points, .. } => points.iter().flatten().any(|length| length.uses_ch()),
             Self::BackgroundSize(size) => size.uses_ch(),
+            Self::BackgroundSizes(sizes) => sizes.iter().any(|size| size.uses_ch()),
             Self::BackgroundPosition(position) => position.x().is_ch() || position.y().is_ch(),
+            Self::BackgroundPositions(positions) => positions.iter().any(|position| position.x().is_ch() || position.y().is_ch()),
             Self::TransformOrigin(origin) => origin.x().is_ch() || origin.y().is_ch(),
+            Self::LinearGradient(gradient) => gradient.uses_ch(),
             Self::RadialGradient(gradient) => gradient.uses_ch(),
             Self::ConicGradient(gradient) => gradient.uses_ch(),
             Self::BackgroundLayers(layers) => layers.iter().any(BackgroundLayer::uses_ch),
@@ -102,9 +225,15 @@ impl PropertyValue {
             Self::Keyword(_)
             | Self::Number(_)
             | Self::Color(_)
-            | Self::LinearGradient(_)
             | Self::BackgroundImageUrl(_)
             | Self::BackgroundRepeat(_)
+            | Self::BackgroundRepeats(_)
+            | Self::BackgroundBlendModes(_)
+            | Self::BackgroundClips(_)
+            | Self::ClipBox(_)
+            | Self::ClipSvgPath { .. }
+            | Self::BackgroundOrigins(_)
+            | Self::BackgroundAttachments(_)
             | Self::ObjectFit(_)
             | Self::FontFamilies(_)
             | Self::GridLine(_)
@@ -114,7 +243,13 @@ impl PropertyValue {
             // A `content` string and a registry name are both plain text; they
             // carry no length.
             | Self::String(_)
+            | Self::ContainerNames(_)
             | Self::Name(_)
+            | Self::ContainerRef { .. }
+            | Self::ContainerTemplate(_)
+            | Self::FlexFlowTemplate(_)
+            | Self::GapTemplate(_)
+            | Self::VariableTemplate(_)
             | Self::CustomRef(_)
             // A custom property's declared text carries whatever units it was
             // written with, `ch` included — but it is parsed into a real value
@@ -127,7 +262,7 @@ impl PropertyValue {
         }
     }
 
-    #[doc = include_str!("property_value.doc/as_color.md")]
+    /// Returns the color if this value is a [`PropertyValue::Color`].
     #[must_use]
     pub const fn as_color(&self) -> Option<StyleColor> {
         match self {
@@ -136,7 +271,8 @@ impl PropertyValue {
         }
     }
 
-    #[doc = include_str!("property_value.doc/as_linear_gradient.md")]
+    /// Returns the linear gradient if this value is a
+    /// [`PropertyValue::LinearGradient`].
     #[must_use]
     pub const fn as_linear_gradient(&self) -> Option<&LinearGradient> {
         match self {
@@ -145,7 +281,8 @@ impl PropertyValue {
         }
     }
 
-    #[doc = include_str!("property_value.doc/as_radial_gradient.md")]
+    /// Returns the radial gradient if this value is a
+    /// [`PropertyValue::RadialGradient`].
     #[must_use]
     pub const fn as_radial_gradient(&self) -> Option<&RadialGradient> {
         match self {
@@ -154,7 +291,8 @@ impl PropertyValue {
         }
     }
 
-    #[doc = include_str!("property_value.doc/as_conic_gradient.md")]
+    /// Returns the conic gradient if this value is a
+    /// [`PropertyValue::ConicGradient`].
     #[must_use]
     pub const fn as_conic_gradient(&self) -> Option<&ConicGradient> {
         match self {
@@ -163,7 +301,8 @@ impl PropertyValue {
         }
     }
 
-    #[doc = include_str!("property_value.doc/as_background_image_url.md")]
+    /// Returns the raw `url(...)` string if this value is a
+    /// [`PropertyValue::BackgroundImageUrl`] (the authored URL/path, unresolved).
     #[must_use]
     pub fn as_background_image_url(&self) -> Option<&str> {
         match self {
@@ -172,7 +311,7 @@ impl PropertyValue {
         }
     }
 
-    #[doc = include_str!("property_value.doc/as_background_layers.md")]
+    #[doc = include_str!("../../docs/api/property/property_value.doc/as_background_layers.md")]
     #[must_use]
     pub fn as_background_layers(&self) -> Option<&[BackgroundLayer]> {
         match self {
@@ -181,7 +320,8 @@ impl PropertyValue {
         }
     }
 
-    #[doc = include_str!("property_value.doc/as_background_size.md")]
+    /// Returns the `background-size` if this value is a
+    /// [`PropertyValue::BackgroundSize`].
     #[must_use]
     pub const fn as_background_size(&self) -> Option<BackgroundSize> {
         match self {
@@ -190,7 +330,8 @@ impl PropertyValue {
         }
     }
 
-    #[doc = include_str!("property_value.doc/as_background_position.md")]
+    /// Returns the `background-position` if this value is a
+    /// [`PropertyValue::BackgroundPosition`].
     #[must_use]
     pub const fn as_background_position(&self) -> Option<BackgroundPosition> {
         match self {
@@ -199,7 +340,8 @@ impl PropertyValue {
         }
     }
 
-    #[doc = include_str!("property_value.doc/as_background_repeat.md")]
+    /// Returns the `background-repeat` if this value is a
+    /// [`PropertyValue::BackgroundRepeat`].
     #[must_use]
     pub const fn as_background_repeat(&self) -> Option<BackgroundRepeat> {
         match self {
@@ -208,7 +350,7 @@ impl PropertyValue {
         }
     }
 
-    #[doc = include_str!("property_value.doc/as_object_fit.md")]
+    /// Returns the `object-fit` if this value is a [`PropertyValue::ObjectFit`].
     #[must_use]
     pub const fn as_object_fit(&self) -> Option<ObjectFit> {
         match self {
@@ -217,7 +359,8 @@ impl PropertyValue {
         }
     }
 
-    #[doc = include_str!("property_value.doc/as_box_shadows.md")]
+    /// Returns the ordered `box-shadow` list if this value is a
+    /// [`PropertyValue::BoxShadow`] (an empty slice for `box-shadow: none`).
     #[must_use]
     pub fn as_box_shadows(&self) -> Option<&[BoxShadow]> {
         match self {
@@ -226,7 +369,10 @@ impl PropertyValue {
         }
     }
 
-    #[doc = include_str!("property_value.doc/as_filter_ops.md")]
+    /// Returns the ordered `filter` op list if this value is a
+    /// [`PropertyValue::Filter`] (an empty slice for `filter: none` or a filter
+    /// with no honored functions). Each entry is a [`FilterOp`]
+    /// (a `drop-shadow(...)` or a `blur(<length>)`), in author order.
     #[must_use]
     pub fn as_filter_ops(&self) -> Option<&[FilterOp]> {
         match self {
@@ -235,7 +381,8 @@ impl PropertyValue {
         }
     }
 
-    #[doc = include_str!("property_value.doc/font_families.md")]
+    /// Builds a [`PropertyValue::FontFamilies`] from an ordered iterator of
+    /// family / generic-keyword names, preserving author order.
     #[must_use]
     pub fn font_families<I, S>(names: I) -> Self
     where
@@ -245,7 +392,8 @@ impl PropertyValue {
         Self::FontFamilies(names.into_iter().map(Into::into).collect())
     }
 
-    #[doc = include_str!("property_value.doc/as_font_families.md")]
+    /// Returns the ordered `font-family` list if this value is a
+    /// [`PropertyValue::FontFamilies`].
     #[must_use]
     pub fn as_font_families(&self) -> Option<&[Box<str>]> {
         match self {
@@ -254,7 +402,8 @@ impl PropertyValue {
         }
     }
 
-    #[doc = include_str!("property_value.doc/grid_tracks.md")]
+    /// Builds a [`PropertyValue::GridTracks`] from an ordered iterator of
+    /// [`GridTrack`]s (with no line names), preserving author order.
     #[must_use]
     pub fn grid_tracks<I>(tracks: I) -> Self
     where
@@ -263,13 +412,15 @@ impl PropertyValue {
         Self::GridTracks(GridTrackList::from_tracks(tracks))
     }
 
-    #[doc = include_str!("property_value.doc/grid_track_list.md")]
+    /// Builds a [`PropertyValue::GridTracks`] from a [`GridTrackList`] (tracks +
+    /// `[name]` line names).
     #[must_use]
     pub const fn grid_track_list(list: GridTrackList) -> Self {
         Self::GridTracks(list)
     }
 
-    #[doc = include_str!("property_value.doc/as_grid_tracks.md")]
+    /// Returns the ordered grid track slice if this value is a
+    /// [`PropertyValue::GridTracks`].
     #[must_use]
     pub fn as_grid_tracks(&self) -> Option<&[GridTrack]> {
         match self {
@@ -278,7 +429,8 @@ impl PropertyValue {
         }
     }
 
-    #[doc = include_str!("property_value.doc/as_grid_track_list.md")]
+    /// Returns the full grid track list (tracks + line names) if this value is a
+    /// [`PropertyValue::GridTracks`].
     #[must_use]
     pub const fn as_grid_track_list(&self) -> Option<&GridTrackList> {
         match self {
@@ -287,7 +439,7 @@ impl PropertyValue {
         }
     }
 
-    #[doc = include_str!("property_value.doc/as_grid_line.md")]
+    #[doc = include_str!("../../docs/api/property/property_value.doc/as_grid_line.md")]
     #[must_use]
     pub fn as_grid_line(&self) -> Option<&GridLineValue> {
         match self {
@@ -296,7 +448,8 @@ impl PropertyValue {
         }
     }
 
-    #[doc = include_str!("property_value.doc/as_grid_areas.md")]
+    /// Returns the parsed grid-area template if this value is a
+    /// [`PropertyValue::GridAreas`].
     #[must_use]
     pub const fn as_grid_areas(&self) -> Option<&GridAreaTemplate> {
         match self {
@@ -305,7 +458,8 @@ impl PropertyValue {
         }
     }
 
-    #[doc = include_str!("property_value.doc/as_grid_area_name.md")]
+    /// Returns the named-area reference if this value is a
+    /// [`PropertyValue::GridAreaName`].
     #[must_use]
     pub fn as_grid_area_name(&self) -> Option<&str> {
         match self {
@@ -314,7 +468,8 @@ impl PropertyValue {
         }
     }
 
-    #[doc = include_str!("property_value.doc/as_transform.md")]
+    /// Returns the resolved transform if this value is a
+    /// [`PropertyValue::Transform`].
     #[must_use]
     pub const fn as_transform(&self) -> Option<Transform> {
         match self {
@@ -323,7 +478,8 @@ impl PropertyValue {
         }
     }
 
-    #[doc = include_str!("property_value.doc/as_transform_origin.md")]
+    /// Returns the transform origin if this value is a
+    /// [`PropertyValue::TransformOrigin`].
     #[must_use]
     pub const fn as_transform_origin(&self) -> Option<TransformOrigin> {
         match self {
@@ -332,7 +488,7 @@ impl PropertyValue {
         }
     }
 
-    #[doc = include_str!("property_value.doc/as_length.md")]
+    /// Returns the length if this value is a [`PropertyValue::Length`].
     #[must_use]
     pub const fn as_length(&self) -> Option<Length> {
         match self {
@@ -341,7 +497,7 @@ impl PropertyValue {
         }
     }
 
-    #[doc = include_str!("property_value.doc/as_calc.md")]
+    /// Returns the length expression if this value is a [`PropertyValue::Calc`].
     #[must_use]
     pub const fn as_calc(&self) -> Option<&LengthExpr> {
         match self {
@@ -350,7 +506,8 @@ impl PropertyValue {
         }
     }
 
-    #[doc = include_str!("property_value.doc/is_wide_keyword.md")]
+    /// Returns `true` when this value is one of the CSS-wide keywords
+    /// (`inherit`, `initial`, `unset`).
     #[must_use]
     pub const fn is_wide_keyword(&self) -> bool {
         matches!(self, Self::Inherit | Self::Initial | Self::Unset)

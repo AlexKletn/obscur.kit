@@ -1,21 +1,21 @@
-#![doc = include_str!("message_args.doc/_module.md")]
+//! `MessageArgs`: the named parameters a message is formatted with (spec §7.2).
 
 use crate::message::{GrammaticalCase, GrammaticalGender, MessageValue};
 
-#[doc = include_str!("message_args.doc/MessageArgs.md")]
+#[doc = include_str!("../../docs/api/message/message_args.doc/MessageArgs.md")]
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct MessageArgs {
     bindings: Vec<(Box<str>, MessageValue)>,
 }
 
 impl MessageArgs {
-    #[doc = include_str!("message_args.doc/new.md")]
+    /// Creates an empty argument set.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    #[doc = include_str!("message_args.doc/set.md")]
+    /// Binds `name` to `value`, replacing any previous binding of that name.
     pub fn set(&mut self, name: impl Into<Box<str>>, value: MessageValue) {
         let name = name.into();
         if let Some(slot) = self.bindings.iter_mut().find(|(n, _)| *n == name) {
@@ -25,38 +25,39 @@ impl MessageArgs {
         }
     }
 
-    #[doc = include_str!("message_args.doc/with.md")]
+    /// Binds `name` to `value` (fluent builder).
     #[must_use]
     pub fn with(mut self, name: impl Into<Box<str>>, value: MessageValue) -> Self {
         self.set(name, value);
         self
     }
 
-    #[doc = include_str!("message_args.doc/with_integer.md")]
+    /// Binds `name` to an integer count (fluent builder).
     #[must_use]
     pub fn with_integer(self, name: impl Into<Box<str>>, count: i64) -> Self {
         self.with(name, MessageValue::integer(count))
     }
 
-    #[doc = include_str!("message_args.doc/with_text.md")]
+    /// Binds `name` to a literal string (fluent builder).
     #[must_use]
     pub fn with_text(self, name: impl Into<Box<str>>, text: impl Into<Box<str>>) -> Self {
         self.with(name, MessageValue::text(text))
     }
 
-    #[doc = include_str!("message_args.doc/with_gender.md")]
+    /// Binds `name` to a grammatical gender (fluent builder; spec §7.2 gender).
     #[must_use]
     pub fn with_gender(self, name: impl Into<Box<str>>, gender: &GrammaticalGender) -> Self {
         self.with(name, MessageValue::gender(gender))
     }
 
-    #[doc = include_str!("message_args.doc/with_case.md")]
+    /// Binds `name` to a grammatical case (fluent builder; spec §7.2 case
+    /// variants).
     #[must_use]
     pub fn with_case(self, name: impl Into<Box<str>>, case: &GrammaticalCase) -> Self {
         self.with(name, MessageValue::grammatical_case(case))
     }
 
-    #[doc = include_str!("message_args.doc/get.md")]
+    /// Returns the value bound to `name`, if any.
     #[must_use]
     pub fn get(&self, name: &str) -> Option<&MessageValue> {
         self.bindings
@@ -65,13 +66,13 @@ impl MessageArgs {
             .map(|(_, v)| v)
     }
 
-    #[doc = include_str!("message_args.doc/len.md")]
+    /// Returns how many names are bound.
     #[must_use]
     pub fn len(&self) -> usize {
         self.bindings.len()
     }
 
-    #[doc = include_str!("message_args.doc/is_empty.md")]
+    /// Returns whether nothing is bound.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.bindings.is_empty()

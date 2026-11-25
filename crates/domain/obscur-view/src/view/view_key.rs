@@ -1,25 +1,25 @@
-#![doc = include_str!("view_key.doc/_module.md")]
+//! `ViewKey`: explicit stable identity for a keyed child.
 
 use obscur_identity::StableKey;
 
-#[doc = include_str!("view_key.doc/ViewKey.md")]
+#[doc = include_str!("../../docs/api/view/view_key.doc/ViewKey.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ViewKey(StableKey);
 
 impl ViewKey {
-    #[doc = include_str!("view_key.doc/new.md")]
+    /// Wraps a foundation [`StableKey`] as a `ViewKey`.
     #[must_use]
     pub const fn new(key: StableKey) -> Self {
         Self(key)
     }
 
-    #[doc = include_str!("view_key.doc/stable_key.md")]
+    /// Returns the underlying [`StableKey`].
     #[must_use]
     pub const fn stable_key(&self) -> &StableKey {
         &self.0
     }
 
-    #[doc = include_str!("view_key.doc/into_stable_key.md")]
+    /// Consumes this `ViewKey`, returning the underlying [`StableKey`].
     #[must_use]
     pub fn into_stable_key(self) -> StableKey {
         self.0
@@ -38,13 +38,19 @@ impl From<u64> for ViewKey {
     }
 }
 
+impl From<usize> for ViewKey {
+    fn from(value: usize) -> Self {
+        Self::from(value as u64)
+    }
+}
+
 impl From<&str> for ViewKey {
     fn from(value: &str) -> Self {
         Self(StableKey::from(value))
     }
 }
 
-#[doc = include_str!("view_key.doc/From.md")]
+#[doc = include_str!("../../docs/api/view/view_key.doc/From.md")]
 impl From<String> for ViewKey {
     fn from(value: String) -> Self {
         Self::from(value.as_str())

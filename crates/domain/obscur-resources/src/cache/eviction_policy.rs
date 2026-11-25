@@ -1,20 +1,22 @@
-#![doc = include_str!("eviction_policy.doc/_module.md")]
+//! Choosing which cache entry to evict (spec §5.19 eviction).
 
 use crate::cache::CacheEntry;
 
-#[doc = include_str!("eviction_policy.doc/EvictionPolicy.md")]
+#[doc = include_str!("../../docs/api/cache/eviction_policy.doc/EvictionPolicy.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EvictionPolicy {
-    #[doc = include_str!("eviction_policy.doc/Lru.md")]
+    /// Least Recently Used: evict the smallest `last_access` (ties → smallest key).
     Lru,
-    #[doc = include_str!("eviction_policy.doc/Lfu.md")]
+    /// Least Frequently Used: evict the smallest `hits` (ties → smallest
+    /// `last_access`, then key).
     Lfu,
-    #[doc = include_str!("eviction_policy.doc/VisibilityAware.md")]
+    /// Visibility-aware: evict the smallest [`VisibilityPriority`](crate::cache::VisibilityPriority) (spec §5.19),
+    /// then the smallest `last_access`, then key.
     VisibilityAware,
 }
 
 impl EvictionPolicy {
-    #[doc = include_str!("eviction_policy.doc/choose_victim.md")]
+    #[doc = include_str!("../../docs/api/cache/eviction_policy.doc/choose_victim.md")]
     #[must_use]
     pub fn choose_victim<'a>(&self, entries: &'a [CacheEntry]) -> Option<&'a CacheEntry> {
         entries.iter().min_by(|a, b| match self {
@@ -37,7 +39,7 @@ impl EvictionPolicy {
 }
 
 impl Default for EvictionPolicy {
-    #[doc = include_str!("eviction_policy.doc/default.md")]
+    /// The default policy is [`EvictionPolicy::VisibilityAware`].
     fn default() -> Self {
         Self::VisibilityAware
     }

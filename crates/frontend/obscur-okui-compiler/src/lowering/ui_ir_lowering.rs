@@ -1,4 +1,5 @@
-#![doc = include_str!("ui_ir_lowering.doc/_module.md")]
+//! `UiIrLowering`: lowers a `.okui` [`Document`] AST into a [`UiIrDocument`]
+//! (spec §2.15).
 
 use obscur_capability::CapabilityId;
 use obscur_okui_syntax::ast::{Attribute, Document, Element, Expression};
@@ -10,34 +11,9 @@ use obscur_ui_ir::version::UiIrVersion;
 
 use crate::lowering::{ExpressionLowering, SourceMapBuilder};
 
-#[doc = include_str!("ui_ir_lowering.doc/LoweringError.md")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum LoweringError {
-    #[doc = include_str!("ui_ir_lowering.doc/EmptyDocument.md")]
-    EmptyDocument,
-    #[doc = include_str!("ui_ir_lowering.doc/MissingTagName.md")]
-    MissingTagName(u32),
-    #[doc = include_str!("ui_ir_lowering.doc/MissingLoopKey.md")]
-    MissingLoopKey(u32),
-}
+use super::LoweringError;
 
-impl std::fmt::Display for LoweringError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::EmptyDocument => write!(f, "cannot lower an empty document"),
-            Self::MissingTagName(offset) => {
-                write!(f, "element is missing a tag name at offset {offset}")
-            }
-            Self::MissingLoopKey(offset) => {
-                write!(f, "loop is missing a mandatory `key` at offset {offset}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for LoweringError {}
-
-#[doc = include_str!("ui_ir_lowering.doc/UiIrLowering.md")]
+#[doc = include_str!("../../docs/api/lowering/ui_ir_lowering.doc/UiIrLowering.md")]
 #[derive(Debug, Clone)]
 pub struct UiIrLowering {
     source_map: SourceMapBuilder,
@@ -48,7 +24,8 @@ pub struct UiIrLowering {
 }
 
 impl UiIrLowering {
-    #[doc = include_str!("ui_ir_lowering.doc/new.md")]
+    /// Creates a lowering pass whose source map records spans under
+    /// `source_name` (the logical `.okui` source identifier).
     #[must_use]
     pub fn new(source_name: impl Into<Box<str>>) -> Self {
         Self {
@@ -60,14 +37,14 @@ impl UiIrLowering {
         }
     }
 
-    #[doc = include_str!("ui_ir_lowering.doc/alloc_id.md")]
+    /// Allocates the next stable node id (post-increment).
     fn alloc_id(&mut self) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
         id
     }
 
-    #[doc = include_str!("ui_ir_lowering.doc/lower.md")]
+    #[doc = include_str!("../../docs/api/lowering/ui_ir_lowering.doc/lower.md")]
     pub fn lower(
         mut self,
         doc: &Document,
@@ -100,7 +77,7 @@ impl UiIrLowering {
         Ok(document)
     }
 
-    #[doc = include_str!("ui_ir_lowering.doc/lower_element.md")]
+    #[doc = include_str!("../../docs/api/lowering/ui_ir_lowering.doc/lower_element.md")]
     fn lower_element(&mut self, element: &Element) -> Result<UiIrNode, LoweringError> {
         let offset = element.syntax().offset().unwrap_or(0);
         let id = self.alloc_id();
@@ -128,7 +105,10 @@ impl UiIrLowering {
         Ok(node)
     }
 
-    #[doc = include_str!("ui_ir_lowering.doc/lower_loop.md")]
+    /// Lowers a `<For>`/`<VirtualFor>` into a [`Loop`](obscur_ui_ir::document::UiIrNodeKind::Loop)
+    /// node, carrying the mandatory `key={…}` on the node and the iterated
+    /// collection (`each={…}`) as a property; a missing key is a non-fatal
+    /// [`LoweringError::MissingLoopKey`] diagnostic (spec §2.11).
     fn lower_loop(
         &mut self,
         element: &Element,
@@ -154,7 +134,10 @@ impl UiIrLowering {
         Ok(node)
     }
 
-    #[doc = include_str!("ui_ir_lowering.doc/lower_conditional.md")]
+    /// Lowers an `<If>`/`<ElseIf>`/`<Else>` into a
+    /// [`Conditional`](obscur_ui_ir::document::UiIrNodeKind::Conditional) node;
+    /// the branch condition (`cond={…}`) flows through as a property and the
+    /// guarded body as children (spec §2.11).
     fn lower_conditional(
         &mut self,
         element: &Element,
@@ -167,7 +150,8 @@ impl UiIrLowering {
         Ok(node)
     }
 
-    #[doc = include_str!("ui_ir_lowering.doc/lower_attributes.md")]
+    /// Folds every attribute of `element` onto `node` as an event or property,
+    /// collecting any declared `requires` capability along the way.
     fn lower_attributes(&mut self, element: &Element, mut node: UiIrNode) -> UiIrNode {
         for attribute in element.attributes() {
             if attribute.is_event() {
@@ -200,12 +184,18 @@ impl UiIrLowering {
             } else {
                 UiIrExpression::literal(UiIrValue::Null)
             };
-            node = node.with_property(UiIrProperty::new(name, value));
+            node = if name == "key"
+                && matches!(node.kind(), UiIrNodeKind::Element | UiIrNodeKind::Component)
+            {
+                node.with_key(value)
+            } else {
+                node.with_property(UiIrProperty::new(name, value))
+            };
         }
         node
     }
 
-    #[doc = include_str!("ui_ir_lowering.doc/lower_children.md")]
+    /// Folds every content child of `element` onto `node`.
     fn lower_children(
         &mut self,
         element: &Element,
@@ -238,7 +228,9 @@ impl UiIrLowering {
         Ok(node)
     }
 
-    #[doc = include_str!("ui_ir_lowering.doc/lower_interpolation.md")]
+    /// Lowers an `{expr}` interpolation to the IR's
+    /// [interpolation node](UiIrNode::interpolation), carrying the expression
+    /// itself — `ViewCodegen` emits it as the text node's content.
     fn lower_interpolation(&mut self, node: &SyntaxNode, expression: &Expression) -> UiIrNode {
         let id = self.alloc_id();
         self.source_map.record(id, node.offset().unwrap_or(0));
@@ -246,12 +238,13 @@ impl UiIrLowering {
     }
 }
 
-#[doc = include_str!("ui_ir_lowering.doc/starts_uppercase.md")]
+/// Returns whether `tag`'s first character is an ASCII uppercase letter — the
+/// component-vs-element distinction.
 fn starts_uppercase(tag: &str) -> bool {
     tag.chars().next().is_some_and(char::is_uppercase)
 }
 
-#[doc = include_str!("ui_ir_lowering.doc/event_local_name.md")]
+#[doc = include_str!("../../docs/api/lowering/ui_ir_lowering.doc/event_local_name.md")]
 pub(crate) fn event_local_name(attribute: &Attribute) -> String {
     let mut seen_colon = false;
     for token in attribute.syntax().tokens() {
@@ -264,7 +257,7 @@ pub(crate) fn event_local_name(attribute: &Attribute) -> String {
     attribute.name().unwrap_or_default()
 }
 
-#[doc = include_str!("ui_ir_lowering.doc/attribute_value_text.md")]
+#[doc = include_str!("../../docs/api/lowering/ui_ir_lowering.doc/attribute_value_text.md")]
 pub(crate) fn attribute_value_text(attribute: &Attribute) -> Option<String> {
     if let Some(literal) = attribute.string_value() {
         return Some(literal);

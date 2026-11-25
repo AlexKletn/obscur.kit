@@ -1,15 +1,26 @@
-#![doc = include_str!("semantic_selector.doc/_module.md")]
+//! Retained nodes chosen by what they are, not where they are.
 
+use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::NodeId;
 use obscur_runtime::UiRuntime;
 use obscur_tree::node::NodeKind;
 
-#[doc = include_str!("semantic_selector.doc/SemanticSelector.md")]
+#[doc = include_str!("../../docs/api/selector/semantic_selector.doc/SemanticSelector.md")]
 #[derive(Debug)]
 pub struct SemanticSelector;
 
 impl SemanticSelector {
-    #[doc = include_str!("semantic_selector.doc/count_class.md")]
+    /// Finds nodes by role and optional accessible name in the runtime's semantic
+    /// projection. The name is matched exactly and hidden nodes are excluded.
+    #[must_use]
+    pub fn by_role(runtime: &UiRuntime, role: SemanticRole, name: Option<&str>) -> Vec<NodeId> {
+        runtime
+            .semantic_tree()
+            .by_role(role, name)
+            .map(|(id, _)| id)
+            .collect()
+    }
+    /// The number of retained nodes carrying `class`.
     #[must_use]
     pub fn count_class(runtime: &UiRuntime, class: &str) -> usize {
         runtime
@@ -19,7 +30,7 @@ impl SemanticSelector {
             .count()
     }
 
-    #[doc = include_str!("semantic_selector.doc/child_text.md")]
+    #[doc = include_str!("../../docs/api/selector/semantic_selector.doc/child_text.md")]
     #[must_use]
     pub fn child_text(runtime: &UiRuntime, node: NodeId) -> Option<String> {
         let child = *runtime.tree().get(node)?.child_nodes().first()?;
@@ -29,7 +40,7 @@ impl SemanticSelector {
         }
     }
 
-    #[doc = include_str!("semantic_selector.doc/first_text.md")]
+    #[doc = include_str!("../../docs/api/selector/semantic_selector.doc/first_text.md")]
     #[must_use]
     pub fn first_text(runtime: &UiRuntime) -> String {
         runtime

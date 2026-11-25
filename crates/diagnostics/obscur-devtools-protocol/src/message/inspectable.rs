@@ -1,31 +1,31 @@
-#![doc = include_str!("inspectable.doc/_module.md")]
+//! The set of inspectable live-state targets (spec §7.6).
 
-#[doc = include_str!("inspectable.doc/Inspectable.md")]
+#[doc = include_str!("../../docs/api/message/inspectable.doc/Inspectable.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Inspectable {
-    #[doc = include_str!("inspectable.doc/Tree.md")]
+    /// The retained element/component tree.
     Tree,
-    #[doc = include_str!("inspectable.doc/Styles.md")]
+    /// Resolved styles.
     Styles,
-    #[doc = include_str!("inspectable.doc/Layout.md")]
+    /// Computed layout geometry.
     Layout,
-    #[doc = include_str!("inspectable.doc/EventFlow.md")]
+    /// Event routing / dispatch flow.
     EventFlow,
-    #[doc = include_str!("inspectable.doc/Focus.md")]
+    /// Current focus state.
     Focus,
-    #[doc = include_str!("inspectable.doc/Animations.md")]
+    /// Active animations and their timelines.
     Animations,
-    #[doc = include_str!("inspectable.doc/Resources.md")]
+    /// Loaded resources (fonts, images, …).
     Resources,
-    #[doc = include_str!("inspectable.doc/Accessibility.md")]
+    /// Accessibility tree and node properties.
     Accessibility,
-    #[doc = include_str!("inspectable.doc/Scene.md")]
+    /// The composited scene graph.
     Scene,
-    #[doc = include_str!("inspectable.doc/Rendering.md")]
+    /// Rendering pipeline state.
     Rendering,
-    #[doc = include_str!("inspectable.doc/Caches.md")]
+    /// Cache occupancy and statistics.
     Caches,
-    #[doc = include_str!("inspectable.doc/PluginState.md")]
+    /// Plugin instances and their reported state.
     PluginState,
 }
 

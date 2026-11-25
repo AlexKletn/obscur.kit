@@ -1,17 +1,17 @@
-#![doc = include_str!("component_id.doc/_module.md")]
+//! Typed identifier: `ComponentId`.
 
-#[doc = include_str!("component_id.doc/ComponentId.md")]
+#[doc = include_str!("../../docs/api/id/component_id.doc/ComponentId.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ComponentId(u64);
 
 impl ComponentId {
-    #[doc = include_str!("component_id.doc/from_raw.md")]
+    /// Wraps a raw handle value into a `ComponentId`.
     #[must_use]
     pub const fn from_raw(raw: u64) -> Self {
         Self(raw)
     }
 
-    #[doc = include_str!("component_id.doc/raw.md")]
+    /// Returns the raw handle value backing this identifier.
     #[must_use]
     pub const fn raw(self) -> u64 {
         self.0

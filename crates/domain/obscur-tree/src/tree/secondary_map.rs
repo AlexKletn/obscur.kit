@@ -1,17 +1,17 @@
-#![doc = include_str!("secondary_map.doc/_module.md")]
+//! A projection map keyed by `NodeId` that augments — never replaces — identity.
 
 use std::collections::HashMap;
 
 use obscur_identity::{FastMap, NodeId};
 
-#[doc = include_str!("secondary_map.doc/SecondaryMap.md")]
+#[doc = include_str!("../../docs/api/tree/secondary_map.doc/SecondaryMap.md")]
 #[derive(Debug, Clone)]
 pub struct SecondaryMap<V> {
     entries: FastMap<NodeId, V>,
 }
 
 impl<V> SecondaryMap<V> {
-    #[doc = include_str!("secondary_map.doc/new.md")]
+    /// Creates an empty secondary map.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -19,47 +19,47 @@ impl<V> SecondaryMap<V> {
         }
     }
 
-    #[doc = include_str!("secondary_map.doc/insert.md")]
+    /// Inserts `value` for `id`, returning the previous value if one was present.
     pub fn insert(&mut self, id: NodeId, value: V) -> Option<V> {
         self.entries.insert(id, value)
     }
 
-    #[doc = include_str!("secondary_map.doc/get.md")]
+    /// Returns a shared reference to the value attached to `id`, if any.
     #[must_use]
     pub fn get(&self, id: NodeId) -> Option<&V> {
         self.entries.get(&id)
     }
 
-    #[doc = include_str!("secondary_map.doc/get_mut.md")]
+    /// Returns a mutable reference to the value attached to `id`, if any.
     #[must_use]
     pub fn get_mut(&mut self, id: NodeId) -> Option<&mut V> {
         self.entries.get_mut(&id)
     }
 
-    #[doc = include_str!("secondary_map.doc/remove.md")]
+    /// Removes and returns the value attached to `id`, if any.
     pub fn remove(&mut self, id: NodeId) -> Option<V> {
         self.entries.remove(&id)
     }
 
-    #[doc = include_str!("secondary_map.doc/contains.md")]
+    /// Returns `true` if a value is attached to `id`.
     #[must_use]
     pub fn contains(&self, id: NodeId) -> bool {
         self.entries.contains_key(&id)
     }
 
-    #[doc = include_str!("secondary_map.doc/len.md")]
+    /// Returns the number of attached values.
     #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
-    #[doc = include_str!("secondary_map.doc/is_empty.md")]
+    /// Returns `true` if no values are attached.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
-    #[doc = include_str!("secondary_map.doc/iter.md")]
+    /// Iterates over every `(NodeId, &V)` pair, in unspecified order.
     pub fn iter(&self) -> impl Iterator<Item = (NodeId, &V)> {
         self.entries.iter().map(|(id, value)| (*id, value))
     }

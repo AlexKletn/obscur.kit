@@ -1,4 +1,4 @@
-#![doc = include_str!("counter_panel.doc/_module.md")]
+//! The one-element view most runtime tests are written against.
 
 use obscur_identity::ComponentId;
 use obscur_style::cascade::CascadeOrigin;
@@ -8,18 +8,18 @@ use obscur_view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewV
 
 use crate::fixture::ClassRule;
 
-#[doc = include_str!("counter_panel.doc/CounterPanel.md")]
+#[doc = include_str!("../../docs/api/fixture/counter_panel.doc/CounterPanel.md")]
 #[derive(Debug)]
 pub struct CounterPanel;
 
 impl CounterPanel {
-    #[doc = include_str!("counter_panel.doc/view.md")]
+    /// The lone `.counter` element.
     #[must_use]
     pub fn view() -> View {
         View::from_fragment(ViewFragment::from_nodes(vec![Self::element()]))
     }
 
-    #[doc = include_str!("counter_panel.doc/nested_view.md")]
+    #[doc = include_str!("../../docs/api/fixture/counter_panel.doc/nested_view.md")]
     #[must_use]
     pub fn nested_view() -> View {
         View::from_fragment(ViewFragment::from_nodes(vec![
@@ -29,7 +29,7 @@ impl CounterPanel {
         ]))
     }
 
-    #[doc = include_str!("counter_panel.doc/sheet.md")]
+    /// `.counter { background-color: red; width: 100px; height: 50px }`.
     #[must_use]
     pub fn sheet() -> Stylesheet {
         Stylesheet::new(
@@ -43,7 +43,7 @@ impl CounterPanel {
         )
     }
 
-    #[doc = include_str!("counter_panel.doc/height_only_sheet.md")]
+    #[doc = include_str!("../../docs/api/fixture/counter_panel.doc/height_only_sheet.md")]
     #[must_use]
     pub fn height_only_sheet() -> Stylesheet {
         Stylesheet::new(
@@ -60,7 +60,7 @@ impl CounterPanel {
         )
     }
 
-    #[doc = include_str!("counter_panel.doc/element.md")]
+    /// The `.counter` element node both views are built from.
     fn element() -> ViewNode {
         ViewNode::element(ComponentId::from_raw(10))
             .with_prop(ViewProperty::new(CLASS, ViewValue::Text("counter".into())))

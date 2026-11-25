@@ -1,35 +1,42 @@
-#![doc = include_str!("background_layer.doc/_module.md")]
+#![doc = include_str!("../../docs/api/property/background_layer.doc/_module.md")]
 
 use crate::property::{ConicGradient, LinearGradient, PropertyValue, RadialGradient};
 
-#[doc = include_str!("background_layer.doc/BackgroundLayer.md")]
+#[doc = include_str!("../../docs/api/property/background_layer.doc/BackgroundLayer.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum BackgroundLayer {
-    #[doc = include_str!("background_layer.doc/Linear.md")]
+    /// A layer position with no image to paint.
+    None,
+    /// A `linear-gradient(...)` / `repeating-linear-gradient(...)` layer.
     Linear(LinearGradient),
-    #[doc = include_str!("background_layer.doc/Radial.md")]
+    /// A `radial-gradient(...)` layer.
     Radial(RadialGradient),
-    #[doc = include_str!("background_layer.doc/Conic.md")]
+    /// A `conic-gradient(...)` layer.
     Conic(ConicGradient),
-    #[doc = include_str!("background_layer.doc/Url.md")]
+    /// A `url(...)` image layer, carrying the **raw** authored URL/path string
+    /// (unresolved), exactly as the single
+    /// [`PropertyValue::BackgroundImageUrl`](crate::property::PropertyValue::BackgroundImageUrl)
+    /// variant does.
     Url(Box<str>),
 }
 
 impl BackgroundLayer {
-    #[doc = include_str!("background_layer.doc/uses_ch.md")]
+    #[doc = include_str!("../../docs/api/property/background_layer.doc/uses_ch.md")]
     #[must_use]
-    pub const fn uses_ch(&self) -> bool {
+    pub fn uses_ch(&self) -> bool {
         match self {
+            Self::Linear(gradient) => gradient.uses_ch(),
             Self::Radial(gradient) => gradient.uses_ch(),
             Self::Conic(gradient) => gradient.uses_ch(),
-            Self::Linear(_) | Self::Url(_) => false,
+            Self::None | Self::Url(_) => false,
         }
     }
 
-    #[doc = include_str!("background_layer.doc/into_property_value.md")]
+    #[doc = include_str!("../../docs/api/property/background_layer.doc/into_property_value.md")]
     #[must_use]
     pub fn into_property_value(self) -> PropertyValue {
         match self {
+            Self::None => PropertyValue::Initial,
             Self::Linear(gradient) => PropertyValue::LinearGradient(gradient),
             Self::Radial(gradient) => PropertyValue::RadialGradient(gradient),
             Self::Conic(gradient) => PropertyValue::ConicGradient(gradient),

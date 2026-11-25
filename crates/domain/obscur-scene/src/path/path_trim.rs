@@ -1,28 +1,28 @@
-#![doc = include_str!("path_trim.doc/_module.md")]
+#![doc = include_str!("../../docs/api/path/path_trim.doc/_module.md")]
 
 use obscur_geometry::Point;
 
-use super::{Path, PathSegment};
+use super::{FillRule, Path, PathSegment};
 
-#[doc = include_str!("path_trim.doc/FLATTEN_TOLERANCE.md")]
+/// How far a flattened curve may stray from the true one, in logical pixels.
 const FLATTEN_TOLERANCE: f32 = 0.25;
 
-#[doc = include_str!("path_trim.doc/MAX_STEPS.md")]
+#[doc = include_str!("../../docs/api/path/path_trim.doc/MAX_STEPS.md")]
 const MAX_STEPS: usize = 256;
 
-#[doc = include_str!("path_trim.doc/PathTrim.md")]
+/// A path measured along its own length, ready to be sliced.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PathTrim {
-    #[doc = include_str!("path_trim.doc/points.md")]
+    /// The flattened polyline: every point the pen visits, curves included.
     points: Vec<Point>,
-    #[doc = include_str!("path_trim.doc/breaks.md")]
+    /// Indices where the pen JUMPED rather than drew — the start of each subpath after the first.
     breaks: Vec<usize>,
-    #[doc = include_str!("path_trim.doc/lengths.md")]
+    /// Distance from the start of the path to each point, so a fraction resolves by one binary-free scan.
     lengths: Vec<f32>,
 }
 
 impl PathTrim {
-    #[doc = include_str!("path_trim.doc/of.md")]
+    /// Measures `path`, flattening every curve.
     #[must_use]
     pub fn of(path: &Path) -> Self {
         let mut points: Vec<Point> = Vec::new();
@@ -106,20 +106,22 @@ impl PathTrim {
         }
     }
 
-    #[doc = include_str!("path_trim.doc/length.md")]
+    /// The path's total length in logical pixels, or zero if it draws nothing.
     #[must_use]
     pub fn length(&self) -> f32 {
         self.lengths.last().copied().unwrap_or(0.0)
     }
 
-    #[doc = include_str!("path_trim.doc/contains.md")]
+    #[doc = include_str!("../../docs/api/path/path_trim.doc/contains.md")]
     #[must_use]
     pub fn contains(&self, point: Point) -> bool {
-        // Even-odd ray casting: count how many edges a ray from the point
-        // crosses. Each subpath is treated as CLOSED whether or not it was
-        // written that way, which is what a fill does and therefore what a hit
-        // region means — an open shape still has an inside.
-        let mut inside = false;
+        self.contains_with_rule(point, FillRule::EvenOdd)
+    }
+
+    /// Tests the closed fill of all flattened contours using the chosen rule.
+    #[must_use]
+    pub fn contains_with_rule(&self, point: Point, rule: FillRule) -> bool {
+        let mut winding = 0_i64;
         let mut start = 0;
         for end in self
             .breaks
@@ -128,15 +130,18 @@ impl PathTrim {
             .chain(core::iter::once(self.points.len()))
         {
             let subpath = &self.points[start..end];
-            if subpath.len() >= 3 && crosses_odd_number_of_edges(subpath, point) {
-                inside = !inside;
+            if subpath.len() >= 3 {
+                winding += winding_number(subpath, point);
             }
             start = end;
         }
-        inside
+        match rule {
+            FillRule::EvenOdd => winding % 2 != 0,
+            FillRule::NonZero => winding != 0,
+        }
     }
 
-    #[doc = include_str!("path_trim.doc/slice.md")]
+    #[doc = include_str!("../../docs/api/path/path_trim.doc/slice.md")]
     #[must_use]
     pub fn slice(&self, start: f32, end: f32) -> Path {
         let total = self.length();
@@ -190,26 +195,23 @@ impl PathTrim {
     }
 }
 
-#[doc = include_str!("path_trim.doc/crosses_odd_number_of_edges.md")]
-fn crosses_odd_number_of_edges(polygon: &[Point], point: Point) -> bool {
-    let mut inside = false;
-    let mut j = polygon.len() - 1;
-    for i in 0..polygon.len() {
-        let (a, b) = (polygon[i], polygon[j]);
-        // The half-open rule on the vertical span is what stops a ray that
-        // passes exactly through a vertex from counting it twice.
-        if (a.y > point.y) != (b.y > point.y) {
-            let span = b.y - a.y;
-            if span != 0.0 && point.x < (b.x - a.x) * (point.y - a.y) / span + a.x {
-                inside = !inside;
-            }
+fn winding_number(polygon: &[Point], point: Point) -> i64 {
+    let mut winding = 0;
+    let mut a = polygon[polygon.len() - 1];
+    for &b in polygon {
+        let cross = (f64::from(b.x) - f64::from(a.x)) * (f64::from(point.y) - f64::from(a.y))
+            - (f64::from(b.y) - f64::from(a.y)) * (f64::from(point.x) - f64::from(a.x));
+        if a.y <= point.y && b.y > point.y && cross > 0.0 {
+            winding += 1;
+        } else if a.y > point.y && b.y <= point.y && cross < 0.0 {
+            winding -= 1;
         }
-        j = i;
+        a = b;
     }
-    inside
+    winding
 }
 
-#[doc = include_str!("path_trim.doc/flatten_quad.md")]
+/// Appends the flattened points of a quadratic, excluding its start.
 fn flatten_quad(from: Point, control: Point, end: Point, out: &mut Vec<Point>) {
     let steps = steps_for(distance(from, control) + distance(control, end));
     for step in 1..=steps {
@@ -222,7 +224,7 @@ fn flatten_quad(from: Point, control: Point, end: Point, out: &mut Vec<Point>) {
     }
 }
 
-#[doc = include_str!("path_trim.doc/flatten_cubic.md")]
+/// Appends the flattened points of a cubic, excluding its start.
 fn flatten_cubic(from: Point, c1: Point, c2: Point, end: Point, out: &mut Vec<Point>) {
     let steps = steps_for(distance(from, c1) + distance(c1, c2) + distance(c2, end));
     for step in 1..=steps {
@@ -241,7 +243,7 @@ fn flatten_cubic(from: Point, c1: Point, c2: Point, end: Point, out: &mut Vec<Po
     }
 }
 
-#[doc = include_str!("path_trim.doc/steps_for.md")]
+/// How many line segments a curve with this control-polygon length is cut into.
 fn steps_for(control_polygon: f32) -> usize {
     // The control polygon is an upper bound on the curve's own length, so
     // stepping by it is conservative rather than optimistic — a curve is never
@@ -258,13 +260,13 @@ fn steps_for(control_polygon: f32) -> usize {
     steps.clamp(1, MAX_STEPS)
 }
 
-#[doc = include_str!("path_trim.doc/distance.md")]
+/// Euclidean distance between two points.
 fn distance(a: Point, b: Point) -> f32 {
     let (dx, dy) = (b.x - a.x, b.y - a.y);
     dx.hypot(dy)
 }
 
-#[doc = include_str!("path_trim.doc/lerp.md")]
+/// The point a fraction of the way from `a` to `b`.
 fn lerp(a: Point, b: Point, t: f32) -> Point {
     Point::new(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t)
 }

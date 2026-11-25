@@ -1,1 +1,0 @@
-The `height` property.

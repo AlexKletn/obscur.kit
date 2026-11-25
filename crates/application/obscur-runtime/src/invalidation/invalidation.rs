@@ -1,10 +1,10 @@
-#![doc = include_str!("invalidation.doc/_module.md")]
+//! A single invalidation record (Obscur Kit 2 specs §4.3).
 
 use obscur_identity::NodeId;
 
 use crate::invalidation::{InvalidationKind, InvalidationReason};
 
-#[doc = include_str!("invalidation.doc/Invalidation.md")]
+#[doc = include_str!("../../docs/api/invalidation/invalidation.doc/Invalidation.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Invalidation {
     node: Option<NodeId>,
@@ -12,31 +12,35 @@ pub struct Invalidation {
 }
 
 impl Invalidation {
-    #[doc = include_str!("invalidation.doc/new.md")]
+    /// Creates an invalidation record for `node` (or a global change when
+    /// `node` is `None`) with the given `reason`.
     #[must_use]
     pub fn new(node: Option<NodeId>, reason: InvalidationReason) -> Self {
         Self { node, reason }
     }
 
-    #[doc = include_str!("invalidation.doc/global.md")]
+    /// Creates a global invalidation record (`node = None`) with the given
+    /// `reason`, for changes not scoped to a single node.
     #[must_use]
     pub fn global(reason: InvalidationReason) -> Self {
         Self { node: None, reason }
     }
 
-    #[doc = include_str!("invalidation.doc/node.md")]
+    /// Returns the node this invalidation applies to, or `None` for a global
+    /// change.
     #[must_use]
     pub fn node(self) -> Option<NodeId> {
         self.node
     }
 
-    #[doc = include_str!("invalidation.doc/reason.md")]
+    /// Returns the runtime-level cause of this invalidation.
     #[must_use]
     pub fn reason(self) -> InvalidationReason {
         self.reason
     }
 
-    #[doc = include_str!("invalidation.doc/kind.md")]
+    /// Returns the classified [`InvalidationKind`], delegating to
+    /// [`self.reason().kind()`](InvalidationReason::kind).
     #[must_use]
     pub fn kind(self) -> InvalidationKind {
         self.reason.kind()

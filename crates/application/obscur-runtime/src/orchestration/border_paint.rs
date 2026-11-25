@@ -1,31 +1,78 @@
-#![doc = include_str!("border_paint.doc/_module.md")]
+//! The stroked edges of a box: its CSS borders (mitered quads, the uniform
+//! rounded ring, and the dashed stroke), the corner radii every consumer of the
+//! box shares, and the `outline` ring painted outside the border box.
 
 use obscur_geometry::{CornerRadii, CornerRadius, Point, Rect, Size};
-use obscur_identity::NodeId;
 use obscur_scene::command::PaintCommand;
 use obscur_scene::paint::{Brush, Paint, Stroke};
 use obscur_scene::path::Path;
-use obscur_style::computed::ComputedValue;
+use obscur_style::computed::{ComputedStyle, ComputedValue};
 use obscur_style::property::{Length, PropertyId, PropertyValue, StyleColor, layout_keyword};
 
-use super::ComputedStyles;
 use super::paint_color::{current_color_of, scene_color_from};
 
-#[doc = include_str!("border_paint.doc/border_fills.md")]
-pub(super) fn border_fills(
-    computed: &ComputedStyles,
-    node: NodeId,
+#[doc = include_str!("../../docs/api/orchestration/border_paint.doc/BorderWidths.md")]
+pub(super) type BorderWidths = [f32; 4];
+
+#[doc = include_str!("../../docs/api/orchestration/border_paint.doc/border_widths_of.md")]
+pub(super) fn border_widths_of(style: Option<&ComputedStyle>) -> BorderWidths {
+    [
+        border_width_of(style, PropertyId::BorderTopWidth),
+        border_width_of(style, PropertyId::BorderRightWidth),
+        border_width_of(style, PropertyId::BorderBottomWidth),
+        border_width_of(style, PropertyId::BorderLeftWidth),
+    ]
+}
+
+/// Returns the padding box used by overflow clipping and scrolling.
+pub(crate) fn overflow_padding_box(style: Option<&ComputedStyle>, bounds: Rect) -> Rect {
+    let [top, right, bottom, left] = border_widths_of(style).map(|width| width.max(0.0));
+    Rect::new(
+        Point::new(bounds.origin.x + left, bounds.origin.y + top),
+        Size::new(
+            (bounds.size.width - left - right).max(0.0),
+            (bounds.size.height - top - bottom).max(0.0),
+        ),
+    )
+}
+
+/// Resolves the inner corner radii at the padding edge.
+pub(crate) fn overflow_padding_radii(
+    style: Option<&ComputedStyle>,
     bounds: Rect,
+    padding: Rect,
+) -> CornerRadii {
+    let [top, right, bottom, left] = border_widths_of(style).map(|width| width.max(0.0));
+    let outer = corner_radii_of(style, Some(bounds)).normalized(bounds);
+    let inset = |radius: CornerRadius, x: f32, y: f32| {
+        CornerRadius::new((radius.x - x).max(0.0), (radius.y - y).max(0.0))
+    };
+    CornerRadii {
+        top_left: inset(outer.top_left, left, top),
+        top_right: inset(outer.top_right, right, top),
+        bottom_right: inset(outer.bottom_right, right, bottom),
+        bottom_left: inset(outer.bottom_left, left, bottom),
+    }
+    .normalized(padding)
+}
+
+#[doc = include_str!("../../docs/api/orchestration/border_paint.doc/any_border_width.md")]
+pub(super) fn any_border_width(widths: BorderWidths) -> bool {
+    widths.iter().any(|w| *w > 0.0)
+}
+
+#[doc = include_str!("../../docs/api/orchestration/border_paint.doc/border_fills.md")]
+pub(super) fn border_fills(
+    style: Option<&ComputedStyle>,
+    bounds: Rect,
+    widths: BorderWidths,
 ) -> Vec<(Path, StyleColor)> {
-    let top = border_width_of(computed, node, PropertyId::BorderTopWidth);
-    let right = border_width_of(computed, node, PropertyId::BorderRightWidth);
-    let bottom = border_width_of(computed, node, PropertyId::BorderBottomWidth);
-    let left = border_width_of(computed, node, PropertyId::BorderLeftWidth);
+    let [top, right, bottom, left] = widths;
     // Fast path: no positive border width ⇒ nothing to paint (the common case).
     if top <= 0.0 && right <= 0.0 && bottom <= 0.0 && left <= 0.0 {
         return Vec::new();
     }
-    let current = current_color_of(computed, node);
+    let current = current_color_of(style);
     let x = bounds.origin.x;
     let y = bounds.origin.y;
     let w = bounds.size.width;
@@ -51,8 +98,8 @@ pub(super) fn border_fills(
     // widths). Emitted only when solid, positive-width, and non-transparent.
     let mut push_side =
         |width: f32, style_id: PropertyId, color_id: PropertyId, corners: [Point; 4]| {
-            if width > 0.0 && border_is_solid(computed, node, style_id) {
-                let color = border_color_of(computed, node, color_id, current);
+            if width > 0.0 && border_is_solid(style, style_id) {
+                let color = border_color_of(style, color_id, current);
                 // A fully transparent side paints nothing (the border-triangle trick).
                 if color.a > 0.0 {
                     out.push((quad(corners[0], corners[1], corners[2], corners[3]), color));
@@ -86,24 +133,24 @@ pub(super) fn border_fills(
     out
 }
 
-#[doc = include_str!("border_paint.doc/uniform_border.md")]
-pub(super) fn uniform_border(computed: &ComputedStyles, node: NodeId) -> Option<(f32, StyleColor)> {
-    let top = border_width_of(computed, node, PropertyId::BorderTopWidth);
-    let right = border_width_of(computed, node, PropertyId::BorderRightWidth);
-    let bottom = border_width_of(computed, node, PropertyId::BorderBottomWidth);
-    let left = border_width_of(computed, node, PropertyId::BorderLeftWidth);
+#[doc = include_str!("../../docs/api/orchestration/border_paint.doc/uniform_border.md")]
+pub(super) fn uniform_border(
+    style: Option<&ComputedStyle>,
+    widths: BorderWidths,
+) -> Option<(f32, StyleColor)> {
+    let [top, right, bottom, left] = widths;
     if !(top > 0.0 && top == right && top == bottom && top == left) {
         return None;
     }
-    if !all_sides_solid(computed, node) {
+    if !all_sides_solid(style) {
         return None;
     }
     // All four colors equal (resolving `currentColor` the same way for each side).
-    let current = current_color_of(computed, node);
-    let ct = border_color_of(computed, node, PropertyId::BorderTopColor, current);
-    let cr = border_color_of(computed, node, PropertyId::BorderRightColor, current);
-    let cb = border_color_of(computed, node, PropertyId::BorderBottomColor, current);
-    let cl = border_color_of(computed, node, PropertyId::BorderLeftColor, current);
+    let current = current_color_of(style);
+    let ct = border_color_of(style, PropertyId::BorderTopColor, current);
+    let cr = border_color_of(style, PropertyId::BorderRightColor, current);
+    let cb = border_color_of(style, PropertyId::BorderBottomColor, current);
+    let cl = border_color_of(style, PropertyId::BorderLeftColor, current);
     if ct == cr && ct == cb && ct == cl {
         Some((top, ct))
     } else {
@@ -111,7 +158,7 @@ pub(super) fn uniform_border(computed: &ComputedStyles, node: NodeId) -> Option<
     }
 }
 
-#[doc = include_str!("border_paint.doc/uniform_border_ring.md")]
+#[doc = include_str!("../../docs/api/orchestration/border_paint.doc/uniform_border_ring.md")]
 pub(super) fn uniform_border_ring(bounds: Rect, radii: CornerRadii, width: f32) -> Path {
     let inner = Rect::new(
         Point::new(bounds.origin.x + width, bounds.origin.y + width),
@@ -123,107 +170,109 @@ pub(super) fn uniform_border_ring(bounds: Rect, radii: CornerRadii, width: f32) 
     Path::rounded_rect_ring(bounds, radii, inner, radii.offset(-width))
 }
 
-#[doc = include_str!("border_paint.doc/border_width_of.md")]
-pub(super) fn border_width_of(computed: &ComputedStyles, node: NodeId, id: PropertyId) -> f32 {
-    computed
-        .get(&node)
+#[doc = include_str!("../../docs/api/orchestration/border_paint.doc/border_width_of.md")]
+pub(super) fn border_width_of(style: Option<&ComputedStyle>, id: PropertyId) -> f32 {
+    style
         .and_then(|style| style.get(id))
         .and_then(ComputedValue::as_length)
         .and_then(Length::as_px)
         .map_or(0.0, |px| px.0)
 }
 
-#[doc = include_str!("border_paint.doc/corner_radius_of.md")]
+#[doc = include_str!("../../docs/api/orchestration/border_paint.doc/corner_radius_of.md")]
 fn corner_radius_of(
-    computed: &ComputedStyles,
-    node: NodeId,
+    style: Option<&ComputedStyle>,
     id: PropertyId,
     bounds: Option<Rect>,
 ) -> CornerRadius {
-    let length = computed
-        .get(&node)
+    match style
         .and_then(|style| style.get(id))
-        .and_then(ComputedValue::as_length);
-    match length {
-        Some(Length::Px(px)) => CornerRadius::circular(px.0),
-        Some(Length::Percent(pct)) => bounds.map_or_else(CornerRadius::default, |b| {
-            CornerRadius::new(pct / 100.0 * b.size.width, pct / 100.0 * b.size.height)
+        .map(ComputedValue::value)
+    {
+        Some(PropertyValue::Length(Length::Px(px))) => CornerRadius::circular(px.0),
+        Some(PropertyValue::Length(Length::Percent(pct))) => bounds
+            .map_or_else(CornerRadius::default, |b| {
+                CornerRadius::new(pct / 100.0 * b.size.width, pct / 100.0 * b.size.height)
+            }),
+        Some(PropertyValue::Calc(expr)) => bounds.map_or_else(CornerRadius::default, |b| {
+            let radius = |basis| {
+                expr.resolve_with_percentage_basis(basis)
+                    .unwrap_or_default()
+                    .max(0.0)
+            };
+            CornerRadius::new(radius(b.size.width), radius(b.size.height))
         }),
         _ => CornerRadius::default(),
     }
 }
 
-#[doc = include_str!("border_paint.doc/corner_radii_of.md")]
-pub(super) fn corner_radii_of(
-    computed: &ComputedStyles,
-    node: NodeId,
-    bounds: Option<Rect>,
-) -> CornerRadii {
+#[doc = include_str!("../../docs/api/orchestration/border_paint.doc/corner_radii_of.md")]
+pub(crate) fn corner_radii_of(style: Option<&ComputedStyle>, bounds: Option<Rect>) -> CornerRadii {
     CornerRadii {
-        top_left: corner_radius_of(computed, node, PropertyId::BorderTopLeftRadius, bounds),
-        top_right: corner_radius_of(computed, node, PropertyId::BorderTopRightRadius, bounds),
-        bottom_right: corner_radius_of(computed, node, PropertyId::BorderBottomRightRadius, bounds),
-        bottom_left: corner_radius_of(computed, node, PropertyId::BorderBottomLeftRadius, bounds),
+        top_left: corner_radius_of(style, PropertyId::BorderTopLeftRadius, bounds),
+        top_right: corner_radius_of(style, PropertyId::BorderTopRightRadius, bounds),
+        bottom_right: corner_radius_of(style, PropertyId::BorderBottomRightRadius, bounds),
+        bottom_left: corner_radius_of(style, PropertyId::BorderBottomLeftRadius, bounds),
     }
 }
 
-#[doc = include_str!("border_paint.doc/border_is_solid.md")]
-fn border_is_solid(computed: &ComputedStyles, node: NodeId, id: PropertyId) -> bool {
-    border_style_is(computed, node, id, layout_keyword::BORDER_STYLE_SOLID)
+/// Whether a node's computed `border-*-style` (`id`) is the reserved `solid`
+/// handle. An absent style (the deferred `none` initial) or any other value is
+/// treated as not solid, so no edge is painted.
+fn border_is_solid(style: Option<&ComputedStyle>, id: PropertyId) -> bool {
+    border_style_is(style, id, layout_keyword::BORDER_STYLE_SOLID)
 }
 
-fn all_sides_solid(computed: &ComputedStyles, node: NodeId) -> bool {
-    border_is_solid(computed, node, PropertyId::BorderTopStyle)
-        && border_is_solid(computed, node, PropertyId::BorderRightStyle)
-        && border_is_solid(computed, node, PropertyId::BorderBottomStyle)
-        && border_is_solid(computed, node, PropertyId::BorderLeftStyle)
+fn all_sides_solid(style: Option<&ComputedStyle>) -> bool {
+    border_is_solid(style, PropertyId::BorderTopStyle)
+        && border_is_solid(style, PropertyId::BorderRightStyle)
+        && border_is_solid(style, PropertyId::BorderBottomStyle)
+        && border_is_solid(style, PropertyId::BorderLeftStyle)
 }
 
-#[doc = include_str!("border_paint.doc/border_is_dashed.md")]
-fn border_is_dashed(computed: &ComputedStyles, node: NodeId, id: PropertyId) -> bool {
-    border_style_is(computed, node, id, layout_keyword::BORDER_STYLE_DASHED)
+/// Whether a node's computed `border-*-style` (`id`) is the reserved `dashed`
+/// handle (`dotted` folds here too). Any other value — including `solid`, `none`,
+/// or an absent style — is not dashed.
+fn border_is_dashed(style: Option<&ComputedStyle>, id: PropertyId) -> bool {
+    border_style_is(style, id, layout_keyword::BORDER_STYLE_DASHED)
 }
 
-#[doc = include_str!("border_paint.doc/border_style_is.md")]
+/// Whether a node's computed `border-*-style` (`id`) equals the reserved
+/// `expected` keyword handle.
 fn border_style_is(
-    computed: &ComputedStyles,
-    node: NodeId,
+    style: Option<&ComputedStyle>,
     id: PropertyId,
     expected: obscur_identity::InternedSymbol,
 ) -> bool {
     matches!(
-        computed
-            .get(&node)
+        style
             .and_then(|style| style.get(id))
             .map(ComputedValue::value),
         Some(&PropertyValue::Keyword(sym)) if sym == expected
     )
 }
 
-#[doc = include_str!("border_paint.doc/uniform_dashed_border.md")]
+#[doc = include_str!("../../docs/api/orchestration/border_paint.doc/uniform_dashed_border.md")]
 pub(super) fn uniform_dashed_border(
-    computed: &ComputedStyles,
-    node: NodeId,
+    style: Option<&ComputedStyle>,
+    widths: BorderWidths,
 ) -> Option<(f32, StyleColor)> {
-    let top = border_width_of(computed, node, PropertyId::BorderTopWidth);
-    let right = border_width_of(computed, node, PropertyId::BorderRightWidth);
-    let bottom = border_width_of(computed, node, PropertyId::BorderBottomWidth);
-    let left = border_width_of(computed, node, PropertyId::BorderLeftWidth);
+    let [top, right, bottom, left] = widths;
     if !(top > 0.0 && top == right && top == bottom && top == left) {
         return None;
     }
-    if !(border_is_dashed(computed, node, PropertyId::BorderTopStyle)
-        && border_is_dashed(computed, node, PropertyId::BorderRightStyle)
-        && border_is_dashed(computed, node, PropertyId::BorderBottomStyle)
-        && border_is_dashed(computed, node, PropertyId::BorderLeftStyle))
+    if !(border_is_dashed(style, PropertyId::BorderTopStyle)
+        && border_is_dashed(style, PropertyId::BorderRightStyle)
+        && border_is_dashed(style, PropertyId::BorderBottomStyle)
+        && border_is_dashed(style, PropertyId::BorderLeftStyle))
     {
         return None;
     }
-    let current = current_color_of(computed, node);
-    let ct = border_color_of(computed, node, PropertyId::BorderTopColor, current);
-    let cr = border_color_of(computed, node, PropertyId::BorderRightColor, current);
-    let cb = border_color_of(computed, node, PropertyId::BorderBottomColor, current);
-    let cl = border_color_of(computed, node, PropertyId::BorderLeftColor, current);
+    let current = current_color_of(style);
+    let ct = border_color_of(style, PropertyId::BorderTopColor, current);
+    let cr = border_color_of(style, PropertyId::BorderRightColor, current);
+    let cb = border_color_of(style, PropertyId::BorderBottomColor, current);
+    let cl = border_color_of(style, PropertyId::BorderLeftColor, current);
     if ct == cr && ct == cb && ct == cl {
         Some((top, ct))
     } else {
@@ -231,13 +280,20 @@ pub(super) fn uniform_dashed_border(
     }
 }
 
-#[doc = include_str!("border_paint.doc/dashed_border_pattern.md")]
+/// The dash pattern (in logical pixels) for a dashed border of stroke `width`:
+/// `[3·width on, 3·width off]`. CSS leaves the exact dash length implementation-
+/// defined; a multiple of the border width gives dashes that scale with the
+/// border and read as a normal dashed rule.
 pub(super) fn dashed_border_pattern(width: f32) -> [f32; 2] {
     let dash = (3.0 * width).max(1.0);
     [dash, dash]
 }
 
-#[doc = include_str!("border_paint.doc/dashed_border_path.md")]
+/// Builds the path a uniform dashed border strokes along: the border box inset by
+/// `width / 2` on every side, so a stroke of `width` centered on it fills the CSS
+/// border band exactly (CSS borders sit inside the border box). Rounded when the
+/// element has a corner radius (each radius reduced by `width / 2`, the centerline
+/// radius), else a plain rectangle.
 pub(super) fn dashed_border_path(
     bounds: Rect,
     radii: CornerRadii,
@@ -262,26 +318,25 @@ pub(super) fn dashed_border_path(
     }
 }
 
-#[doc = include_str!("border_paint.doc/outline_paint.md")]
+#[doc = include_str!("../../docs/api/orchestration/border_paint.doc/outline_paint.md")]
 pub(super) fn outline_paint(
-    computed: &ComputedStyles,
-    node: NodeId,
+    style: Option<&ComputedStyle>,
     bounds: Rect,
     radii: CornerRadii,
     has_radius: bool,
 ) -> Option<PaintCommand> {
-    let width = border_width_of(computed, node, PropertyId::OutlineWidth);
+    let width = border_width_of(style, PropertyId::OutlineWidth);
     if width <= 0.0 {
         return None;
     }
-    let dashed = border_is_dashed(computed, node, PropertyId::OutlineStyle);
-    let solid = border_is_solid(computed, node, PropertyId::OutlineStyle);
+    let dashed = border_is_dashed(style, PropertyId::OutlineStyle);
+    let solid = border_is_solid(style, PropertyId::OutlineStyle);
     // Only a `solid` or `dashed` (incl. folded `dotted`) outline paints; `none` or
     // an absent style paints nothing.
     if !dashed && !solid {
         return None;
     }
-    let offset = border_width_of(computed, node, PropertyId::OutlineOffset);
+    let offset = border_width_of(style, PropertyId::OutlineOffset);
     // The stroke centerline runs `offset + width/2` outside the border box, so the
     // outline's inner edge sits `offset` px out and the band is `width` thick.
     let d = offset + width / 2.0;
@@ -301,8 +356,8 @@ pub(super) fn outline_paint(
     } else {
         Path::rect(rect)
     };
-    let current = current_color_of(computed, node);
-    let color = border_color_of(computed, node, PropertyId::OutlineColor, current);
+    let current = current_color_of(style);
+    let color = border_color_of(style, PropertyId::OutlineColor, current);
     let mut stroke = Stroke::new(Brush::solid(scene_color_from(color)), width);
     if dashed {
         // Reuse the border dash convention — no duplicate dash logic.
@@ -314,15 +369,14 @@ pub(super) fn outline_paint(
     })
 }
 
-#[doc = include_str!("border_paint.doc/border_color_of.md")]
+/// Reads a node's computed `border-*-color` (`id`), falling back to `current`
+/// (the node's computed `color`, i.e. CSS `currentColor`) when the color is unset.
 fn border_color_of(
-    computed: &ComputedStyles,
-    node: NodeId,
+    style: Option<&ComputedStyle>,
     id: PropertyId,
     current: StyleColor,
 ) -> StyleColor {
-    computed
-        .get(&node)
+    style
         .and_then(|style| style.get(id))
         .and_then(ComputedValue::as_color)
         .unwrap_or(current)

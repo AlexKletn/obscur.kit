@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Button control (spec §2.6).
 
 mod button;
 pub use button::Button;

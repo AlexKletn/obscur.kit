@@ -1,4 +1,6 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Lifecycle module.
+mod lifecycle_event;
+pub use lifecycle_event::LifecycleEvent;
 mod release_result;
 pub use release_result::ReleaseResult;
 mod runtime_lifecycle;

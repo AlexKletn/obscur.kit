@@ -1,4 +1,4 @@
-#![doc = include_str!("qt_appearance_provider.doc/_module.md")]
+//! Reading appearance from KDE's `kdeglobals`.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -6,29 +6,37 @@ use std::path::{Path, PathBuf};
 use obscur_capability::SupportLevel;
 use obscur_scene::color::Color;
 use obscur_system::appearance::{
-    AppearanceProvider, ColorScheme, SystemAppearance, SystemFont, SystemPalette,
+    AppearanceProvider, ColorScheme, SystemAppearance, SystemFont, SystemPalette, WindowButton,
+    WindowButtonIcons, WindowButtonLayout, WindowDecoration,
 };
 
-#[doc = include_str!("qt_appearance_provider.doc/QtAppearanceProvider.md")]
+#[doc = include_str!("../../docs/api/provider/qt_appearance_provider.doc/QtAppearanceProvider.md")]
 #[derive(Debug, Clone)]
 pub struct QtAppearanceProvider {
     path: PathBuf,
+    window_config: PathBuf,
 }
 
 impl QtAppearanceProvider {
-    #[doc = include_str!("qt_appearance_provider.doc/new.md")]
+    /// Read the session's own `kdeglobals`, wherever XDG puts it.
     #[must_use]
     pub fn new() -> Self {
         Self::at(default_path())
     }
 
-    #[doc = include_str!("qt_appearance_provider.doc/at.md")]
+    /// Read appearance settings from the nominated file and title bar button settings
+    /// from the `kwinrc` file in the same directory.
     #[must_use]
     pub fn at(path: impl Into<PathBuf>) -> Self {
-        Self { path: path.into() }
+        let path = path.into();
+        let window_config = path.with_file_name("kwinrc");
+        Self {
+            path,
+            window_config,
+        }
     }
 
-    #[doc = include_str!("qt_appearance_provider.doc/path.md")]
+    /// The file this provider reads.
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
@@ -43,8 +51,13 @@ impl Default for QtAppearanceProvider {
 
 impl AppearanceProvider for QtAppearanceProvider {
     fn appearance(&self) -> SystemAppearance {
-        std::fs::read_to_string(&self.path)
-            .map_or_else(|_| SystemAppearance::default(), |text| parse(&text))
+        let mut appearance = std::fs::read_to_string(&self.path)
+            .map_or_else(|_| SystemAppearance::default(), |text| parse(&text));
+        appearance.window_decoration = std::fs::read_to_string(&self.window_config)
+            .ok()
+            .as_deref()
+            .and_then(parse_decoration);
+        appearance
     }
 
     fn support(&self) -> SupportLevel {
@@ -52,12 +65,14 @@ impl AppearanceProvider for QtAppearanceProvider {
             // The only source on this platform that states a whole palette, so
             // when the file is there the answer is the complete shape.
             SupportLevel::Native
+        } else if self.window_config.is_file() {
+            SupportLevel::Limited
         } else {
             SupportLevel::Unavailable
         }
     }
 
-    #[doc = include_str!("qt_appearance_provider.doc/watch_support.md")]
+    #[doc = include_str!("../../docs/api/provider/qt_appearance_provider.doc/watch_support.md")]
     fn watch_support(&self) -> SupportLevel {
         // Unavailable, and this is the asymmetry worth stating out loud: the
         // source that knows the most is the one that cannot tell you when it
@@ -69,7 +84,7 @@ impl AppearanceProvider for QtAppearanceProvider {
     }
 }
 
-#[doc = include_str!("qt_appearance_provider.doc/default_path.md")]
+#[doc = include_str!("../../docs/api/provider/qt_appearance_provider.doc/default_path.md")]
 fn default_path() -> PathBuf {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
@@ -78,7 +93,7 @@ fn default_path() -> PathBuf {
     base.join("kdeglobals")
 }
 
-#[doc = include_str!("qt_appearance_provider.doc/parse.md")]
+#[doc = include_str!("../../docs/api/provider/qt_appearance_provider.doc/parse.md")]
 fn parse(text: &str) -> SystemAppearance {
     let ini = read_ini(text);
     let get = |section: &str, key: &str| {
@@ -129,13 +144,55 @@ fn parse(text: &str) -> SystemAppearance {
         // KDE states a duration multiplier; zero means the user turned
         // animation off, which is the same request `prefers-reduced-motion`
         // makes.
+        window_radius: None,
+        window_decoration: None,
         reduced_motion: get("KDE", "AnimationDurationFactor")
             .and_then(|value| value.trim().parse::<f32>().ok())
             .map(|factor| factor <= f32::EPSILON),
     }
 }
 
-#[doc = include_str!("qt_appearance_provider.doc/read_ini.md")]
+fn parse_decoration(text: &str) -> Option<WindowDecoration> {
+    fn buttons(group: &str) -> Vec<WindowButton> {
+        group
+            .chars()
+            .filter_map(|code| {
+                Some(match code {
+                    'M' => WindowButton::WindowMenu,
+                    'N' => WindowButton::ApplicationMenu,
+                    'S' => WindowButton::OnAllWorkspaces,
+                    'H' => WindowButton::ContextHelp,
+                    'I' => WindowButton::Minimize,
+                    'A' => WindowButton::Maximize,
+                    'X' => WindowButton::Close,
+                    'F' => WindowButton::KeepAbove,
+                    'B' => WindowButton::KeepBelow,
+                    'L' => WindowButton::Shade,
+                    'E' => WindowButton::ExcludeFromCapture,
+                    '_' => WindowButton::Spacer,
+                    _ => return None,
+                })
+            })
+            .collect()
+    }
+
+    let ini = read_ini(text);
+    let read = |key: &str| {
+        ini.get(&("org.kde.kdecoration2".to_owned(), key.to_owned()))
+            .map(|value| buttons(value))
+    };
+    let left = read("ButtonsOnLeft");
+    let right = read("ButtonsOnRight");
+    if left.is_none() && right.is_none() {
+        return None;
+    }
+    Some(WindowDecoration {
+        button_layout: WindowButtonLayout { left, right },
+        button_icons: WindowButtonIcons::default(),
+    })
+}
+
+#[doc = include_str!("../../docs/api/provider/qt_appearance_provider.doc/read_ini.md")]
 fn read_ini(text: &str) -> BTreeMap<(String, String), String> {
     let mut out = BTreeMap::new();
     let mut section = String::new();
@@ -158,7 +215,7 @@ fn read_ini(text: &str) -> BTreeMap<(String, String), String> {
     out
 }
 
-#[doc = include_str!("qt_appearance_provider.doc/parse_rgb.md")]
+#[doc = include_str!("../../docs/api/provider/qt_appearance_provider.doc/parse_rgb.md")]
 fn parse_rgb(value: &str) -> Option<Color> {
     let mut parts = value.split(',').map(|part| part.trim().parse::<u8>());
     let r = parts.next()?.ok()?;
@@ -182,7 +239,7 @@ fn parse_rgb(value: &str) -> Option<Color> {
     ))
 }
 
-#[doc = include_str!("qt_appearance_provider.doc/parse_font.md")]
+#[doc = include_str!("../../docs/api/provider/qt_appearance_provider.doc/parse_font.md")]
 fn parse_font(value: &str) -> Option<SystemFont> {
     // Qt writes a font as a comma-separated record whose first two fields are
     // the family and the point size; the rest is Qt's own business.
@@ -198,7 +255,7 @@ fn parse_font(value: &str) -> Option<SystemFont> {
     Some(SystemFont::new(family, size))
 }
 
-#[doc = include_str!("qt_appearance_provider.doc/luminance.md")]
+#[doc = include_str!("../../docs/api/provider/qt_appearance_provider.doc/luminance.md")]
 fn luminance(color: Color) -> f32 {
     // Rec. 601 luma. Enough to tell a dark surface from a light one, which is
     // the only question asked of it.
@@ -234,6 +291,27 @@ Theme=breeze-dark
 [KDE]
 AnimationDurationFactor=1
 ";
+
+    #[test]
+    fn kwin_layout_preserves_an_explicit_empty_group_and_button_order() {
+        let decoration =
+            parse_decoration("[org.kde.kdecoration2]\nButtonsOnLeft=\nButtonsOnRight=F_IAX")
+                .unwrap();
+        assert_eq!(decoration.button_layout.left, Some(vec![]));
+        assert_eq!(
+            decoration.button_layout.right,
+            Some(vec![
+                WindowButton::KeepAbove,
+                WindowButton::Spacer,
+                WindowButton::Minimize,
+                WindowButton::Maximize,
+                WindowButton::Close,
+            ])
+        );
+        let partial = parse_decoration("[org.kde.kdecoration2]\nButtonsOnRight=X").unwrap();
+        assert_eq!(partial.button_layout.left, None);
+        assert!(parse_decoration("[Windows]\nButtonsOnRight=X").is_none());
+    }
 
     #[test]
     fn a_kde_config_yields_the_whole_shape() {

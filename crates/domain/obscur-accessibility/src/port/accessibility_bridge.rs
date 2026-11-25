@@ -1,104 +1,32 @@
-#![doc = include_str!("accessibility_bridge.doc/_module.md")]
+//! The replaceable port platform accessibility adapters implement (§7.1).
 
 use crate::event::{AccessibilityAction, AccessibilityFocus};
 use crate::tree::{SemanticSnapshot, SemanticUpdate};
 
-#[doc = include_str!("accessibility_bridge.doc/AccessibilityBridge.md")]
+#[doc = include_str!("../../docs/api/port/accessibility_bridge.doc/AccessibilityBridge.md")]
 pub trait AccessibilityBridge {
-    #[doc = include_str!("accessibility_bridge.doc/update_tree.md")]
+    /// Pushes a full [`SemanticSnapshot`] to the platform accessibility tree.
     fn update_tree(&mut self, snapshot: &SemanticSnapshot);
 
-    #[doc = include_str!("accessibility_bridge.doc/apply_update.md")]
+    /// Applies a single incremental [`SemanticUpdate`] to the platform tree.
     fn apply_update(&mut self, update: &SemanticUpdate);
 
-    #[doc = include_str!("accessibility_bridge.doc/set_focus.md")]
+    /// Reflects an [`AccessibilityFocus`] change to the platform.
     fn set_focus(&mut self, focus: &AccessibilityFocus);
 
-    #[doc = include_str!("accessibility_bridge.doc/announce.md")]
+    /// Emits a live-region announcement. `assertive` requests an interrupting
+    /// (assertive) announcement rather than a polite one.
     fn announce(&mut self, message: &str, assertive: bool);
 
-    #[doc = include_str!("accessibility_bridge.doc/poll_actions.md")]
+    /// Drains and returns the inbound assistive-technology action requests
+    /// queued since the last poll. Returns an empty [`Vec`] when none are
+    /// pending.
     fn poll_actions(&mut self) -> Vec<AccessibilityAction>;
-}
-
-#[doc = include_str!("accessibility_bridge.doc/NullAccessibilityBridge.md")]
-#[derive(Debug, Default, Clone)]
-pub struct NullAccessibilityBridge;
-
-impl NullAccessibilityBridge {
-    #[doc = include_str!("accessibility_bridge.doc/new.md")]
-    #[must_use]
-    pub const fn new() -> Self {
-        Self
-    }
-}
-
-impl AccessibilityBridge for NullAccessibilityBridge {
-    fn update_tree(&mut self, _snapshot: &SemanticSnapshot) {}
-
-    fn apply_update(&mut self, _update: &SemanticUpdate) {}
-
-    fn set_focus(&mut self, _focus: &AccessibilityFocus) {}
-
-    fn announce(&mut self, _message: &str, _assertive: bool) {}
-
-    fn poll_actions(&mut self) -> Vec<AccessibilityAction> {
-        Vec::new()
-    }
-}
-
-#[doc = include_str!("accessibility_bridge.doc/RecordingAccessibilityBridge.md")]
-#[derive(Debug, Default, Clone)]
-pub struct RecordingAccessibilityBridge {
-    #[doc = include_str!("accessibility_bridge.doc/tree_updates.md")]
-    pub tree_updates: u64,
-    #[doc = include_str!("accessibility_bridge.doc/updates_applied.md")]
-    pub updates_applied: u64,
-    #[doc = include_str!("accessibility_bridge.doc/last_announcement.md")]
-    pub last_announcement: Option<Box<str>>,
-    #[doc = include_str!("accessibility_bridge.doc/last_focus.md")]
-    pub last_focus: Option<AccessibilityFocus>,
-    #[doc = include_str!("accessibility_bridge.doc/queued.md")]
-    queued: Vec<AccessibilityAction>,
-}
-
-impl RecordingAccessibilityBridge {
-    #[doc = include_str!("accessibility_bridge.doc/new_2.md")]
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    #[doc = include_str!("accessibility_bridge.doc/queue_action.md")]
-    pub fn queue_action(&mut self, action: AccessibilityAction) {
-        self.queued.push(action);
-    }
-}
-
-impl AccessibilityBridge for RecordingAccessibilityBridge {
-    fn update_tree(&mut self, _snapshot: &SemanticSnapshot) {
-        self.tree_updates += 1;
-    }
-
-    fn apply_update(&mut self, _update: &SemanticUpdate) {
-        self.updates_applied += 1;
-    }
-
-    fn set_focus(&mut self, focus: &AccessibilityFocus) {
-        self.last_focus = Some(*focus);
-    }
-
-    fn announce(&mut self, message: &str, _assertive: bool) {
-        self.last_announcement = Some(Box::from(message));
-    }
-
-    fn poll_actions(&mut self) -> Vec<AccessibilityAction> {
-        std::mem::take(&mut self.queued)
-    }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::{NullAccessibilityBridge, RecordingAccessibilityBridge};
     use super::*;
     use crate::semantic::{SemanticAction, SemanticNode, SemanticRole};
     use crate::tree::SemanticTree;

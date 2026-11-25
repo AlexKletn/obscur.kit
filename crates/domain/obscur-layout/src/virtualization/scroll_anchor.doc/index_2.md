@@ -1,1 +1,0 @@
-The anchored item index.

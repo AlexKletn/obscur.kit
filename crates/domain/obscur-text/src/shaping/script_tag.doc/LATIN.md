@@ -1,1 +1,0 @@
-Latin script (`Latn`).

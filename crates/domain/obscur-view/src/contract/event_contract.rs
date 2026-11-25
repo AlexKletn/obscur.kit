@@ -1,22 +1,23 @@
-#![doc = include_str!("event_contract.doc/_module.md")]
+//! `EventContract`: the typed contract of a single component event (spec §2.3).
 
 use obscur_identity::InternedSymbol;
 
-#[doc = include_str!("event_contract.doc/EventContract.md")]
+#[doc = include_str!("../../docs/api/contract/event_contract.doc/EventContract.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EventContract {
-    #[doc = include_str!("event_contract.doc/name.md")]
+    /// Interned name of the event.
     pub name: InternedSymbol,
-    #[doc = include_str!("event_contract.doc/payload_type.md")]
+    #[doc = include_str!("../../docs/api/contract/event_contract.doc/payload_type.md")]
     pub payload_type: InternedSymbol,
-    #[doc = include_str!("event_contract.doc/bubbles.md")]
+    /// Whether the event travels through the bubble phase after reaching its
+    /// target.
     pub bubbles: bool,
-    #[doc = include_str!("event_contract.doc/cancelable.md")]
+    /// Whether a handler may cancel the event's default action.
     pub cancelable: bool,
 }
 
 impl EventContract {
-    #[doc = include_str!("event_contract.doc/new.md")]
+    #[doc = include_str!("../../docs/api/contract/event_contract.doc/new.md")]
     #[must_use]
     pub const fn new(name: InternedSymbol, payload_type: InternedSymbol) -> Self {
         Self {
@@ -27,14 +28,14 @@ impl EventContract {
         }
     }
 
-    #[doc = include_str!("event_contract.doc/bubbling.md")]
+    /// Marks the event as bubbling, returning the updated contract.
     #[must_use]
     pub const fn bubbling(mut self) -> Self {
         self.bubbles = true;
         self
     }
 
-    #[doc = include_str!("event_contract.doc/cancelable_2.md")]
+    /// Marks the event as cancelable, returning the updated contract.
     #[must_use]
     pub const fn cancelable(mut self) -> Self {
         self.cancelable = true;

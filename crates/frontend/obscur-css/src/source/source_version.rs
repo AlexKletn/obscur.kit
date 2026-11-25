@@ -1,26 +1,26 @@
-#![doc = include_str!("source_version.doc/_module.md")]
+//! `SourceVersion`: which revision of a CSS source a parse was of.
 
-#[doc = include_str!("source_version.doc/SourceVersion.md")]
+#[doc = include_str!("../../docs/api/source/source_version.doc/SourceVersion.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct SourceVersion(u64);
 
 impl SourceVersion {
-    #[doc = include_str!("source_version.doc/INITIAL.md")]
+    /// The revision a freshly authored source starts at.
     pub const INITIAL: Self = Self(0);
 
-    #[doc = include_str!("source_version.doc/from_raw.md")]
+    /// Wraps a raw revision value.
     #[must_use]
     pub const fn from_raw(raw: u64) -> Self {
         Self(raw)
     }
 
-    #[doc = include_str!("source_version.doc/raw.md")]
+    /// The raw revision value.
     #[must_use]
     pub const fn raw(self) -> u64 {
         self.0
     }
 
-    #[doc = include_str!("source_version.doc/next.md")]
+    /// The next revision — what an owner stamps a source with after editing it.
     #[must_use]
     pub const fn next(self) -> Self {
         Self(self.0.wrapping_add(1))

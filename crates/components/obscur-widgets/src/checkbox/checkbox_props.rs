@@ -1,4 +1,4 @@
-#![doc = include_str!("checkbox_props.doc/_module.md")]
+#![doc = include_str!("../../docs/api/checkbox/checkbox_props.doc/_module.md")]
 
 use obscur_identity::InternedSymbol;
 use obscur_view::component::{
@@ -9,27 +9,34 @@ use obscur_view::view::{CHECKED, StyleAttributes, ViewProperty, ViewValue};
 
 use super::Checkbox;
 
-#[doc = include_str!("checkbox_props.doc/CheckboxProps.md")]
+#[doc = include_str!("../../docs/api/checkbox/checkbox_props.doc/CheckboxProps.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckboxProps {
-    #[doc = include_str!("checkbox_props.doc/label.md")]
+    /// The label text rendered beside the indicator.
     pub label: String,
-    #[doc = include_str!("checkbox_props.doc/checked.md")]
+    /// The tri-state checked value: `Some(true)` on, `Some(false)` off, `None`
+    /// mixed (indeterminate).
     pub checked: Option<bool>,
 }
 
 impl CheckboxProps {
-    #[doc = include_str!("checkbox_props.doc/LABEL.md")]
+    #[doc = include_str!("../../docs/api/checkbox/checkbox_props.doc/LABEL.md")]
     pub const LABEL: InternedSymbol = InternedSymbol::from_raw(0xF697_17FD);
 
-    #[doc = include_str!("checkbox_props.doc/NAME.md")]
+    /// Symbol of the component's name, `"Checkbox"` — the FNV-1a-32 hash
+    /// `#[derive(Contract)]` puts on `ComponentContract::with_name`.
     const NAME: InternedSymbol = InternedSymbol::from_raw(0x000B_8638);
-    #[doc = include_str!("checkbox_props.doc/LABEL_TYPE.md")]
+    /// Opaque type identity of the `label` prop: the FNV-1a-32 hash of the Rust
+    /// type spelling `String`, which is what `#[derive(Contract)]` records as a
+    /// `PropContract`'s `value_type`. It names no view property and is compared,
+    /// never interpreted.
     const LABEL_TYPE: InternedSymbol = InternedSymbol::from_raw(0x604F_4858);
-    #[doc = include_str!("checkbox_props.doc/CHECKED_TYPE.md")]
+    /// Opaque type identity of the `checked` prop: the FNV-1a-32 hash of the
+    /// normalised Rust type spelling `Option < bool >`, which is what
+    /// `#[derive(Contract)]` records for an `Option<bool>` field.
     const CHECKED_TYPE: InternedSymbol = InternedSymbol::from_raw(0xD0C8_231A);
 
-    #[doc = include_str!("checkbox_props.doc/contract.md")]
+    #[doc = include_str!("../../docs/api/checkbox/checkbox_props.doc/contract.md")]
     #[must_use]
     pub fn contract() -> ComponentContract {
         ComponentContract::new(Checkbox::COMPONENT_ID)
@@ -40,7 +47,7 @@ impl CheckboxProps {
 }
 
 impl FromProps for CheckboxProps {
-    #[doc = include_str!("checkbox_props.doc/from_props.md")]
+    #[doc = include_str!("../../docs/api/checkbox/checkbox_props.doc/from_props.md")]
     fn from_props(props: &[ViewProperty]) -> Result<Self, PropsError> {
         let label: String = decode_required(props, Self::LABEL, "label")?;
         let checked = match prop_value(props, Checkbox::PROP_CHECKED) {

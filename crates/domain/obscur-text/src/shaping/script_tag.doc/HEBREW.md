@@ -1,1 +1,0 @@
-Hebrew script (`Hebr`).

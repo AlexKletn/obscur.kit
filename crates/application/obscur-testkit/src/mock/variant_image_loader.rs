@@ -1,4 +1,4 @@
-#![doc = include_str!("variant_image_loader.doc/_module.md")]
+//! A loader over a fake filesystem of DPI variants.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -7,20 +7,20 @@ use obscur_resources::port::{LoadedBytes, ResourceLoader};
 use obscur_resources::source::ResourceSource;
 use obscur_resources::state::{ResourceError, ResourceMetadata};
 
-#[doc = include_str!("variant_image_loader.doc/VariantImageLoader.md")]
+#[doc = include_str!("../../docs/api/mock/variant_image_loader.doc/VariantImageLoader.md")]
 #[derive(Debug, Clone)]
 pub struct VariantImageLoader {
-    #[doc = include_str!("variant_image_loader.doc/files.md")]
+    /// The fake filesystem: authored path -> the asset's square pixel size.
     files: HashMap<Box<str>, u8>,
-    #[doc = include_str!("variant_image_loader.doc/asked.md")]
+    /// Every path `load` was called with, in order.
     asked: Arc<Mutex<Vec<Box<str>>>>,
 }
 
 impl VariantImageLoader {
-    #[doc = include_str!("variant_image_loader.doc/BOTH_VARIANTS.md")]
+    #[doc = include_str!("../../docs/api/mock/variant_image_loader.doc/BOTH_VARIANTS.md")]
     pub const BOTH_VARIANTS: &'static [(&'static str, u8)] = &[("x", 2), ("x@2x", 4)];
 
-    #[doc = include_str!("variant_image_loader.doc/new.md")]
+    /// A loader over the given `path -> pixel dimension` filesystem.
     #[must_use]
     pub fn new(files: &[(&str, u8)]) -> Self {
         Self {
@@ -29,7 +29,7 @@ impl VariantImageLoader {
         }
     }
 
-    #[doc = include_str!("variant_image_loader.doc/asked_fn.md")]
+    #[doc = include_str!("../../docs/api/mock/variant_image_loader.doc/asked_fn.md")]
     #[must_use]
     pub fn asked(&self) -> Vec<Box<str>> {
         self.asked.lock().expect("uncontended").clone()

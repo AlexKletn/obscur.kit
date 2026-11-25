@@ -1,1 +1,0 @@
-Double-clicking does nothing.

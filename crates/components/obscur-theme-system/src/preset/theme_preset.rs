@@ -1,4 +1,4 @@
-#![doc = include_str!("theme_preset.doc/_module.md")]
+//! A named bundle of tokens for a visual mode (spec §2.6).
 
 use std::collections::BTreeMap;
 
@@ -6,39 +6,21 @@ use obscur_scene::color::Color;
 
 use crate::token::{ThemeToken, TokenValue};
 
-#[doc = include_str!("theme_preset.doc/ThemeMode.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum ThemeMode {
-    #[doc = include_str!("theme_preset.doc/Light.md")]
-    #[default]
-    Light,
-    #[doc = include_str!("theme_preset.doc/Dark.md")]
-    Dark,
-    #[doc = include_str!("theme_preset.doc/HighContrast.md")]
-    HighContrast,
-}
+use super::ThemeMode;
 
-impl ThemeMode {
-    #[doc = include_str!("theme_preset.doc/is_high_contrast.md")]
-    #[must_use]
-    pub const fn is_high_contrast(self) -> bool {
-        matches!(self, Self::HighContrast)
-    }
-}
-
-#[doc = include_str!("theme_preset.doc/ThemePreset.md")]
+#[doc = include_str!("../../docs/api/preset/theme_preset.doc/ThemePreset.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThemePreset {
-    #[doc = include_str!("theme_preset.doc/name.md")]
+    /// The preset's human-readable name (e.g. `"Light"`).
     pub name: Box<str>,
-    #[doc = include_str!("theme_preset.doc/mode.md")]
+    /// The visual mode this preset targets.
     pub mode: ThemeMode,
-    #[doc = include_str!("theme_preset.doc/tokens.md")]
+    /// The tokens keyed by their namespaced name, in deterministic order.
     pub tokens: BTreeMap<Box<str>, TokenValue>,
 }
 
 impl ThemePreset {
-    #[doc = include_str!("theme_preset.doc/new.md")]
+    /// Creates an empty preset with the given name and mode.
     #[must_use]
     pub fn new(name: impl Into<Box<str>>, mode: ThemeMode) -> Self {
         Self {
@@ -48,37 +30,37 @@ impl ThemePreset {
         }
     }
 
-    #[doc = include_str!("theme_preset.doc/insert.md")]
+    /// Inserts a token, keyed by its name; replaces any existing token of that name.
     pub fn insert(&mut self, token: ThemeToken) {
         self.tokens.insert(token.name, token.value);
     }
 
-    #[doc = include_str!("theme_preset.doc/with.md")]
+    /// Inserts a token and returns the preset, for fluent construction.
     #[must_use]
     pub fn with(mut self, token: ThemeToken) -> Self {
         self.insert(token);
         self
     }
 
-    #[doc = include_str!("theme_preset.doc/name_2.md")]
+    /// Returns the preset's name.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    #[doc = include_str!("theme_preset.doc/mode_2.md")]
+    /// Returns the preset's visual mode.
     #[must_use]
     pub const fn mode(&self) -> ThemeMode {
         self.mode
     }
 
-    #[doc = include_str!("theme_preset.doc/get.md")]
+    /// Resolves a token by name.
     #[must_use]
     pub fn get(&self, token_name: &str) -> Option<&TokenValue> {
         self.tokens.get(token_name)
     }
 
-    #[doc = include_str!("theme_preset.doc/color.md")]
+    /// Resolves a token as a color, or `None` if absent or not a color.
     #[must_use]
     pub fn color(&self, token_name: &str) -> Option<Color> {
         match self.get(token_name) {
@@ -87,7 +69,7 @@ impl ThemePreset {
         }
     }
 
-    #[doc = include_str!("theme_preset.doc/length.md")]
+    /// Resolves a token as a length, or `None` if absent or not a length.
     #[must_use]
     pub fn length(&self, token_name: &str) -> Option<f32> {
         match self.get(token_name) {
@@ -96,30 +78,30 @@ impl ThemePreset {
         }
     }
 
-    #[doc = include_str!("theme_preset.doc/contains.md")]
+    /// Returns whether a token with the given name is present.
     #[must_use]
     pub fn contains(&self, token_name: &str) -> bool {
         self.tokens.contains_key(token_name)
     }
 
-    #[doc = include_str!("theme_preset.doc/len.md")]
+    /// Returns the number of tokens in the preset.
     #[must_use]
     pub fn len(&self) -> usize {
         self.tokens.len()
     }
 
-    #[doc = include_str!("theme_preset.doc/is_empty.md")]
+    /// Returns whether the preset has no tokens.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.tokens.is_empty()
     }
 
-    #[doc = include_str!("theme_preset.doc/tokens_2.md")]
+    /// Iterates the tokens as `(name, value)` pairs in deterministic name order.
     pub fn tokens(&self) -> impl Iterator<Item = (&str, &TokenValue)> {
         self.tokens.iter().map(|(name, value)| (&**name, value))
     }
 
-    #[doc = include_str!("theme_preset.doc/light.md")]
+    /// The built-in light preset: a light background with a dark foreground.
     #[must_use]
     pub fn light() -> Self {
         Self::new("Light", ThemeMode::Light)
@@ -142,7 +124,7 @@ impl ThemePreset {
             .with(ThemeToken::font_family("font.body", "sans-serif"))
     }
 
-    #[doc = include_str!("theme_preset.doc/dark.md")]
+    /// The built-in dark preset: a dark background with a light foreground.
     #[must_use]
     pub fn dark() -> Self {
         Self::new("Dark", ThemeMode::Dark)
@@ -165,7 +147,7 @@ impl ThemePreset {
             .with(ThemeToken::font_family("font.body", "sans-serif"))
     }
 
-    #[doc = include_str!("theme_preset.doc/high_contrast.md")]
+    /// The built-in high-contrast preset: pure black/white with a saturated primary.
     #[must_use]
     pub fn high_contrast() -> Self {
         Self::new("High Contrast", ThemeMode::HighContrast)

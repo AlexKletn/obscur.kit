@@ -1,8 +1,9 @@
-#![doc = include_str!("slot_rule.doc/_module.md")]
+//! `SlotRule`: one named slot in the compiler's string contract model (spec
+//! §2.12).
 
 use obscur_view::contract::SlotCardinality;
 
-#[doc = include_str!("slot_rule.doc/SlotRule.md")]
+#[doc = include_str!("../../docs/api/validation/slot_rule.doc/SlotRule.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SlotRule {
     name: Box<str>,
@@ -11,7 +12,8 @@ pub struct SlotRule {
 }
 
 impl SlotRule {
-    #[doc = include_str!("slot_rule.doc/new.md")]
+    /// Declares a slot called `name` accepting `cardinality` children, with no
+    /// restriction on which children those are.
     #[must_use]
     pub fn new(name: impl Into<Box<str>>, cardinality: SlotCardinality) -> Self {
         Self {
@@ -21,32 +23,33 @@ impl SlotRule {
         }
     }
 
-    #[doc = include_str!("slot_rule.doc/allowing_child.md")]
+    /// Adds `tag` to the slot's allowed child tags (fluent). Adding any turns on
+    /// the restriction: only listed tags are then accepted in this slot.
     #[must_use]
     pub fn allowing_child(mut self, tag: impl Into<Box<str>>) -> Self {
         self.allowed_children.push(tag.into());
         self
     }
 
-    #[doc = include_str!("slot_rule.doc/name.md")]
+    /// Returns the slot's name — the value a child's `slot="…"` must match.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    #[doc = include_str!("slot_rule.doc/cardinality.md")]
+    /// Returns how many children the slot accepts.
     #[must_use]
     pub const fn cardinality(&self) -> SlotCardinality {
         self.cardinality
     }
 
-    #[doc = include_str!("slot_rule.doc/allowed_children.md")]
+    /// Returns the child tags the slot admits; an empty slice means any child.
     #[must_use]
     pub fn allowed_children(&self) -> &[Box<str>] {
         &self.allowed_children
     }
 
-    #[doc = include_str!("slot_rule.doc/admits.md")]
+    /// Returns whether `tag` may be placed in this slot.
     pub(crate) fn admits(&self, tag: &str) -> bool {
         self.allowed_children.is_empty() || self.allowed_children.iter().any(|t| t.as_ref() == tag)
     }

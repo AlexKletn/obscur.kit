@@ -1,1 +1,0 @@
-A [`ResourceState::Pending`] state.

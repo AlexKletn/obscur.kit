@@ -1,28 +1,29 @@
-#![doc = include_str!("background_size.doc/_module.md")]
+//! The computed value of CSS `background-size` (spec §5.2, CSS Backgrounds §3).
 
 use crate::property::Length;
 
-#[doc = include_str!("background_size.doc/BackgroundSize.md")]
+#[doc = include_str!("../../docs/api/property/background_size.doc/BackgroundSize.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum BackgroundSize {
-    #[doc = include_str!("background_size.doc/Auto.md")]
+    /// Draw the image at its intrinsic pixel size (the CSS initial `auto`).
     #[default]
     Auto,
-    #[doc = include_str!("background_size.doc/Cover.md")]
+    /// Scale to the smallest size that fully covers the box (aspect preserved).
     Cover,
-    #[doc = include_str!("background_size.doc/Contain.md")]
+    /// Scale to the largest size that fits inside the box (aspect preserved).
     Contain,
-    #[doc = include_str!("background_size.doc/Explicit.md")]
+    /// An explicit per-axis size. Each component is a concrete [`Length`]
+    /// (`px` / `%`) or [`Length::Auto`] (derived from the other axis).
     Explicit {
-        #[doc = include_str!("background_size.doc/width.md")]
+        /// The horizontal size component (`Length::Auto` = derive from height).
         width: Length,
-        #[doc = include_str!("background_size.doc/height.md")]
+        /// The vertical size component (`Length::Auto` = derive from width).
         height: Length,
     },
 }
 
 impl BackgroundSize {
-    #[doc = include_str!("background_size.doc/uses_ch.md")]
+    #[doc = include_str!("../../docs/api/property/background_size.doc/uses_ch.md")]
     #[must_use]
     pub const fn uses_ch(&self) -> bool {
         match self {

@@ -1,4 +1,4 @@
-#![doc = include_str!("smol_timer.doc/_module.md")]
+#![doc = include_str!("../../docs/api/timer/smol_timer.doc/_module.md")]
 
 use std::fmt;
 use std::sync::Arc;
@@ -7,17 +7,19 @@ use std::time::Duration;
 use async_executor::Executor;
 use obscur_task::Timer;
 
-#[doc = include_str!("smol_timer.doc/SmolTimer.md")]
+#[doc = include_str!("../../docs/api/timer/smol_timer.doc/SmolTimer.md")]
 #[derive(Clone)]
 pub struct SmolTimer {
-    #[doc = include_str!("smol_timer.doc/executor.md")]
+    /// The shared executor wake tasks are spawned onto. Must be a driven
+    /// executor (typically a `SmolSpawner`'s) for scheduled wakes to fire.
     executor: Arc<Executor<'static>>,
-    #[doc = include_str!("smol_timer.doc/wake.md")]
+    /// The action invoked after each scheduled delay elapses. Shared so the
+    /// timer stays [`Clone`] and each spawned task can hold its own reference.
     wake: Arc<dyn Fn() + Send + Sync + 'static>,
 }
 
 impl SmolTimer {
-    #[doc = include_str!("smol_timer.doc/new.md")]
+    #[doc = include_str!("../../docs/api/timer/smol_timer.doc/new.md")]
     #[must_use]
     pub fn new(executor: Arc<Executor<'static>>, wake: impl Fn() + Send + Sync + 'static) -> Self {
         Self {
@@ -28,14 +30,14 @@ impl SmolTimer {
 }
 
 impl fmt::Debug for SmolTimer {
-    #[doc = include_str!("smol_timer.doc/fmt.md")]
+    /// Formats without the wake closure, which is not itself `Debug`.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SmolTimer").finish_non_exhaustive()
     }
 }
 
 impl Timer for SmolTimer {
-    #[doc = include_str!("smol_timer.doc/schedule.md")]
+    #[doc = include_str!("../../docs/api/timer/smol_timer.doc/schedule.md")]
     fn schedule(&self, delay: Duration) {
         let wake = Arc::clone(&self.wake);
         self.executor

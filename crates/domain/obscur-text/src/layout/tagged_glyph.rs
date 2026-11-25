@@ -1,24 +1,28 @@
-#![doc = include_str!("tagged_glyph.doc/_module.md")]
+//! One flattened, font-tagged glyph of a paragraph's glyph stream (spec §5.10).
 
 use crate::font::FontId;
 use crate::shaping::{ShapedGlyph, ShapedRun, TextDirection};
 
-#[doc = include_str!("tagged_glyph.doc/TaggedGlyph.md")]
+/// One flattened glyph tagged with the font, direction, font size, and bidi
+/// embedding level of the [`ShapedRun`] it came from. Flattening the fallback
+/// result into this stream lets word-splitting and greedy packing treat the
+/// whole paragraph uniformly while retaining enough per-glyph provenance to
+/// rebuild same-font, same-level segments and reorder them into visual order.
 #[derive(Clone, Copy)]
 pub(super) struct TaggedGlyph {
     pub(super) font: FontId,
     pub(super) direction: TextDirection,
     pub(super) font_size: f32,
     pub(super) level: u8,
-    #[doc = include_str!("tagged_glyph.doc/synth_oblique.md")]
+    /// Whether the segment this glyph belongs to is faux-sheared (spec §5.18).
     pub(super) synth_oblique: bool,
-    #[doc = include_str!("tagged_glyph.doc/synth_bold.md")]
+    /// Whether the segment this glyph belongs to is faux-bolded (spec §5.18).
     pub(super) synth_bold: bool,
     pub(super) glyph: ShapedGlyph,
 }
 
 impl TaggedGlyph {
-    #[doc = include_str!("tagged_glyph.doc/flatten.md")]
+    #[doc = include_str!("../../docs/api/layout/tagged_glyph.doc/flatten.md")]
     pub(super) fn flatten(runs: &[ShapedRun]) -> Vec<Self> {
         let mut stream = Vec::new();
         for shaped in runs {
@@ -29,7 +33,7 @@ impl TaggedGlyph {
             let level = shaped.level();
             let synth_oblique = shaped.synth_oblique();
             let synth_bold = shaped.synth_bold();
-            for glyph in run.glyphs() {
+            let mut append = |glyph| {
                 stream.push(Self {
                     font,
                     direction,
@@ -37,20 +41,29 @@ impl TaggedGlyph {
                     level,
                     synth_oblique,
                     synth_bold,
-                    glyph: *glyph,
+                    glyph,
                 });
+            };
+            let glyphs = run.glyphs();
+            if direction == TextDirection::RightToLeft {
+                for cluster in glyphs.chunk_by(|a, b| a.cluster() == b.cluster()).rev() {
+                    cluster.iter().copied().for_each(&mut append);
+                }
+            } else {
+                glyphs.iter().copied().for_each(append);
             }
         }
         stream
     }
 
-    #[doc = include_str!("tagged_glyph.doc/source_char.md")]
+    #[doc = include_str!("../../docs/api/layout/tagged_glyph.doc/source_char.md")]
     pub(super) fn source_char(self, text: &str) -> Option<char> {
         text.get(self.glyph.cluster()..)
             .and_then(|rest| rest.chars().next())
     }
 
-    #[doc = include_str!("tagged_glyph.doc/is_word_separator.md")]
+    /// Whether this glyph's source character is a CSS word separator
+    /// (CSS Text 3 §8.2): U+0020 SPACE or U+00A0 NO-BREAK SPACE.
     pub(super) fn is_word_separator(self, text: &str) -> bool {
         matches!(self.source_char(text), Some(' ' | '\u{00A0}'))
     }

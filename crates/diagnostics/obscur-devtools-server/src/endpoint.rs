@@ -1,4 +1,4 @@
-#![doc = include_str!("endpoint.doc/_module.md")]
+//! The `DevToolsEndpoint`: the security-enforcing heart of the server (§7.6/§7.7).
 
 use obscur_devtools_protocol::error::ProtocolError;
 use obscur_devtools_protocol::message::{
@@ -12,37 +12,10 @@ use crate::bridge::{InspectSource, RuntimeBridge};
 use crate::subscription::SubscriptionManager;
 use crate::transport::InjectionSink;
 
-#[doc = include_str!("endpoint.doc/AuditEntry.md")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AuditEntry {
-    #[doc = include_str!("endpoint.doc/command.md")]
-    pub command: CommandId,
-    #[doc = include_str!("endpoint.doc/kind.md")]
-    pub kind: CommandKind,
-}
+pub use crate::audit_entry::AuditEntry;
+pub use crate::command_outcome::CommandOutcome;
 
-impl AuditEntry {
-    #[doc = include_str!("endpoint.doc/new.md")]
-    #[must_use]
-    pub const fn new(command: CommandId, kind: CommandKind) -> Self {
-        Self { command, kind }
-    }
-}
-
-#[doc = include_str!("endpoint.doc/CommandOutcome.md")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CommandOutcome {
-    #[doc = include_str!("endpoint.doc/Snapshot.md")]
-    Snapshot(SnapshotMessage),
-    #[doc = include_str!("endpoint.doc/Subscribed.md")]
-    Subscribed(Subscription),
-    #[doc = include_str!("endpoint.doc/Unsubscribed.md")]
-    Unsubscribed(bool),
-    #[doc = include_str!("endpoint.doc/Acknowledged.md")]
-    Acknowledged(CommandId),
-}
-
-#[doc = include_str!("endpoint.doc/DevToolsEndpoint.md")]
+#[doc = include_str!("../docs/api/endpoint.doc/DevToolsEndpoint.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DevToolsEndpoint<S> {
     authenticator: Authenticator,
@@ -54,17 +27,17 @@ pub struct DevToolsEndpoint<S> {
     connected: bool,
     enabled: bool,
     control_excluded: bool,
-    #[doc = include_str!("endpoint.doc/event_push.md")]
+    #[doc = include_str!("../docs/api/endpoint.doc/event_push.md")]
     event_push: bool,
     audit_log: Vec<AuditEntry>,
-    #[doc = include_str!("endpoint.doc/injections.md")]
+    #[doc = include_str!("../docs/api/endpoint.doc/injections.md")]
     injections: InjectionSink,
-    #[doc = include_str!("endpoint.doc/pending_controls.md")]
+    #[doc = include_str!("../docs/api/endpoint.doc/pending_controls.md")]
     pending_controls: Vec<ControlAction>,
 }
 
 impl<S: InspectSource> DevToolsEndpoint<S> {
-    #[doc = include_str!("endpoint.doc/new_2.md")]
+    #[doc = include_str!("../docs/api/endpoint.doc/new_2.md")]
     pub fn new(authenticator: Authenticator, bridge: RuntimeBridge<S>) -> Self {
         Self {
             authenticator,
@@ -83,33 +56,35 @@ impl<S: InspectSource> DevToolsEndpoint<S> {
         }
     }
 
-    #[doc = include_str!("endpoint.doc/with_supported_versions.md")]
+    /// Sets the range of protocol versions this endpoint will negotiate.
     #[must_use]
     pub fn with_supported_versions(mut self, supported: VersionRange) -> Self {
         self.supported = supported;
         self
     }
 
-    #[doc = include_str!("endpoint.doc/with_injection_sink.md")]
+    #[doc = include_str!("../docs/api/endpoint.doc/with_injection_sink.md")]
     #[must_use]
     pub fn with_injection_sink(mut self, injections: InjectionSink) -> Self {
         self.injections = injections;
         self
     }
 
-    #[doc = include_str!("endpoint.doc/with_control_excluded.md")]
+    /// Marks this endpoint as control-excluded: `Control` commands are refused
+    /// with [`ProtocolError::ControlDisabled`] regardless of granted scope
+    /// (spec §7.7).
     #[must_use]
     pub fn with_control_excluded(mut self) -> Self {
         self.control_excluded = true;
         self
     }
 
-    #[doc = include_str!("endpoint.doc/enable.md")]
+    #[doc = include_str!("../docs/api/endpoint.doc/enable.md")]
     pub fn enable(&mut self) {
         self.enabled = true;
     }
 
-    #[doc = include_str!("endpoint.doc/handshake.md")]
+    #[doc = include_str!("../docs/api/endpoint.doc/handshake.md")]
     pub fn handshake(&mut self, request: &HandshakeRequest) -> HandshakeResponse {
         if !self.enabled {
             return HandshakeResponse::rejected(HandshakeRejection::Unauthorized);
@@ -128,7 +103,7 @@ impl<S: InspectSource> DevToolsEndpoint<S> {
         }
     }
 
-    #[doc = include_str!("endpoint.doc/dispatch.md")]
+    #[doc = include_str!("../docs/api/endpoint.doc/dispatch.md")]
     pub fn dispatch(&mut self, command: &CommandMessage) -> Result<CommandOutcome, ProtocolError> {
         let required = command.required_scope();
         if !self.granted.contains(required) {
@@ -144,6 +119,13 @@ impl<S: InspectSource> DevToolsEndpoint<S> {
         match &command.kind {
             CommandKind::Inspect(target) => Ok(CommandOutcome::Snapshot(
                 self.bridge.inspect(command.id, *target),
+            )),
+            CommandKind::SelectSemantic { role, name } => Ok(CommandOutcome::Snapshot(
+                self.bridge
+                    .select_semantic(command.id, role, name.as_deref()),
+            )),
+            CommandKind::SelectStableId(selector) => Ok(CommandOutcome::Snapshot(
+                self.bridge.select_stable(command.id, selector),
             )),
             CommandKind::Subscribe(topic) => {
                 // A grant is a promise to deliver. This session is request/reply
@@ -182,76 +164,77 @@ impl<S: InspectSource> DevToolsEndpoint<S> {
         }
     }
 
-    #[doc = include_str!("endpoint.doc/services_injection.md")]
+    #[doc = include_str!("../docs/api/endpoint.doc/services_injection.md")]
     #[must_use]
     pub fn services_injection(&self) -> bool {
         self.injections.is_live()
     }
 
-    #[doc = include_str!("endpoint.doc/drain_controls.md")]
+    #[doc = include_str!("../docs/api/endpoint.doc/drain_controls.md")]
     pub fn drain_controls(&mut self) -> Vec<ControlAction> {
         std::mem::take(&mut self.pending_controls)
     }
 
-    #[doc = include_str!("endpoint.doc/inspect.md")]
+    /// Convenience: inspect `target` directly through the runtime bridge,
+    /// bypassing the command envelope (used by hosts that already authorised).
     pub fn inspect(&self, command: CommandId, target: Inspectable) -> SnapshotMessage {
         self.bridge.inspect(command, target)
     }
 
-    #[doc = include_str!("endpoint.doc/audit_log.md")]
+    /// Returns the recorded dangerous operations (spec §7.7).
     #[must_use]
     pub fn audit_log(&self) -> &[AuditEntry] {
         &self.audit_log
     }
 
-    #[doc = include_str!("endpoint.doc/is_connected.md")]
+    /// Returns whether a session has successfully handshook.
     #[must_use]
     pub fn is_connected(&self) -> bool {
         self.connected
     }
 
-    #[doc = include_str!("endpoint.doc/is_enabled.md")]
+    /// Returns whether the endpoint has been enabled by the host.
     #[must_use]
     pub fn is_enabled(&self) -> bool {
         self.enabled
     }
 
-    #[doc = include_str!("endpoint.doc/granted_scopes.md")]
+    /// Returns the scopes granted to the current session.
     #[must_use]
     pub fn granted_scopes(&self) -> ScopeSet {
         self.granted
     }
 
-    #[doc = include_str!("endpoint.doc/negotiated_version.md")]
+    /// Returns the negotiated protocol version, if the session is connected.
     #[must_use]
     pub fn negotiated_version(&self) -> Option<ProtocolVersion> {
         self.version
     }
 
-    #[doc = include_str!("endpoint.doc/subscriptions.md")]
+    /// Returns a reference to the subscription manager.
     #[must_use]
     pub fn subscriptions(&self) -> &SubscriptionManager {
         &self.subscriptions
     }
 
-    #[doc = include_str!("endpoint.doc/control_excluded.md")]
+    /// Returns whether `Control` commands are refused on this endpoint.
     #[must_use]
     pub fn control_excluded(&self) -> bool {
         self.control_excluded
     }
 
-    #[doc = include_str!("endpoint.doc/services_event_push.md")]
+    #[doc = include_str!("../docs/api/endpoint.doc/services_event_push.md")]
     #[must_use]
     pub fn services_event_push(&self) -> bool {
         self.event_push
     }
 
-    #[doc = include_str!("endpoint.doc/mark_event_push_serviced.md")]
+    #[doc = include_str!("../docs/api/endpoint.doc/mark_event_push_serviced.md")]
     pub(crate) fn mark_event_push_serviced(&mut self) {
         self.event_push = true;
     }
 
-    #[doc = include_str!("endpoint.doc/fan_out.md")]
+    /// Builds the events to push to subscribers of `topic` for `kind`.
     #[must_use]
     pub fn fan_out(
         &self,

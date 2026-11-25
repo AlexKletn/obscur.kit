@@ -1,1 +1,0 @@
-The `B` scan position.

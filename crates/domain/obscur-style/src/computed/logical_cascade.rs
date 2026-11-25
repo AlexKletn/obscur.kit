@@ -1,10 +1,10 @@
-#![doc = include_str!("logical_cascade.doc/_module.md")]
+#![doc = include_str!("../../docs/api/computed/logical_cascade.doc/_module.md")]
 
 use crate::cascade::ResolvedDeclarations;
 use crate::computed::ComputedStyle;
 use crate::property::{PropertyId, PropertyValue, WritingMode, layout_keyword};
 
-#[doc = include_str!("logical_cascade.doc/resolves_rtl.md")]
+#[doc = include_str!("../../docs/api/computed/logical_cascade.doc/resolves_rtl.md")]
 pub(super) fn resolves_rtl(
     cascaded: &ResolvedDeclarations,
     parent: Option<&ComputedStyle>,
@@ -21,7 +21,7 @@ pub(super) fn resolves_rtl(
         .is_some_and(|symbol| symbol == layout_keyword::DIRECTION_RTL)
 }
 
-#[doc = include_str!("logical_cascade.doc/resolves_writing_mode.md")]
+#[doc = include_str!("../../docs/api/computed/logical_cascade.doc/resolves_writing_mode.md")]
 pub(super) fn resolves_writing_mode(
     cascaded: &ResolvedDeclarations,
     parent: Option<&ComputedStyle>,
@@ -48,7 +48,7 @@ pub(super) fn resolves_writing_mode(
     }
 }
 
-#[doc = include_str!("logical_cascade.doc/cascaded_for.md")]
+#[doc = include_str!("../../docs/api/computed/logical_cascade.doc/cascaded_for.md")]
 pub(super) fn cascaded_for(
     cascaded: &ResolvedDeclarations,
     property: PropertyId,

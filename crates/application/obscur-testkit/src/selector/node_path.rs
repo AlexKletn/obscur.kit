@@ -1,23 +1,23 @@
-#![doc = include_str!("node_path.doc/_module.md")]
+//! A node named by its position under the root.
 
 use obscur_identity::NodeId;
 use obscur_runtime::UiRuntime;
 
-#[doc = include_str!("node_path.doc/NodePath.md")]
+#[doc = include_str!("../../docs/api/selector/node_path.doc/NodePath.md")]
 #[derive(Debug, Clone, Copy)]
 pub struct NodePath<'a> {
-    #[doc = include_str!("node_path.doc/steps.md")]
+    /// The child index to take at each depth, starting from the root.
     steps: &'a [usize],
 }
 
 impl<'a> NodePath<'a> {
-    #[doc = include_str!("node_path.doc/new.md")]
+    /// A path over the given child indices.
     #[must_use]
     pub fn new(steps: &'a [usize]) -> Self {
         Self { steps }
     }
 
-    #[doc = include_str!("node_path.doc/resolve.md")]
+    #[doc = include_str!("../../docs/api/selector/node_path.doc/resolve.md")]
     #[must_use]
     pub fn resolve(&self, runtime: &UiRuntime) -> NodeId {
         let tree = runtime.tree();
@@ -38,7 +38,7 @@ impl<'a> NodePath<'a> {
         node
     }
 
-    #[doc = include_str!("node_path.doc/children.md")]
+    #[doc = include_str!("../../docs/api/selector/node_path.doc/children.md")]
     #[must_use]
     pub fn children(&self, runtime: &UiRuntime) -> Vec<NodeId> {
         let node = self.resolve(runtime);

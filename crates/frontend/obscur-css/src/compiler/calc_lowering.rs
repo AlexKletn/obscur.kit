@@ -1,85 +1,103 @@
-#![doc = include_str!("calc_lowering.doc/_module.md")]
+#![doc = include_str!("../../docs/api/compiler/calc_lowering.doc/_module.md")]
+
+mod clamp_bound;
+mod length_operand;
+
+use clamp_bound::{ClampBound, parse_clamp_bound};
+
+use length_operand::LengthOperand;
 
 use super::value_lowering::dimension_length;
 use crate::parser::ParsedValue;
 
+use obscur_style::matching::StyleRangeValue;
 use obscur_style::property::{Length, LengthExpr};
 
-#[doc = include_str!("calc_lowering.doc/Operand.md")]
-enum Operand {
-    #[doc = include_str!("calc_lowering.doc/Len.md")]
-    Len(LengthExpr),
-    #[doc = include_str!("calc_lowering.doc/Num.md")]
-    Num(f32),
+#[doc = include_str!("../../docs/api/compiler/calc_lowering.doc/lower_math_function.md")]
+pub(crate) fn lower_math_function(name: &str, args: &[ParsedValue]) -> Option<LengthExpr> {
+    lower_operand(name, args)?.into_length()
 }
 
-impl Operand {
-    #[doc = include_str!("calc_lowering.doc/into_length.md")]
-    fn into_length(self) -> Option<LengthExpr> {
-        match self {
-            Self::Len(expr) => Some(expr),
-            Self::Num(_) => None,
-        }
+pub(super) fn lower_range_math(name: &str, args: &[ParsedValue]) -> Option<StyleRangeValue> {
+    match lower_operand(name, args)? {
+        LengthOperand::Len(expr) => Some(StyleRangeValue::Math(expr.into())),
+        LengthOperand::Num(value) if value.is_finite() => Some(StyleRangeValue::Number(value)),
+        LengthOperand::Num(_) => None,
     }
 }
 
-#[doc = include_str!("calc_lowering.doc/lower_math_function.md")]
-pub(crate) fn lower_math_function(name: &str, args: &[ParsedValue]) -> Option<LengthExpr> {
+fn lower_operand(name: &str, args: &[ParsedValue]) -> Option<LengthOperand> {
     if name.eq_ignore_ascii_case("calc") || name.is_empty() {
         parse_full(args)
     } else if name.eq_ignore_ascii_case("min") {
-        Some(LengthExpr::Min(parse_arg_list(args)?))
+        lower_extrema(args, true)
     } else if name.eq_ignore_ascii_case("max") {
-        Some(LengthExpr::Max(parse_arg_list(args)?))
+        lower_extrema(args, false)
     } else if name.eq_ignore_ascii_case("clamp") {
         let parts = split_top_level_commas(args);
-        if parts.len() != 3 {
+        let [first, center, last] = parts.as_slice() else {
             return None;
-        }
-        let min = parse_clamp_bound(parts[0])?;
-        let val = parse_full(parts[1])?;
-        let max = parse_clamp_bound(parts[2])?;
-        Some(match (min, max) {
-            (ClampBound::Bounded(min), ClampBound::Bounded(max)) => {
-                LengthExpr::Clamp(Box::new(min), Box::new(val), Box::new(max))
-            }
-            (ClampBound::Bounded(min), ClampBound::None) => LengthExpr::Max(vec![min, val]),
-            (ClampBound::None, ClampBound::Bounded(max)) => LengthExpr::Min(vec![val, max]),
-            (ClampBound::None, ClampBound::None) => val,
-        })
+        };
+        lower_clamp(
+            parse_clamp_bound(first)?,
+            parse_full(center)?,
+            parse_clamp_bound(last)?,
+        )
     } else {
         None
     }
 }
 
-#[doc = include_str!("calc_lowering.doc/ClampBound.md")]
-enum ClampBound {
-    #[doc = include_str!("calc_lowering.doc/Bounded.md")]
-    Bounded(LengthExpr),
-    #[doc = include_str!("calc_lowering.doc/None.md")]
-    None,
-}
-
-#[doc = include_str!("calc_lowering.doc/parse_clamp_bound.md")]
-fn parse_clamp_bound(tokens: &[ParsedValue]) -> Option<ClampBound> {
-    if let [ParsedValue::Keyword(keyword)] = tokens
-        && keyword.eq_ignore_ascii_case("none")
-    {
-        return Some(ClampBound::None);
-    }
-    parse_full(tokens).map(ClampBound::Bounded)
-}
-
-#[doc = include_str!("calc_lowering.doc/parse_arg_list.md")]
-fn parse_arg_list(args: &[ParsedValue]) -> Option<Vec<LengthExpr>> {
+fn lower_extrema(args: &[ParsedValue], is_min: bool) -> Option<LengthOperand> {
     let parts = split_top_level_commas(args);
-    if parts.len() == 1 && parts[0].is_empty() {
-        return None;
+    let mut operands = parts.into_iter().map(parse_full);
+    match operands.next()?? {
+        LengthOperand::Len(first) => {
+            let mut lengths = Vec::with_capacity(operands.len() + 1);
+            lengths.push(first);
+            for operand in operands {
+                lengths.push(operand?.into_length()?);
+            }
+            Some(LengthOperand::Len(if is_min {
+                LengthExpr::Min(lengths)
+            } else {
+                LengthExpr::Max(lengths)
+            }))
+        }
+        LengthOperand::Num(first) => {
+            let combine = if is_min { f32::min } else { f32::max };
+            let result = operands.try_fold(first, |acc, operand| match operand? {
+                LengthOperand::Num(value) => Some(combine(acc, value)),
+                LengthOperand::Len(_) => None,
+            })?;
+            Some(LengthOperand::Num(result))
+        }
     }
-    parts.into_iter().map(parse_full).collect()
 }
 
-#[doc = include_str!("calc_lowering.doc/split_top_level_commas.md")]
+fn lower_clamp(min: ClampBound, value: LengthOperand, max: ClampBound) -> Option<LengthOperand> {
+    use ClampBound::{Bounded, None as Unbounded};
+    use LengthOperand::{Len, Num};
+
+    Some(match (min, value, max) {
+        (Bounded(Len(min)), Len(val), Bounded(Len(max))) => Len(LengthExpr::Clamp(
+            Box::new(min),
+            Box::new(val),
+            Box::new(max),
+        )),
+        (Bounded(Len(min)), Len(val), Unbounded) => Len(LengthExpr::Max(vec![min, val])),
+        (Unbounded, Len(val), Bounded(Len(max))) => Len(LengthExpr::Min(vec![val, max])),
+        (Bounded(Num(min)), Num(val), Bounded(Num(max))) => Num(min.max(val.min(max))),
+        (Bounded(Num(min)), Num(val), Unbounded) => Num(min.max(val)),
+        (Unbounded, Num(val), Bounded(Num(max))) => Num(val.min(max)),
+        (Unbounded, val, Unbounded) => val,
+        _ => return None,
+    })
+}
+
+/// Splits `args` at top-level [`ParsedValue::Comma`]s (nested function arguments
+/// keep their own commas inside their [`ParsedValue::Function`] node, so they are
+/// never seen here).
 fn split_top_level_commas(args: &[ParsedValue]) -> Vec<&[ParsedValue]> {
     let mut parts = Vec::new();
     let mut start = 0;
@@ -93,19 +111,19 @@ fn split_top_level_commas(args: &[ParsedValue]) -> Vec<&[ParsedValue]> {
     parts
 }
 
-#[doc = include_str!("calc_lowering.doc/parse_full.md")]
-fn parse_full(tokens: &[ParsedValue]) -> Option<LengthExpr> {
+/// Parses one complete arithmetic operand, preserving whether it is a number or a length expression.
+fn parse_full(tokens: &[ParsedValue]) -> Option<LengthOperand> {
     let mut pos = 0;
     let expr = parse_sum(tokens, &mut pos)?;
     if pos == tokens.len() {
-        expr.into_length()
+        Some(expr)
     } else {
         None
     }
 }
 
-#[doc = include_str!("calc_lowering.doc/parse_sum.md")]
-fn parse_sum(tokens: &[ParsedValue], pos: &mut usize) -> Option<Operand> {
+/// `sum := product (('+' | '-') product)*`
+fn parse_sum(tokens: &[ParsedValue], pos: &mut usize) -> Option<LengthOperand> {
     let mut left = parse_product(tokens, pos)?;
     while let Some(op) = peek_delim(tokens, *pos, &['+', '-']) {
         *pos += 1;
@@ -115,8 +133,8 @@ fn parse_sum(tokens: &[ParsedValue], pos: &mut usize) -> Option<Operand> {
     Some(left)
 }
 
-#[doc = include_str!("calc_lowering.doc/parse_product.md")]
-fn parse_product(tokens: &[ParsedValue], pos: &mut usize) -> Option<Operand> {
+/// `product := unit (('*' | '/') unit)*`
+fn parse_product(tokens: &[ParsedValue], pos: &mut usize) -> Option<LengthOperand> {
     let mut left = parse_unit(tokens, pos)?;
     while let Some(op) = peek_delim(tokens, *pos, &['*', '/']) {
         *pos += 1;
@@ -126,34 +144,36 @@ fn parse_product(tokens: &[ParsedValue], pos: &mut usize) -> Option<Operand> {
     Some(left)
 }
 
-#[doc = include_str!("calc_lowering.doc/parse_unit.md")]
-fn parse_unit(tokens: &[ParsedValue], pos: &mut usize) -> Option<Operand> {
+/// `unit := <length> | <number> | ( sum ) | <math-fn>`
+fn parse_unit(tokens: &[ParsedValue], pos: &mut usize) -> Option<LengthOperand> {
     let value = tokens.get(*pos)?;
     match value {
         ParsedValue::Dimension { value, unit } => {
             *pos += 1;
-            dimension_length(*value, unit).map(|l| Operand::Len(LengthExpr::Leaf(l)))
+            dimension_length(*value, unit).map(|l| LengthOperand::Len(LengthExpr::Leaf(l)))
         }
         ParsedValue::Percentage(p) => {
             *pos += 1;
             #[allow(clippy::cast_possible_truncation)]
-            Some(Operand::Len(LengthExpr::Leaf(Length::Percent(*p as f32))))
+            Some(LengthOperand::Len(LengthExpr::Leaf(Length::Percent(
+                *p as f32,
+            ))))
         }
         ParsedValue::Number(n) => {
             *pos += 1;
             #[allow(clippy::cast_possible_truncation)]
-            Some(Operand::Num(*n as f32))
+            Some(LengthOperand::Num(*n as f32))
         }
         // A nested math function or a bare parenthesised group.
         ParsedValue::Function { name, args } => {
             *pos += 1;
-            lower_math_function(name, args).map(Operand::Len)
+            lower_operand(name, args)
         }
         _ => None,
     }
 }
 
-#[doc = include_str!("calc_lowering.doc/peek_delim.md")]
+/// Returns the delimiter char at `pos` if it is one of `wanted`.
 fn peek_delim(tokens: &[ParsedValue], pos: usize, wanted: &[char]) -> Option<char> {
     match tokens.get(pos) {
         Some(ParsedValue::Delimiter(c)) if wanted.contains(c) => Some(*c),
@@ -161,38 +181,47 @@ fn peek_delim(tokens: &[ParsedValue], pos: usize, wanted: &[char]) -> Option<cha
     }
 }
 
-#[doc = include_str!("calc_lowering.doc/combine_additive.md")]
-fn combine_additive(left: Operand, right: Operand, op: char) -> Option<Operand> {
+/// Combines `left op right` for `+` / `-`. Both operands must be lengths (a
+/// length plus a bare number is invalid), except two numbers fold to a number.
+fn combine_additive(left: LengthOperand, right: LengthOperand, op: char) -> Option<LengthOperand> {
     match (left, right) {
-        (Operand::Len(a), Operand::Len(b)) => {
+        (LengthOperand::Len(a), LengthOperand::Len(b)) => {
             let node = if op == '+' {
                 LengthExpr::Sum(Box::new(a), Box::new(b))
             } else {
                 LengthExpr::Diff(Box::new(a), Box::new(b))
             };
-            Some(Operand::Len(node))
+            Some(LengthOperand::Len(node))
         }
-        (Operand::Num(a), Operand::Num(b)) => {
-            Some(Operand::Num(if op == '+' { a + b } else { a - b }))
+        (LengthOperand::Num(a), LengthOperand::Num(b)) => {
+            Some(LengthOperand::Num(if op == '+' { a + b } else { a - b }))
         }
         // Length ± number (or number ± length) is not a valid length.
         _ => None,
     }
 }
 
-#[doc = include_str!("calc_lowering.doc/combine_multiplicative.md")]
-fn combine_multiplicative(left: Operand, right: Operand, op: char) -> Option<Operand> {
+/// Combines `left op right` for `*` / `/`. Exactly one operand must be a number
+/// (division additionally requires the *right* operand to be the number).
+fn combine_multiplicative(
+    left: LengthOperand,
+    right: LengthOperand,
+    op: char,
+) -> Option<LengthOperand> {
     match (left, right, op) {
         // number * number, number / number.
-        (Operand::Num(a), Operand::Num(b), '*') => Some(Operand::Num(a * b)),
-        (Operand::Num(a), Operand::Num(b), '/') => (b != 0.0).then_some(Operand::Num(a / b)),
+        (LengthOperand::Num(a), LengthOperand::Num(b), '*') => Some(LengthOperand::Num(a * b)),
+        (LengthOperand::Num(a), LengthOperand::Num(b), '/') => {
+            (b != 0.0).then_some(LengthOperand::Num(a / b))
+        }
         // length * number, number * length.
-        (Operand::Len(a), Operand::Num(n), '*') | (Operand::Num(n), Operand::Len(a), '*') => {
-            Some(Operand::Len(LengthExpr::Product(Box::new(a), n)))
+        (LengthOperand::Len(a), LengthOperand::Num(n), '*')
+        | (LengthOperand::Num(n), LengthOperand::Len(a), '*') => {
+            Some(LengthOperand::Len(LengthExpr::Product(Box::new(a), n)))
         }
         // length / number only (number / length is not a length).
-        (Operand::Len(a), Operand::Num(n), '/') => {
-            (n != 0.0).then_some(Operand::Len(LengthExpr::Quotient(Box::new(a), n)))
+        (LengthOperand::Len(a), LengthOperand::Num(n), '/') => {
+            (n != 0.0).then_some(LengthOperand::Len(LengthExpr::Quotient(Box::new(a), n)))
         }
         _ => None,
     }

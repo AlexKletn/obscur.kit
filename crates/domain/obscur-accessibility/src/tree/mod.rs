@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Tree module.
 mod semantic_snapshot;
 pub use semantic_snapshot::SemanticSnapshot;
 mod semantic_tree;

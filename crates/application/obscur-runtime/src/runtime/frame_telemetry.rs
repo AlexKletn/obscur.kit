@@ -1,58 +1,28 @@
-#![doc = include_str!("frame_telemetry.doc/_module.md")]
+//! [`FrameTelemetry`]: the §7.9 performance channel — the sink each frame's
+//! phases record into, and the budget their cost counts are checked against.
+
+use super::frame_phase::FramePhase;
 
 use obscur_diagnostics::{
-    BudgetViolation, DiagnosticSubsystem, NullTelemetrySink, PerformanceCounter, PerformanceSpan,
+    DiagnosticSink, DiagnosticSubsystem, NullTelemetrySink, PerformanceCounter, PerformanceSpan,
     SpanAttribution, TelemetrySink,
 };
 
 use super::FrameBudget;
 use crate::frame::FrameId;
 
-#[doc = include_str!("frame_telemetry.doc/FramePhase.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum FramePhase {
-    #[doc = include_str!("frame_telemetry.doc/Reconcile.md")]
-    Reconcile,
-    #[doc = include_str!("frame_telemetry.doc/Style.md")]
-    Style,
-    #[doc = include_str!("frame_telemetry.doc/Layout.md")]
-    Layout,
-    #[doc = include_str!("frame_telemetry.doc/Compose.md")]
-    Compose,
-}
-
-impl FramePhase {
-    #[doc = include_str!("frame_telemetry.doc/names.md")]
-    const fn names(self) -> (&'static str, &'static str, DiagnosticSubsystem) {
-        match self {
-            Self::Reconcile => ("reconcile", "reconcile.nodes", DiagnosticSubsystem::Tree),
-            Self::Style => ("style", "style.resolved", DiagnosticSubsystem::Style),
-            Self::Layout => ("layout", "layout.boxes", DiagnosticSubsystem::Layout),
-            Self::Compose => ("compose", "compose.commands", DiagnosticSubsystem::Render),
-        }
-    }
-
-    #[doc = include_str!("frame_telemetry.doc/check.md")]
-    fn check(self, budget: FrameBudget, metric: u64) -> Option<BudgetViolation> {
-        match self {
-            Self::Reconcile => budget.check_reconcile(metric),
-            Self::Style => budget.check_style(metric),
-            Self::Layout => budget.check_layout(metric),
-            Self::Compose => budget.check_compose(metric),
-        }
-    }
-}
-
-#[doc = include_str!("frame_telemetry.doc/FrameTelemetry.md")]
+#[doc = include_str!("../../docs/api/runtime/frame_telemetry.doc/FrameTelemetry.md")]
 pub(crate) struct FrameTelemetry {
-    #[doc = include_str!("frame_telemetry.doc/sink.md")]
+    #[doc = include_str!("../../docs/api/runtime/frame_telemetry.doc/sink.md")]
     sink: Box<dyn TelemetrySink>,
-    #[doc = include_str!("frame_telemetry.doc/budget.md")]
+    /// The per-phase cost bounds. Unbounded by default, so no violation is
+    /// produced until a host installs one.
     budget: FrameBudget,
 }
 
 impl FrameTelemetry {
-    #[doc = include_str!("frame_telemetry.doc/new.md")]
+    /// A channel that discards everything and bounds nothing — the default a
+    /// runtime starts with.
     pub(crate) fn new() -> Self {
         Self {
             sink: Box::new(NullTelemetrySink),
@@ -60,34 +30,40 @@ impl FrameTelemetry {
         }
     }
 
-    #[doc = include_str!("frame_telemetry.doc/set_sink.md")]
+    /// Installs the sink subsequent records go to, replacing any previous one.
     pub(crate) fn set_sink(&mut self, sink: Box<dyn TelemetrySink>) {
         self.sink = sink;
     }
 
-    #[doc = include_str!("frame_telemetry.doc/set_budget.md")]
+    /// Installs the per-phase cost bounds, replacing any previous ones.
     pub(crate) const fn set_budget(&mut self, budget: FrameBudget) {
         self.budget = budget;
     }
 
-    #[doc = include_str!("frame_telemetry.doc/budget_2.md")]
+    /// The per-phase cost bounds currently checked after each phase.
     pub(crate) const fn budget(&self) -> FrameBudget {
         self.budget
     }
 
-    #[doc = include_str!("frame_telemetry.doc/open_frame.md")]
+    #[doc = include_str!("../../docs/api/runtime/frame_telemetry.doc/open_frame.md")]
     pub(crate) fn open_frame(&mut self) {
         self.sink
             .record_span(&PerformanceSpan::new("frame", DiagnosticSubsystem::Runtime));
     }
 
-    #[doc = include_str!("frame_telemetry.doc/close_frame.md")]
+    #[doc = include_str!("../../docs/api/runtime/frame_telemetry.doc/close_frame.md")]
     pub(crate) fn close_frame(&mut self, phases_run: u64) {
         self.count(DiagnosticSubsystem::Runtime, "frame.phases_run", phases_run);
     }
 
-    #[doc = include_str!("frame_telemetry.doc/record_phase.md")]
-    pub(crate) fn record_phase(&mut self, phase: FramePhase, metric: u64, frame: FrameId) {
+    #[doc = include_str!("../../docs/api/runtime/frame_telemetry.doc/record_phase.md")]
+    pub(crate) fn record_phase(
+        &mut self,
+        phase: FramePhase,
+        metric: u64,
+        frame: FrameId,
+        diagnostics: &dyn DiagnosticSink,
+    ) {
         let (name, label, subsystem) = phase.names();
         self.sink.record_span(
             &PerformanceSpan::new(name, subsystem).with_attribution(SpanAttribution::frame(frame)),
@@ -95,10 +71,12 @@ impl FrameTelemetry {
         self.count(subsystem, label, metric);
         if let Some(violation) = phase.check(self.budget, metric) {
             self.sink.record_violation(&violation);
+            diagnostics.emit(&violation.to_diagnostic());
         }
     }
 
-    #[doc = include_str!("frame_telemetry.doc/count.md")]
+    /// Records a standalone counter — a tally that belongs to no frame phase and
+    /// has no budget, such as the components rendered during reconcile.
     pub(crate) fn count(&mut self, subsystem: DiagnosticSubsystem, label: &'static str, n: u64) {
         let mut counter = PerformanceCounter::new(subsystem, label);
         counter.add(n);
@@ -158,7 +136,12 @@ mod tests {
         // number attributed to nothing.
         let (mut telemetry, shared) = channel();
         for phase in PHASES {
-            telemetry.record_phase(phase, 7, FrameId::from_raw(3));
+            telemetry.record_phase(
+                phase,
+                7,
+                FrameId::from_raw(3),
+                &obscur_diagnostics::NullDiagnosticSink,
+            );
         }
         let sink = shared.0.borrow();
         assert_eq!(sink.spans.len(), 4);
@@ -211,14 +194,24 @@ mod tests {
             let (mut telemetry, shared) = channel();
             telemetry.set_budget(budget);
             // One under its own bound: no phase may complain.
-            telemetry.record_phase(phase, over - 1, FrameId::FIRST);
+            telemetry.record_phase(
+                phase,
+                over - 1,
+                FrameId::FIRST,
+                &obscur_diagnostics::NullDiagnosticSink,
+            );
             assert!(
                 shared.0.borrow().violations.is_empty(),
                 "{phase:?} at {} is within its own bound",
                 over - 1
             );
             // One over it: exactly one violation, on this phase's subsystem.
-            telemetry.record_phase(phase, over, FrameId::FIRST);
+            telemetry.record_phase(
+                phase,
+                over,
+                FrameId::FIRST,
+                &obscur_diagnostics::NullDiagnosticSink,
+            );
             let sink = shared.0.borrow();
             assert_eq!(
                 sink.violations.len(),
@@ -235,7 +228,12 @@ mod tests {
         // work from the counter recorded beside it.
         let (mut telemetry, shared) = channel();
         telemetry.set_budget(FrameBudget::unbounded().with_layout_boxes(2));
-        telemetry.record_phase(FramePhase::Layout, 5, FrameId::FIRST);
+        telemetry.record_phase(
+            FramePhase::Layout,
+            5,
+            FrameId::FIRST,
+            &obscur_diagnostics::NullDiagnosticSink,
+        );
         let sink = shared.0.borrow();
         assert_eq!(sink.counters[0].value(), 5);
         // The §7.9 cost encoding is one item = one nanosecond.
@@ -248,7 +246,12 @@ mod tests {
         let (mut telemetry, shared) = channel();
         assert_eq!(telemetry.budget(), FrameBudget::unbounded());
         for phase in PHASES {
-            telemetry.record_phase(phase, u64::MAX, FrameId::FIRST);
+            telemetry.record_phase(
+                phase,
+                u64::MAX,
+                FrameId::FIRST,
+                &obscur_diagnostics::NullDiagnosticSink,
+            );
         }
         let sink = shared.0.borrow();
         assert_eq!(sink.spans.len(), 4, "the phases are still observed");
@@ -283,7 +286,12 @@ mod tests {
         // is gone, not buffered.
         let mut telemetry = FrameTelemetry::new();
         telemetry.open_frame();
-        telemetry.record_phase(FramePhase::Style, 99, FrameId::FIRST);
+        telemetry.record_phase(
+            FramePhase::Style,
+            99,
+            FrameId::FIRST,
+            &obscur_diagnostics::NullDiagnosticSink,
+        );
         telemetry.close_frame(1);
 
         let shared = Shared::default();

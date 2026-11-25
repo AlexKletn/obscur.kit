@@ -1,6 +1,10 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Request module.
 mod activate_window;
-pub use activate_window::{ActivateWindow, ActivationResult, FocusRequest};
+pub use activate_window::ActivateWindow;
+mod activation_result;
+pub use activation_result::ActivationResult;
+mod focus_request;
+pub use focus_request::FocusRequest;
 mod close_window;
 pub use close_window::CloseWindow;
 mod create_window;

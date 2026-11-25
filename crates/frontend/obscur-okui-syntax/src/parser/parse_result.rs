@@ -1,9 +1,10 @@
-#![doc = include_str!("parse_result.doc/_module.md")]
+//! `ParseResult`: the outcome of a parse — the lossless tree plus any
+//! diagnostics gathered along the way.
 
 use crate::parser::ParseError;
 use crate::syntax::SyntaxTree;
 
-#[doc = include_str!("parse_result.doc/ParseResult.md")]
+#[doc = include_str!("../../docs/api/parser/parse_result.doc/ParseResult.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParseResult {
     tree: SyntaxTree,
@@ -11,37 +12,37 @@ pub struct ParseResult {
 }
 
 impl ParseResult {
-    #[doc = include_str!("parse_result.doc/new.md")]
+    /// Creates a result from a lossless `tree` and its `errors`.
     #[must_use]
     pub fn new(tree: SyntaxTree, errors: Vec<ParseError>) -> Self {
         Self { tree, errors }
     }
 
-    #[doc = include_str!("parse_result.doc/tree.md")]
+    /// Returns the lossless syntax tree.
     #[must_use]
     pub const fn tree(&self) -> &SyntaxTree {
         &self.tree
     }
 
-    #[doc = include_str!("parse_result.doc/errors.md")]
+    /// Returns the diagnostics gathered while parsing.
     #[must_use]
     pub fn errors(&self) -> &[ParseError] {
         &self.errors
     }
 
-    #[doc = include_str!("parse_result.doc/is_ok.md")]
+    /// Returns `true` if the source parsed without any diagnostics.
     #[must_use]
     pub fn is_ok(&self) -> bool {
         self.errors.is_empty()
     }
 
-    #[doc = include_str!("parse_result.doc/error_count.md")]
+    /// Returns the number of diagnostics gathered.
     #[must_use]
     pub fn error_count(&self) -> usize {
         self.errors.len()
     }
 
-    #[doc = include_str!("parse_result.doc/into_tree.md")]
+    /// Consumes the result, returning just the lossless tree.
     #[must_use]
     pub fn into_tree(self) -> SyntaxTree {
         self.tree

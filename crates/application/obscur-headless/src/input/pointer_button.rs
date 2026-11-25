@@ -1,14 +1,14 @@
-#![doc = include_str!("pointer_button.doc/_module.md")]
+//! Pointer button identity for synthetic pointer input (spec §7.4).
 
-#[doc = include_str!("pointer_button.doc/PointerButton.md")]
+#[doc = include_str!("../../docs/api/input/pointer_button.doc/PointerButton.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum PointerButton {
-    #[doc = include_str!("pointer_button.doc/Primary.md")]
+    /// The primary button (typically the left mouse button). This is the default.
     #[default]
     Primary,
-    #[doc = include_str!("pointer_button.doc/Secondary.md")]
+    /// The secondary button (typically the right mouse button).
     Secondary,
-    #[doc = include_str!("pointer_button.doc/Middle.md")]
+    /// The middle button (typically the mouse wheel button).
     Middle,
 }
 

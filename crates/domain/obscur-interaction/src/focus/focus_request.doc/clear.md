@@ -1,1 +1,0 @@
-Requests clearing focus (blur).

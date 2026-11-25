@@ -1,40 +1,13 @@
-#![doc = include_str!("local_transport.doc/_module.md")]
+//! In-process loopback transport and its wire envelopes (spec §7.6/§7.7).
 
 use std::collections::VecDeque;
 
 use obscur_devtools_protocol::error::ProtocolError;
-use obscur_devtools_protocol::message::{
-    CommandId, CommandMessage, HandshakeRequest, HandshakeResponse, MESSAGE_LIMIT, ProtocolEvent,
-    SnapshotMessage, Subscription,
-};
+use obscur_devtools_protocol::message::MESSAGE_LIMIT;
 
-#[doc = include_str!("local_transport.doc/ServerBound.md")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ServerBound {
-    #[doc = include_str!("local_transport.doc/Handshake.md")]
-    Handshake(HandshakeRequest),
-    #[doc = include_str!("local_transport.doc/Command.md")]
-    Command(CommandMessage),
-}
+use super::{ClientBound, ServerBound};
 
-#[doc = include_str!("local_transport.doc/ClientBound.md")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ClientBound {
-    #[doc = include_str!("local_transport.doc/Handshake_2.md")]
-    Handshake(HandshakeResponse),
-    #[doc = include_str!("local_transport.doc/Snapshot.md")]
-    Snapshot(SnapshotMessage),
-    #[doc = include_str!("local_transport.doc/Event.md")]
-    Event(ProtocolEvent),
-    #[doc = include_str!("local_transport.doc/Subscription.md")]
-    Subscription(Subscription),
-    #[doc = include_str!("local_transport.doc/Acknowledged.md")]
-    Acknowledged(CommandId),
-    #[doc = include_str!("local_transport.doc/Error.md")]
-    Error(ProtocolError),
-}
-
-#[doc = include_str!("local_transport.doc/LocalTransport.md")]
+#[doc = include_str!("../../docs/api/transport/local_transport.doc/LocalTransport.md")]
 #[derive(Debug, Clone, Default)]
 pub struct LocalTransport {
     to_server: VecDeque<ServerBound>,
@@ -42,7 +15,7 @@ pub struct LocalTransport {
 }
 
 impl LocalTransport {
-    #[doc = include_str!("local_transport.doc/new.md")]
+    /// Creates an empty transport with both queues drained.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -51,7 +24,7 @@ impl LocalTransport {
         }
     }
 
-    #[doc = include_str!("local_transport.doc/send_to_server.md")]
+    #[doc = include_str!("../../docs/api/transport/local_transport.doc/send_to_server.md")]
     pub fn send_to_server(&mut self, message: ServerBound) -> Result<(), ProtocolError> {
         if self.to_server.len() >= MESSAGE_LIMIT {
             return Err(ProtocolError::LimitExceeded {
@@ -62,13 +35,13 @@ impl LocalTransport {
         Ok(())
     }
 
-    #[doc = include_str!("local_transport.doc/poll_server.md")]
+    /// Removes and returns the next client→server message, if any.
     #[must_use]
     pub fn poll_server(&mut self) -> Option<ServerBound> {
         self.to_server.pop_front()
     }
 
-    #[doc = include_str!("local_transport.doc/push_to_client.md")]
+    #[doc = include_str!("../../docs/api/transport/local_transport.doc/push_to_client.md")]
     pub fn push_to_client(&mut self, message: ClientBound) -> Result<(), ProtocolError> {
         if self.to_client.len() >= MESSAGE_LIMIT {
             return Err(ProtocolError::LimitExceeded {
@@ -79,19 +52,19 @@ impl LocalTransport {
         Ok(())
     }
 
-    #[doc = include_str!("local_transport.doc/poll_client.md")]
+    /// Removes and returns the next server→client message, if any.
     #[must_use]
     pub fn poll_client(&mut self) -> Option<ClientBound> {
         self.to_client.pop_front()
     }
 
-    #[doc = include_str!("local_transport.doc/pending_to_server.md")]
+    /// Returns the number of queued client→server messages.
     #[must_use]
     pub fn pending_to_server(&self) -> usize {
         self.to_server.len()
     }
 
-    #[doc = include_str!("local_transport.doc/pending_to_client.md")]
+    /// Returns the number of queued server→client messages.
     #[must_use]
     pub fn pending_to_client(&self) -> usize {
         self.to_client.len()
@@ -101,6 +74,9 @@ impl LocalTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use obscur_devtools_protocol::message::{
+        CommandId, CommandMessage, HandshakeRequest, SnapshotMessage,
+    };
     use obscur_devtools_protocol::message::{
         CommandKind, Inspectable, ProtocolVersion, SnapshotPayload, VersionRange,
     };

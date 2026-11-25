@@ -1,4 +1,6 @@
-#![doc = include_str!("shared_element_transition.doc/_module.md")]
+//! The [`SharedElementTransition`] cross-view element morph and its
+//! [`SharedElementKey`] (spec §4.17 "shared-element transitions", "stable
+//! identity").
 
 use obscur_geometry::Rect;
 
@@ -6,25 +8,9 @@ use crate::track::Easing;
 use crate::transition::TransitionDirection;
 use crate::value::Interpolatable;
 
-#[doc = include_str!("shared_element_transition.doc/SharedElementKey.md")]
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct SharedElementKey(Box<str>);
+use super::SharedElementKey;
 
-impl SharedElementKey {
-    #[doc = include_str!("shared_element_transition.doc/new.md")]
-    #[must_use]
-    pub fn new(tag: impl Into<Box<str>>) -> Self {
-        Self(tag.into())
-    }
-
-    #[doc = include_str!("shared_element_transition.doc/as_str.md")]
-    #[must_use]
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-#[doc = include_str!("shared_element_transition.doc/SharedElementTransition.md")]
+#[doc = include_str!("../../docs/api/transition/shared_element_transition.doc/SharedElementTransition.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct SharedElementTransition {
     key: SharedElementKey,
@@ -35,7 +21,10 @@ pub struct SharedElementTransition {
 }
 
 impl SharedElementTransition {
-    #[doc = include_str!("shared_element_transition.doc/new_2.md")]
+    /// Creates a shared-element transition for `key`, morphing from
+    /// `from_bounds` (old view) to `to_bounds` (new view), playing
+    /// [`Linear`](Easing::Linear) and
+    /// [`Forward`](TransitionDirection::Forward) (spec §4.17).
     #[must_use]
     pub fn new(key: SharedElementKey, from_bounds: Rect, to_bounds: Rect) -> Self {
         Self {
@@ -47,57 +36,58 @@ impl SharedElementTransition {
         }
     }
 
-    #[doc = include_str!("shared_element_transition.doc/with_easing.md")]
+    /// Returns this transition with `easing` applied (spec §4.17).
     #[must_use]
     pub fn with_easing(mut self, easing: Easing) -> Self {
         self.easing = easing;
         self
     }
 
-    #[doc = include_str!("shared_element_transition.doc/with_direction.md")]
+    /// Returns this transition with `direction` applied (spec §4.17).
     #[must_use]
     pub fn with_direction(mut self, direction: TransitionDirection) -> Self {
         self.direction = direction;
         self
     }
 
-    #[doc = include_str!("shared_element_transition.doc/key.md")]
+    /// The stable key pairing this element across the two views (spec §4.17).
     #[must_use]
     pub const fn key(&self) -> &SharedElementKey {
         &self.key
     }
 
-    #[doc = include_str!("shared_element_transition.doc/from_bounds.md")]
+    /// The element's box in the OLD view (spec §4.17).
     #[must_use]
     pub const fn from_bounds(&self) -> Rect {
         self.from_bounds
     }
 
-    #[doc = include_str!("shared_element_transition.doc/to_bounds.md")]
+    /// The element's box in the NEW view (spec §4.17).
     #[must_use]
     pub const fn to_bounds(&self) -> Rect {
         self.to_bounds
     }
 
-    #[doc = include_str!("shared_element_transition.doc/easing.md")]
+    /// The easing curve applied to progress (spec §4.17).
     #[must_use]
     pub const fn easing(&self) -> Easing {
         self.easing
     }
 
-    #[doc = include_str!("shared_element_transition.doc/direction.md")]
+    /// The direction this transition plays in (spec §4.17).
     #[must_use]
     pub const fn direction(&self) -> TransitionDirection {
         self.direction
     }
 
-    #[doc = include_str!("shared_element_transition.doc/matches.md")]
+    /// Returns `true` if `key` identifies this transition's element (spec
+    /// §4.17 "stable identity").
     #[must_use]
     pub fn matches(&self, key: &SharedElementKey) -> bool {
         &self.key == key
     }
 
-    #[doc = include_str!("shared_element_transition.doc/sample.md")]
+    #[doc = include_str!("../../docs/api/transition/shared_element_transition.doc/sample.md")]
     #[must_use]
     pub fn sample(&self, t: f32) -> Rect {
         let oriented = self.direction.orient(t);
@@ -113,12 +103,6 @@ mod tests {
 
     fn rect(x: f32, y: f32, w: f32, h: f32) -> Rect {
         Rect::new(Point::new(x, y), Size::new(w, h))
-    }
-
-    #[test]
-    fn key_round_trips_tag() {
-        let key = SharedElementKey::new("avatar");
-        assert_eq!(key.as_str(), "avatar");
     }
 
     #[test]

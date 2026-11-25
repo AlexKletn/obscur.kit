@@ -1,4 +1,4 @@
-#![doc = include_str!("smol_spawner.doc/_module.md")]
+#![doc = include_str!("../../docs/api/spawner/smol_spawner.doc/_module.md")]
 
 use std::fmt;
 use std::sync::Arc;
@@ -7,18 +7,21 @@ use std::thread::JoinHandle;
 use async_executor::Executor;
 use obscur_task::{BlockingExecutor, BoxFuture, Spawner};
 
-#[doc = include_str!("smol_spawner.doc/SmolSpawner.md")]
+#[doc = include_str!("../../docs/api/spawner/smol_spawner.doc/SmolSpawner.md")]
 pub struct SmolSpawner {
-    #[doc = include_str!("smol_spawner.doc/executor.md")]
+    /// The shared executor spawned work runs on; also handed to timers so they
+    /// schedule onto the same driven executor.
     executor: Arc<Executor<'static>>,
-    #[doc = include_str!("smol_spawner.doc/shutdown.md")]
+    /// Shutdown signal: sending (or dropping) this completes the worker's
+    /// [`Executor::run`] future so the thread returns cleanly.
     shutdown: async_channel::Sender<()>,
-    #[doc = include_str!("smol_spawner.doc/worker.md")]
+    /// The worker thread driving the executor. `Option` so [`Drop`] can take and
+    /// join it exactly once.
     worker: Option<JoinHandle<()>>,
 }
 
 impl SmolSpawner {
-    #[doc = include_str!("smol_spawner.doc/new.md")]
+    #[doc = include_str!("../../docs/api/spawner/smol_spawner.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         let executor = Arc::new(Executor::new());
@@ -44,7 +47,7 @@ impl SmolSpawner {
         }
     }
 
-    #[doc = include_str!("smol_spawner.doc/executor_2.md")]
+    #[doc = include_str!("../../docs/api/spawner/smol_spawner.doc/executor_2.md")]
     #[must_use]
     pub fn executor(&self) -> Arc<Executor<'static>> {
         Arc::clone(&self.executor)
@@ -52,35 +55,36 @@ impl SmolSpawner {
 }
 
 impl Default for SmolSpawner {
-    #[doc = include_str!("smol_spawner.doc/default.md")]
+    /// Equivalent to [`SmolSpawner::new`].
     fn default() -> Self {
         Self::new()
     }
 }
 
 impl fmt::Debug for SmolSpawner {
-    #[doc = include_str!("smol_spawner.doc/fmt.md")]
+    /// Formats without the executor internals, shutdown channel, or worker
+    /// handle, none of which carry a useful `Debug` representation here.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SmolSpawner").finish_non_exhaustive()
     }
 }
 
 impl Spawner for SmolSpawner {
-    #[doc = include_str!("smol_spawner.doc/spawn.md")]
+    #[doc = include_str!("../../docs/api/spawner/smol_spawner.doc/spawn.md")]
     fn spawn(&self, future: BoxFuture) {
         self.executor.spawn(future).detach();
     }
 }
 
 impl BlockingExecutor for SmolSpawner {
-    #[doc = include_str!("smol_spawner.doc/run_blocking.md")]
+    #[doc = include_str!("../../docs/api/spawner/smol_spawner.doc/run_blocking.md")]
     fn run_blocking(&self, job: Box<dyn FnOnce() + Send + 'static>) {
         blocking::unblock(job).detach();
     }
 }
 
 impl Drop for SmolSpawner {
-    #[doc = include_str!("smol_spawner.doc/drop.md")]
+    #[doc = include_str!("../../docs/api/spawner/smol_spawner.doc/drop.md")]
     fn drop(&mut self) {
         let _ = self.shutdown.try_send(());
         if let Some(worker) = self.worker.take() {

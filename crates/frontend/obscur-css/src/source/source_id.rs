@@ -1,20 +1,20 @@
-#![doc = include_str!("source_id.doc/_module.md")]
+//! A stable identifier for a CSS source (stylesheet) (spec §2.5 source maps).
 
-#[doc = include_str!("source_id.doc/SourceId.md")]
+#[doc = include_str!("../../docs/api/source/source_id.doc/SourceId.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SourceId(u32);
 
 impl SourceId {
-    #[doc = include_str!("source_id.doc/ANONYMOUS.md")]
+    /// The id reserved for anonymous sources with no stable identity.
     pub const ANONYMOUS: SourceId = SourceId::from_raw(0);
 
-    #[doc = include_str!("source_id.doc/from_raw.md")]
+    /// Creates a `SourceId` from its raw underlying value.
     #[must_use]
     pub const fn from_raw(raw: u32) -> Self {
         Self(raw)
     }
 
-    #[doc = include_str!("source_id.doc/raw.md")]
+    /// Returns the raw underlying value of this id.
     #[must_use]
     pub const fn raw(self) -> u32 {
         self.0

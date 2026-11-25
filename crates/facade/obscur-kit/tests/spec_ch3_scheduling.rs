@@ -117,6 +117,39 @@ fn three_requests_and_two_commits_coalesce_into_one_frame() {
     );
 }
 
+#[test]
+fn a_high_priority_input_frame_also_applies_a_pending_structural_update() {
+    let sheet = support::compile(CSS);
+    let sheets = std::slice::from_ref(&sheet);
+    let mut rt = runtime(200.0, 400.0);
+    let _ = rt.render_now(&text_view("before"), sheets);
+
+    rt.request_frame(FrameReason::Input);
+    rt.request_frame(FrameReason::ExternalRender);
+    assert_eq!(drain_frames(&mut rt, &text_view("after"), sheets), 1);
+    assert_eq!(tree_text(&rt).as_deref(), Some("after"));
+}
+
+#[test]
+fn reactive_diagnostics_capture_reuses_the_retained_scene() {
+    use std::{cell::Cell, rc::Rc};
+
+    let mut rt = runtime(200.0, 400.0);
+    let builds = Rc::new(Cell::new(0));
+    let count = Rc::clone(&builds);
+    rt.set_root_view(move || {
+        count.set(count.get() + 1);
+        static_view()
+    });
+    rt.request_frame(FrameReason::UiCommit);
+    let initial = rt.run_due_frame_reactive().unwrap();
+    rt.request_frame(FrameReason::DiagnosticsCapture);
+    let capture = rt.run_due_frame_reactive().unwrap();
+    assert_eq!(builds.get(), 1);
+    assert_eq!(capture.snapshot(), initial.snapshot());
+    assert!(!capture.restyled() && !capture.relaid_out());
+}
+
 #[doc = include_str!("spec_ch3_scheduling.doc/five_queued_pointer_moves_are_five_dispatches_in_one_frame.md")]
 #[test]
 fn five_queued_pointer_moves_are_five_dispatches_in_one_frame() {
@@ -198,6 +231,123 @@ fn input_is_serviced_before_resource_completion_in_one_frame() {
         remaining, 0,
         "both reasons are served by that single frame — 1 frame total, not 2"
     );
+}
+
+#[test]
+fn an_idle_poll_services_one_background_unit_without_rendering() {
+    let mut rt = runtime(200.0, 400.0);
+    rt.request_background();
+    rt.request_background();
+
+    assert!(rt.run_due_frame(&static_view(), &[]).is_none());
+    assert_eq!(rt.pending_background(), 1);
+    assert_eq!(rt.serviced_background(), 1);
+
+    rt.set_root_view(|| panic!("an idle poll must leave the view alone"));
+    assert!(rt.run_due_frame_reactive().is_none());
+    assert!(rt.run_due_frame_reactive().is_none());
+    assert_eq!(rt.pending_background(), 0);
+    assert_eq!(rt.serviced_background(), 2);
+}
+
+#[test]
+fn idle_frame_polls_run_one_background_callback_at_a_time() {
+    use std::{cell::RefCell, rc::Rc};
+
+    let mut rt = runtime(200.0, 400.0);
+    let completed = Rc::new(RefCell::new(Vec::new()));
+    for id in [1, 2] {
+        let completed = Rc::clone(&completed);
+        rt.enqueue_background(move || completed.borrow_mut().push(id));
+    }
+    assert!(completed.borrow().is_empty());
+
+    assert!(rt.run_due_frame(&static_view(), &[]).is_none());
+    assert_eq!(*completed.borrow(), [1]);
+    rt.set_root_view(|| panic!("background callbacks alone do not render"));
+    assert!(rt.run_due_frame_reactive().is_none());
+    assert_eq!(*completed.borrow(), [1, 2]);
+    assert_eq!(rt.pending_background(), 0);
+    assert_eq!(rt.serviced_background(), 2);
+}
+
+#[test]
+fn cancelled_background_callbacks_are_discarded_without_counting_as_serviced() {
+    use obscur_kit::task::CancellationSource;
+    use std::{cell::Cell, rc::Rc};
+
+    let mut rt = runtime(200.0, 400.0);
+    let cancelled = CancellationSource::new();
+    rt.enqueue_cancellable_background(cancelled.token(), || panic!("cancelled before polling"));
+    cancelled.cancel();
+    rt.enqueue_cancellable_background(cancelled.token(), || panic!("cancelled before enqueue"));
+
+    let ran = Rc::new(Cell::new(false));
+    let observed = Rc::clone(&ran);
+    rt.enqueue_background(move || observed.set(true));
+    assert_eq!(rt.pending_background(), 2);
+
+    assert!(rt.run_due_frame(&static_view(), &[]).is_none());
+    assert_eq!(rt.pending_background(), 1);
+    assert_eq!(rt.serviced_background(), 0);
+    assert!(!ran.get());
+    assert!(rt.run_due_frame(&static_view(), &[]).is_none());
+    assert!(ran.get());
+    assert_eq!(rt.serviced_background(), 1);
+}
+
+#[test]
+fn background_deadlines_use_logical_time_and_include_the_boundary() {
+    use std::{cell::Cell, rc::Rc, time::Duration};
+
+    let mut rt = runtime(200.0, 400.0);
+    rt.enqueue_background_with_deadline(Duration::ZERO, || panic!("zero lifetime"));
+    rt.enqueue_background_with_deadline(Duration::from_millis(125), || panic!("expired job"));
+    let ran = Rc::new(Cell::new(false));
+    let observed = Rc::clone(&ran);
+    rt.enqueue_background_with_deadline(Duration::from_millis(250), move || observed.set(true));
+    assert_eq!(rt.pending_background(), 2);
+
+    rt.advance_motion(0.125);
+    assert!(rt.run_due_frame(&static_view(), &[]).is_none());
+    assert_eq!(rt.serviced_background(), 0);
+    assert_eq!(rt.pending_background(), 1);
+    assert!(rt.run_due_frame(&static_view(), &[]).is_none());
+    assert!(ran.get());
+    assert_eq!(rt.serviced_background(), 1);
+}
+
+#[test]
+fn the_host_can_budget_idle_and_fairness_work_separately() {
+    use obscur_kit::runtime::{BackgroundBudget, scheduler::StarvationGuard};
+
+    let mut rt = runtime(200.0, 400.0);
+    rt.set_background_budget(BackgroundBudget {
+        idle_units: 0,
+        fairness_units: 2,
+    });
+    for _ in 0..5 {
+        rt.request_background();
+    }
+    let view = static_view();
+    assert!(rt.run_due_frame(&view, &[]).is_none());
+    assert_eq!(rt.pending_background(), 5);
+    for _ in 0..StarvationGuard::DEFAULT_THRESHOLD {
+        rt.request_frame(FrameReason::Input);
+        assert!(rt.run_due_frame(&view, &[]).is_some());
+    }
+    assert_eq!(rt.pending_background(), 5);
+    rt.request_frame(FrameReason::Input);
+    assert!(rt.run_due_frame(&view, &[]).is_some());
+    assert_eq!(rt.pending_background(), 3);
+
+    rt.set_background_budget(BackgroundBudget {
+        idle_units: 2,
+        fairness_units: 0,
+    });
+    assert!(rt.run_due_frame(&view, &[]).is_none());
+    assert_eq!(rt.pending_background(), 1);
+    assert_eq!(rt.serviced_background(), 4);
 }
 
 #[doc = include_str!("spec_ch3_scheduling.doc/background_work_completes_under_sustained_input_saturation.md")]

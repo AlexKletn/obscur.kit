@@ -1,11 +1,11 @@
-#![doc = include_str!("diagnostic_channel.doc/_module.md")]
+//! The functional diagnostics channel (spec §7.8).
 
 use super::diagnostic_buffer_policy::DiagnosticBufferPolicy;
 use super::diagnostic_filter::DiagnosticFilter;
-use super::diagnostic_subscription::{DiagnosticSubscription, SubscriptionId};
+use super::{DiagnosticSubscription, SubscriptionId};
 use crate::diagnostic::Diagnostic;
 
-#[doc = include_str!("diagnostic_channel.doc/DiagnosticChannel.md")]
+#[doc = include_str!("../../docs/api/subscription/diagnostic_channel.doc/DiagnosticChannel.md")]
 #[derive(Debug, Default)]
 pub struct DiagnosticChannel {
     subscriptions: Vec<DiagnosticSubscription>,
@@ -13,7 +13,7 @@ pub struct DiagnosticChannel {
 }
 
 impl DiagnosticChannel {
-    #[doc = include_str!("diagnostic_channel.doc/new.md")]
+    /// Creates an empty channel with no subscriptions.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -22,7 +22,7 @@ impl DiagnosticChannel {
         }
     }
 
-    #[doc = include_str!("diagnostic_channel.doc/subscribe.md")]
+    /// Registers a subscription and returns its freshly minted id.
     pub fn subscribe(
         &mut self,
         filter: DiagnosticFilter,
@@ -35,76 +35,47 @@ impl DiagnosticChannel {
         id
     }
 
-    #[doc = include_str!("diagnostic_channel.doc/unsubscribe.md")]
+    /// Removes the subscription with `id`, returning whether one was removed.
     pub fn unsubscribe(&mut self, id: SubscriptionId) -> bool {
         let before = self.subscriptions.len();
         self.subscriptions.retain(|s| s.id() != id);
         self.subscriptions.len() != before
     }
 
-    #[doc = include_str!("diagnostic_channel.doc/publish.md")]
+    /// Publishes `diagnostic` to the channel, offering it to every enabled,
+    /// matching subscription. Each subscription applies its own buffer policy,
+    /// so backpressure is independent per subscriber.
     pub fn publish(&mut self, diagnostic: &Diagnostic) {
         for subscription in &mut self.subscriptions {
             subscription.offer(diagnostic);
         }
     }
 
-    #[doc = include_str!("diagnostic_channel.doc/drain.md")]
+    /// Drains all buffered diagnostics from the subscription with `id`, or
+    /// returns an empty vector if no such subscription exists.
     pub fn drain(&mut self, id: SubscriptionId) -> Vec<Diagnostic> {
         self.subscription_mut(id)
             .map(DiagnosticSubscription::drain)
             .unwrap_or_default()
     }
 
-    #[doc = include_str!("diagnostic_channel.doc/subscription_mut.md")]
+    /// Returns a mutable reference to the subscription with `id`, if any, so
+    /// callers can toggle it enabled/disabled or inspect its buffer.
     #[must_use]
     pub fn subscription_mut(&mut self, id: SubscriptionId) -> Option<&mut DiagnosticSubscription> {
         self.subscriptions.iter_mut().find(|s| s.id() == id)
     }
 
-    #[doc = include_str!("diagnostic_channel.doc/subscription_count.md")]
+    /// Returns the number of active subscriptions.
     #[must_use]
     pub fn subscription_count(&self) -> usize {
         self.subscriptions.len()
     }
 }
 
-#[doc = include_str!("diagnostic_channel.doc/ChannelSink.md")]
-#[derive(Debug, Default)]
-pub struct ChannelSink {
-    channel: std::cell::RefCell<DiagnosticChannel>,
-}
-
-impl ChannelSink {
-    #[doc = include_str!("diagnostic_channel.doc/new_2.md")]
-    #[must_use]
-    pub fn new(channel: DiagnosticChannel) -> Self {
-        Self {
-            channel: std::cell::RefCell::new(channel),
-        }
-    }
-
-    #[doc = include_str!("diagnostic_channel.doc/channel_mut.md")]
-    #[must_use]
-    pub fn channel_mut(&self) -> std::cell::RefMut<'_, DiagnosticChannel> {
-        self.channel.borrow_mut()
-    }
-
-    #[doc = include_str!("diagnostic_channel.doc/into_inner.md")]
-    #[must_use]
-    pub fn into_inner(self) -> DiagnosticChannel {
-        self.channel.into_inner()
-    }
-}
-
-impl crate::port::DiagnosticSink for ChannelSink {
-    fn emit(&self, diagnostic: &Diagnostic) {
-        self.channel.borrow_mut().publish(diagnostic);
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use super::super::ChannelSink;
     use super::*;
     use crate::OverflowStrategy;
     use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticSeverity, DiagnosticSubsystem};

@@ -1,11 +1,11 @@
-#![doc = include_str!("line_segments.doc/_module.md")]
+//! One line's shaped segments, in visual order (spec §5.10, UAX #9 L2).
 
-use crate::shaping::{GlyphRun, ShapedRun};
+use crate::shaping::{GlyphRun, ShapedRun, TextDirection};
 use crate::span::TextRange;
 
 use super::tagged_glyph::TaggedGlyph;
 
-#[doc = include_str!("line_segments.doc/line_segments.md")]
+#[doc = include_str!("../../docs/api/layout/line_segments.doc/line_segments.md")]
 pub(super) fn line_segments(glyphs: &[TaggedGlyph], line_end: usize) -> Vec<ShapedRun> {
     let mut segments = Vec::new();
     let mut index = 0;
@@ -21,6 +21,7 @@ pub(super) fn line_segments(glyphs: &[TaggedGlyph], line_end: usize) -> Vec<Shap
         let mut run_glyphs = Vec::new();
         while index < glyphs.len()
             && glyphs[index].font == font
+            && glyphs[index].direction == direction
             && glyphs[index].level == level
             && glyphs[index].font_size == font_size
             && glyphs[index].synth_oblique == synth_oblique
@@ -33,6 +34,12 @@ pub(super) fn line_segments(glyphs: &[TaggedGlyph], line_end: usize) -> Vec<Shap
         // The segment ends where the next segment begins (or the line end).
         let seg_end = glyphs.get(index).map_or(line_end, |t| t.glyph.cluster());
         let range = TextRange::new(seg_start.min(seg_end), seg_start.max(seg_end));
+        if direction == TextDirection::RightToLeft {
+            run_glyphs.reverse();
+            for cluster in run_glyphs.chunk_by_mut(|a, b| a.cluster() == b.cluster()) {
+                cluster.reverse();
+            }
+        }
         let run = GlyphRun::new(run_glyphs, direction, font_size, range);
         segments.push(
             ShapedRun::new(font, run)
@@ -44,7 +51,7 @@ pub(super) fn line_segments(glyphs: &[TaggedGlyph], line_end: usize) -> Vec<Shap
     segments
 }
 
-#[doc = include_str!("line_segments.doc/reorder_visual.md")]
+#[doc = include_str!("../../docs/api/layout/line_segments.doc/reorder_visual.md")]
 fn reorder_visual(segments: &mut [ShapedRun]) {
     let Some(max_level) = segments.iter().map(ShapedRun::level).max() else {
         return;

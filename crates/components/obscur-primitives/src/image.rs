@@ -1,9 +1,9 @@
-#![doc = include_str!("image.doc/_module.md")]
+//! `Image`: a raster/vector image primitive (spec §2.6, §5.16).
 
 use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_view::view::{LOCAL_NAME, SRC, View, ViewNode, ViewProperty, ViewValue};
 
-#[doc = include_str!("image.doc/Image.md")]
+#[doc = include_str!("../docs/api/image.doc/Image.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Image {
     source: Box<str>,
@@ -11,15 +11,15 @@ pub struct Image {
 }
 
 impl Image {
-    #[doc = include_str!("image.doc/COMPONENT_ID.md")]
+    #[doc = include_str!("../docs/api/image.doc/COMPONENT_ID.md")]
     pub const COMPONENT_ID: ComponentId = ComponentId::from_raw(0x00C0_0003);
 
-    #[doc = include_str!("image.doc/PROP_SRC.md")]
+    #[doc = include_str!("../docs/api/image.doc/PROP_SRC.md")]
     pub const PROP_SRC: InternedSymbol = SRC;
-    #[doc = include_str!("image.doc/PROP_ALT.md")]
+    /// Property name for the accessible alternative text.
     pub const PROP_ALT: InternedSymbol = InternedSymbol::from_raw(0x00C1_0302);
 
-    #[doc = include_str!("image.doc/new.md")]
+    /// Creates an image referencing `source` with no alternative text.
     #[must_use]
     pub fn new(source: impl Into<Box<str>>) -> Self {
         Self {
@@ -28,14 +28,14 @@ impl Image {
         }
     }
 
-    #[doc = include_str!("image.doc/with_alt.md")]
+    /// Sets the accessible alternative text, returning the updated image.
     #[must_use]
     pub fn with_alt(mut self, alt: impl Into<Box<str>>) -> Self {
         self.alt = Some(alt.into());
         self
     }
 
-    #[doc = include_str!("image.doc/into_view_node.md")]
+    #[doc = include_str!("../docs/api/image.doc/into_view_node.md")]
     #[must_use]
     pub fn into_view_node(self) -> ViewNode {
         // The element names itself `img`, under the reserved LOCAL_NAME symbol the
@@ -58,7 +58,7 @@ impl Image {
         node
     }
 
-    #[doc = include_str!("image.doc/view.md")]
+    /// Lowers this image into a single-node [`View`].
     #[must_use]
     pub fn view(self) -> View {
         View::single(self.into_view_node())

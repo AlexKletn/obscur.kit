@@ -7,5 +7,17 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[dependencies]
+obscur-plugin-model = { workspace = true }
+event-listener = "5.4"
+obscur-plugin-api = { workspace = true }
+obscur-plugin-package = { workspace = true }
+wasmi = { version = "2.0.2", default-features = false, features = ["std", "validate", "portable-dispatch"] }
+
+[dev-dependencies]
+wat = "1"
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+
 [lints]
 workspace = true

@@ -1,4 +1,4 @@
-#![doc = include_str!("color_lowering.doc/_module.md")]
+#![doc = include_str!("../../docs/api/compiler/color_lowering.doc/_module.md")]
 
 use super::property_compiler::narrow_f32;
 use super::value_lowering::angle_to_degrees;
@@ -6,7 +6,7 @@ use crate::parser::ParsedValue;
 use obscur_scene::color::convert;
 use obscur_style::property::StyleColor;
 
-#[doc = include_str!("color_lowering.doc/named_color.md")]
+#[doc = include_str!("../../docs/api/compiler/color_lowering.doc/named_color.md")]
 pub(super) fn named_color(keyword: &str) -> Option<StyleColor> {
     let c = |r: f32, g: f32, b: f32| StyleColor::rgba(r, g, b, 1.0);
     match keyword.to_ascii_lowercase().as_str() {
@@ -32,7 +32,7 @@ pub(super) fn named_color(keyword: &str) -> Option<StyleColor> {
     }
 }
 
-#[doc = include_str!("color_lowering.doc/parse_rgb.md")]
+#[doc = include_str!("../../docs/api/compiler/color_lowering.doc/parse_rgb.md")]
 fn parse_rgb(args: &[ParsedValue]) -> Option<StyleColor> {
     let mut channels: Vec<(f64, bool)> = Vec::new();
     for arg in args {
@@ -65,7 +65,7 @@ fn parse_rgb(args: &[ParsedValue]) -> Option<StyleColor> {
     Some(StyleColor::rgba(r, g, b, a))
 }
 
-#[doc = include_str!("color_lowering.doc/color_from_function.md")]
+#[doc = include_str!("../../docs/api/compiler/color_lowering.doc/color_from_function.md")]
 pub(super) fn color_from_function(name: &str, args: &[ParsedValue]) -> Option<StyleColor> {
     if name.eq_ignore_ascii_case("rgb") || name.eq_ignore_ascii_case("rgba") {
         parse_rgb(args)
@@ -84,20 +84,24 @@ pub(super) fn color_from_function(name: &str, args: &[ParsedValue]) -> Option<St
     }
 }
 
-#[doc = include_str!("color_lowering.doc/ColorArg.md")]
+/// One tokenized argument of a modern-syntax `<color>` function.
 #[derive(Clone, Copy)]
 enum ColorArg {
-    #[doc = include_str!("color_lowering.doc/Number.md")]
+    /// A bare `<number>`.
     Number(f64),
-    #[doc = include_str!("color_lowering.doc/Percent.md")]
+    /// A `<percentage>`; stores the numeric part (`50` for `50%`).
     Percent(f64),
-    #[doc = include_str!("color_lowering.doc/Angle.md")]
+    /// An `<angle>` normalized to degrees.
     Angle(f64),
-    #[doc = include_str!("color_lowering.doc/None.md")]
+    /// The `none` keyword (a missing/powerless component).
     None,
 }
 
-#[doc = include_str!("color_lowering.doc/split_color_args.md")]
+/// Splits a color function's argument list into its color components and an
+/// optional alpha, tolerating both the legacy comma syntax and the modern
+/// space-plus-`/` syntax (spec CSS Color 4 §4). Commas separate components;
+/// a single `/` delimiter introduces the alpha. Returns [`None`] on an
+/// unrecognised token or a malformed (double-`/`) list.
 fn split_color_args(args: &[ParsedValue]) -> Option<(Vec<ColorArg>, Option<ColorArg>)> {
     let mut comps = Vec::new();
     let mut alpha: Option<ColorArg> = None;
@@ -127,7 +131,8 @@ fn split_color_args(args: &[ParsedValue]) -> Option<(Vec<ColorArg>, Option<Color
     Some((comps, alpha))
 }
 
-#[doc = include_str!("color_lowering.doc/color_arg.md")]
+/// Tokenizes one component value into a [`ColorArg`], or [`None`] if it is not a
+/// number/percentage/angle/`none`.
 fn color_arg(value: &ParsedValue) -> Option<ColorArg> {
     match value {
         ParsedValue::Number(n) => Some(ColorArg::Number(*n)),
@@ -140,7 +145,8 @@ fn color_arg(value: &ParsedValue) -> Option<ColorArg> {
     }
 }
 
-#[doc = include_str!("color_lowering.doc/read_hue.md")]
+/// Reads a `<hue>` component (an angle in degrees). A bare number is degrees; an
+/// `<angle>` is already degrees; `none` is a powerless `0` (spec CSS Color 4).
 fn read_hue(c: ColorArg) -> Option<f64> {
     match c {
         ColorArg::Number(n) => Some(n),
@@ -150,7 +156,9 @@ fn read_hue(c: ColorArg) -> Option<f64> {
     }
 }
 
-#[doc = include_str!("color_lowering.doc/resolve_alpha.md")]
+/// Resolves the optional alpha to `0.0..=1.0`: a number is a fraction, a
+/// percentage is `p/100`, an absent or `none` alpha resolves to `1.0` / `0.0`
+/// respectively (spec CSS Color 4 §4).
 fn resolve_alpha(alpha: Option<ColorArg>) -> Option<f64> {
     match alpha {
         None => Some(1.0),
@@ -161,7 +169,7 @@ fn resolve_alpha(alpha: Option<ColorArg>) -> Option<f64> {
     }
 }
 
-#[doc = include_str!("color_lowering.doc/make_color.md")]
+/// Builds a clamped-alpha [`StyleColor`] from already-sRGB channels.
 fn make_color([r, g, b]: [f64; 3], a: f64) -> StyleColor {
     StyleColor::rgba(
         narrow_f32(r),
@@ -171,7 +179,7 @@ fn make_color([r, g, b]: [f64; 3], a: f64) -> StyleColor {
     )
 }
 
-#[doc = include_str!("color_lowering.doc/parse_hsl.md")]
+#[doc = include_str!("../../docs/api/compiler/color_lowering.doc/parse_hsl.md")]
 fn parse_hsl(args: &[ParsedValue]) -> Option<StyleColor> {
     let (comps, alpha) = split_color_args(args)?;
     if comps.len() != 3 {
@@ -192,7 +200,8 @@ fn parse_hsl(args: &[ParsedValue]) -> Option<StyleColor> {
     Some(make_color(convert::hsl_to_srgb(h, s, l), a))
 }
 
-#[doc = include_str!("color_lowering.doc/read_ok_lightness.md")]
+/// Reads the Oklab lightness `L`: a number is `0..=1`, a percentage is `p/100`,
+/// `none` is `0` (spec CSS Color 4 §9.2).
 fn read_ok_lightness(c: ColorArg) -> Option<f64> {
     match c {
         ColorArg::Number(n) => Some(n),
@@ -202,7 +211,9 @@ fn read_ok_lightness(c: ColorArg) -> Option<f64> {
     }
 }
 
-#[doc = include_str!("color_lowering.doc/read_ok_axis.md")]
+/// Reads an Oklab `a`/`b` (or Oklch `C`): a number is used directly, a
+/// percentage is referenced to `±0.4` (`100% = 0.4`), `none` is `0` (spec CSS
+/// Color 4 §9.2/§9.3).
 fn read_ok_axis(c: ColorArg) -> Option<f64> {
     match c {
         ColorArg::Number(n) => Some(n),
@@ -212,7 +223,8 @@ fn read_ok_axis(c: ColorArg) -> Option<f64> {
     }
 }
 
-#[doc = include_str!("color_lowering.doc/parse_oklab.md")]
+/// Parses `oklab()` into a [`StyleColor`] (spec CSS Color 4 §9.2). `L` in
+/// `[0,1]`/`%`, signed `a`/`b`, optional `/ <alpha>`.
 fn parse_oklab(args: &[ParsedValue]) -> Option<StyleColor> {
     let (comps, alpha) = split_color_args(args)?;
     if comps.len() != 3 {
@@ -225,7 +237,8 @@ fn parse_oklab(args: &[ParsedValue]) -> Option<StyleColor> {
     Some(make_color(convert::oklab_to_srgb(l, a, b), alpha))
 }
 
-#[doc = include_str!("color_lowering.doc/parse_oklch.md")]
+/// Parses `oklch()` into a [`StyleColor`] (spec CSS Color 4 §9.3). `L` in
+/// `[0,1]`/`%`, `C >= 0`, hue angle, optional `/ <alpha>`.
 fn parse_oklch(args: &[ParsedValue]) -> Option<StyleColor> {
     let (comps, alpha) = split_color_args(args)?;
     if comps.len() != 3 {
@@ -238,7 +251,8 @@ fn parse_oklch(args: &[ParsedValue]) -> Option<StyleColor> {
     Some(make_color(convert::oklch_to_srgb(l, c, h), alpha))
 }
 
-#[doc = include_str!("color_lowering.doc/read_lab_lightness.md")]
+/// Reads the Lab lightness `L`: a number is `0..=100`, a percentage is `p`
+/// (`100% = 100`), `none` is `0` (spec CSS Color 4 §8.1).
 fn read_lab_lightness(c: ColorArg) -> Option<f64> {
     match c {
         ColorArg::Number(n) => Some(n),
@@ -248,7 +262,8 @@ fn read_lab_lightness(c: ColorArg) -> Option<f64> {
     }
 }
 
-#[doc = include_str!("color_lowering.doc/read_lab_axis.md")]
+/// Reads a Lab `a`/`b`: a number is used directly, a percentage is referenced
+/// to `±125` (`100% = 125`), `none` is `0` (spec CSS Color 4 §8.1).
 fn read_lab_axis(c: ColorArg) -> Option<f64> {
     match c {
         ColorArg::Number(n) => Some(n),
@@ -258,7 +273,8 @@ fn read_lab_axis(c: ColorArg) -> Option<f64> {
     }
 }
 
-#[doc = include_str!("color_lowering.doc/parse_lab.md")]
+/// Parses `lab()` into a [`StyleColor`] (spec CSS Color 4 §8.1, D50). `L` in
+/// `[0,100]`/`%`, signed `a`/`b`, optional `/ <alpha>`.
 fn parse_lab(args: &[ParsedValue]) -> Option<StyleColor> {
     let (comps, alpha) = split_color_args(args)?;
     if comps.len() != 3 {
@@ -271,7 +287,8 @@ fn parse_lab(args: &[ParsedValue]) -> Option<StyleColor> {
     Some(make_color(convert::lab_to_srgb(l, a, b), alpha))
 }
 
-#[doc = include_str!("color_lowering.doc/parse_lch.md")]
+/// Parses `lch()` into a [`StyleColor`] (spec CSS Color 4 §8.3, D50). `L` in
+/// `[0,100]`/`%`, `C >= 0` (`100% = 150`), hue angle, optional `/ <alpha>`.
 fn parse_lch(args: &[ParsedValue]) -> Option<StyleColor> {
     let (comps, alpha) = split_color_args(args)?;
     if comps.len() != 3 {
@@ -291,7 +308,8 @@ fn parse_lch(args: &[ParsedValue]) -> Option<StyleColor> {
     Some(make_color(convert::lch_to_srgb(l, c, h), alpha))
 }
 
-#[doc = include_str!("color_lowering.doc/parse_hex_color.md")]
+/// Parses a 3/4/6/8-digit hex colour (without the leading `#`) into a
+/// [`StyleColor`], returning [`None`] on a bad length or non-hex digit.
 pub(super) fn parse_hex_color(hex: &str) -> Option<StyleColor> {
     // A `#` token carries an identifier, which admits every code point at or
     // above U+0080 (css-syntax-3 §4.2), so its bytes need not be its
@@ -344,7 +362,9 @@ pub(super) fn parse_hex_color(hex: &str) -> Option<StyleColor> {
     }
 }
 
-#[doc = include_str!("color_lowering.doc/parse_stop_color.md")]
+/// Reads one color-stop color: a hex hash, a modelled named color, or any CSS
+/// Color 4 `<color>` function (`rgb()`/`hsl()`/`oklab()`/`oklch()`/`lab()`/
+/// `lch()`); [`None`] for anything else.
 pub(super) fn parse_stop_color(value: &ParsedValue) -> Option<StyleColor> {
     match value {
         ParsedValue::Hash(hex) => parse_hex_color(hex),
@@ -366,7 +386,7 @@ pub(crate) mod tests {
         StyleColor::rgba(r, g, b, 1.0)
     }
 
-    #[doc = include_str!("color_lowering.doc/color_of.md")]
+    /// Extracts the [`StyleColor`] a `color:` declaration lowers to.
     fn color_of(text: &str) -> StyleColor {
         match value_of(text) {
             PropertyValue::Color(c) => c,
@@ -374,7 +394,7 @@ pub(crate) mod tests {
         }
     }
 
-    #[doc = include_str!("color_lowering.doc/color_close.md")]
+    /// Asserts two colors are equal within `eps` per channel.
     fn color_close(got: StyleColor, want: StyleColor, eps: f32) {
         assert!(
             (got.r - want.r).abs() <= eps

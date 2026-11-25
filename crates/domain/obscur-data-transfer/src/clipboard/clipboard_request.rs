@@ -1,46 +1,34 @@
-#![doc = include_str!("clipboard_request.doc/_module.md")]
+//! A copy/cut/paste/clear command addressed to the clipboard (spec §6.20 data
+//! transfer — clipboard).
 
 use crate::offer::MimeType;
 use crate::transfer::TransferPayload;
 
-#[doc = include_str!("clipboard_request.doc/ClipboardWriteMode.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ClipboardWriteMode {
-    #[doc = include_str!("clipboard_request.doc/Copy.md")]
-    Copy,
-    #[doc = include_str!("clipboard_request.doc/Cut.md")]
-    Cut,
-}
+use super::ClipboardWriteMode;
 
-impl ClipboardWriteMode {
-    #[doc = include_str!("clipboard_request.doc/is_cut.md")]
-    #[must_use]
-    pub const fn is_cut(self) -> bool {
-        matches!(self, Self::Cut)
-    }
-}
-
-#[doc = include_str!("clipboard_request.doc/ClipboardRequest.md")]
+#[doc = include_str!("../../docs/api/clipboard/clipboard_request.doc/ClipboardRequest.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum ClipboardRequest {
-    #[doc = include_str!("clipboard_request.doc/Write.md")]
+    /// Copy or cut a payload onto the clipboard (spec §6.20 COPY/CUT).
     Write {
-        #[doc = include_str!("clipboard_request.doc/payload.md")]
+        /// The content to place on the clipboard.
         payload: TransferPayload,
-        #[doc = include_str!("clipboard_request.doc/mode.md")]
+        /// Whether this is a copy or a cut.
         mode: ClipboardWriteMode,
     },
-    #[doc = include_str!("clipboard_request.doc/Read.md")]
+    /// Paste from the clipboard, requesting these formats (empty = any/all
+    /// available) (spec §6.20 PASTE).
     Read {
-        #[doc = include_str!("clipboard_request.doc/mimes.md")]
+        /// The requested formats; an empty list accepts any available format.
         mimes: Vec<MimeType>,
     },
-    #[doc = include_str!("clipboard_request.doc/Clear.md")]
+    /// Empty the clipboard (spec §6.20).
     Clear,
 }
 
 impl ClipboardRequest {
-    #[doc = include_str!("clipboard_request.doc/copy.md")]
+    /// Creates a copy request placing `payload` on the clipboard (spec §6.20
+    /// COPY).
     #[must_use]
     pub const fn copy(payload: TransferPayload) -> Self {
         Self::Write {
@@ -49,7 +37,8 @@ impl ClipboardRequest {
         }
     }
 
-    #[doc = include_str!("clipboard_request.doc/cut.md")]
+    /// Creates a cut request placing `payload` on the clipboard (spec §6.20
+    /// CUT).
     #[must_use]
     pub const fn cut(payload: TransferPayload) -> Self {
         Self::Write {
@@ -58,37 +47,42 @@ impl ClipboardRequest {
         }
     }
 
-    #[doc = include_str!("clipboard_request.doc/read.md")]
+    /// Creates a paste request narrowed to `mimes` (empty = any/all available)
+    /// (spec §6.20 PASTE).
     #[must_use]
     pub const fn read(mimes: Vec<MimeType>) -> Self {
         Self::Read { mimes }
     }
 
-    #[doc = include_str!("clipboard_request.doc/read_any.md")]
+    /// Creates a paste request accepting any available format (spec §6.20
+    /// PASTE).
     #[must_use]
     pub const fn read_any() -> Self {
         Self::Read { mimes: Vec::new() }
     }
 
-    #[doc = include_str!("clipboard_request.doc/clear.md")]
+    /// Creates a clear request (spec §6.20).
     #[must_use]
     pub const fn clear() -> Self {
         Self::Clear
     }
 
-    #[doc = include_str!("clipboard_request.doc/is_write.md")]
+    /// Returns whether this is a [`Write`](ClipboardRequest::Write) (copy or
+    /// cut) (spec §6.20).
     #[must_use]
     pub const fn is_write(&self) -> bool {
         matches!(self, Self::Write { .. })
     }
 
-    #[doc = include_str!("clipboard_request.doc/is_read.md")]
+    /// Returns whether this is a [`Read`](ClipboardRequest::Read) (paste)
+    /// (spec §6.20).
     #[must_use]
     pub const fn is_read(&self) -> bool {
         matches!(self, Self::Read { .. })
     }
 
-    #[doc = include_str!("clipboard_request.doc/write_mode.md")]
+    /// Returns the [`ClipboardWriteMode`] of a write request, or `None` for a
+    /// read or clear (spec §6.20).
     #[must_use]
     pub const fn write_mode(&self) -> Option<ClipboardWriteMode> {
         match self {
@@ -116,12 +110,6 @@ mod tests {
         assert!(copy.is_write());
         assert!(cut.is_write());
         assert!(!copy.is_read());
-    }
-
-    #[test]
-    fn write_mode_predicates_classify_cut() {
-        assert!(ClipboardWriteMode::Cut.is_cut());
-        assert!(!ClipboardWriteMode::Copy.is_cut());
     }
 
     #[test]

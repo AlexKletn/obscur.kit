@@ -1,5 +1,17 @@
-#![doc = include_str!("extracted_entry.doc/_module.md")]
+//! Filesystem location of a verified payload file.
 
-#[doc = include_str!("extracted_entry.doc/ExtractedEntry.md")]
+use std::path::{Path, PathBuf};
+
+/// Filesystem location of a verified payload file.
 #[derive(Debug)]
-pub struct ExtractedEntry;
+pub struct ExtractedEntry {
+    pub(super) path: PathBuf,
+}
+
+impl ExtractedEntry {
+    /// Returns the absolute path within the isolated directory.
+    #[must_use]
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}

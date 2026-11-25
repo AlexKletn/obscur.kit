@@ -1,31 +1,35 @@
-#![doc = include_str!("spacing.doc/_module.md")]
+#![doc = include_str!("../../docs/api/shaping/spacing.doc/_module.md")]
+
+use std::sync::Arc;
 
 use crate::shaping::{GlyphRun, ShapedGlyph, ShapedRun};
 
-#[doc = include_str!("spacing.doc/is_word_separator.md")]
+/// Returns whether the character at byte offset `cluster` in `text` is a CSS
+/// word separator for `word-spacing` (§8.2): U+0020 SPACE or U+00A0 NBSP.
 fn is_word_separator(text: &str, cluster: usize) -> bool {
     text.get(cluster..)
         .and_then(|rest| rest.chars().next())
         .is_some_and(|ch| ch == ' ' || ch == '\u{00A0}')
 }
 
-#[doc = include_str!("spacing.doc/apply_spacing.md")]
+#[doc = include_str!("../../docs/api/shaping/spacing.doc/apply_spacing.md")]
 #[must_use]
 pub fn apply_spacing(
-    runs: Vec<ShapedRun>,
+    runs: Arc<[ShapedRun]>,
     text: &str,
     letter_spacing: f32,
     word_spacing: f32,
-) -> Vec<ShapedRun> {
+) -> Arc<[ShapedRun]> {
     if letter_spacing == 0.0 && word_spacing == 0.0 {
         return runs;
     }
-    runs.into_iter()
-        .map(|run| respace_run(&run, text, letter_spacing, word_spacing))
+    runs.iter()
+        .map(|run| respace_run(run, text, letter_spacing, word_spacing))
         .collect()
 }
 
-#[doc = include_str!("spacing.doc/respace_run.md")]
+/// Rebuilds one [`ShapedRun`] with letter-/word-spacing folded into its advances,
+/// carrying every other attribute across unchanged.
 fn respace_run(run: &ShapedRun, text: &str, letter_spacing: f32, word_spacing: f32) -> ShapedRun {
     let source = run.run();
     let glyphs = source.glyphs();
@@ -96,8 +100,8 @@ mod tests {
 
     #[test]
     fn zero_zero_is_identity() {
-        let runs = vec![run_over("hello world")];
-        let out = apply_spacing(runs.clone(), "hello world", 0.0, 0.0);
+        let runs: Arc<[ShapedRun]> = Arc::from(vec![run_over("hello world")]);
+        let out = apply_spacing(Arc::clone(&runs), "hello world", 0.0, 0.0);
         assert_eq!(out, runs, "no-op spacing must return runs byte-for-byte");
     }
 
@@ -107,7 +111,7 @@ mod tests {
         // cluster → +30px (one add per typographic character unit, §8.1).
         let baseline = total_advance(&[run_over("hello")]);
         assert_eq!(baseline, 30.0);
-        let spaced = apply_spacing(vec![run_over("hello")], "hello", 6.0, 0.0);
+        let spaced = apply_spacing(Arc::from(vec![run_over("hello")]), "hello", 6.0, 0.0);
         assert_eq!(total_advance(&spaced), 30.0 + 6.0 * 5.0);
     }
 
@@ -115,7 +119,7 @@ mod tests {
     fn word_spacing_adds_per_separator_only() {
         // "ab cd" has exactly one space → +12px once (§8.2), not per character.
         let baseline = total_advance(&[run_over("ab cd")]);
-        let spaced = apply_spacing(vec![run_over("ab cd")], "ab cd", 0.0, 12.0);
+        let spaced = apply_spacing(Arc::from(vec![run_over("ab cd")]), "ab cd", 0.0, 12.0);
         assert_eq!(total_advance(&spaced), baseline + 12.0);
     }
 
@@ -123,20 +127,20 @@ mod tests {
     fn nbsp_is_a_word_separator() {
         let text = "a\u{00A0}b";
         let baseline = total_advance(&[run_over(text)]);
-        let spaced = apply_spacing(vec![run_over(text)], text, 0.0, 10.0);
+        let spaced = apply_spacing(Arc::from(vec![run_over(text)]), text, 0.0, 10.0);
         assert_eq!(total_advance(&spaced), baseline + 10.0);
     }
 
     #[test]
     fn negative_letter_spacing_is_not_clamped() {
         // -2px per cluster on "abc" (3×6=18) → 18 - 6 = 12, allowed to shrink.
-        let spaced = apply_spacing(vec![run_over("abc")], "abc", -2.0, 0.0);
+        let spaced = apply_spacing(Arc::from(vec![run_over("abc")]), "abc", -2.0, 0.0);
         assert_eq!(total_advance(&spaced), 18.0 - 6.0);
     }
 
     #[test]
     fn preserves_glyph_identity_cluster_and_font() {
-        let spaced = apply_spacing(vec![run_over("hi")], "hi", 4.0, 0.0);
+        let spaced = apply_spacing(Arc::from(vec![run_over("hi")]), "hi", 4.0, 0.0);
         let run = spaced[0].run();
         assert_eq!(spaced[0].font(), FontId::PRIMARY);
         assert_eq!(run.glyph_at(0).unwrap().glyph_id(), 0);

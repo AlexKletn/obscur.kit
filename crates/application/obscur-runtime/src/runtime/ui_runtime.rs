@@ -1,4 +1,4 @@
-#![doc = include_str!("ui_runtime.doc/_module.md")]
+#![doc = include_str!("../../docs/api/runtime/ui_runtime.doc/_module.md")]
 
 use std::collections::HashMap;
 use std::fmt;
@@ -14,6 +14,7 @@ use obscur_tree::reconciliation::Reconciler;
 use obscur_tree::tree::RetainedTree;
 use obscur_view::view::View;
 
+use super::layout_style_cache::LayoutStyleCache;
 use super::{
     AccessibilityPublisher, BackgroundWork, CanvasPainters, CascadeSheets, FramePlan,
     FrameTelemetry, HandlerRegistry, HitTesting, InputQueue, LayoutInputs, MotionDriver,
@@ -38,8 +39,11 @@ mod caret_visibility;
 mod command_routing;
 mod composition;
 mod construction;
+mod container_queries;
+mod coordinate_mapping;
 mod custom_values;
 mod diagnostics;
+pub use diagnostics::CommandTrace;
 mod event_listeners;
 mod focus;
 mod frame_classification;
@@ -47,141 +51,217 @@ mod frame_entry;
 mod frame_output;
 mod frame_pipeline;
 mod frame_requests;
+mod gamepad;
+mod geometry_observers;
 mod gestures;
 mod inline_style;
 mod interaction_state;
 mod keyboard;
 mod motion;
+mod native_touchpad_gesture;
 mod pending_work;
 mod pointer;
 mod pointer_dispatch;
+mod portals;
 mod queued_input;
 mod removed_nodes;
 mod resource_resolution;
 mod resources;
+mod scroll_gesture;
+mod scrollbar_drag;
 mod scrolling;
+mod shared_elements;
 mod slider;
+mod spatial_focus;
 mod styling;
 mod surface;
+mod system_back;
 mod text_edit_commands;
 mod text_editing;
 mod text_pointer;
 mod text_ports;
+mod touch_gestures;
 mod view_source;
 mod virtual_lists;
+mod visible_content_subscription;
 
-#[doc = include_str!("ui_runtime.doc/UiRuntime.md")]
+type AnimationProgressObserver = (obscur_motion::timeline::TimelineId, Box<dyn FnMut(f32)>);
+
+#[doc = include_str!("../../docs/api/runtime/ui_runtime.doc/UiRuntime.md")]
 pub struct UiRuntime {
-    #[doc = include_str!("ui_runtime.doc/id.md")]
+    /// Identity of this runtime.
     id: RuntimeId,
-    #[doc = include_str!("ui_runtime.doc/tree.md")]
+    /// The retained tree carried across frames.
     tree: RetainedTree,
-    #[doc = include_str!("ui_runtime.doc/scene.md")]
+    portal_hosts: Option<Box<dyn obscur_tree::portal::PortalHostResolver>>,
+    /// The mutable scene composed into each frame.
     scene: Scene,
-    #[doc = include_str!("ui_runtime.doc/reconciler.md")]
+    /// Turns the desired view tree into retained-tree structure.
     reconciler: Reconciler,
-    #[doc = include_str!("ui_runtime.doc/enactor.md")]
+    #[doc = include_str!("../../docs/api/runtime/ui_runtime.doc/enactor.md")]
     enactor: ReconcileEnactor,
-    #[doc = include_str!("ui_runtime.doc/matcher.md")]
+    /// Matches authored stylesheets (pseudo-state aware) into cascade inputs.
     matcher: StyleMatchingCoordinator,
-    #[doc = include_str!("ui_runtime.doc/style.md")]
+    /// Resolves computed styles over the retained tree.
     style: StyleCoordinator,
-    #[doc = include_str!("ui_runtime.doc/layout.md")]
+    /// Drives layout over the retained tree.
     layout: LayoutCoordinator,
-    #[doc = include_str!("ui_runtime.doc/measure_cache.md")]
+    layout_styles: LayoutStyleCache,
+    generated_boxes: Option<crate::orchestration::GeneratedBoxes>,
+    container_queries: obscur_style::matching::ContainerQueryEnvironment,
+    container_query_rounds: u8,
+    #[doc = include_str!("../../docs/api/runtime/ui_runtime.doc/measure_cache.md")]
     measure_cache: MeasureCache,
-    #[doc = include_str!("ui_runtime.doc/arrange_cache.md")]
+    #[doc = include_str!("../../docs/api/runtime/ui_runtime.doc/arrange_cache.md")]
     arrange_cache: ArrangeCache,
-    #[doc = include_str!("ui_runtime.doc/scene_composer.md")]
+    /// Composes the paint-ordered display list.
     scene_composer: SceneCoordinator,
-    #[doc = include_str!("ui_runtime.doc/locale.md")]
+    #[doc = include_str!("../../docs/api/runtime/ui_runtime.doc/locale.md")]
     locale: LanguageTag,
-    #[doc = include_str!("ui_runtime.doc/scheduler.md")]
+    /// The event-driven scheduler gating [`run_due_frame`](Self::run_due_frame).
     scheduler: FrameScheduler,
-    #[doc = include_str!("ui_runtime.doc/pseudo.md")]
+    /// Whether an explicit animation request in the current scheduling window can change the application view.
+    view_animation_requested: bool,
+    /// A continuation frame is queued for the host to wake on the next motion tick.
+    /// Polling at the same logical time leaves the request pending.
+    timeline_waiting_for_tick: bool,
+    /// The runtime-owned per-node interaction state feeding the matcher.
     pseudo: PseudoStates,
-    #[doc = include_str!("ui_runtime.doc/boxes.md")]
+    /// The absolute layout boxes retained from the last produced frame, in
+    /// **content space** (scroll not folded in). Paint/compose and hit-test read
+    /// this field directly and apply each scroll container's offset themselves.
     boxes: LayoutBoxes,
-    #[doc = include_str!("ui_runtime.doc/inputs.md")]
+    /// The cascade inputs computed for the last produced frame.
     inputs: StyleInputs,
-    #[doc = include_str!("ui_runtime.doc/computed.md")]
+    /// The computed styles resolved for the last produced frame, retained so a
+    /// frame that skips the style phase (e.g. an idle diagnostics capture, or a
+    /// future paint-only class) can reuse them instead of re-resolving (§3.4
+    /// phase 5 incremental recalculation).
     computed: ComputedStyles,
-    #[doc = include_str!("ui_runtime.doc/generated_content.md")]
+    /// The §4.16 generated / synthetic decoration resolved for the last styled
+    /// frame, keyed by node: `::before` / `::after` content and the input
+    /// placeholder. Read by compose (to paint the runs) and `inspect_snapshot`
+    /// (to project the synthetic placeholder part). Empty when nothing decorates.
     generated_content: FastMap<NodeId, GeneratedContent>,
-    #[doc = include_str!("ui_runtime.doc/overlaid.md")]
+    #[doc = include_str!("../../docs/api/runtime/ui_runtime.doc/overlaid.md")]
     overlaid: ComputedStyles,
-    #[doc = include_str!("ui_runtime.doc/last_style.md")]
+    #[doc = include_str!("../../docs/api/runtime/ui_runtime.doc/last_style.md")]
     last_style: Option<StyleKey>,
-    #[doc = include_str!("ui_runtime.doc/hits.md")]
+    #[doc = include_str!("../../docs/api/runtime/ui_runtime.doc/hits.md")]
     hits: HitTesting,
-    #[doc = include_str!("ui_runtime.doc/hover.md")]
+    /// The nodes currently under the pointer, topmost-first (hover target at
+    /// index `0`).
     hover: HoverChain,
-    #[doc = include_str!("ui_runtime.doc/last_layout_inputs.md")]
+    /// The most recent cursor-capable pointer and its position in host coordinates.
+    hover_pointer: Option<(
+        obscur_interaction::pointer::PointerId,
+        obscur_geometry::Point,
+    )>,
+    /// Whether a geometry-driven hover change has requested its corrective frame.
+    hover_correction_pending: bool,
+    /// The non-style inputs the retained boxes were last arranged under (see
+    /// [`LayoutInputs`]). `None` until the first layout runs.
     last_layout_inputs: Option<LayoutInputs>,
-    #[doc = include_str!("ui_runtime.doc/inspector.md")]
+    #[doc = include_str!("../../docs/api/runtime/ui_runtime.doc/inspector.md")]
     inspector: TreeInspector,
-    #[doc = include_str!("ui_runtime.doc/focused.md")]
+    #[doc = include_str!("../../docs/api/runtime/ui_runtime.doc/focused.md")]
     focused: Option<NodeId>,
-    #[doc = include_str!("ui_runtime.doc/focus_visible.md")]
+    #[doc = include_str!("../../docs/api/runtime/ui_runtime.doc/focus_visible.md")]
     focus_visible: bool,
-    #[doc = include_str!("ui_runtime.doc/pointers.md")]
+    spatial_navigation: bool,
+    #[doc = include_str!("../../docs/api/runtime/ui_runtime.doc/pointers.md")]
     pointers: PointerSessions,
-    #[doc = include_str!("ui_runtime.doc/canvas_painters.md")]
+    scrollbar_drags: HashMap<obscur_interaction::pointer::PointerId, scrollbar_drag::ScrollbarDrag>,
+    system_back: Option<system_back::SystemBackSession>,
+    scroll_gesture: Option<scroll_gesture::ScrollGesture>,
+    scroll_gesture_blocked: bool,
+    native_touchpad_gesture: Option<native_touchpad_gesture::NativeTouchpadGesture>,
+    touch_gestures: FastMap<obscur_interaction::pointer::PointerId, touch_gestures::TouchGesture>,
+    #[doc = include_str!("../../docs/api/runtime/ui_runtime.doc/canvas_painters.md")]
     canvas_painters: CanvasPainters,
-    #[doc = include_str!("ui_runtime.doc/inline_styles.md")]
+    /// The `style` attributes, compiled and cached (spec §4.14, origin 5).
     inline_styles: InlineStyles,
-    #[doc = include_str!("ui_runtime.doc/canvas_clock.md")]
-    canvas_clock: f32,
-    #[doc = include_str!("ui_runtime.doc/slider_drags.md")]
+    /// Logical time advanced by host ticks for canvas sampling and background deadlines.
+    logical_time: std::time::Duration,
+    /// Which slider each pointer is dragging, and which end of it.
     slider_drags: HashMap<obscur_interaction::pointer::PointerId, (NodeId, crate::runtime::Grab)>,
-    #[doc = include_str!("ui_runtime.doc/pointer_bindings.md")]
+    /// Which raw pointer event names the committed tree binds — the gate that keeps
+    /// `pointermove` free for an application that does not watch it. Recomputed by
+    /// [`PointerEventBindings::scan`] on every structural frame.
     pointer_bindings: PointerEventBindings,
-    #[doc = include_str!("ui_runtime.doc/environment.md")]
+    #[doc = include_str!("../../docs/api/runtime/ui_runtime.doc/environment.md")]
     environment: EnvironmentValues,
-    #[doc = include_str!("ui_runtime.doc/routing.md")]
+    media_preferences: obscur_style::matching::MediaPreferences,
+    detected_media_input: Option<obscur_style::matching::MediaInput>,
+    media_input_override: Option<Option<obscur_style::matching::MediaInput>>,
+    #[doc = include_str!("../../docs/api/runtime/ui_runtime.doc/routing.md")]
     routing: HandlerRegistry,
-    #[doc = include_str!("ui_runtime.doc/editing.md")]
+    #[doc = include_str!("../../docs/api/runtime/ui_runtime.doc/editing.md")]
     editing: Option<TextEditSession>,
-    #[doc = include_str!("ui_runtime.doc/modifiers.md")]
+    /// The modifier keys currently held, folded from physical modifier-key
+    /// press/release transitions so shortcut matching sees the live chord.
     modifiers: Modifiers,
-    #[doc = include_str!("ui_runtime.doc/input.md")]
+    #[doc = include_str!("../../docs/api/runtime/ui_runtime.doc/input.md")]
     input: InputQueue,
-    #[doc = include_str!("ui_runtime.doc/drag.md")]
+    /// The data-drag session driver: pointer input drives it while a drag is in
+    /// flight, and its provisional transaction gates what a drop applies (§3.2).
     drag: DragCoordinator,
-    #[doc = include_str!("ui_runtime.doc/drag_outcome.md")]
+    /// Latest content-space pointer for active drag autoscroll.
+    drag_scroll_point: Option<obscur_geometry::Point>,
+    /// Latest content-space pointer for active text-selection autoscroll.
+    selection_scroll_point: Option<obscur_geometry::Point>,
+    /// The outcome of the last drag to finish, awaiting `take_drag_outcome`.
     drag_outcome: Option<DragOutcome>,
-    #[doc = include_str!("ui_runtime.doc/next_frame.md")]
+    /// The id assigned to the next produced frame.
     next_frame: FrameId,
-    #[doc = include_str!("ui_runtime.doc/staged_plan.md")]
+    #[doc = include_str!("../../docs/api/runtime/ui_runtime.doc/staged_plan.md")]
     staged_plan: Option<FramePlan>,
-    #[doc = include_str!("ui_runtime.doc/surface.md")]
+    #[doc = include_str!("../../docs/api/runtime/ui_runtime.doc/surface.md")]
     surface: SurfaceGeometry,
-    #[doc = include_str!("ui_runtime.doc/scroll.md")]
+    #[doc = include_str!("../../docs/api/runtime/ui_runtime.doc/scroll.md")]
     scroll: ScrollOffsets,
-    #[doc = include_str!("ui_runtime.doc/virtual_lists.md")]
+    /// Configured scroll snap positions and pending settlements.
+    scroll_snaps: FastMap<NodeId, super::scroll_snap::ScrollSnap>,
+    /// Application-selected anchors keyed by scroll container.
+    tracked_scroll_anchors: FastMap<NodeId, NodeId>,
+    #[doc = include_str!("../../docs/api/runtime/ui_runtime.doc/virtual_lists.md")]
     virtual_lists: VirtualLists,
-    #[doc = include_str!("ui_runtime.doc/motion.md")]
+    #[doc = include_str!("../../docs/api/runtime/ui_runtime.doc/motion.md")]
     motion: MotionDriver,
-    #[doc = include_str!("ui_runtime.doc/telemetry.md")]
+    /// Source captures awaiting a matching destination after layout.
+    shared_elements: Vec<shared_elements::PendingSharedElement>,
+    animation_progress: Vec<AnimationProgressObserver>,
+    #[doc = include_str!("../../docs/api/runtime/ui_runtime.doc/telemetry.md")]
     telemetry: FrameTelemetry,
-    #[doc = include_str!("ui_runtime.doc/diagnostics.md")]
+    #[doc = include_str!("../../docs/api/runtime/ui_runtime.doc/diagnostics.md")]
     diagnostics: Box<dyn DiagnosticSink>,
-    #[doc = include_str!("ui_runtime.doc/background.md")]
+    command_trace: Option<std::collections::VecDeque<CommandTrace>>,
+    #[doc = include_str!("../../docs/api/runtime/ui_runtime.doc/background.md")]
     background: BackgroundWork,
-    #[doc = include_str!("ui_runtime.doc/root_view.md")]
+    /// Geometry subscriptions scoped to the lifetime of retained nodes.
+    geometry_observers: Vec<geometry_observers::GeometrySubscription>,
+    /// Subscription to changes in the camera’s visible content region.
+    visible_content_observer: Option<visible_content_subscription::VisibleContentSubscription>,
+    /// Window lifecycle state for this runtime. Embedded hosts report native events here.
+    lifecycle: crate::lifecycle::RuntimeLifecycle,
+    /// Per-poll background service limits set by the host.
+    background_budget: crate::runtime::BackgroundBudget,
+    #[doc = include_str!("../../docs/api/runtime/ui_runtime.doc/root_view.md")]
     root_view: Option<Box<dyn FnMut() -> View>>,
-    #[doc = include_str!("ui_runtime.doc/components.md")]
+    #[doc = include_str!("../../docs/api/runtime/ui_runtime.doc/components.md")]
     components: ComponentStore,
-    #[doc = include_str!("ui_runtime.doc/sheets.md")]
+    #[doc = include_str!("../../docs/api/runtime/ui_runtime.doc/sheets.md")]
     sheets: CascadeSheets,
-    #[doc = include_str!("ui_runtime.doc/accessibility.md")]
+    #[doc = include_str!("../../docs/api/runtime/ui_runtime.doc/accessibility.md")]
     accessibility: AccessibilityPublisher,
-    #[doc = include_str!("ui_runtime.doc/resources.md")]
+    #[doc = include_str!("../../docs/api/runtime/ui_runtime.doc/resources.md")]
     resources: ResourceBridge,
 }
 
 impl fmt::Debug for UiRuntime {
-    #[doc = include_str!("ui_runtime.doc/fmt.md")]
+    /// Reports the stable identity fields — runtime id, viewport, next frame, and
+    /// pending frame count — without touching the opaque tree, scene, or
+    /// coordinator internals.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("UiRuntime")
             .field("id", &self.id)
@@ -835,6 +915,106 @@ mod tests {
         );
     }
 
+    #[test]
+    fn accessibility_bridge_receives_camera_bounds_on_a_compose_frame() {
+        use obscur_geometry::{Point, Rect, Size};
+        use obscur_interaction::gesture::ZoomPan;
+
+        let mut runtime = UiRuntime::new(runtime_id(), viewport());
+        runtime.set_device_scale(2.0);
+        let bridge = install_capture(&mut runtime);
+        let (view, sheet) = sized_button();
+        let sheets = [sheet];
+        let _ = runtime.render_now(&view, &sheets);
+        let button = button_node(&runtime);
+        let bounds = || {
+            bridge
+                .borrow()
+                .last
+                .as_ref()
+                .unwrap()
+                .get(button)
+                .unwrap()
+                .bounds()
+        };
+        assert_eq!(
+            bounds(),
+            Some(Rect::new(Point::ORIGIN, Size::new(200.0, 100.0)))
+        );
+
+        let mut camera = ZoomPan::new(0.5, 4.0).unwrap();
+        assert!(camera.zoom_at(2.0, Point::ORIGIN));
+        assert!(camera.pan_by(Point::new(30.0, 10.0)));
+        assert!(runtime.set_view_camera(Some(camera)));
+        assert!(runtime.run_due_frame(&view, &sheets).is_some());
+        assert_eq!(
+            bounds(),
+            Some(Rect::new(Point::new(60.0, 20.0), Size::new(400.0, 200.0)))
+        );
+
+        let pushes = bridge.borrow().pushes;
+        let _ = runtime.render_now(&view, &sheets);
+        assert_eq!(bridge.borrow().pushes, pushes);
+    }
+
+    #[test]
+    fn accessibility_bridge_updates_bounds_when_only_presentation_moves() {
+        use obscur_geometry::{Point, Rect, Size};
+        use obscur_motion::track::KeyframeTrack;
+        use obscur_motion::transition::TransitionInterruption;
+        use obscur_motion::value::MotionValue;
+
+        let mut rt = UiRuntime::new(runtime_id(), viewport());
+        let bridge = install_capture(&mut rt);
+        let (view, sheet) = sized_button();
+        let sheets = [sheet];
+        let _ = rt.render_now(&view, &sheets);
+        let button = button_node(&rt);
+        let bounds = || {
+            bridge
+                .borrow()
+                .last
+                .as_ref()
+                .unwrap()
+                .get(button)
+                .unwrap()
+                .bounds()
+        };
+
+        let animation = rt.animate(
+            button,
+            PropertyId::Transform,
+            KeyframeTrack::from_endpoints(
+                MotionValue::transform([1.0, 0.0, 0.0, 1.0, 0.0, 0.0]),
+                MotionValue::transform([1.0, 0.0, 0.0, 1.0, 80.0, 40.0]),
+            ),
+            1.0,
+            crate::orchestration::AnimatedKind::Transform,
+            TransitionInterruption::Restart,
+        );
+        rt.advance_motion(0.5);
+        assert!(rt.run_due_frame(&view, &sheets).is_some());
+        assert_eq!(
+            bounds(),
+            Some(Rect::new(Point::new(40.0, 20.0), Size::new(100.0, 50.0)))
+        );
+        assert_eq!(rt.layout_boxes()[&button].origin(), Point::ORIGIN);
+
+        rt.advance_motion(0.5);
+        assert!(rt.run_due_frame(&view, &sheets).is_some());
+        assert_eq!(
+            bounds(),
+            Some(Rect::new(Point::new(80.0, 40.0), Size::new(100.0, 50.0)))
+        );
+
+        assert!(rt.cancel_animation(animation));
+        assert!(rt.run_due_frame(&view, &sheets).is_some());
+        assert_eq!(
+            bounds(),
+            Some(Rect::new(Point::ORIGIN, Size::new(100.0, 50.0)))
+        );
+    }
+
     // ---- §4.17 S4: CSS transitions / @keyframes driven through motion --------
 
     /// `.box { width: 100px; height: 50px } .box:hover { width: 200px }`.
@@ -1100,6 +1280,25 @@ mod tests {
         (runtime, panel, a)
     }
 
+    #[test]
+    fn native_keyboard_blur_clears_modifiers_and_focus_even_inside_a_trap() {
+        use obscur_interaction::command::{Modifier, Modifiers};
+
+        let sheet = interaction_sheet();
+        let (mut runtime, _, node) = focused_on_a(&[sheet]);
+        runtime.open_focus_scope(
+            FocusScope::new(FocusScopeId::from_raw(8))
+                .with_member(node)
+                .trapping(true),
+        );
+        runtime.set_modifiers(Modifiers::new().with(Modifier::Ctrl));
+        runtime.blur_window_focus();
+        assert_eq!(runtime.focused(), None);
+        assert!(runtime.modifiers.is_empty());
+        assert!(runtime.has_pending_frame());
+        assert!(runtime.focus_node(Some(node)));
+    }
+
     /// §2.6's chain **in order**, and that it is a chain: with one handler at
     /// every one of the five links, the innermost claims the command and no
     /// other runs. Removing that link hands the command to exactly the next one
@@ -1261,6 +1460,34 @@ mod tests {
         (runtime, mirror)
     }
 
+    #[test]
+    fn native_ime_batches_replace_utf8_text_and_reanchor_preedit() {
+        use obscur_text::ime::{Preedit, TextInputUpdate};
+
+        let (mut runtime, _) = focused_editable("éx");
+        let target = runtime.text_input_target().unwrap();
+        runtime.apply_text_input_update(
+            target,
+            TextInputUpdate {
+                before: 1,
+                commit: Some("界".into()),
+                preedit: Some(Preedit::new("に")),
+                ..TextInputUpdate::default()
+            },
+        );
+        assert_eq!(runtime.editing_text(), Some("é界"));
+        assert_eq!(runtime.composition_preedit(), Some("に"));
+        runtime.apply_text_input_update(
+            target,
+            TextInputUpdate {
+                commit: Some("日".into()),
+                ..TextInputUpdate::default()
+            },
+        );
+        assert_eq!(runtime.editing_text(), Some("é界日"));
+        assert_eq!(runtime.composition_preedit(), None);
+    }
+
     // ---- Single-line horizontal caret scroll (CSS Overflow 3 §3.1) ------------
     //
     // All four of these read `scroll_left_of`, which reaches into the private
@@ -1375,6 +1602,39 @@ mod tests {
             "the head is scrolled left of the box: run_left {run_left} vs box left {}",
             field_box.origin.x,
         );
+    }
+
+    #[test]
+    fn rtl_single_line_scroll_tracks_the_visual_caret() {
+        let mut runtime = focused_scroll_field();
+        runtime.set_locale(&obscur_localization::locale::LanguageTag::parse("he").unwrap());
+        let _ = render_scroll_frame(&mut runtime);
+        for _ in 0..24 {
+            runtime.handle_key(char_press('א'));
+        }
+        let _ = render_scroll_frame(&mut runtime);
+        let initial_scroll = scroll_left_of(&runtime);
+
+        runtime.handle_key(named_press(NamedKey::Home));
+        assert_eq!(runtime.editing_selection().unwrap().focus(), 0);
+        let field = scroll_field_node(&runtime);
+        let bounds = runtime.layout_boxes().get(&field).unwrap().bounds;
+        let list = render_scroll_frame(&mut runtime);
+        let right_scroll = scroll_left_of(&runtime);
+        assert!(right_scroll > initial_scroll);
+        let caret_x = painted_caret_x(&list).expect("visible caret");
+        assert!(
+            (caret_x + crate::orchestration::CARET_WIDTH - bounds.right()).abs() < 1e-3,
+            "caret {caret_x}, field {bounds:?}, scroll {}",
+            scroll_left_of(&runtime)
+        );
+
+        runtime.handle_key(named_press(NamedKey::End));
+        let list = render_scroll_frame(&mut runtime);
+        assert!(scroll_left_of(&runtime) < right_scroll);
+        let caret_x = painted_caret_x(&list).expect("visible caret");
+        assert!(caret_x >= bounds.origin.x && caret_x < bounds.right());
+        assert!((caret_x - first_run_origin_x(&list).unwrap()).abs() < 1e-3);
     }
 
     #[test]

@@ -1,5 +1,6 @@
-#![doc = include_str!("service_handle.doc/_module.md")]
+//! `ServiceHandle` (skeleton stub for the spec-defined entity; not yet implemented).
 
-#[doc = include_str!("service_handle.doc/ServiceHandle.md")]
+/// Placeholder for the `ServiceHandle` entity. See the Obscur Kit 2 specs for its
+/// contract; this stub exists to materialise the target source layout.
 #[derive(Debug)]
 pub struct ServiceHandle;

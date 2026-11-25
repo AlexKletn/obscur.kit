@@ -1,11 +1,12 @@
-#![doc = include_str!("line_justification.doc/_module.md")]
+//! Stretching a paragraph's eligible lines to fill the wrap width
+//! (`text-align: justify`, spec §5.10).
 
 use std::collections::HashSet;
 
 use super::LineBreak;
 use super::packed_line::PackedLine;
 
-#[doc = include_str!("line_justification.doc/justify_lines.md")]
+#[doc = include_str!("../../docs/api/layout/line_justification.doc/justify_lines.md")]
 pub(super) fn justify_lines(lines: &mut [PackedLine], breaks: &[LineBreak], max_width: f32) {
     let Some(last) = lines.len().checked_sub(1) else {
         return;
@@ -21,7 +22,7 @@ pub(super) fn justify_lines(lines: &mut [PackedLine], breaks: &[LineBreak], max_
     }
 }
 
-#[doc = include_str!("line_justification.doc/justify_line.md")]
+#[doc = include_str!("../../docs/api/layout/line_justification.doc/justify_line.md")]
 fn justify_line(line: &mut PackedLine, word_starts: &HashSet<usize>, max_width: f32) {
     let extra = max_width - line.width();
     if extra <= 0.0 {

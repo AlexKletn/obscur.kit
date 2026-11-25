@@ -1,4 +1,4 @@
-#![doc = include_str!("handler_registry.doc/_module.md")]
+//! [`HandlerRegistry`]: what is bound where, for §2.3 propagation and §2.6 routing.
 
 use std::collections::HashMap;
 
@@ -11,41 +11,55 @@ use obscur_interaction::focus::{FocusRestore, FocusScope, FocusScopeId};
 
 use super::{AppCommands, CommandHandler, CommandTarget, EventListener, IntoCommandHandler};
 
-#[doc = include_str!("handler_registry.doc/TextHandlers.md")]
+/// The shape both editable-field registries take: a command symbol to the
+/// closure the application registered for it, called with the field's text.
 type TextHandlers = FastMap<InternedSymbol, Box<dyn FnMut(&str)>>;
 
-#[doc = include_str!("handler_registry.doc/HandlerRegistry.md")]
+#[doc = include_str!("../../docs/api/runtime/handler_registry.doc/HandlerRegistry.md")]
 pub(crate) struct HandlerRegistry {
-    #[doc = include_str!("handler_registry.doc/handlers.md")]
+    #[doc = include_str!("../../docs/api/runtime/handler_registry.doc/handlers.md")]
     handlers: FastMap<InternedSymbol, CommandHandler>,
-    #[doc = include_str!("handler_registry.doc/node_handlers.md")]
+    /// §2.6 links 1 and 3: handlers bound at a specific node, which is what makes
+    /// routing positional — the same symbol runs different logic depending on
+    /// where the command originated.
     node_handlers: FastMap<(NodeId, InternedSymbol), CommandHandler>,
-    #[doc = include_str!("handler_registry.doc/listeners.md")]
+    /// §2.3 listeners, keyed by the node they observe on. Several per key, run in
+    /// registration order — unlike a handler, a listener never replaces an
+    /// earlier one.
     listeners: FastMap<(NodeId, InternedSymbol), Vec<EventListener>>,
-    #[doc = include_str!("handler_registry.doc/scopes.md")]
+    /// The open focus-containment scopes, as a stack: the last opened is the
+    /// innermost, which is the one §2.6 link 2 consults first.
     scopes: Vec<FocusScope>,
-    #[doc = include_str!("handler_registry.doc/focus_restore.md")]
+    #[doc = include_str!("../../docs/api/runtime/handler_registry.doc/focus_restore.md")]
     focus_restore: FocusRestore,
-    #[doc = include_str!("handler_registry.doc/declared_traps.md")]
+    #[doc = include_str!("../../docs/api/runtime/handler_registry.doc/declared_traps.md")]
     declared_traps: Vec<FocusScopeId>,
-    #[doc = include_str!("handler_registry.doc/scope_handlers.md")]
+    /// §2.6 link 2: handlers bound to a focus scope, dropped with the scope.
     scope_handlers: HashMap<(FocusScopeId, InternedSymbol), CommandHandler>,
-    #[doc = include_str!("handler_registry.doc/app_commands.md")]
+    /// §2.6 link 5: the shared application-level fallback. A handle, so several
+    /// windows' runtimes given the same one share a genuinely application-wide
+    /// level rather than each keeping a second per-window table.
     app_commands: AppCommands,
-    #[doc = include_str!("handler_registry.doc/text_input_handlers.md")]
+    /// §6.7 per-keystroke handlers for the focused editable's `on-input`
+    /// command, called with the field's whole resulting text.
     text_input_handlers: TextHandlers,
-    #[doc = include_str!("handler_registry.doc/change_handlers.md")]
+    /// §6.7 commit handlers for the focused editable's `on-change` command,
+    /// called once per edit session with the committed text. A distinct table
+    /// from [`text_input_handlers`](Self::text_input_handlers) so an application
+    /// can register both on one field without conflation.
     change_handlers: TextHandlers,
-    #[doc = include_str!("handler_registry.doc/value_handlers.md")]
+    #[doc = include_str!("../../docs/api/runtime/handler_registry.doc/value_handlers.md")]
     value_handlers: FastMap<InternedSymbol, Box<dyn FnMut(f32, f32)>>,
-    #[doc = include_str!("handler_registry.doc/commands.md")]
+    /// The shortcut → command-symbol table keyboard input resolves against.
     commands: CommandRouter,
-    #[doc = include_str!("handler_registry.doc/command_registry.md")]
+    /// The §6.7 unified action descriptors and their live [`CommandState`], which
+    /// is what makes one `set_state` call disable a shortcut, a menu item and a
+    /// click at once.
     command_registry: CommandRegistry,
 }
 
 impl HandlerRegistry {
-    #[doc = include_str!("handler_registry.doc/new.md")]
+    /// An empty registry: nothing bound anywhere, no scope open.
     pub(crate) fn new() -> Self {
         Self {
             handlers: HashMap::default(),
@@ -66,7 +80,7 @@ impl HandlerRegistry {
 
     // ---- §2.6 link 4: the window surface ------------------------------------
 
-    #[doc = include_str!("handler_registry.doc/set_command.md")]
+    /// Binds `handler` to `command` at the window level, replacing any previous.
     pub(crate) fn set_command<M>(
         &mut self,
         command: InternedSymbol,
@@ -76,20 +90,19 @@ impl HandlerRegistry {
             .insert(command, handler.into_command_handler());
     }
 
-    #[doc = include_str!("handler_registry.doc/has_command.md")]
+    /// Whether a window-level handler is bound to `command`.
     pub(crate) fn has_command(&self, command: InternedSymbol) -> bool {
         self.handlers.contains_key(&command)
     }
 
-    #[doc = include_str!("handler_registry.doc/remove_command.md")]
-    #[cfg(test)]
+    #[doc = include_str!("../../docs/api/runtime/handler_registry.doc/remove_command.md")]
     pub(crate) fn remove_command(&mut self, command: InternedSymbol) -> bool {
         self.handlers.remove(&command).is_some()
     }
 
     // ---- §2.6 links 1 and 3: nodes ------------------------------------------
 
-    #[doc = include_str!("handler_registry.doc/set_node_command.md")]
+    /// Binds `handler` to `command` at `node`, replacing any previous.
     pub(crate) fn set_node_command<M>(
         &mut self,
         node: NodeId,
@@ -100,12 +113,12 @@ impl HandlerRegistry {
             .insert((node, command), handler.into_command_handler());
     }
 
-    #[doc = include_str!("handler_registry.doc/has_node_command.md")]
+    /// Whether a handler is bound to `command` at `node`.
     pub(crate) fn has_node_command(&self, node: NodeId, command: InternedSymbol) -> bool {
         self.node_handlers.contains_key(&(node, command))
     }
 
-    #[doc = include_str!("handler_registry.doc/clear_node.md")]
+    #[doc = include_str!("../../docs/api/runtime/handler_registry.doc/clear_node.md")]
     pub(crate) fn clear_node(&mut self, node: NodeId) -> usize {
         let before = self.node_handlers.len();
         self.node_handlers.retain(|(at, _), _| *at != node);
@@ -125,7 +138,8 @@ impl HandlerRegistry {
 
     // ---- §2.3 listeners ------------------------------------------------------
 
-    #[doc = include_str!("handler_registry.doc/add_listener.md")]
+    /// Adds a listener for `command` on `node`, running in `phase`. Adds — never
+    /// replaces: several listeners per key run in registration order.
     pub(crate) fn add_listener<M>(
         &mut self,
         node: NodeId,
@@ -139,17 +153,17 @@ impl HandlerRegistry {
             .push(EventListener::new(phase, listener.into_command_handler()));
     }
 
-    #[doc = include_str!("handler_registry.doc/listener_count.md")]
+    /// How many listeners are registered for `command` on `node`.
     pub(crate) fn listener_count(&self, node: NodeId, command: InternedSymbol) -> usize {
         self.listeners.get(&(node, command)).map_or(0, Vec::len)
     }
 
-    #[doc = include_str!("handler_registry.doc/has_listeners.md")]
+    #[doc = include_str!("../../docs/api/runtime/handler_registry.doc/has_listeners.md")]
     pub(crate) fn has_listeners(&self) -> bool {
         !self.listeners.is_empty()
     }
 
-    #[doc = include_str!("handler_registry.doc/run_listeners.md")]
+    #[doc = include_str!("../../docs/api/runtime/handler_registry.doc/run_listeners.md")]
     pub(crate) fn run_listeners(
         &mut self,
         node: NodeId,
@@ -176,14 +190,17 @@ impl HandlerRegistry {
 
     // ---- §2.6 link 2: focus scopes -------------------------------------------
 
-    #[doc = include_str!("handler_registry.doc/open_scope.md")]
+    /// Opens `scope` as the innermost scope. Re-opening the same
+    /// [`FocusScopeId`] replaces its membership rather than stacking a duplicate.
     pub(crate) fn open_scope(&mut self, scope: FocusScope) {
         let id = scope.id();
         self.scopes.retain(|open| open.id() != id);
         self.scopes.push(scope);
     }
 
-    #[doc = include_str!("handler_registry.doc/close_scope.md")]
+    /// Closes the scope with this `id` **and drops its handlers**, returning
+    /// whether one was open. The two go together: a closed dialog whose handlers
+    /// survived would keep claiming commands from outside itself.
     pub(crate) fn close_scope(&mut self, id: FocusScopeId) -> bool {
         let before = self.scopes.len();
         self.scopes.retain(|scope| scope.id() != id);
@@ -194,37 +211,37 @@ impl HandlerRegistry {
         closed
     }
 
-    #[doc = include_str!("handler_registry.doc/scopes_2.md")]
+    /// The open scopes, outermost first.
     pub(crate) fn scopes(&self) -> &[FocusScope] {
         &self.scopes
     }
 
-    #[doc = include_str!("handler_registry.doc/scope.md")]
+    /// The open scope with this id, if one is open.
     pub(crate) fn scope(&self, id: FocusScopeId) -> Option<&FocusScope> {
         self.scopes.iter().find(|scope| scope.id() == id)
     }
 
-    #[doc = include_str!("handler_registry.doc/save_focus_for_scope.md")]
+    /// Records what focus a scope displaced as it opened.
     pub(crate) fn save_focus_for_scope(&mut self, previously_focused: Option<NodeId>) {
         self.focus_restore.save(previously_focused);
     }
 
-    #[doc = include_str!("handler_registry.doc/restore_focus_for_scope.md")]
+    #[doc = include_str!("../../docs/api/runtime/handler_registry.doc/restore_focus_for_scope.md")]
     pub(crate) fn restore_focus_for_scope(&mut self) -> Option<NodeId> {
         self.focus_restore.restore()
     }
 
-    #[doc = include_str!("handler_registry.doc/declared_traps_2.md")]
+    /// The scopes of the traps the previous reconciliation saw.
     pub(crate) fn declared_traps(&self) -> &[FocusScopeId] {
         &self.declared_traps
     }
 
-    #[doc = include_str!("handler_registry.doc/set_declared_traps.md")]
+    /// Replaces the remembered trap scopes with this frame's answer.
     pub(crate) fn set_declared_traps(&mut self, traps: Vec<FocusScopeId>) {
         self.declared_traps = traps;
     }
 
-    #[doc = include_str!("handler_registry.doc/set_scope_command.md")]
+    /// Binds `handler` to `command` on scope `id`, replacing any previous.
     pub(crate) fn set_scope_command<M>(
         &mut self,
         id: FocusScopeId,
@@ -235,26 +252,28 @@ impl HandlerRegistry {
             .insert((id, command), handler.into_command_handler());
     }
 
-    #[doc = include_str!("handler_registry.doc/has_scope_command.md")]
+    /// Whether a handler is bound to `command` on scope `id`.
     pub(crate) fn has_scope_command(&self, id: FocusScopeId, command: InternedSymbol) -> bool {
         self.scope_handlers.contains_key(&(id, command))
     }
 
     // ---- §2.6 link 5: the application fallback -------------------------------
 
-    #[doc = include_str!("handler_registry.doc/set_app_commands.md")]
+    /// Installs the shared application-level fallback.
     pub(crate) fn set_app_commands(&mut self, commands: AppCommands) {
         self.app_commands = commands;
     }
 
-    #[doc = include_str!("handler_registry.doc/app_commands_2.md")]
+    /// A handle to the application fallback. The handle *shares* the registry, so
+    /// registering through it reaches this runtime and every other one given the
+    /// same handle.
     pub(crate) fn app_commands(&self) -> AppCommands {
         self.app_commands.clone()
     }
 
     // ---- the route walk ------------------------------------------------------
 
-    #[doc = include_str!("handler_registry.doc/dispatch_along.md")]
+    #[doc = include_str!("../../docs/api/runtime/handler_registry.doc/dispatch_along.md")]
     pub(crate) fn dispatch_along(
         &mut self,
         route: &[CommandTarget],
@@ -311,7 +330,7 @@ impl HandlerRegistry {
 
     // ---- §6.7 editable-field handlers ----------------------------------------
 
-    #[doc = include_str!("handler_registry.doc/set_text_input.md")]
+    /// Binds the per-keystroke `on-input` handler for `command`.
     pub(crate) fn set_text_input(
         &mut self,
         command: InternedSymbol,
@@ -320,13 +339,14 @@ impl HandlerRegistry {
         self.text_input_handlers.insert(command, Box::new(handler));
     }
 
-    #[doc = include_str!("handler_registry.doc/has_text_input.md")]
+    /// Whether a text-input handler is bound to `command`.
     pub(crate) fn has_text_input(&self, command: InternedSymbol) -> bool {
         self.text_input_handlers.contains_key(&command)
     }
 
-    #[doc = include_str!("handler_registry.doc/dispatch_text_input.md")]
-    #[doc = include_str!("handler_registry.doc/set_value_input.md")]
+    /// Runs the text-input handler for `command` (if any) with `text`, returning
+    /// whether one ran. Asks for no frame — the caller decides that.
+    /// Registers the handler a numeric control reports through.
     pub(crate) fn set_value_input(
         &mut self,
         command: InternedSymbol,
@@ -335,7 +355,7 @@ impl HandlerRegistry {
         self.value_handlers.insert(command, Box::new(handler));
     }
 
-    #[doc = include_str!("handler_registry.doc/dispatch_value_input.md")]
+    /// Reports a numeric control's new value, and whether anyone was listening.
     pub(crate) fn dispatch_value_input(
         &mut self,
         command: InternedSymbol,
@@ -359,7 +379,7 @@ impl HandlerRegistry {
         }
     }
 
-    #[doc = include_str!("handler_registry.doc/set_change.md")]
+    /// Binds the commit `on-change` handler for `command`.
     pub(crate) fn set_change(
         &mut self,
         command: InternedSymbol,
@@ -368,12 +388,13 @@ impl HandlerRegistry {
         self.change_handlers.insert(command, Box::new(handler));
     }
 
-    #[doc = include_str!("handler_registry.doc/has_change.md")]
+    /// Whether a change (commit) handler is bound to `command`.
     pub(crate) fn has_change(&self, command: InternedSymbol) -> bool {
         self.change_handlers.contains_key(&command)
     }
 
-    #[doc = include_str!("handler_registry.doc/dispatch_change.md")]
+    /// Runs the change handler for `command` (if any) with `text`, returning
+    /// whether one ran. Asks for no frame — the caller decides that.
     pub(crate) fn dispatch_change(&mut self, command: InternedSymbol, text: &str) -> bool {
         if let Some(handler) = self.change_handlers.get_mut(&command) {
             handler(text);
@@ -385,17 +406,19 @@ impl HandlerRegistry {
 
     // ---- §6.7 shortcuts and descriptors --------------------------------------
 
-    #[doc = include_str!("handler_registry.doc/bind_shortcut.md")]
+    /// Binds `shortcut` to `command` in the keyboard table.
     pub(crate) fn bind_shortcut(&mut self, shortcut: Shortcut, command: InternedSymbol) {
         self.commands.bind(shortcut, command);
     }
 
-    #[doc = include_str!("handler_registry.doc/command_router.md")]
+    /// The shortcut → command-symbol table keyboard input resolves against.
     pub(crate) const fn command_router(&self) -> &CommandRouter {
         &self.commands
     }
 
-    #[doc = include_str!("handler_registry.doc/register_command.md")]
+    /// Registers a unified [`Command`] descriptor and binds its shortcut if it
+    /// declares one — the single registration that lights up the keyboard, the
+    /// menu and the click together (spec §6.7).
     pub(crate) fn register_command(&mut self, command: Command) {
         if let Some(shortcut) = command.shortcut() {
             self.commands.bind(shortcut, command.id());
@@ -403,12 +426,13 @@ impl HandlerRegistry {
         self.command_registry.register(command);
     }
 
-    #[doc = include_str!("handler_registry.doc/command_registry_2.md")]
+    /// The unified action descriptors and their live state (spec §6.7).
     pub(crate) const fn command_registry(&self) -> &CommandRegistry {
         &self.command_registry
     }
 
-    #[doc = include_str!("handler_registry.doc/set_command_state.md")]
+    /// Sets the live [`CommandState`] of a registered command, returning whether
+    /// one was registered under `command`.
     pub(crate) fn set_command_state(
         &mut self,
         command: InternedSymbol,
@@ -417,14 +441,17 @@ impl HandlerRegistry {
         self.command_registry.set_state(command, state)
     }
 
-    #[doc = include_str!("handler_registry.doc/permits_dispatch.md")]
+    /// Whether `command`'s registered state permits a dispatch. A symbol with no
+    /// registered descriptor is unconstrained, so applications routing raw
+    /// symbols are unaffected (spec §6.7).
     pub(crate) fn permits_dispatch(&self, command: InternedSymbol) -> bool {
         self.command_registry.permits_dispatch(command)
     }
 }
 
 impl std::fmt::Debug for HandlerRegistry {
-    #[doc = include_str!("handler_registry.doc/fmt.md")]
+    /// Counts what is bound, never the closures — a handler has no useful
+    /// rendering.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HandlerRegistry")
             .field("handlers", &self.handlers.len())

@@ -1,1 +1,0 @@
-Strictly less than (`<`).

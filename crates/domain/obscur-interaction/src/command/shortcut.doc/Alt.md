@@ -1,1 +1,0 @@
-The `Alt` / `Option` modifier.

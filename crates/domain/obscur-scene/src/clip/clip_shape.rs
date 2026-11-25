@@ -1,45 +1,46 @@
-#![doc = include_str!("clip_shape.doc/_module.md")]
+//! The geometry a clip restricts drawing to.
 
 use obscur_geometry::{CornerRadii, Rect};
 
 use crate::path::Path;
 
-#[doc = include_str!("clip_shape.doc/ClipShape.md")]
+#[doc = include_str!("../../docs/api/clip/clip_shape.doc/ClipShape.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum ClipShape {
-    #[doc = include_str!("clip_shape.doc/Rect.md")]
+    /// A plain axis-aligned rectangle.
     Rect(Rect),
-    #[doc = include_str!("clip_shape.doc/RoundedRect.md")]
+    /// A rectangle with per-corner rounding.
     RoundedRect {
-        #[doc = include_str!("clip_shape.doc/rect.md")]
+        /// The rectangle being rounded.
         rect: Rect,
-        #[doc = include_str!("clip_shape.doc/radii.md")]
+        /// The per-corner radii applied to `rect`.
         radii: CornerRadii,
     },
-    #[doc = include_str!("clip_shape.doc/Path.md")]
+    /// An arbitrary vector outline.
     Path(Path),
 }
 
 impl ClipShape {
-    #[doc = include_str!("clip_shape.doc/rect_2.md")]
+    /// Creates a rectangular clip shape.
     #[must_use]
     pub const fn rect(rect: Rect) -> Self {
         Self::Rect(rect)
     }
 
-    #[doc = include_str!("clip_shape.doc/rounded_rect.md")]
+    /// Creates a rounded-rectangular clip shape from a rectangle and its
+    /// per-corner radii.
     #[must_use]
     pub const fn rounded_rect(rect: Rect, radii: CornerRadii) -> Self {
         Self::RoundedRect { rect, radii }
     }
 
-    #[doc = include_str!("clip_shape.doc/path.md")]
+    /// Creates a clip shape from an arbitrary path outline.
     #[must_use]
     pub fn path(path: Path) -> Self {
         Self::Path(path)
     }
 
-    #[doc = include_str!("clip_shape.doc/bounds.md")]
+    #[doc = include_str!("../../docs/api/clip/clip_shape.doc/bounds.md")]
     #[must_use]
     pub fn bounds(&self) -> Option<Rect> {
         match self {

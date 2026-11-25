@@ -1,51 +1,34 @@
-#![doc = include_str!("editing_view.doc/_module.md")]
+//! The per-frame [`EditingView`] the scene phase paints a caret + selection from.
 
 use obscur_identity::NodeId;
 use obscur_text::selection::TextSelection;
 
-#[doc = include_str!("editing_view.doc/EditingView.md")]
+use super::PreeditView;
+
+#[doc = include_str!("../../docs/api/orchestration/editing_view.doc/EditingView.md")]
 #[derive(Debug, Clone, Copy)]
 pub struct EditingView<'a> {
-    #[doc = include_str!("editing_view.doc/node.md")]
+    /// The editable field node the session is bound to.
     pub node: NodeId,
-    #[doc = include_str!("editing_view.doc/text.md")]
+    /// The session's current text — the source of truth painted for the field,
+    /// overriding the (possibly lagging) retained text content.
     pub text: &'a str,
-    #[doc = include_str!("editing_view.doc/selection.md")]
+    /// The session's current caret/selection: collapsed is a caret, non-empty is
+    /// a highlighted span.
     pub selection: TextSelection,
-    #[doc = include_str!("editing_view.doc/preedit.md")]
+    /// The active IME preedit spliced into the field for DISPLAY when a
+    /// composition is live (spec §5.12), or `None` when the field is not
+    /// composing. When present, the compose phase draws `text` with the preedit
+    /// spliced at [`PreeditView::at`], underlines the preedit span, and places the
+    /// caret at the preedit's caret — none of which touches the buffer.
     pub preedit: Option<PreeditView<'a>>,
-    #[doc = include_str!("editing_view.doc/scroll_left.md")]
+    #[doc = include_str!("../../docs/api/orchestration/editing_view.doc/scroll_left.md")]
     pub scroll_left: f32,
 }
 
-#[doc = include_str!("editing_view.doc/PreeditView.md")]
-#[derive(Debug, Clone, Copy)]
-pub struct PreeditView<'a> {
-    #[doc = include_str!("editing_view.doc/text_2.md")]
-    pub text: &'a str,
-    #[doc = include_str!("editing_view.doc/at.md")]
-    pub at: usize,
-    #[doc = include_str!("editing_view.doc/end.md")]
-    pub end: usize,
-    #[doc = include_str!("editing_view.doc/caret.md")]
-    pub caret: usize,
-}
-
-impl<'a> PreeditView<'a> {
-    #[doc = include_str!("editing_view.doc/new.md")]
-    #[must_use]
-    pub(crate) const fn new(text: &'a str, at: usize, end: usize, caret: usize) -> Self {
-        Self {
-            text,
-            at,
-            end,
-            caret,
-        }
-    }
-}
-
 impl<'a> EditingView<'a> {
-    #[doc = include_str!("editing_view.doc/new_2.md")]
+    /// Creates an editing view for `node` painting `text` with `selection` and no
+    /// active preedit.
     #[must_use]
     pub(crate) const fn new(node: NodeId, text: &'a str, selection: TextSelection) -> Self {
         Self {
@@ -57,14 +40,17 @@ impl<'a> EditingView<'a> {
         }
     }
 
-    #[doc = include_str!("editing_view.doc/with_preedit.md")]
+    /// Returns a copy with the active IME `preedit` attached (spec §5.12).
     #[must_use]
     pub(crate) const fn with_preedit(mut self, preedit: PreeditView<'a>) -> Self {
         self.preedit = Some(preedit);
         self
     }
 
-    #[doc = include_str!("editing_view.doc/with_scroll_left.md")]
+    /// Returns a copy carrying the field's horizontal `scroll_left` offset
+    /// (logical px, ≥ 0) — how far the run is scrolled left so the caret stays in
+    /// the field's content box (CSS Overflow 3 §3.1). `0.0` leaves the paint
+    /// byte-identical to the unscrolled path.
     #[must_use]
     pub(crate) const fn with_scroll_left(mut self, scroll_left: f32) -> Self {
         self.scroll_left = scroll_left;

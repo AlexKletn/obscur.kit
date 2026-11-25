@@ -1,43 +1,53 @@
-#![doc = include_str!("retained_node.doc/_module.md")]
+//! A retained tree node — the anchor of UI identity.
 
 use obscur_identity::{InternedSymbol, NodeId, StableKey};
 use obscur_view::view::{StyleAttributes, ViewEventBinding, ViewFragment, ViewProperty};
 
 use super::{LogicalParent, NodeFlags, NodeGeneration, NodeKind, VisualParent};
 
-#[doc = include_str!("retained_node.doc/RetainedNode.md")]
+#[doc = include_str!("../../docs/api/node/retained_node.doc/RetainedNode.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct RetainedNode {
-    #[doc = include_str!("retained_node.doc/id.md")]
+    /// Stable node identity.
     pub id: NodeId,
-    #[doc = include_str!("retained_node.doc/generation.md")]
+    /// Generation, bumped when the arena slot's identity is reused.
     pub generation: NodeGeneration,
-    #[doc = include_str!("retained_node.doc/kind.md")]
+    /// Classification of this node (element, text, root, synthetic).
     pub kind: NodeKind,
-    #[doc = include_str!("retained_node.doc/flags.md")]
+    /// Structural / behavioural flags (not invalidation state, spec §4.3).
     pub flags: NodeFlags,
-    #[doc = include_str!("retained_node.doc/logical_parent.md")]
+    /// Logical parent (structure and style/theme scope).
     pub logical_parent: LogicalParent,
-    #[doc = include_str!("retained_node.doc/visual_parent.md")]
+    /// Visual parent (paint location in the stacking tree).
     pub visual_parent: VisualParent,
-    #[doc = include_str!("retained_node.doc/children.md")]
+    /// Ordered child links, by `NodeId` — **every** child node in document
+    /// order, text and synthetic parts included. This is the all-nodes list
+    /// internal traversals (layout, paint, hit-test, semantics, reconcile) walk;
+    /// read it through [`child_nodes`](Self::child_nodes).
     pub children: Vec<NodeId>,
-    #[doc = include_str!("retained_node.doc/element_children.md")]
+    #[doc = include_str!("../../docs/api/node/retained_node.doc/element_children.md")]
     pub element_children: Vec<NodeId>,
-    #[doc = include_str!("retained_node.doc/key.md")]
+    /// Explicit reconciliation key, if the desired node carried one.
     pub key: Option<StableKey>,
-    #[doc = include_str!("retained_node.doc/attributes.md")]
+    /// CSS-relevant identity (local name, id, class list) for element nodes,
+    /// extracted from the desired node's props during reconciliation. Empty for
+    /// non-element nodes and elements that carry no style attributes.
     pub attributes: StyleAttributes,
-    #[doc = include_str!("retained_node.doc/event_bindings.md")]
+    /// Event bindings (`event → command`) carried on element nodes, copied from
+    /// the desired node's events during reconciliation. Actions flow *up*: the
+    /// runtime looks a fired event up here to find the command it dispatches
+    /// (spec §2.3, §3.1). Empty for non-element nodes and elements with no
+    /// events.
     pub event_bindings: Box<[ViewEventBinding]>,
-    #[doc = include_str!("retained_node.doc/props.md")]
+    #[doc = include_str!("../../docs/api/node/retained_node.doc/props.md")]
     pub props: Box<[ViewProperty]>,
-    #[doc = include_str!("retained_node.doc/slot_content.md")]
+    #[doc = include_str!("../../docs/api/node/retained_node.doc/slot_content.md")]
     pub slot_content: ViewFragment,
 }
 
 impl RetainedNode {
-    #[doc = include_str!("retained_node.doc/new.md")]
+    /// Creates a retained node at its first generation with the given kind:
+    /// no parents, no children, no key, and empty flags.
     #[must_use]
     pub fn new(id: NodeId, kind: NodeKind) -> Self {
         Self {
@@ -57,72 +67,78 @@ impl RetainedNode {
         }
     }
 
-    #[doc = include_str!("retained_node.doc/id_2.md")]
+    /// Returns this node's stable identity.
     #[must_use]
     pub const fn id(&self) -> NodeId {
         self.id
     }
 
-    #[doc = include_str!("retained_node.doc/generation_2.md")]
+    /// Returns this node's current generation.
     #[must_use]
     pub const fn generation(&self) -> NodeGeneration {
         self.generation
     }
 
-    #[doc = include_str!("retained_node.doc/kind_2.md")]
+    /// Returns this node's classification.
     #[must_use]
     pub const fn kind(&self) -> &NodeKind {
         &self.kind
     }
 
-    #[doc = include_str!("retained_node.doc/flags_2.md")]
+    /// Returns this node's structural / behavioural flags.
     #[must_use]
     pub const fn flags(&self) -> NodeFlags {
         self.flags
     }
 
-    #[doc = include_str!("retained_node.doc/logical_parent_2.md")]
+    /// Returns this node's logical parent.
     #[must_use]
     pub const fn logical_parent(&self) -> LogicalParent {
         self.logical_parent
     }
 
-    #[doc = include_str!("retained_node.doc/visual_parent_2.md")]
+    /// Returns this node's visual parent.
     #[must_use]
     pub const fn visual_parent(&self) -> VisualParent {
         self.visual_parent
     }
 
-    #[doc = include_str!("retained_node.doc/key_2.md")]
+    /// Returns this node's explicit reconciliation key, if any.
     #[must_use]
     pub const fn key(&self) -> Option<&StableKey> {
         self.key.as_ref()
     }
 
-    #[doc = include_str!("retained_node.doc/attributes_2.md")]
+    /// Returns this node's CSS-relevant style attributes (local name, id,
+    /// classes). Empty for non-element nodes.
     #[must_use]
     pub const fn attributes(&self) -> &StyleAttributes {
         &self.attributes
     }
 
-    #[doc = include_str!("retained_node.doc/event_bindings_2.md")]
+    /// Returns this node's event bindings (`event → command`). Empty for
+    /// non-element nodes and elements that carry no events.
     #[must_use]
     pub fn event_bindings(&self) -> &[ViewEventBinding] {
         &self.event_bindings
     }
 
-    #[doc = include_str!("retained_node.doc/slot_content_2.md")]
+    /// Returns the authored children kept for §2.12 slot projection — see
+    /// [`slot_content`](Self::slot_content). Empty unless an authored child of
+    /// this node carried a `slot="…"` assignment.
     #[must_use]
     pub const fn slot_content(&self) -> &ViewFragment {
         &self.slot_content
     }
 
-    #[doc = include_str!("retained_node.doc/set_slot_content.md")]
+    /// Sets the authored children kept for §2.12 slot projection, replacing any
+    /// previous value.
     pub fn set_slot_content(&mut self, slot_content: ViewFragment) {
         self.slot_content = slot_content;
     }
 
-    #[doc = include_str!("retained_node.doc/command_for_event.md")]
+    /// Returns the command bound to `event` on this node, if any — the first
+    /// matching binding wins.
     #[must_use]
     pub fn command_for_event(&self, event: InternedSymbol) -> Option<InternedSymbol> {
         self.event_bindings
@@ -131,65 +147,73 @@ impl RetainedNode {
             .map(ViewEventBinding::command)
     }
 
-    #[doc = include_str!("retained_node.doc/bump_generation.md")]
+    /// Advances the generation, marking the arena slot as reused for a new
+    /// occupant so that stale references can be detected.
     pub fn bump_generation(&mut self) {
         self.generation = self.generation.next();
     }
 
-    #[doc = include_str!("retained_node.doc/set_logical_parent.md")]
+    /// Sets the logical parent (structure / style-theme scope). Independent of
+    /// the visual parent (spec §4.14).
     pub fn set_logical_parent(&mut self, parent: LogicalParent) {
         self.logical_parent = parent;
     }
 
-    #[doc = include_str!("retained_node.doc/set_visual_parent.md")]
+    /// Sets the visual parent (paint location). Independent of the logical
+    /// parent (spec §4.14).
     pub fn set_visual_parent(&mut self, parent: VisualParent) {
         self.visual_parent = parent;
     }
 
-    #[doc = include_str!("retained_node.doc/set_key.md")]
+    /// Sets or clears the explicit reconciliation key.
     pub fn set_key(&mut self, key: Option<StableKey>) {
         self.key = key;
     }
 
-    #[doc = include_str!("retained_node.doc/set_attributes.md")]
+    /// Sets this node's CSS-relevant style attributes, replacing any previous
+    /// value.
     pub fn set_attributes(&mut self, attributes: StyleAttributes) {
         self.attributes = attributes;
     }
 
-    #[doc = include_str!("retained_node.doc/set_event_bindings.md")]
+    /// Sets this node's event bindings, replacing any previous value.
     pub fn set_event_bindings(&mut self, event_bindings: Box<[ViewEventBinding]>) {
         self.event_bindings = event_bindings;
     }
 
-    #[doc = include_str!("retained_node.doc/props_2.md")]
+    /// Returns the node's full authored property list.
     #[must_use]
     pub fn props(&self) -> &[ViewProperty] {
         &self.props
     }
 
-    #[doc = include_str!("retained_node.doc/set_props.md")]
+    #[doc = include_str!("../../docs/api/node/retained_node.doc/set_props.md")]
     pub fn set_props(&mut self, props: Box<[ViewProperty]>) {
         self.props = props;
     }
 
-    #[doc = include_str!("retained_node.doc/children_2.md")]
+    #[doc = include_str!("../../docs/api/node/retained_node.doc/children_2.md")]
     #[must_use]
     pub fn children(&self) -> &[NodeId] {
         &self.element_children
     }
 
-    #[doc = include_str!("retained_node.doc/child_nodes.md")]
+    /// Returns **every** ordered child link — text and synthetic parts included.
+    /// This is the all-nodes view the tree machinery walks; the element-only
+    /// component-tree projection a host sees is [`children`](Self::children).
     #[must_use]
     pub fn child_nodes(&self) -> &[NodeId] {
         &self.children
     }
 
-    #[doc = include_str!("retained_node.doc/push_child.md")]
+    /// Appends a child link, preserving order.
     pub fn push_child(&mut self, child: NodeId) {
         self.children.push(child);
     }
 
-    #[doc = include_str!("retained_node.doc/remove_child.md")]
+    /// Removes the first occurrence of `child` from the child links, preserving
+    /// the order of the remaining children. Returns `true` if a child was
+    /// removed.
     pub fn remove_child(&mut self, child: NodeId) -> bool {
         if let Some(pos) = self.children.iter().position(|c| *c == child) {
             self.children.remove(pos);
@@ -199,17 +223,17 @@ impl RetainedNode {
         }
     }
 
-    #[doc = include_str!("retained_node.doc/insert_flags.md")]
+    /// Adds `flags` to this node's flag set.
     pub fn insert_flags(&mut self, flags: NodeFlags) {
         self.flags.insert(flags);
     }
 
-    #[doc = include_str!("retained_node.doc/remove_flags.md")]
+    /// Removes `flags` from this node's flag set.
     pub fn remove_flags(&mut self, flags: NodeFlags) {
         self.flags.remove(flags);
     }
 
-    #[doc = include_str!("retained_node.doc/has_flags.md")]
+    /// Returns `true` if every flag in `flags` is set.
     #[must_use]
     pub fn has_flags(&self, flags: NodeFlags) -> bool {
         self.flags.contains(flags)

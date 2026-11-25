@@ -1,6 +1,6 @@
-#![doc = include_str!("ui_ir_event.doc/_module.md")]
+//! `UiIrEvent`: an event binding wiring an event name to a handler (spec §2.5).
 
-#[doc = include_str!("ui_ir_event.doc/UiIrEvent.md")]
+#[doc = include_str!("../../docs/api/document/ui_ir_event.doc/UiIrEvent.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UiIrEvent {
     event: Box<str>,
@@ -8,7 +8,7 @@ pub struct UiIrEvent {
 }
 
 impl UiIrEvent {
-    #[doc = include_str!("ui_ir_event.doc/new.md")]
+    /// Creates an event binding wiring `event` to `handler`.
     #[must_use]
     pub fn new(event: impl Into<Box<str>>, handler: impl Into<Box<str>>) -> Self {
         Self {
@@ -17,13 +17,13 @@ impl UiIrEvent {
         }
     }
 
-    #[doc = include_str!("ui_ir_event.doc/event.md")]
+    /// Returns the triggering event name (e.g. `"click"`).
     #[must_use]
     pub fn event(&self) -> &str {
         &self.event
     }
 
-    #[doc = include_str!("ui_ir_event.doc/handler.md")]
+    /// Returns the command or action name that flows up when the event fires.
     #[must_use]
     pub fn handler(&self) -> &str {
         &self.handler

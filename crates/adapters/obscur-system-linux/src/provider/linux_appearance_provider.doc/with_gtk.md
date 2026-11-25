@@ -1,1 +1,0 @@
-Substitute the GNOME reader.

@@ -1,9 +1,9 @@
-#![doc = include_str!("syntax_token.doc/_module.md")]
+//! `SyntaxToken`: a leaf of the lossless syntax tree.
 
 use crate::lexer::Token;
 use crate::syntax::SyntaxKind;
 
-#[doc = include_str!("syntax_token.doc/SyntaxToken.md")]
+#[doc = include_str!("../../docs/api/syntax/syntax_token.doc/SyntaxToken.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SyntaxToken {
     kind: SyntaxKind,
@@ -12,7 +12,7 @@ pub struct SyntaxToken {
 }
 
 impl SyntaxToken {
-    #[doc = include_str!("syntax_token.doc/new.md")]
+    #[doc = include_str!("../../docs/api/syntax/syntax_token.doc/new.md")]
     #[must_use]
     pub fn new(kind: SyntaxKind, text: impl Into<Box<str>>, offset: u32) -> Self {
         Self {
@@ -22,7 +22,8 @@ impl SyntaxToken {
         }
     }
 
-    #[doc = include_str!("syntax_token.doc/from_lexer.md")]
+    /// Creates a leaf from a lexer [`Token`], mapping its kind via
+    /// [`SyntaxKind::from_token`].
     #[must_use]
     pub fn from_lexer(token: &Token) -> Self {
         Self::new(
@@ -32,37 +33,37 @@ impl SyntaxToken {
         )
     }
 
-    #[doc = include_str!("syntax_token.doc/kind.md")]
+    /// Returns the leaf's kind.
     #[must_use]
     pub const fn kind(&self) -> SyntaxKind {
         self.kind
     }
 
-    #[doc = include_str!("syntax_token.doc/text.md")]
+    /// Returns the exact source slice this leaf covers.
     #[must_use]
     pub fn text(&self) -> &str {
         &self.text
     }
 
-    #[doc = include_str!("syntax_token.doc/offset.md")]
+    /// Returns the byte offset of the leaf's start in the source.
     #[must_use]
     pub const fn offset(&self) -> u32 {
         self.offset
     }
 
-    #[doc = include_str!("syntax_token.doc/len.md")]
+    /// Returns the leaf's length in bytes.
     #[must_use]
     pub fn len(&self) -> u32 {
         u32::try_from(self.text.len()).unwrap_or(u32::MAX)
     }
 
-    #[doc = include_str!("syntax_token.doc/is_empty.md")]
+    /// Returns `true` if the leaf covers no bytes.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.text.is_empty()
     }
 
-    #[doc = include_str!("syntax_token.doc/is_trivia.md")]
+    /// Returns `true` if this leaf is trivia (see [`SyntaxKind::is_trivia`]).
     #[must_use]
     pub const fn is_trivia(&self) -> bool {
         self.kind.is_trivia()

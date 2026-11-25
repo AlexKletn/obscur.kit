@@ -1,1 +1,0 @@
-A literal float value.

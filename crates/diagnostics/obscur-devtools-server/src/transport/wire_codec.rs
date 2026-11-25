@@ -1,6 +1,8 @@
-#![doc = include_str!("wire_codec.doc/_module.md")]
+#![doc = include_str!("../../docs/api/transport/wire_codec.doc/_module.md")]
 
-use core::fmt;
+mod wire_cursor;
+
+use wire_cursor::WireCursor;
 
 use obscur_devtools_protocol::error::ProtocolError;
 use obscur_devtools_protocol::message::{
@@ -12,41 +14,14 @@ use obscur_devtools_protocol::message::{
 
 use crate::transport::{ClientBound, ServerBound};
 
-#[doc = include_str!("wire_codec.doc/WireError.md")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum WireError {
-    #[doc = include_str!("wire_codec.doc/UnexpectedEof.md")]
-    UnexpectedEof,
-    #[doc = include_str!("wire_codec.doc/InvalidUtf8.md")]
-    InvalidUtf8,
-    #[doc = include_str!("wire_codec.doc/UnknownTag.md")]
-    UnknownTag(u8),
-}
+use super::WireError;
 
-impl fmt::Display for WireError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::UnexpectedEof => write!(f, "unexpected end of wire buffer"),
-            Self::InvalidUtf8 => write!(f, "invalid UTF-8 in wire string"),
-            Self::UnknownTag(tag) => write!(f, "unknown wire discriminant tag: {tag}"),
-        }
-    }
-}
-
-impl core::error::Error for WireError {}
-
-impl From<WireError> for ProtocolError {
-    fn from(_: WireError) -> Self {
-        Self::MalformedMessage
-    }
-}
-
-#[doc = include_str!("wire_codec.doc/WireCodec.md")]
+#[doc = include_str!("../../docs/api/transport/wire_codec.doc/WireCodec.md")]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct WireCodec;
 
 impl WireCodec {
-    #[doc = include_str!("wire_codec.doc/encode_server_bound.md")]
+    /// Encodes a client→server envelope into a fresh byte buffer.
     #[must_use]
     pub fn encode_server_bound(message: &ServerBound) -> Vec<u8> {
         let mut buf = Vec::new();
@@ -63,9 +38,9 @@ impl WireCodec {
         buf
     }
 
-    #[doc = include_str!("wire_codec.doc/decode_server_bound.md")]
+    #[doc = include_str!("../../docs/api/transport/wire_codec.doc/decode_server_bound.md")]
     pub fn decode_server_bound(bytes: &[u8]) -> Result<ServerBound, WireError> {
-        let mut cursor = Cursor::new(bytes);
+        let mut cursor = WireCursor::new(bytes);
         let out = match cursor.read_u8()? {
             0 => ServerBound::Handshake(read_handshake_request(&mut cursor)?),
             1 => ServerBound::Command(read_command(&mut cursor)?),
@@ -74,7 +49,7 @@ impl WireCodec {
         Ok(out)
     }
 
-    #[doc = include_str!("wire_codec.doc/encode_client_bound.md")]
+    /// Encodes a server→client envelope into a fresh byte buffer.
     #[must_use]
     pub fn encode_client_bound(message: &ClientBound) -> Vec<u8> {
         let mut buf = Vec::new();
@@ -107,9 +82,9 @@ impl WireCodec {
         buf
     }
 
-    #[doc = include_str!("wire_codec.doc/decode_client_bound.md")]
+    #[doc = include_str!("../../docs/api/transport/wire_codec.doc/decode_client_bound.md")]
     pub fn decode_client_bound(bytes: &[u8]) -> Result<ClientBound, WireError> {
-        let mut cursor = Cursor::new(bytes);
+        let mut cursor = WireCursor::new(bytes);
         let out = match cursor.read_u8()? {
             0 => ClientBound::Handshake(read_handshake_response(&mut cursor)?),
             1 => ClientBound::Snapshot(read_snapshot(&mut cursor)?),
@@ -128,7 +103,7 @@ fn push_handshake_request(buf: &mut Vec<u8>, request: &HandshakeRequest) {
     push_str(buf, &request.token);
 }
 
-fn read_handshake_request(cursor: &mut Cursor<'_>) -> Result<HandshakeRequest, WireError> {
+fn read_handshake_request(cursor: &mut WireCursor<'_>) -> Result<HandshakeRequest, WireError> {
     let versions = read_version_range(cursor)?;
     let token = cursor.read_str()?.to_owned();
     Ok(HandshakeRequest::new(versions, token))
@@ -148,7 +123,7 @@ fn push_handshake_response(buf: &mut Vec<u8>, response: &HandshakeResponse) {
     }
 }
 
-fn read_handshake_response(cursor: &mut Cursor<'_>) -> Result<HandshakeResponse, WireError> {
+fn read_handshake_response(cursor: &mut WireCursor<'_>) -> Result<HandshakeResponse, WireError> {
     match cursor.read_u8()? {
         0 => {
             let version = read_version(cursor)?;
@@ -167,7 +142,7 @@ const fn rejection_tag(reason: HandshakeRejection) -> u8 {
     }
 }
 
-fn read_rejection(cursor: &mut Cursor<'_>) -> Result<HandshakeRejection, WireError> {
+fn read_rejection(cursor: &mut WireCursor<'_>) -> Result<HandshakeRejection, WireError> {
     match cursor.read_u8()? {
         0 => Ok(HandshakeRejection::VersionUnsupported),
         1 => Ok(HandshakeRejection::Unauthorized),
@@ -176,6 +151,7 @@ fn read_rejection(cursor: &mut Cursor<'_>) -> Result<HandshakeRejection, WireErr
 }
 
 fn push_command(buf: &mut Vec<u8>, command: &CommandMessage) {
+    use obscur_devtools_protocol::message::StableSelector;
     push_u64(buf, command.id.raw());
     match &command.kind {
         CommandKind::Inspect(target) => {
@@ -198,10 +174,40 @@ fn push_command(buf: &mut Vec<u8>, command: &CommandMessage) {
             push_u8(buf, 4);
             push_injected_event(buf, *event);
         }
+        CommandKind::SelectSemantic { role, name } => {
+            push_u8(buf, 5);
+            push_str(buf, role);
+            push_u8(buf, u8::from(name.is_some()));
+            if let Some(name) = name {
+                push_str(buf, name);
+            }
+        }
+        CommandKind::SelectStableId(selector) => {
+            push_u8(buf, 6);
+            match selector {
+                StableSelector::TestId(id) => {
+                    push_u8(buf, 0);
+                    push_str(buf, id);
+                }
+                StableSelector::AutomationId(id) => {
+                    push_u8(buf, 1);
+                    push_str(buf, id);
+                }
+                StableSelector::Component(id) => {
+                    push_u8(buf, 2);
+                    push_u64(buf, *id);
+                }
+                StableSelector::Node(id) => {
+                    push_u8(buf, 3);
+                    push_u64(buf, *id);
+                }
+            }
+        }
     }
 }
 
-fn read_command(cursor: &mut Cursor<'_>) -> Result<CommandMessage, WireError> {
+fn read_command(cursor: &mut WireCursor<'_>) -> Result<CommandMessage, WireError> {
+    use obscur_devtools_protocol::message::StableSelector;
     let id = CommandId::new(cursor.read_u64()?);
     let kind = match cursor.read_u8()? {
         0 => CommandKind::Inspect(read_inspectable(cursor)?),
@@ -209,6 +215,22 @@ fn read_command(cursor: &mut Cursor<'_>) -> Result<CommandMessage, WireError> {
         2 => CommandKind::Unsubscribe(SubscriptionId::new(cursor.read_u64()?)),
         3 => CommandKind::Control(read_control_action(cursor)?),
         4 => CommandKind::Inject(read_injected_event(cursor)?),
+        5 => {
+            let role = cursor.read_str()?.into();
+            let name = match cursor.read_u8()? {
+                0 => None,
+                1 => Some(cursor.read_str()?.into()),
+                other => return Err(WireError::UnknownTag(other)),
+            };
+            CommandKind::SelectSemantic { role, name }
+        }
+        6 => CommandKind::SelectStableId(match cursor.read_u8()? {
+            0 => StableSelector::TestId(cursor.read_str()?.into()),
+            1 => StableSelector::AutomationId(cursor.read_str()?.into()),
+            2 => StableSelector::Component(cursor.read_u64()?),
+            3 => StableSelector::Node(cursor.read_u64()?),
+            other => return Err(WireError::UnknownTag(other)),
+        }),
         other => return Err(WireError::UnknownTag(other)),
     };
     Ok(CommandMessage::new(id, kind))
@@ -226,7 +248,7 @@ fn push_control_action(buf: &mut Vec<u8>, action: ControlAction) {
     }
 }
 
-fn read_control_action(cursor: &mut Cursor<'_>) -> Result<ControlAction, WireError> {
+fn read_control_action(cursor: &mut WireCursor<'_>) -> Result<ControlAction, WireError> {
     match cursor.read_u8()? {
         0 => Ok(ControlAction::Pause),
         1 => Ok(ControlAction::Resume),
@@ -259,7 +281,7 @@ fn push_injected_event(buf: &mut Vec<u8>, event: InjectedEvent) {
     }
 }
 
-fn read_injected_event(cursor: &mut Cursor<'_>) -> Result<InjectedEvent, WireError> {
+fn read_injected_event(cursor: &mut WireCursor<'_>) -> Result<InjectedEvent, WireError> {
     match cursor.read_u8()? {
         0 => Ok(InjectedEvent::PointerDown {
             x: cursor.read_i32()?,
@@ -291,7 +313,7 @@ fn push_snapshot(buf: &mut Vec<u8>, snapshot: &SnapshotMessage) {
     push_str(buf, &snapshot.payload.detail);
 }
 
-fn read_snapshot(cursor: &mut Cursor<'_>) -> Result<SnapshotMessage, WireError> {
+fn read_snapshot(cursor: &mut WireCursor<'_>) -> Result<SnapshotMessage, WireError> {
     let command = CommandId::new(cursor.read_u64()?);
     let target = read_inspectable(cursor)?;
     let description = cursor.read_str()?.to_owned();
@@ -329,7 +351,7 @@ fn push_event(buf: &mut Vec<u8>, event: &ProtocolEvent) {
     }
 }
 
-fn read_event(cursor: &mut Cursor<'_>) -> Result<ProtocolEvent, WireError> {
+fn read_event(cursor: &mut WireCursor<'_>) -> Result<ProtocolEvent, WireError> {
     let subscription = SubscriptionId::new(cursor.read_u64()?);
     let topic = read_topic(cursor)?;
     let kind = match cursor.read_u8()? {
@@ -354,7 +376,7 @@ fn push_subscription(buf: &mut Vec<u8>, subscription: &Subscription) {
     push_u8(buf, u8::from(subscription.granted));
 }
 
-fn read_subscription(cursor: &mut Cursor<'_>) -> Result<Subscription, WireError> {
+fn read_subscription(cursor: &mut WireCursor<'_>) -> Result<Subscription, WireError> {
     let id = SubscriptionId::new(cursor.read_u64()?);
     let topic = read_topic(cursor)?;
     let granted = cursor.read_u8()? != 0;
@@ -383,7 +405,7 @@ fn push_protocol_error(buf: &mut Vec<u8>, error: &ProtocolError) {
     }
 }
 
-fn read_protocol_error(cursor: &mut Cursor<'_>) -> Result<ProtocolError, WireError> {
+fn read_protocol_error(cursor: &mut WireCursor<'_>) -> Result<ProtocolError, WireError> {
     match cursor.read_u8()? {
         0 => Ok(ProtocolError::VersionUnsupported),
         1 => Ok(ProtocolError::Unauthorized {
@@ -405,7 +427,7 @@ fn push_version(buf: &mut Vec<u8>, version: ProtocolVersion) {
     push_u16(buf, version.minor);
 }
 
-fn read_version(cursor: &mut Cursor<'_>) -> Result<ProtocolVersion, WireError> {
+fn read_version(cursor: &mut WireCursor<'_>) -> Result<ProtocolVersion, WireError> {
     Ok(ProtocolVersion::new(cursor.read_u16()?, cursor.read_u16()?))
 }
 
@@ -414,13 +436,13 @@ fn push_version_range(buf: &mut Vec<u8>, range: VersionRange) {
     push_version(buf, range.max);
 }
 
-fn read_version_range(cursor: &mut Cursor<'_>) -> Result<VersionRange, WireError> {
+fn read_version_range(cursor: &mut WireCursor<'_>) -> Result<VersionRange, WireError> {
     let min = read_version(cursor)?;
     let max = read_version(cursor)?;
     Ok(VersionRange::new(min, max))
 }
 
-#[doc = include_str!("wire_codec.doc/push_scope_set.md")]
+/// Encodes a scope set as a single `u8` bitset via the public `contains` API.
 fn push_scope_set(buf: &mut Vec<u8>, scopes: ScopeSet) {
     let mut bits = 0u8;
     for (bit, scope) in scope_bits() {
@@ -431,8 +453,8 @@ fn push_scope_set(buf: &mut Vec<u8>, scopes: ScopeSet) {
     push_u8(buf, bits);
 }
 
-#[doc = include_str!("wire_codec.doc/read_scope_set.md")]
-fn read_scope_set(cursor: &mut Cursor<'_>) -> Result<ScopeSet, WireError> {
+/// Rebuilds a scope set from its `u8` bitset via the public `with` API.
+fn read_scope_set(cursor: &mut WireCursor<'_>) -> Result<ScopeSet, WireError> {
     let bits = cursor.read_u8()?;
     let mut set = ScopeSet::empty();
     for (bit, scope) in scope_bits() {
@@ -461,7 +483,7 @@ const fn scope_tag(scope: PermissionScope) -> u8 {
     }
 }
 
-fn read_scope(cursor: &mut Cursor<'_>) -> Result<PermissionScope, WireError> {
+fn read_scope(cursor: &mut WireCursor<'_>) -> Result<PermissionScope, WireError> {
     match cursor.read_u8()? {
         0 => Ok(PermissionScope::Read),
         1 => Ok(PermissionScope::Subscribe),
@@ -488,7 +510,7 @@ const fn inspectable_tag(target: Inspectable) -> u8 {
     }
 }
 
-fn read_inspectable(cursor: &mut Cursor<'_>) -> Result<Inspectable, WireError> {
+fn read_inspectable(cursor: &mut WireCursor<'_>) -> Result<Inspectable, WireError> {
     match cursor.read_u8()? {
         0 => Ok(Inspectable::Tree),
         1 => Ok(Inspectable::Styles),
@@ -515,7 +537,7 @@ const fn topic_tag(topic: Topic) -> u8 {
     }
 }
 
-fn read_topic(cursor: &mut Cursor<'_>) -> Result<Topic, WireError> {
+fn read_topic(cursor: &mut WireCursor<'_>) -> Result<Topic, WireError> {
     match cursor.read_u8()? {
         0 => Ok(Topic::Diagnostics),
         1 => Ok(Topic::Lifecycle),
@@ -535,7 +557,7 @@ const fn severity_tag(severity: EventSeverity) -> u8 {
     }
 }
 
-fn read_severity(cursor: &mut Cursor<'_>) -> Result<EventSeverity, WireError> {
+fn read_severity(cursor: &mut WireCursor<'_>) -> Result<EventSeverity, WireError> {
     match cursor.read_u8()? {
         0 => Ok(EventSeverity::Trace),
         1 => Ok(EventSeverity::Info),
@@ -580,59 +602,6 @@ fn push_str(buf: &mut Vec<u8>, value: &str) {
     buf.extend_from_slice(bytes);
 }
 
-#[doc = include_str!("wire_codec.doc/Cursor.md")]
-struct Cursor<'a> {
-    data: &'a [u8],
-    pos: usize,
-}
-
-impl<'a> Cursor<'a> {
-    const fn new(data: &'a [u8]) -> Self {
-        Self { data, pos: 0 }
-    }
-
-    fn take(&mut self, n: usize) -> Result<&'a [u8], WireError> {
-        let end = self.pos.checked_add(n).ok_or(WireError::UnexpectedEof)?;
-        let slice = self
-            .data
-            .get(self.pos..end)
-            .ok_or(WireError::UnexpectedEof)?;
-        self.pos = end;
-        Ok(slice)
-    }
-
-    fn read_u8(&mut self) -> Result<u8, WireError> {
-        Ok(self.take(1)?[0])
-    }
-
-    fn read_u16(&mut self) -> Result<u16, WireError> {
-        let array = <[u8; 2]>::try_from(self.take(2)?).map_err(|_| WireError::UnexpectedEof)?;
-        Ok(u16::from_le_bytes(array))
-    }
-
-    fn read_u32(&mut self) -> Result<u32, WireError> {
-        let array = <[u8; 4]>::try_from(self.take(4)?).map_err(|_| WireError::UnexpectedEof)?;
-        Ok(u32::from_le_bytes(array))
-    }
-
-    fn read_i32(&mut self) -> Result<i32, WireError> {
-        let array = <[u8; 4]>::try_from(self.take(4)?).map_err(|_| WireError::UnexpectedEof)?;
-        Ok(i32::from_le_bytes(array))
-    }
-
-    fn read_u64(&mut self) -> Result<u64, WireError> {
-        let array = <[u8; 8]>::try_from(self.take(8)?).map_err(|_| WireError::UnexpectedEof)?;
-        Ok(u64::from_le_bytes(array))
-    }
-
-    fn read_str(&mut self) -> Result<&'a str, WireError> {
-        let len = self.read_u32()?;
-        let n = usize::try_from(len).map_err(|_| WireError::UnexpectedEof)?;
-        let bytes = self.take(n)?;
-        core::str::from_utf8(bytes).map_err(|_| WireError::InvalidUtf8)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -652,6 +621,14 @@ mod tests {
     fn server_bound_commands_round_trip() {
         let commands = [
             CommandKind::Inspect(Inspectable::PluginState),
+            CommandKind::SelectSemantic {
+                role: "Button".into(),
+                name: Some("Сохранить".into()),
+            },
+            CommandKind::SelectSemantic {
+                role: "Button".into(),
+                name: None,
+            },
             CommandKind::Subscribe(Topic::Frames),
             CommandKind::Unsubscribe(SubscriptionId::new(9)),
             CommandKind::Control(ControlAction::SetInspectMode(true)),

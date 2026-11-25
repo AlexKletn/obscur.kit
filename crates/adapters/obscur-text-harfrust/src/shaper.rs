@@ -1,4 +1,5 @@
-#![doc = include_str!("shaper.doc/_module.md")]
+//! The [`HarfrustShaper`] adapter implementing [`TextShaper`] over HarfRust
+//! (spec §5.10).
 
 use std::cell::Cell;
 use std::sync::Arc;
@@ -13,19 +14,23 @@ use read_fonts::{FontRef as ReadFontRef, TableProvider};
 
 use crate::face_metrics::FaceMetrics;
 
-#[doc = include_str!("shaper.doc/HarfrustShaper.md")]
+#[doc = include_str!("../docs/api/shaper.doc/HarfrustShaper.md")]
 #[derive(Debug, Clone, Default)]
 pub struct HarfrustShaper {
-    #[doc = include_str!("shaper.doc/font_bytes.md")]
+    /// The wired host font bytes, or `None` for a font-less shaper that relies on
+    /// per-request `Memory` bytes.
     font_bytes: Option<Arc<[u8]>>,
-    #[doc = include_str!("shaper.doc/faces.md")]
+    /// The registered faces' real metrics, keyed by [`FontId`]; empty until
+    /// [`with_faces`](Self::with_faces) supplies a registry's snapshot.
     faces: FaceMetrics,
-    #[doc = include_str!("shaper.doc/idealized.md")]
+    /// How many line-metric queries were answered with the idealized ratios
+    /// because no real metrics were reachable for the font. Interior state: the
+    /// metrics methods take `&self`.
     idealized: Cell<u32>,
 }
 
 impl HarfrustShaper {
-    #[doc = include_str!("shaper.doc/from_bytes.md")]
+    #[doc = include_str!("../docs/api/shaper.doc/from_bytes.md")]
     #[must_use]
     pub fn from_bytes(bytes: impl Into<Arc<[u8]>>) -> Self {
         Self {
@@ -35,7 +40,7 @@ impl HarfrustShaper {
         }
     }
 
-    #[doc = include_str!("shaper.doc/without_font.md")]
+    #[doc = include_str!("../docs/api/shaper.doc/without_font.md")]
     #[must_use]
     pub const fn without_font() -> Self {
         Self {
@@ -45,20 +50,21 @@ impl HarfrustShaper {
         }
     }
 
-    #[doc = include_str!("shaper.doc/with_faces.md")]
+    #[doc = include_str!("../docs/api/shaper.doc/with_faces.md")]
     #[must_use]
     pub fn with_faces(mut self, faces: FaceMetrics) -> Self {
         self.faces = faces;
         self
     }
 
-    #[doc = include_str!("shaper.doc/idealized_line_metrics.md")]
+    #[doc = include_str!("../docs/api/shaper.doc/idealized_line_metrics.md")]
     #[must_use]
     pub fn idealized_line_metrics(&self) -> u32 {
         self.idealized.get()
     }
 
-    #[doc = include_str!("shaper.doc/bytes_for.md")]
+    /// Returns the font bytes to shape `request` with: the wired host font if
+    /// present, otherwise the request face's in-memory bytes.
     fn bytes_for<'a>(&'a self, request: &'a ShapingRequest) -> Option<&'a [u8]> {
         match self.font_bytes.as_deref() {
             Some(bytes) => Some(bytes),
@@ -66,7 +72,9 @@ impl HarfrustShaper {
         }
     }
 
-    #[doc = include_str!("shaper.doc/idealized_2.md")]
+    /// Returns the idealized metrics for `font_size`, counting the fallback so it
+    /// stays observable through
+    /// [`idealized_line_metrics`](Self::idealized_line_metrics).
     fn idealized(&self, font_size: f32) -> LineMetrics {
         self.idealized.set(self.idealized.get().saturating_add(1));
         LineMetrics::idealized(font_size)
@@ -165,7 +173,7 @@ impl TextShaper for HarfrustShaper {
     }
 }
 
-#[doc = include_str!("shaper.doc/line_metrics_from_bytes.md")]
+#[doc = include_str!("../docs/api/shaper.doc/line_metrics_from_bytes.md")]
 fn line_metrics_from_bytes(bytes: &[u8], font_size: f32) -> Option<LineMetrics> {
     let font = ReadFontRef::new(bytes).ok()?;
     let units_per_em = font.head().ok()?.units_per_em();
@@ -180,7 +188,8 @@ fn line_metrics_from_bytes(bytes: &[u8], font_size: f32) -> Option<LineMetrics> 
     Some(LineMetrics::new(ascent, descent, line_gap))
 }
 
-#[doc = include_str!("shaper.doc/map_direction.md")]
+/// Maps a domain [`TextDirection`] to the HarfRust [`Direction`] for horizontal
+/// scripts.
 const fn map_direction(direction: TextDirection) -> Direction {
     match direction {
         TextDirection::LeftToRight => Direction::LeftToRight,

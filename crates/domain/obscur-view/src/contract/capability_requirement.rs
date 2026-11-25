@@ -1,16 +1,17 @@
-#![doc = include_str!("capability_requirement.doc/_module.md")]
+//! `CapabilityRequirement`: how strongly a component needs a capability.
 
-#[doc = include_str!("capability_requirement.doc/CapabilityRequirement.md")]
+#[doc = include_str!("../../docs/api/contract/capability_requirement.doc/CapabilityRequirement.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CapabilityRequirement {
-    #[doc = include_str!("capability_requirement.doc/Required.md")]
+    /// The component cannot function without the capability.
     Required,
-    #[doc = include_str!("capability_requirement.doc/Optional.md")]
+    /// The component can function without the capability, using it only when
+    /// present.
     Optional,
 }
 
 impl CapabilityRequirement {
-    #[doc = include_str!("capability_requirement.doc/is_required.md")]
+    /// Returns whether this requirement is mandatory.
     #[must_use]
     pub const fn is_required(self) -> bool {
         matches!(self, Self::Required)

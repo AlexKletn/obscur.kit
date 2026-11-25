@@ -1,4 +1,4 @@
-#![doc = include_str!("stylesheet_cache.doc/_module.md")]
+//! `StylesheetCache`: parse each CSS source once per revision (spec §4.12).
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -6,23 +6,25 @@ use std::collections::hash_map::Entry;
 use crate::parser::{ParsedStylesheet, StylesheetParser};
 use crate::source::{CssSource, SourceId, SourceVersion};
 
-#[doc = include_str!("stylesheet_cache.doc/StylesheetCache.md")]
+#[doc = include_str!("../../docs/api/cache/stylesheet_cache.doc/StylesheetCache.md")]
 #[derive(Debug, Default)]
 pub struct StylesheetCache {
-    #[doc = include_str!("stylesheet_cache.doc/entries.md")]
+    /// One entry per identified source: the revision it was parsed at, and the
+    /// parse. A new revision replaces the entry rather than growing the map.
     entries: HashMap<SourceId, (SourceVersion, ParsedStylesheet)>,
-    #[doc = include_str!("stylesheet_cache.doc/anonymous.md")]
+    #[doc = include_str!("../../docs/api/cache/stylesheet_cache.doc/anonymous.md")]
     anonymous: Option<ParsedStylesheet>,
 }
 
 impl StylesheetCache {
-    #[doc = include_str!("stylesheet_cache.doc/new.md")]
+    /// Creates an empty cache.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    #[doc = include_str!("stylesheet_cache.doc/get.md")]
+    /// The cached parse of `source`, or [`None`] on a miss — an unseen source, a
+    /// stale revision, or an anonymous source (never cached).
     #[must_use]
     pub fn get(&self, source: &CssSource) -> Option<&ParsedStylesheet> {
         if source.id() == SourceId::ANONYMOUS {
@@ -34,7 +36,7 @@ impl StylesheetCache {
             .map(|(_, parsed)| parsed)
     }
 
-    #[doc = include_str!("stylesheet_cache.doc/parse.md")]
+    #[doc = include_str!("../../docs/api/cache/stylesheet_cache.doc/parse.md")]
     pub fn parse(&mut self, source: &CssSource) -> &ParsedStylesheet {
         // An anonymous source is parsed every time and never stored — see the
         // type-level note on why it must not share a key.
@@ -59,23 +61,23 @@ impl StylesheetCache {
         }
     }
 
-    #[doc = include_str!("stylesheet_cache.doc/invalidate.md")]
+    #[doc = include_str!("../../docs/api/cache/stylesheet_cache.doc/invalidate.md")]
     pub fn invalidate(&mut self, id: SourceId) -> bool {
         self.entries.remove(&id).is_some()
     }
 
-    #[doc = include_str!("stylesheet_cache.doc/clear.md")]
+    /// Drops every entry.
     pub fn clear(&mut self) {
         self.entries.clear();
     }
 
-    #[doc = include_str!("stylesheet_cache.doc/len.md")]
+    /// How many sources are cached.
     #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
-    #[doc = include_str!("stylesheet_cache.doc/is_empty.md")]
+    /// Whether nothing is cached.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()

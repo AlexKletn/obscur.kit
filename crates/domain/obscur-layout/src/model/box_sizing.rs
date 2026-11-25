@@ -1,17 +1,18 @@
-#![doc = include_str!("box_sizing.doc/_module.md")]
+//! The CSS `box-sizing` model: whether an explicit `width` / `height` sizes the
+//! content box or the border box.
 
-#[doc = include_str!("box_sizing.doc/BoxSizing.md")]
+#[doc = include_str!("../../docs/api/model/box_sizing.doc/BoxSizing.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BoxSizing {
-    #[doc = include_str!("box_sizing.doc/ContentBox.md")]
+    /// An explicit size is the content box (the CSS initial value).
     #[default]
     ContentBox,
-    #[doc = include_str!("box_sizing.doc/BorderBox.md")]
+    /// An explicit size is the border box (`box-sizing: border-box`).
     BorderBox,
 }
 
 impl BoxSizing {
-    #[doc = include_str!("box_sizing.doc/content_extent.md")]
+    #[doc = include_str!("../../docs/api/model/box_sizing.doc/content_extent.md")]
     #[must_use]
     pub fn content_extent(self, size: f32, bp: f32) -> f32 {
         match self {
@@ -20,7 +21,7 @@ impl BoxSizing {
         }
     }
 
-    #[doc = include_str!("box_sizing.doc/border_extent.md")]
+    #[doc = include_str!("../../docs/api/model/box_sizing.doc/border_extent.md")]
     #[must_use]
     pub fn border_extent(self, size: f32, bp: f32) -> f32 {
         match self {

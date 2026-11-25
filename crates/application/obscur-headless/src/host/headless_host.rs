@@ -1,8 +1,9 @@
-#![doc = include_str!("headless_host.doc/_module.md")]
+//! The deterministic headless driver: [`HeadlessHost`].
 
 use std::fmt;
 use std::sync::Arc;
 
+use obscur_geometry::Size;
 use obscur_identity::{RuntimeId, WindowId};
 use obscur_runtime::UiRuntime;
 use obscur_runtime::frame::FrameResult;
@@ -13,44 +14,56 @@ use obscur_tree::tree::RetainedTree;
 use obscur_view::view::View;
 
 use crate::deterministic::{DeterministicClock, DeterministicExecutor};
+use crate::input::{DispatchOutcome, SyntheticDispatcher, SyntheticInput};
 
+use super::runtime_timer::RuntimeTimer;
 use super::{HeadlessConfig, VirtualWindow};
 
-#[doc = include_str!("headless_host.doc/NANOS_PER_SECOND.md")]
+/// Nanoseconds in one logical second — the conversion between the clock's unit
+/// and the motion scheduler's.
 const NANOS_PER_SECOND: f32 = 1_000_000_000.0;
 
-#[doc = include_str!("headless_host.doc/HeadlessHost.md")]
+#[doc = include_str!("../../docs/api/host/headless_host.doc/HeadlessHost.md")]
 pub struct HeadlessHost {
-    #[doc = include_str!("headless_host.doc/config.md")]
+    /// The viewport/DPI configuration frames are produced under.
     config: HeadlessConfig,
-    #[doc = include_str!("headless_host.doc/window.md")]
+    /// The windowless mapping of the host's single window.
     window: VirtualWindow,
-    #[doc = include_str!("headless_host.doc/runtime.md")]
+    /// The real runtime this host drives; it owns the tree, scene, motion and
+    /// frame counter, so a headless frame and a windowed frame are the same
+    /// frame.
     runtime: UiRuntime,
-    #[doc = include_str!("headless_host.doc/clock.md")]
+    /// The manually-advanced virtual clock. It is the host's single source of
+    /// time: [`advance_time`](HeadlessHost::advance_time) derives the motion
+    /// delta from it rather than from its own argument.
     clock: DeterministicClock,
-    #[doc = include_str!("headless_host.doc/executor.md")]
+    /// The manually-driven deterministic job runner, also installed on `runtime`
+    /// as its blocking-work port. Held as an [`Arc`] because the runtime holds
+    /// the other end.
     executor: Arc<DeterministicExecutor>,
-    #[doc = include_str!("headless_host.doc/motion_at.md")]
+    /// The clock reading the motion scheduler was last advanced to, so time is
+    /// handed to motion exactly once.
     motion_at: Instant,
+    timers: Vec<RuntimeTimer>,
 }
 
 impl HeadlessHost {
-    #[doc = include_str!("headless_host.doc/WINDOW_ID.md")]
+    /// The identity of the single virtual window a host owns.
     const WINDOW_ID: WindowId = WindowId::from_raw(0);
 
-    #[doc = include_str!("headless_host.doc/new.md")]
+    #[doc = include_str!("../../docs/api/host/headless_host.doc/new.md")]
     #[must_use]
     pub fn new(runtime_id: RuntimeId) -> Self {
         Self::with_config(runtime_id, HeadlessConfig::default())
     }
 
-    #[doc = include_str!("headless_host.doc/with_config.md")]
+    #[doc = include_str!("../../docs/api/host/headless_host.doc/with_config.md")]
     #[must_use]
     pub fn with_config(runtime_id: RuntimeId, config: HeadlessConfig) -> Self {
         let window = VirtualWindow::new(Self::WINDOW_ID, config.viewport(), config.scale());
         let executor = Arc::new(DeterministicExecutor::new());
         let mut runtime = UiRuntime::new(runtime_id, config.viewport());
+        runtime.set_surface(window.physical_size(), window.scale().get());
         // The whole point of the deterministic executor: with it installed the
         // runtime hands every resource load to it instead of running the load on
         // the frame, so `run_tasks` — and nothing else — decides when a load
@@ -63,21 +76,45 @@ impl HeadlessHost {
             clock: DeterministicClock::new(),
             executor,
             motion_at: Instant::from_nanos(0),
+            timers: Vec::new(),
         }
     }
 
-    #[doc = include_str!("headless_host.doc/render_styled.md")]
+    #[doc = include_str!("../../docs/api/host/headless_host.doc/render_styled.md")]
     pub fn render_styled(&mut self, desired: &View, sheets: &[Stylesheet]) -> FrameResult {
         self.runtime.render_now(desired, sheets)
     }
 
-    #[doc = include_str!("headless_host.doc/snapshot.md")]
+    /// Dispatches input with pointer timestamps sampled from the host clock.
+    /// Normalized key events retain their supplied timestamps.
+    pub fn dispatch_input(&mut self, input: &SyntheticInput) -> DispatchOutcome {
+        SyntheticDispatcher::new()
+            .at_time(self.clock.now().as_nanos() / 1_000)
+            .dispatch(&mut self.runtime, input)
+    }
+
+    pub(crate) fn run_recorded_frame(
+        &mut self,
+        desired: &View,
+        sheets: &[Stylesheet],
+    ) -> Option<FrameResult> {
+        if self.runtime.has_pending_frame() {
+            if !self.runtime.has_due_frame() {
+                return None;
+            }
+            self.runtime.run_due_frame(desired, sheets)
+        } else {
+            Some(self.render_styled(desired, sheets))
+        }
+    }
+
+    #[doc = include_str!("../../docs/api/host/headless_host.doc/snapshot.md")]
     #[must_use]
     pub fn snapshot(&self) -> SceneSnapshot {
         self.runtime.snapshot()
     }
 
-    #[doc = include_str!("headless_host.doc/advance_time.md")]
+    #[doc = include_str!("../../docs/api/host/headless_host.doc/advance_time.md")]
     pub fn advance_time(&mut self, nanos: u64) {
         self.clock.advance(nanos);
         let now = self.clock.now();
@@ -89,60 +126,111 @@ impl HeadlessHost {
         self.runtime.advance_motion(delta as f32 / NANOS_PER_SECOND);
     }
 
-    #[doc = include_str!("headless_host.doc/run_tasks.md")]
+    #[doc = include_str!("../../docs/api/host/headless_host.doc/run_tasks.md")]
     pub fn run_tasks(&mut self) -> usize {
         self.executor.run();
         self.runtime.poll_resource_tasks()
     }
 
-    #[doc = include_str!("headless_host.doc/tree.md")]
+    pub(crate) fn complete_operation(&mut self, operation: u64) -> bool {
+        if !self.executor.run_operation(operation) {
+            return false;
+        }
+        self.runtime.poll_resource_tasks();
+        true
+    }
+
+    /// Schedules a callback against the host's deterministic clock. Due callbacks
+    /// run in deadline order, with submission order breaking ties.
+    pub fn schedule_timer(
+        &mut self,
+        delay_nanos: u64,
+        task: impl FnOnce(&mut UiRuntime) + 'static,
+    ) {
+        let deadline_nanos = self.clock.now().as_nanos().saturating_add(delay_nanos);
+        self.timers.push(RuntimeTimer {
+            deadline_nanos,
+            task: Box::new(task),
+        });
+    }
+
+    /// Runs the next due timer, if any.
+    pub fn run_due_timer(&mut self) -> bool {
+        let now = self.clock.now().as_nanos();
+        let Some((index, _)) = self
+            .timers
+            .iter()
+            .enumerate()
+            .filter(|(_, timer)| timer.deadline_nanos <= now)
+            .min_by_key(|(_, timer)| timer.deadline_nanos)
+        else {
+            return false;
+        };
+        (self.timers.remove(index).task)(&mut self.runtime);
+        true
+    }
+
+    pub(crate) fn resize_window(&mut self, size: Size) {
+        self.window = VirtualWindow::new(self.window.id(), size, self.window.scale())
+            .with_visible(self.window.visible());
+        self.runtime
+            .set_surface(self.window.physical_size(), self.window.scale().get());
+    }
+
+    pub(crate) fn set_window_visibility(&mut self, visible: bool) {
+        self.window = self.window.with_visible(visible);
+    }
+
+    /// Returns the retained tree carried across frames.
     #[must_use]
     pub fn tree(&self) -> &RetainedTree {
         self.runtime.tree()
     }
 
-    #[doc = include_str!("headless_host.doc/scene.md")]
+    /// Returns the mutable scene's current state (as a shared reference).
     #[must_use]
     pub fn scene(&self) -> &Scene {
         self.runtime.scene()
     }
 
-    #[doc = include_str!("headless_host.doc/runtime_2.md")]
+    /// Returns the runtime this host drives, for reads the host does not wrap
+    /// (computed styles, layout boxes, animation counts, ...).
     #[must_use]
     pub fn runtime(&self) -> &UiRuntime {
         &self.runtime
     }
 
-    #[doc = include_str!("headless_host.doc/runtime_mut.md")]
+    #[doc = include_str!("../../docs/api/host/headless_host.doc/runtime_mut.md")]
     pub fn runtime_mut(&mut self) -> &mut UiRuntime {
         &mut self.runtime
     }
 
-    #[doc = include_str!("headless_host.doc/clock_2.md")]
+    /// Returns the deterministic clock driving this host.
     #[must_use]
     pub fn clock(&self) -> &DeterministicClock {
         &self.clock
     }
 
-    #[doc = include_str!("headless_host.doc/executor_2.md")]
+    /// Returns the deterministic executor driving this host's background work —
+    /// the same one the runtime holds as its blocking port.
     #[must_use]
     pub fn executor(&self) -> &DeterministicExecutor {
         &self.executor
     }
 
-    #[doc = include_str!("headless_host.doc/config_2.md")]
+    /// Returns the viewport/DPI configuration this host renders under.
     #[must_use]
     pub fn config(&self) -> HeadlessConfig {
         self.config
     }
 
-    #[doc = include_str!("headless_host.doc/window_2.md")]
+    /// Returns the host's virtual window.
     #[must_use]
     pub fn window(&self) -> VirtualWindow {
         self.window
     }
 
-    #[doc = include_str!("headless_host.doc/runtime_id.md")]
+    /// Returns the identity of the host this driver stands in for.
     #[must_use]
     pub fn runtime_id(&self) -> RuntimeId {
         self.runtime.id()
@@ -150,7 +238,9 @@ impl HeadlessHost {
 }
 
 impl fmt::Debug for HeadlessHost {
-    #[doc = include_str!("headless_host.doc/fmt.md")]
+    /// Reports the stable identity of the host — its runtime id and
+    /// configuration — without touching the opaque runtime, clock, or executor
+    /// internals.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("HeadlessHost")
             .field("runtime_id", &self.runtime_id())
@@ -531,6 +621,74 @@ mod tests {
             .iter()
             .filter(|c| matches!(c, PaintCommand::DrawImage { .. }))
             .count()
+    }
+
+    #[test]
+    fn an_actual_resource_turn_can_be_recorded_and_replayed() {
+        use crate::replay::{HeadlessRecorder, ReplaySession};
+        use obscur_identity::ResourceId;
+
+        let mut source = image_host();
+        let view = img_view();
+        let sheets = [img_stylesheet()];
+        let mut recorder = HeadlessRecorder::new(&mut source);
+        recorder.resize(400, 300);
+        assert!(recorder.render(&view, &sheets).is_some());
+        assert!(recorder.complete_operation(0));
+        assert!(recorder.check_resource_version(ResourceId::from_raw(0)));
+        recorder.advance_time(16_000_000);
+        assert!(recorder.render(&view, &sheets).is_some());
+        let recording = recorder.finish();
+
+        let mut destination = image_host();
+        let result = ReplaySession::new(recording).replay_on_host(&mut destination, &view, &sheets);
+        assert!(result.is_complete());
+        assert_eq!(result.completions(), 1);
+        assert_eq!(source.window(), destination.window());
+        let snapshot = destination.snapshot();
+        assert_eq!(draw_image_count(snapshot.display_list()), 1);
+        assert_eq!(source.snapshot().display_list(), snapshot.display_list());
+    }
+
+    #[test]
+    fn replay_checks_the_resource_version_before_building_the_next_frame() {
+        use crate::replay::{
+            EventRecording, RecordedEvent, ReplaySession, ReplayStatus, SchedulerReason,
+        };
+
+        for (version, expected) in [
+            (1, ReplayStatus::Completed),
+            (2, ReplayStatus::Diverged { at_step: 2 }),
+        ] {
+            let mut host = image_host();
+            let frame = RecordedEvent::SchedulerDecision {
+                reason: SchedulerReason::Frame,
+                accepted: true,
+            };
+            let mut recording = EventRecording::new();
+            recording.record(0, frame.clone());
+            recording.record(1, RecordedEvent::AsyncCompletion { operation: 0 });
+            recording.record(
+                2,
+                RecordedEvent::ResourceVersion {
+                    resource: 0,
+                    version,
+                },
+            );
+            recording.record(3, frame);
+
+            let result = ReplaySession::new(recording).replay_on_host(
+                &mut host,
+                &img_view(),
+                &[img_stylesheet()],
+            );
+            assert_eq!(result.status(), expected);
+            assert_eq!(result.completions(), 1);
+            assert_eq!(
+                draw_image_count(host.snapshot().display_list()),
+                usize::from(expected == ReplayStatus::Completed),
+            );
+        }
     }
 
     /// A host wired to the mock resource providers.

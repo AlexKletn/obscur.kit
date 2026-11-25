@@ -48,6 +48,37 @@ stays physical. See [08 — Rendering](08-rendering.md).
 > platform's scale unchecked. `tests/surface_mapping.rs`'s
 > `set_device_scale_clamps_to_a_sane_minimum` pins each case.
 
+## Window lifecycle for embedded hosts
+
+Report native window creation and closure using
+`runtime.lifecycle_mut().window_opened(id)` and `window_closed(id)`.
+Drain notifications with `take_events()`. Closing the final tracked window
+queues `LifecycleEvent::LastWindowClosed(id)`. The host decides whether to
+keep the runtime active, reopen a window, or exit.
+Call `request_shutdown(ShutdownRequest::Host)` to queue
+`LifecycleEvent::ShutdownRequested` for the host to handle.
+Use `report_critical_stop(concern)` to report a critical failure in a named
+subsystem. The standalone Winit runner reports event-loop, window and renderer
+failures through the same lifecycle event. `App::run()` returns the error details.
+When the host is ready to release the runtime, `runtime.release().into_events()`
+returns its pending notifications followed by `ResourceReleaseComplete(id)`.
+This event covers runtime-owned handles. The host manages any separately
+owned windows, shared resources and tasks.
+
+For a standalone Winit window, keep the handle from `App::control()` before
+running the app. After `App::run()` returns, use
+`control.take_lifecycle_events()` to read the notifications. A native close
+request or `WindowAction::Close` queues `ShutdownRequested(WindowClose(id))`
+before the runner exits. `LastWindowClosed(id)` follows when it closes, and
+`ResourceReleaseComplete` follows after the runner drops its resources.
+
+For standalone Winit windows, `control.capture_window_placement()` returns a
+versioned Serde snapshot of the last normal logical size and presentation mode.
+It remains available after closing. Use `App::with_window_placement(snapshot)`
+at startup. The current size limits and the platform's placement policy apply.
+The snapshot covers size and mode. Screen coordinates and minimization are
+outside this format.
+
 ## Running frames
 
 Three ways to produce a frame, in increasing order of how much the runtime does
@@ -80,11 +111,15 @@ time rather than when something changed.
 | `set_default_stylesheet(Stylesheet)` | the UA base sheet (see [04 — Styling](04-styling.md)) |
 | `has_default_stylesheet() -> bool` | |
 | `computed_style(NodeId) -> Option<&ComputedStyle>` | as resolved on the last produced frame |
-| `set_pseudo_state(NodeId, PseudoState)` | record an interaction state for subsequent frames |
+| `set_pseudo_state(NodeId, PseudoState)` | temporarily replace the node’s interaction state for a subsequent frame |
 | `pseudo_state(NodeId) -> PseudoState` | |
 | `clear_pseudo_states()` | subsequent frames match as if nothing were hovered/focused/active |
 | `set_inline_style_compiler(InlineStyleCompiler)` | how a `style="…"` attribute becomes a declaration block at cascade origin `Inline`. **The runtime cannot do this itself** — an application-tier crate may not depend on the CSS front end — so with none installed every `style` attribute is inert |
 | `has_inline_style_compiler() -> bool` | |
+
+The runtime rebuilds interaction pseudo-states when hover, focus, or press
+changes. Set the `CHECKED` and `DISABLED` view attributes for persistent
+application-owned state.
 
 `CssPipeline::install` (so `KitBootstrap`, so `App`) installs the inline-style
 compiler for you; a host driving a bare `UiRuntime` must call
@@ -138,6 +173,11 @@ it and differ only in the `PointerDevice` they carry. See [06 — Input](06-inpu
 | `pointer_capture(PointerId) -> Option<NodeId>` | |
 
 ## Focus
+
+Use `capture_focus_state()` to save a focused control with a unique
+`automation-id`. The versioned `FocusState` supports Serde. After layout in
+the new session, `restore_focus_state(&state)` resolves the ID again and
+checks tab eligibility and the active focus trap before moving focus.
 
 | Method | |
 |---|---|
@@ -232,9 +272,27 @@ itself and swallow the arrow keys meant to move its thumb.
 |---|---|
 | `scroll_top(NodeId) -> f32` | `0.0` for a node that is not a scroll container |
 | `set_scroll_top(NodeId, f32)` | clamped to `0 ..= content_height − scrollport_height` |
+| `scroll_left(NodeId) -> f32` | current horizontal offset in logical pixels |
+| `set_scroll_left(NodeId, f32)` | clamps to the available horizontal range and schedules a frame |
 | `scroll_by(NodeId, f32) -> f32` | returns the resulting `scroll_top` |
 | `scroll_into_view(NodeId) -> bool` | scrolls the nearest scrollable ancestor; whether anything moved |
 | `handle_scroll(f32, Point) -> Option<NodeId>` | see [Input](#input) |
+
+For horizontal writing, `scroll_left` is zero at the inline start. In LTR
+it increases toward the right. In RTL it becomes negative toward the left.
+Horizontal scrollbars show the current position and range as an overlay.
+The horizontal thumb supports mouse and direct-contact drag and keeps its
+pointer capture outside the track until release or cancellation. A
+`pointerdown` handler on the scroll container can prevent the drag.
+
+### Persisting a scroll position
+
+Call `capture_scroll_state(node)` after layout to capture both axes. The
+versioned `ScrollState` supports Serde. Store it under an application-defined
+key, then resolve the new container after layout and call
+`restore_scroll_state(node, state)`. The runtime clamps both axes to the
+current content. Unknown versions, non-finite values, and missing containers
+are rejected without changing the offset.
 
 ## Virtual lists
 
@@ -278,9 +336,10 @@ in windows, because only the test path ticked.
 
 These are what CSS `env(safe-area-inset-*)` resolves against.
 
-> **host-wired** — the runtime consumes these correctly and CSS reads them, but
-> no shipped host currently *reports* keyboard geometry: the values are whatever
-> the application sets.
+Standalone hosts can queue updates through `AppControl::set_safe_area_insets`
+and `AppControl::set_keyboard_insets`. The application supplies the values in
+logical pixels. The bundled window runners currently have no automatic source
+for either inset.
 
 ## Drag and drop
 
@@ -335,9 +394,20 @@ The defaults are why a bare runtime lays text out sensibly and paints no glyphs.
 
 | Method | |
 |---|---|
-| `request_background()` | enqueue one unit of band-5 work |
+| `request_background()` | record one pending background unit for scheduler accounting |
+| `enqueue_background(job)` | enqueue a short, nonblocking callback on the runtime owner thread |
+| `enqueue_cancellable_background(token, job)` | enqueue a callback that runs only if the token is still active at dispatch |
+| `enqueue_background_with_deadline(valid_for, job)` | discard the callback if its lifetime has elapsed in logical runtime time |
+| `set_background_budget(BackgroundBudget)` | set separate per-runtime limits for idle polls and due frames after the fairness threshold |
 | `pending_background() -> usize`, `serviced_background() -> u64` | |
 | `is_background_starved() -> bool` | preempted past the scheduler's fairness threshold |
+
+A poll with no frame due services up to its idle budget and returns `None`.
+The idle and fairness budgets default to one unit each. Zero disables
+service in the corresponding scheduling mode.
+The fairness threshold also allows a unit to run during sustained frame
+activity. The host polls to service queued callbacks. Use the configured
+task executors for decoding, shaping, or blocking work.
 
 ## Output: what a host reads back
 
@@ -355,12 +425,67 @@ The defaults are why a bare runtime lays text out sensibly and paints no glyphs.
 |---|---|
 | `semantic_tree() -> SemanticTree` | built from the live retained tree |
 | `semantic_snapshot() -> SemanticSnapshot` | immutable and versioned — what a bridge consumes |
-| `set_accessibility_bridge(Rc<RefCell<dyn AccessibilityBridge>>)` | every frame publishes to it; pushes immediately on install |
+| `set_accessibility_bridge(Rc<RefCell<dyn AccessibilityBridge>>)` | publishes changed snapshots and sends the current snapshot on install |
 | `has_accessibility_bridge() -> bool` | |
 | `push_accessibility(&mut dyn AccessibilityBridge)` | push once, by hand |
 
-> **host-wired** — the outbound path is real, behind the non-default `accesskit`
-> feature. The inbound direction (a platform AT driving the app) is not built.
+The `accesskit` feature supplies the bridge for a host's platform adapter.
+Send incoming requests through `AccessKitBridge::push_action_request` and wake
+the UI loop. `poll_accessibility_actions()` drains requests automatically at
+frame entry and is also available as an explicit host call. Supported actions
+are activation, focus, and scrolling a whole node into view.
+
+## Shared-element transitions
+
+Before replacing a view, call `queue_shared_element(source, key, duration, easing)`
+to capture a laid-out node. Mark one node in the next view with
+`with_shared_element_key(key)`. The new node starts at the captured geometry in
+the first reconciled frame and moves to its own layout bounds on the runtime
+motion clock. Capturing again mid-transition uses the last displayed position.
+The destination uses its own content and clipping. Its authored translation
+and positive axis-aligned scaling define the endpoint. Hit testing and
+accessibility bounds follow the transform submitted with each composed
+frame. Layout and computed style continue to report the destination
+geometry and authored values.
+
+## Coordinate spaces
+
+`local_to_window(node)` returns a typed mapper from the node's layout-box
+origin to logical window coordinates. The mapping includes visual ancestors,
+CSS transforms, scroll offsets and the surface content offset.
+Compose it with `window_to_physical()` to include fractional device scale,
+or call `inverse()` to map in the opposite direction when invertible.
+`window_to_screen(origin)` combines device scale with the host-supplied
+client-area origin in desktop physical pixels. The standalone Winit runner
+publishes that origin through `AppControl::window_screen_origin()` on
+backends that expose it. Wayland returns `None`.
+
+`local_to_parent(node)` maps to the visual parent's layout-box origin,
+including its scroll offset. `local_to_normalized(node)` expresses local
+points as fractions of the node's width and height. A zero-sized axis
+prevents normalization.
+
+## Geometry observers
+
+`observe_resize(node, callback)` reports the initial committed size and later
+changes in logical pixels. Each observer receives at most one notification per
+frame. Return `true` from the callback to request a UI commit on the next frame.
+Use `unobserve_resize(node)` to detach it explicitly. Removing its node drops
+the callback automatically.
+
+`observe_layout(node, callback)` reports the full committed layout box,
+including position changes at the same size. It uses logical layout
+coordinates before scroll and transform adjustments. Resize and layout
+subscriptions can coexist on the same node.
+
+`observe_visibility(node, callback)` reports whether a node has visible area.
+`observe_intersection(node, threshold, callback)` reports when the visible
+area crosses a ratio threshold. Both use the viewport and rectangular
+overflow clips in scroll-adjusted layout coordinates.
+
+`observe_transform(node, callback)` reports changes to the composed CSS
+transform, including transforms of visual ancestors. It reports the
+matrix in logical layout coordinates before applying the scroll offset.
 
 ## Diagnostics and inspection
 

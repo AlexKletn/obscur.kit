@@ -1,47 +1,72 @@
-#![doc = include_str!("selector_target.doc/_module.md")]
+//! How a synthetic input (or a headless query) locates its node (spec §7.4, §7.5).
 
+use obscur_accessibility::semantic::SemanticRole;
 use obscur_geometry::Point;
-use obscur_identity::NodeId;
+use obscur_identity::{ComponentId, NodeId};
 
-#[doc = include_str!("selector_target.doc/SelectorTarget.md")]
+#[doc = include_str!("../../docs/api/input/selector_target.doc/SelectorTarget.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum SelectorTarget {
-    #[doc = include_str!("selector_target.doc/Node.md")]
+    /// A direct, already-resolved stable node id.
     Node(NodeId),
-    #[doc = include_str!("selector_target.doc/TestId.md")]
+    /// Addresses an element by component ID when the current tree has a unique match.
+    Component(ComponentId),
+    /// A stable `test-id` string, independent of CSS/layout (spec §7.5). The
+    /// string is data matched during dispatch, never used for control-flow dispatch.
     TestId(Box<str>),
-    #[doc = include_str!("selector_target.doc/AutomationId.md")]
+    #[doc = include_str!("../../docs/api/input/selector_target.doc/AutomationId.md")]
     AutomationId(Box<str>),
-    #[doc = include_str!("selector_target.doc/Coordinate.md")]
+    /// Addresses a unique visible node by semantic role and optional accessible name.
+    Semantic {
+        /// Required semantic role.
+        role: SemanticRole,
+        /// Exact accessible name, when specified.
+        name: Option<Box<str>>,
+    },
+    /// A point in the viewport; the node is found by hit-testing during dispatch.
     Coordinate(Point),
 }
 
 impl SelectorTarget {
-    #[doc = include_str!("selector_target.doc/node.md")]
+    /// Creates a stable component ID selector. Repeated component instances require a more specific selector.
+    #[must_use]
+    pub const fn component(id: ComponentId) -> Self {
+        Self::Component(id)
+    }
+    /// Creates a semantic selector. A name, when supplied, is matched exactly.
+    #[must_use]
+    pub fn semantic(role: SemanticRole, name: Option<&str>) -> Self {
+        Self::Semantic {
+            role,
+            name: name.map(Into::into),
+        }
+    }
+    /// Targets an already-resolved stable node id directly.
     #[must_use]
     pub const fn node(id: NodeId) -> Self {
         Self::Node(id)
     }
 
-    #[doc = include_str!("selector_target.doc/test_id.md")]
+    /// Targets a node by its stable `test-id` string (resolved during dispatch).
     #[must_use]
     pub fn test_id(id: impl Into<Box<str>>) -> Self {
         Self::TestId(id.into())
     }
 
-    #[doc = include_str!("selector_target.doc/automation_id.md")]
+    /// Targets a node by its stable `automation-id` string (spec §7.5).
     #[must_use]
     pub fn automation_id(id: impl Into<Box<str>>) -> Self {
         Self::AutomationId(id.into())
     }
 
-    #[doc = include_str!("selector_target.doc/is_automation_id.md")]
+    /// Returns `true` if this is an [`AutomationId`](Self::AutomationId) target.
     #[must_use]
     pub const fn is_automation_id(&self) -> bool {
         matches!(self, Self::AutomationId(_))
     }
 
-    #[doc = include_str!("selector_target.doc/automation_id_str.md")]
+    /// Returns the `automation-id` string for an
+    /// [`AutomationId`](Self::AutomationId) target, else `None`.
     #[must_use]
     pub fn automation_id_str(&self) -> Option<&str> {
         match self {
@@ -50,31 +75,31 @@ impl SelectorTarget {
         }
     }
 
-    #[doc = include_str!("selector_target.doc/coordinate.md")]
+    /// Targets a viewport point, resolved to a node by hit-testing during dispatch.
     #[must_use]
     pub const fn coordinate(point: Point) -> Self {
         Self::Coordinate(point)
     }
 
-    #[doc = include_str!("selector_target.doc/is_node.md")]
+    /// Returns `true` if this is a direct [`SelectorTarget::Node`] target.
     #[must_use]
     pub const fn is_node(&self) -> bool {
         matches!(self, Self::Node(_))
     }
 
-    #[doc = include_str!("selector_target.doc/is_test_id.md")]
+    /// Returns `true` if this is a [`SelectorTarget::TestId`] target.
     #[must_use]
     pub const fn is_test_id(&self) -> bool {
         matches!(self, Self::TestId(_))
     }
 
-    #[doc = include_str!("selector_target.doc/is_coordinate.md")]
+    /// Returns `true` if this is a [`SelectorTarget::Coordinate`] target.
     #[must_use]
     pub const fn is_coordinate(&self) -> bool {
         matches!(self, Self::Coordinate(_))
     }
 
-    #[doc = include_str!("selector_target.doc/node_id.md")]
+    /// Returns the node id for a [`SelectorTarget::Node`] target, else `None`.
     #[must_use]
     pub const fn node_id(&self) -> Option<NodeId> {
         match self {
@@ -83,7 +108,7 @@ impl SelectorTarget {
         }
     }
 
-    #[doc = include_str!("selector_target.doc/coordinate_point.md")]
+    /// Returns the point for a [`SelectorTarget::Coordinate`] target, else `None`.
     #[must_use]
     pub const fn coordinate_point(&self) -> Option<Point> {
         match self {
@@ -92,7 +117,7 @@ impl SelectorTarget {
         }
     }
 
-    #[doc = include_str!("selector_target.doc/test_id_str.md")]
+    /// Returns the `test-id` string for a [`SelectorTarget::TestId`] target, else `None`.
     #[must_use]
     pub fn test_id_str(&self) -> Option<&str> {
         match self {

@@ -1,54 +1,55 @@
-#![doc = include_str!("focus_restore.doc/_module.md")]
+//! The [`FocusRestore`] saved-focus stack for scope enter/exit
+//! (spec §7.1 focus).
 
 use obscur_identity::NodeId;
 
-#[doc = include_str!("focus_restore.doc/FocusRestore.md")]
+#[doc = include_str!("../../docs/api/focus/focus_restore.doc/FocusRestore.md")]
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct FocusRestore {
     stack: Vec<Option<NodeId>>,
 }
 
 impl FocusRestore {
-    #[doc = include_str!("focus_restore.doc/new.md")]
+    /// Creates an empty restore stack.
     #[must_use]
     pub fn new() -> Self {
         Self { stack: Vec::new() }
     }
 
-    #[doc = include_str!("focus_restore.doc/save.md")]
+    #[doc = include_str!("../../docs/api/focus/focus_restore.doc/save.md")]
     pub fn save(&mut self, previously_focused: Option<NodeId>) {
         self.stack.push(previously_focused);
     }
 
-    #[doc = include_str!("focus_restore.doc/restore.md")]
+    #[doc = include_str!("../../docs/api/focus/focus_restore.doc/restore.md")]
     pub fn restore(&mut self) -> Option<NodeId> {
         self.stack.pop().flatten()
     }
 
-    #[doc = include_str!("focus_restore.doc/peek.md")]
+    #[doc = include_str!("../../docs/api/focus/focus_restore.doc/peek.md")]
     #[must_use]
     pub fn peek(&self) -> Option<NodeId> {
         self.stack.last().copied().flatten()
     }
 
-    #[doc = include_str!("focus_restore.doc/clear.md")]
+    /// Discards all saved focus.
     pub fn clear(&mut self) {
         self.stack.clear();
     }
 
-    #[doc = include_str!("focus_restore.doc/len.md")]
+    /// Returns the number of saved entries.
     #[must_use]
     pub fn len(&self) -> usize {
         self.stack.len()
     }
 
-    #[doc = include_str!("focus_restore.doc/is_empty.md")]
+    /// Returns whether nothing is saved.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.stack.is_empty()
     }
 
-    #[doc = include_str!("focus_restore.doc/depth.md")]
+    /// Returns the current nesting depth (number of saved entries).
     #[must_use]
     pub fn depth(&self) -> usize {
         self.stack.len()

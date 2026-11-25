@@ -1,16 +1,16 @@
-#![doc = include_str!("notification_action.doc/_module.md")]
+//! An actionable button attached to a notification (spec §6.12 — notifications).
 
-#[doc = include_str!("notification_action.doc/NotificationAction.md")]
+#[doc = include_str!("../../docs/api/notification/notification_action.doc/NotificationAction.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct NotificationAction {
-    #[doc = include_str!("notification_action.doc/id.md")]
+    /// Stable action identity echoed back to the app when the button is clicked.
     id: Box<str>,
-    #[doc = include_str!("notification_action.doc/label.md")]
+    /// Human-readable text displayed on the button.
     label: Box<str>,
 }
 
 impl NotificationAction {
-    #[doc = include_str!("notification_action.doc/new.md")]
+    /// Creates an action with the stable `id` and display `label` (spec §6.12).
     #[must_use]
     pub fn new(id: impl Into<Box<str>>, label: impl Into<Box<str>>) -> Self {
         Self {
@@ -19,13 +19,14 @@ impl NotificationAction {
         }
     }
 
-    #[doc = include_str!("notification_action.doc/id_2.md")]
+    /// Returns the stable action id echoed back when the button is clicked
+    /// (spec §6.12).
     #[must_use]
     pub fn id(&self) -> &str {
         &self.id
     }
 
-    #[doc = include_str!("notification_action.doc/label_2.md")]
+    /// Returns the display text shown on the button (spec §6.12).
     #[must_use]
     pub fn label(&self) -> &str {
         &self.label

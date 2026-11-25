@@ -1,1 +1,0 @@
-Stable diagnostic code.

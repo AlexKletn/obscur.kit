@@ -1,4 +1,4 @@
-#![doc = include_str!("style_invalidation.doc/_module.md")]
+#![doc = include_str!("../../docs/api/invalidation/style_invalidation.doc/_module.md")]
 
 use crate::computed::StyleDiff;
 use crate::invalidation::{StyleDependency, StyleInvalidationReason};
@@ -7,14 +7,14 @@ use obscur_identity::{FastMap, NodeId};
 use std::collections::HashMap;
 use std::collections::hash_map::Iter;
 
-#[doc = include_str!("style_invalidation.doc/StyleInvalidation.md")]
+#[doc = include_str!("../../docs/api/invalidation/style_invalidation.doc/StyleInvalidation.md")]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StyleInvalidation {
     pending: FastMap<NodeId, StyleInvalidationReason>,
 }
 
 impl StyleInvalidation {
-    #[doc = include_str!("style_invalidation.doc/new.md")]
+    /// Creates an empty invalidation set.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -22,54 +22,55 @@ impl StyleInvalidation {
         }
     }
 
-    #[doc = include_str!("style_invalidation.doc/invalidate.md")]
+    #[doc = include_str!("../../docs/api/invalidation/style_invalidation.doc/invalidate.md")]
     pub fn invalidate(&mut self, node: NodeId, reason: StyleInvalidationReason) {
         self.pending.entry(node).or_insert(reason);
     }
 
-    #[doc = include_str!("style_invalidation.doc/is_invalidated.md")]
+    /// Returns whether `node` is in the pending set.
     #[must_use]
     pub fn is_invalidated(&self, node: NodeId) -> bool {
         self.pending.contains_key(&node)
     }
 
-    #[doc = include_str!("style_invalidation.doc/reason.md")]
+    /// Returns the recorded reason for `node`, if it is invalidated.
     #[must_use]
     pub fn reason(&self, node: NodeId) -> Option<StyleInvalidationReason> {
         self.pending.get(&node).copied()
     }
 
-    #[doc = include_str!("style_invalidation.doc/len.md")]
+    /// Returns the number of invalidated nodes.
     #[must_use]
     pub fn len(&self) -> usize {
         self.pending.len()
     }
 
-    #[doc = include_str!("style_invalidation.doc/is_empty.md")]
+    /// Returns whether no nodes are invalidated.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.pending.is_empty()
     }
 
-    #[doc = include_str!("style_invalidation.doc/iter.md")]
+    /// Iterates the pending `(NodeId, StyleInvalidationReason)` entries.
     #[must_use]
     pub fn iter(&self) -> Iter<'_, NodeId, StyleInvalidationReason> {
         self.pending.iter()
     }
 
-    #[doc = include_str!("style_invalidation.doc/take.md")]
+    #[doc = include_str!("../../docs/api/invalidation/style_invalidation.doc/take.md")]
     #[must_use]
     pub fn take(&mut self) -> FastMap<NodeId, StyleInvalidationReason> {
         std::mem::take(&mut self.pending)
     }
 
-    #[doc = include_str!("style_invalidation.doc/drain.md")]
+    /// Alias for [`take`](Self::take): drains the pending set, leaving `self`
+    /// empty and returning what was pending.
     #[must_use]
     pub fn drain(&mut self) -> FastMap<NodeId, StyleInvalidationReason> {
         self.take()
     }
 
-    #[doc = include_str!("style_invalidation.doc/note_parent_style_changed.md")]
+    #[doc = include_str!("../../docs/api/invalidation/style_invalidation.doc/note_parent_style_changed.md")]
     pub fn note_parent_style_changed(
         &mut self,
         child: NodeId,
@@ -84,7 +85,7 @@ impl StyleInvalidation {
         }
     }
 
-    #[doc = include_str!("style_invalidation.doc/note_pseudo_state_changed.md")]
+    #[doc = include_str!("../../docs/api/invalidation/style_invalidation.doc/note_pseudo_state_changed.md")]
     pub fn note_pseudo_state_changed(
         &mut self,
         node: NodeId,

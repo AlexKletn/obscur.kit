@@ -1,32 +1,32 @@
-#![doc = include_str!("erased_component.doc/_module.md")]
+//! `ErasedComponent`: calling a typed [`Component`] from behind a `dyn` handle.
 
 use crate::boundary::ErrorBoundaryPolicy;
 use crate::component::{Component, ComponentContext, FromProps, PropsError};
 use crate::lifecycle::{MountContext, UnmountContext, UpdateContext};
 use crate::view::{View, ViewProperty};
 
-#[doc = include_str!("erased_component.doc/ErasedComponent.md")]
+#[doc = include_str!("../../docs/api/component/erased_component.doc/ErasedComponent.md")]
 pub trait ErasedComponent {
-    #[doc = include_str!("erased_component.doc/render_erased.md")]
+    #[doc = include_str!("../../docs/api/component/erased_component.doc/render_erased.md")]
     fn render_erased(
         &mut self,
         ctx: &mut ComponentContext<'_>,
         props: &[ViewProperty],
     ) -> Result<View, PropsError>;
 
-    #[doc = include_str!("erased_component.doc/on_mount_erased.md")]
+    /// Runs the component's [`on_mount`](Component::on_mount) hook.
     fn on_mount_erased(&mut self, ctx: &mut MountContext<'_, '_>);
 
-    #[doc = include_str!("erased_component.doc/on_update_erased.md")]
+    /// Runs the component's [`on_update`](Component::on_update) hook.
     fn on_update_erased(&mut self, ctx: &mut UpdateContext<'_, '_>);
 
-    #[doc = include_str!("erased_component.doc/on_unmount_erased.md")]
+    /// Runs the component's [`on_unmount`](Component::on_unmount) hook.
     fn on_unmount_erased(&mut self, ctx: &mut UnmountContext<'_, '_>);
 
-    #[doc = include_str!("erased_component.doc/error_boundary_erased.md")]
+    /// The component's [`error_boundary`](Component::error_boundary) policy.
     fn error_boundary_erased(&self) -> ErrorBoundaryPolicy;
 
-    #[doc = include_str!("erased_component.doc/fallback_erased.md")]
+    /// The component's [`fallback`](Component::fallback) UI.
     fn fallback_erased(&self) -> Option<View>;
 }
 

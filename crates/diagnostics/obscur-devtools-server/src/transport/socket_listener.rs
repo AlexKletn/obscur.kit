@@ -1,4 +1,8 @@
-#![doc = include_str!("socket_listener.doc/_module.md")]
+#![doc = include_str!("../../docs/api/transport/socket_listener.doc/_module.md")]
+
+mod kernel_listener;
+
+use kernel_listener::KernelListener;
 
 use std::io;
 use std::net::{SocketAddr, TcpListener};
@@ -9,58 +13,48 @@ use std::path::Path;
 
 use crate::transport::SocketStream;
 
-#[doc = include_str!("socket_listener.doc/SocketListener.md")]
+/// A local-only listening socket that accepts DevTools client connections.
 #[derive(Debug)]
 pub struct SocketListener {
-    inner: Inner,
-}
-
-#[doc = include_str!("socket_listener.doc/Inner.md")]
-#[derive(Debug)]
-enum Inner {
-    #[doc = include_str!("socket_listener.doc/Tcp.md")]
-    Tcp(TcpListener),
-    #[doc = include_str!("socket_listener.doc/Unix.md")]
-    #[cfg(unix)]
-    Unix(UnixListener),
+    inner: KernelListener,
 }
 
 impl SocketListener {
-    #[doc = include_str!("socket_listener.doc/bind_loopback.md")]
+    #[doc = include_str!("../../docs/api/transport/socket_listener.doc/bind_loopback.md")]
     pub fn bind_loopback() -> io::Result<Self> {
         let listener = TcpListener::bind(("127.0.0.1", 0))?;
         Ok(Self {
-            inner: Inner::Tcp(listener),
+            inner: KernelListener::Tcp(listener),
         })
     }
 
-    #[doc = include_str!("socket_listener.doc/bind_unix.md")]
+    #[doc = include_str!("../../docs/api/transport/socket_listener.doc/bind_unix.md")]
     #[cfg(unix)]
     pub fn bind_unix(path: impl AsRef<Path>) -> io::Result<Self> {
         let listener = UnixListener::bind(path)?;
         Ok(Self {
-            inner: Inner::Unix(listener),
+            inner: KernelListener::Unix(listener),
         })
     }
 
-    #[doc = include_str!("socket_listener.doc/local_addr.md")]
+    #[doc = include_str!("../../docs/api/transport/socket_listener.doc/local_addr.md")]
     pub fn local_addr(&self) -> io::Result<Option<SocketAddr>> {
         match &self.inner {
-            Inner::Tcp(listener) => listener.local_addr().map(Some),
+            KernelListener::Tcp(listener) => listener.local_addr().map(Some),
             #[cfg(unix)]
-            Inner::Unix(_) => Ok(None),
+            KernelListener::Unix(_) => Ok(None),
         }
     }
 
-    #[doc = include_str!("socket_listener.doc/accept.md")]
+    #[doc = include_str!("../../docs/api/transport/socket_listener.doc/accept.md")]
     pub fn accept(&self) -> io::Result<SocketStream> {
         match &self.inner {
-            Inner::Tcp(listener) => {
+            KernelListener::Tcp(listener) => {
                 let (stream, _peer) = listener.accept()?;
                 Ok(SocketStream::from_tcp(stream))
             }
             #[cfg(unix)]
-            Inner::Unix(listener) => {
+            KernelListener::Unix(listener) => {
                 let (stream, _peer) = listener.accept()?;
                 Ok(SocketStream::from_unix(stream))
             }

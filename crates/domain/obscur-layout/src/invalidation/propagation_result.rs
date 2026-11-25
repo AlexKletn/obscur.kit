@@ -1,18 +1,19 @@
-#![doc = include_str!("propagation_result.doc/_module.md")]
+//! The outcome of propagating a layout change upward toward a parent context.
 
 use crate::pass::LayoutPassResult;
 
-#[doc = include_str!("propagation_result.doc/PropagationResult.md")]
+#[doc = include_str!("../../docs/api/invalidation/propagation_result.doc/PropagationResult.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PropagationResult {
-    #[doc = include_str!("propagation_result.doc/geometry_changed.md")]
+    /// Whether this context's output geometry changed in the pass.
     geometry_changed: bool,
-    #[doc = include_str!("propagation_result.doc/contained.md")]
+    /// Whether this context is a containment boundary that stops escape.
     contained: bool,
 }
 
 impl PropagationResult {
-    #[doc = include_str!("propagation_result.doc/new.md")]
+    /// Creates a result from whether geometry changed and whether this context
+    /// is a containment boundary.
     #[must_use]
     pub const fn new(geometry_changed: bool, contained: bool) -> Self {
         Self {
@@ -21,25 +22,27 @@ impl PropagationResult {
         }
     }
 
-    #[doc = include_str!("propagation_result.doc/from_pass.md")]
+    /// Builds a result from a completed [`LayoutPassResult`], reading its
+    /// `geometry_changed()` flag, combined with whether this context contains
+    /// layout.
     #[must_use]
     pub const fn from_pass(pass: &LayoutPassResult, contained: bool) -> Self {
         Self::new(pass.geometry_changed(), contained)
     }
 
-    #[doc = include_str!("propagation_result.doc/geometry_changed_2.md")]
+    /// Whether this context's output geometry changed.
     #[must_use]
     pub const fn geometry_changed(&self) -> bool {
         self.geometry_changed
     }
 
-    #[doc = include_str!("propagation_result.doc/contained_2.md")]
+    /// Whether this context is a containment boundary that stops escape.
     #[must_use]
     pub const fn contained(&self) -> bool {
         self.contained
     }
 
-    #[doc = include_str!("propagation_result.doc/continues_upward.md")]
+    #[doc = include_str!("../../docs/api/invalidation/propagation_result.doc/continues_upward.md")]
     #[must_use]
     pub const fn continues_upward(&self) -> bool {
         self.geometry_changed && !self.contained

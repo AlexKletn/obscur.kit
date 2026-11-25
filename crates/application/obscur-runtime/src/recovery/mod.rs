@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Recovery module.
 mod component_recovery;
 pub use component_recovery::ComponentRecovery;
 mod recovery_result;

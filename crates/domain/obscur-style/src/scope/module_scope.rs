@@ -1,28 +1,28 @@
-#![doc = include_str!("module_scope.doc/_module.md")]
+#![doc = include_str!("../../docs/api/scope/module_scope.doc/_module.md")]
 
 use crate::scope::{ScopeId, ScopedIdent};
 use obscur_identity::InternedSymbol;
 
-#[doc = include_str!("module_scope.doc/ModuleScope.md")]
+#[doc = include_str!("../../docs/api/scope/module_scope.doc/ModuleScope.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ModuleScope {
     scope: ScopeId,
 }
 
 impl ModuleScope {
-    #[doc = include_str!("module_scope.doc/new.md")]
+    /// Creates module isolation rooted at the given scope.
     #[must_use]
     pub const fn new(scope: ScopeId) -> Self {
         Self { scope }
     }
 
-    #[doc = include_str!("module_scope.doc/scope.md")]
+    /// Returns the scope this module isolates identifiers into.
     #[must_use]
     pub const fn scope(self) -> ScopeId {
         self.scope
     }
 
-    #[doc = include_str!("module_scope.doc/localize.md")]
+    #[doc = include_str!("../../docs/api/scope/module_scope.doc/localize.md")]
     #[must_use]
     pub const fn localize(self, local: InternedSymbol) -> ScopedIdent {
         ScopedIdent::new(self.scope, local)

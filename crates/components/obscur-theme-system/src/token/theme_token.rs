@@ -1,35 +1,20 @@
-#![doc = include_str!("theme_token.doc/_module.md")]
+//! A named design token: the atomic themeable value (spec §2.6).
 
 use obscur_scene::color::Color;
 
-#[doc = include_str!("theme_token.doc/TokenValue.md")]
-#[derive(Debug, Clone, PartialEq)]
-pub enum TokenValue {
-    #[doc = include_str!("theme_token.doc/Color.md")]
-    Color(Color),
-    #[doc = include_str!("theme_token.doc/Length.md")]
-    Length(f32),
-    #[doc = include_str!("theme_token.doc/Number.md")]
-    Number(f32),
-    #[doc = include_str!("theme_token.doc/Text.md")]
-    Text(Box<str>),
-    #[doc = include_str!("theme_token.doc/FontFamily.md")]
-    FontFamily(Box<str>),
-    #[doc = include_str!("theme_token.doc/DurationMillis.md")]
-    DurationMillis(u32),
-}
+use super::TokenValue;
 
-#[doc = include_str!("theme_token.doc/ThemeToken.md")]
+#[doc = include_str!("../../docs/api/token/theme_token.doc/ThemeToken.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThemeToken {
-    #[doc = include_str!("theme_token.doc/name.md")]
+    /// The dotted, namespaced token name (e.g. `"color.primary"`).
     pub name: Box<str>,
-    #[doc = include_str!("theme_token.doc/value.md")]
+    /// The token's value.
     pub value: TokenValue,
 }
 
 impl ThemeToken {
-    #[doc = include_str!("theme_token.doc/new.md")]
+    /// Creates a token from a name and an explicit [`TokenValue`].
     #[must_use]
     pub fn new(name: impl Into<Box<str>>, value: TokenValue) -> Self {
         Self {
@@ -38,55 +23,55 @@ impl ThemeToken {
         }
     }
 
-    #[doc = include_str!("theme_token.doc/color.md")]
+    /// Creates a [`TokenValue::Color`] token.
     #[must_use]
     pub fn color(name: impl Into<Box<str>>, color: Color) -> Self {
         Self::new(name, TokenValue::Color(color))
     }
 
-    #[doc = include_str!("theme_token.doc/length.md")]
+    /// Creates a [`TokenValue::Length`] token.
     #[must_use]
     pub fn length(name: impl Into<Box<str>>, length: f32) -> Self {
         Self::new(name, TokenValue::Length(length))
     }
 
-    #[doc = include_str!("theme_token.doc/number.md")]
+    /// Creates a [`TokenValue::Number`] token.
     #[must_use]
     pub fn number(name: impl Into<Box<str>>, number: f32) -> Self {
         Self::new(name, TokenValue::Number(number))
     }
 
-    #[doc = include_str!("theme_token.doc/text.md")]
+    /// Creates a [`TokenValue::Text`] token.
     #[must_use]
     pub fn text(name: impl Into<Box<str>>, text: impl Into<Box<str>>) -> Self {
         Self::new(name, TokenValue::Text(text.into()))
     }
 
-    #[doc = include_str!("theme_token.doc/font_family.md")]
+    /// Creates a [`TokenValue::FontFamily`] token.
     #[must_use]
     pub fn font_family(name: impl Into<Box<str>>, family: impl Into<Box<str>>) -> Self {
         Self::new(name, TokenValue::FontFamily(family.into()))
     }
 
-    #[doc = include_str!("theme_token.doc/duration_millis.md")]
+    /// Creates a [`TokenValue::DurationMillis`] token.
     #[must_use]
     pub fn duration_millis(name: impl Into<Box<str>>, millis: u32) -> Self {
         Self::new(name, TokenValue::DurationMillis(millis))
     }
 
-    #[doc = include_str!("theme_token.doc/name_2.md")]
+    /// Returns the token's namespaced name.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    #[doc = include_str!("theme_token.doc/value_2.md")]
+    /// Returns the token's value.
     #[must_use]
     pub fn value(&self) -> &TokenValue {
         &self.value
     }
 
-    #[doc = include_str!("theme_token.doc/as_color.md")]
+    /// Returns the color payload, or `None` if the value is not a color.
     #[must_use]
     pub fn as_color(&self) -> Option<Color> {
         match self.value {
@@ -95,7 +80,7 @@ impl ThemeToken {
         }
     }
 
-    #[doc = include_str!("theme_token.doc/as_length.md")]
+    /// Returns the length payload, or `None` if the value is not a length.
     #[must_use]
     pub fn as_length(&self) -> Option<f32> {
         match self.value {
@@ -104,7 +89,8 @@ impl ThemeToken {
         }
     }
 
-    #[doc = include_str!("theme_token.doc/as_text.md")]
+    /// Returns the text payload for [`TokenValue::Text`] or
+    /// [`TokenValue::FontFamily`], or `None` otherwise.
     #[must_use]
     pub fn as_text(&self) -> Option<&str> {
         match &self.value {

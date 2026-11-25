@@ -13,7 +13,7 @@ resolves `{bindings}` against a [`ScreenData`] table the application writes. The
 last case measures what that costs.
 
 Structure is still fixed: `<If>`/`<For>` are statically materialised on this
-route, and a `{binding}` inside a `<VirtualFor>` keeps its placeholder. Shape that
+route. Runtime virtual rows resolve their item fields on demand. Shape that
 depends on state belongs in the build-time route (a `build.rs` emitting through
 `CodegenRoot::facade`, or the inline `okui!` macro), where the markup becomes
 ordinary Rust — and where §2.9's compile-time contract validation happens.

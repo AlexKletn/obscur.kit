@@ -1,37 +1,25 @@
-#![doc = include_str!("message_provider.doc/_module.md")]
+//! The replaceable port a [`Localizer`](crate::catalog::Localizer) reads messages
+//! through (spec §7.2 replaceable provider).
 
 use obscur_capability::SupportLevel;
 
 use crate::locale::LanguageTag;
 use crate::message::{MessageKey, MessagePattern};
 
-#[doc = include_str!("message_provider.doc/MessageProvider.md")]
+#[doc = include_str!("../../docs/api/catalog/message_provider.doc/MessageProvider.md")]
 pub trait MessageProvider {
-    #[doc = include_str!("message_provider.doc/pattern.md")]
+    /// Returns the pattern registered for `key` in exactly `locale`, or `None`.
     #[must_use]
     fn pattern(&self, locale: &LanguageTag, key: &MessageKey) -> Option<&MessagePattern>;
 
-    #[doc = include_str!("message_provider.doc/availability.md")]
+    /// Returns whether this provider can supply messages at all (spec §7.2).
     #[must_use]
     fn availability(&self) -> SupportLevel;
 }
 
-#[doc = include_str!("message_provider.doc/EmptyMessageProvider.md")]
-#[derive(Debug, Default, Clone, Copy)]
-pub struct EmptyMessageProvider;
-
-impl MessageProvider for EmptyMessageProvider {
-    fn pattern(&self, _locale: &LanguageTag, _key: &MessageKey) -> Option<&MessagePattern> {
-        None
-    }
-
-    fn availability(&self) -> SupportLevel {
-        SupportLevel::Unavailable
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use super::super::EmptyMessageProvider;
     use super::*;
 
     #[test]

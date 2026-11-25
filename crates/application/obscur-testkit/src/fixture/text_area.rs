@@ -1,4 +1,5 @@
-#![doc = include_str!("text_area.doc/_module.md")]
+//! The multi-line editable: the one control where `Enter` is an edit rather than a
+//! commit.
 
 use obscur_identity::ComponentId;
 use obscur_style::cascade::CascadeOrigin;
@@ -11,18 +12,20 @@ use obscur_view::view::{
 
 use crate::fixture::{ClassRule, EditablePanel};
 
-#[doc = include_str!("text_area.doc/TextArea.md")]
+#[doc = include_str!("../../docs/api/fixture/text_area.doc/TextArea.md")]
 #[derive(Debug)]
 pub struct TextArea;
 
 impl TextArea {
-    #[doc = include_str!("text_area.doc/LINE_HEIGHT.md")]
+    #[doc = include_str!("../../docs/api/fixture/text_area.doc/LINE_HEIGHT.md")]
     pub const LINE_HEIGHT: f32 = 20.0;
 
-    #[doc = include_str!("text_area.doc/SCROLLPORT_HEIGHT.md")]
+    /// The scrolling sheet's content-box height, in px — three
+    /// [`LINE_HEIGHT`](Self::LINE_HEIGHT) lines exactly, with no padding or border, so
+    /// a fourth typed line is the first one that must scroll.
     pub const SCROLLPORT_HEIGHT: f32 = 60.0;
 
-    #[doc = include_str!("text_area.doc/view.md")]
+    /// The textarea holding `text`, whose `\n`s are preserved as separate lines.
     #[must_use]
     pub fn view(text: &str) -> View {
         View::from_fragment(ViewFragment::from_nodes(vec![
@@ -40,13 +43,16 @@ impl TextArea {
         ]))
     }
 
-    #[doc = include_str!("text_area.doc/sheet.md")]
+    /// The non-scrolling sheet: a 400×200 `panel` over a 300 px-wide `area` with an
+    /// exact [`LINE_HEIGHT`](Self::LINE_HEIGHT) and `white-space: pre-wrap`, and no
+    /// height of its own — so the box grows with the content instead of scrolling.
     #[must_use]
     pub fn sheet() -> Stylesheet {
         Self::sheet_with(Self::area_rule(Vec::new()))
     }
 
-    #[doc = include_str!("text_area.doc/scrolling_sheet.md")]
+    /// The same sheet with the `area` fixed at [`SCROLLPORT_HEIGHT`](Self::SCROLLPORT_HEIGHT)
+    /// and `overflow: auto`, making it a vertical scroll container.
     #[must_use]
     pub fn scrolling_sheet() -> Stylesheet {
         Self::sheet_with(Self::area_rule(vec![
@@ -65,7 +71,7 @@ impl TextArea {
         ]))
     }
 
-    #[doc = include_str!("text_area.doc/sheet_with.md")]
+    /// The shared `panel` rule, over whichever `area` rule the caller built.
     fn sheet_with(area: StyleRule) -> Stylesheet {
         Stylesheet::new(
             CascadeOrigin::GlobalApp,
@@ -73,7 +79,8 @@ impl TextArea {
         )
     }
 
-    #[doc = include_str!("text_area.doc/area_rule.md")]
+    /// The `area` rule both sheets start from, plus whatever `extra` the scrolling one
+    /// adds.
     fn area_rule(extra: Vec<BlockDeclaration>) -> StyleRule {
         ClassRule::new("area")
             .declaring(vec![

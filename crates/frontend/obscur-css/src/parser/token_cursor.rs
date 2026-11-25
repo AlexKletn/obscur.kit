@@ -1,10 +1,10 @@
-#![doc = include_str!("token_cursor.doc/_module.md")]
+#![doc = include_str!("../../docs/api/parser/token_cursor.doc/_module.md")]
 
 use crate::source::SourceSpan;
 
-use super::css_tokenizer::{CssToken, CssTokenKind};
+use super::{css_token::CssToken, css_token_kind::CssTokenKind};
 
-#[doc = include_str!("token_cursor.doc/TokenCursor.md")]
+#[doc = include_str!("../../docs/api/parser/token_cursor.doc/TokenCursor.md")]
 pub(crate) struct TokenCursor<'t> {
     tokens: &'t [CssToken],
     pos: usize,
@@ -12,7 +12,8 @@ pub(crate) struct TokenCursor<'t> {
 }
 
 impl<'t> TokenCursor<'t> {
-    #[doc = include_str!("token_cursor.doc/new.md")]
+    /// Creates a cursor over `tokens`, reporting `eof` as the end-of-input byte
+    /// offset.
     pub(crate) fn new(tokens: &'t [CssToken], eof: u32) -> Self {
         Self {
             tokens,
@@ -21,17 +22,17 @@ impl<'t> TokenCursor<'t> {
         }
     }
 
-    #[doc = include_str!("token_cursor.doc/peek.md")]
+    /// Returns the current token without advancing.
     pub(crate) fn peek(&self) -> Option<&'t CssToken> {
         self.tokens.get(self.pos)
     }
 
-    #[doc = include_str!("token_cursor.doc/peek_kind.md")]
+    /// Returns the kind of the current token without advancing.
     pub(crate) fn peek_kind(&self) -> Option<&'t CssTokenKind> {
         self.tokens.get(self.pos).map(CssToken::kind)
     }
 
-    #[doc = include_str!("token_cursor.doc/advance.md")]
+    /// Returns the current token and advances past it.
     pub(crate) fn advance(&mut self) -> Option<&'t CssToken> {
         let tok = self.tokens.get(self.pos);
         if tok.is_some() {
@@ -40,19 +41,19 @@ impl<'t> TokenCursor<'t> {
         tok
     }
 
-    #[doc = include_str!("token_cursor.doc/skip_ws.md")]
+    /// Advances past any run of whitespace tokens.
     pub(crate) fn skip_ws(&mut self) {
         while matches!(self.tokens.get(self.pos), Some(t) if t.is_whitespace()) {
             self.pos += 1;
         }
     }
 
-    #[doc = include_str!("token_cursor.doc/eof.md")]
+    /// Returns the end-of-input byte offset.
     pub(crate) fn eof(&self) -> u32 {
         self.eof
     }
 
-    #[doc = include_str!("token_cursor.doc/here_span.md")]
+    /// Returns the span of the current token, or an empty span at end-of-input.
     pub(crate) fn here_span(&self) -> SourceSpan {
         self.tokens
             .get(self.pos)
@@ -60,7 +61,7 @@ impl<'t> TokenCursor<'t> {
     }
 }
 
-#[doc = include_str!("token_cursor.doc/slice_span.md")]
+/// Returns a span covering `tokens`, or an empty span at `eof` when empty.
 pub(crate) fn slice_span(tokens: &[CssToken], eof: u32) -> SourceSpan {
     match (tokens.first(), tokens.last()) {
         (Some(first), Some(last)) => first.span().union(last.span()),

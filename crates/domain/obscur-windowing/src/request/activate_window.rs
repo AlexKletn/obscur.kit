@@ -1,59 +1,20 @@
-#![doc = include_str!("activate_window.doc/_module.md")]
+//! Window activation and element focus requests (spec §6.3).
 
 use obscur_identity::{NodeId, WindowId};
 
-#[doc = include_str!("activate_window.doc/FocusRequest.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FocusRequest {
-    #[doc = include_str!("activate_window.doc/WindowOnly.md")]
-    WindowOnly,
-    #[doc = include_str!("activate_window.doc/Element.md")]
-    Element(NodeId),
-}
+use super::FocusRequest;
 
-impl FocusRequest {
-    #[doc = include_str!("activate_window.doc/element.md")]
-    #[must_use]
-    pub const fn element(self) -> Option<NodeId> {
-        match self {
-            Self::Element(node) => Some(node),
-            Self::WindowOnly => None,
-        }
-    }
-}
-
-#[doc = include_str!("activate_window.doc/ActivationResult.md")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ActivationResult {
-    #[doc = include_str!("activate_window.doc/Activated.md")]
-    Activated,
-    #[doc = include_str!("activate_window.doc/Denied.md")]
-    Denied,
-    #[doc = include_str!("activate_window.doc/Unsupported.md")]
-    Unsupported,
-    #[doc = include_str!("activate_window.doc/Failed.md")]
-    Failed(Box<str>),
-}
-
-impl ActivationResult {
-    #[doc = include_str!("activate_window.doc/is_activated.md")]
-    #[must_use]
-    pub const fn is_activated(&self) -> bool {
-        matches!(self, Self::Activated)
-    }
-}
-
-#[doc = include_str!("activate_window.doc/ActivateWindow.md")]
+#[doc = include_str!("../../docs/api/request/activate_window.doc/ActivateWindow.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActivateWindow {
-    #[doc = include_str!("activate_window.doc/target.md")]
+    /// The window to activate.
     target: WindowId,
-    #[doc = include_str!("activate_window.doc/focus.md")]
+    /// What to focus once the window is activated.
     focus: FocusRequest,
 }
 
 impl ActivateWindow {
-    #[doc = include_str!("activate_window.doc/window.md")]
+    /// Requests activation of `target` without changing element focus.
     #[must_use]
     pub const fn window(target: WindowId) -> Self {
         Self {
@@ -62,7 +23,7 @@ impl ActivateWindow {
         }
     }
 
-    #[doc = include_str!("activate_window.doc/element_2.md")]
+    /// Requests activation of `target` and focus of the element `node` within it.
     #[must_use]
     pub const fn element(target: WindowId, node: NodeId) -> Self {
         Self {
@@ -71,13 +32,13 @@ impl ActivateWindow {
         }
     }
 
-    #[doc = include_str!("activate_window.doc/target_2.md")]
+    /// Returns the window this request targets.
     #[must_use]
     pub const fn target(&self) -> WindowId {
         self.target
     }
 
-    #[doc = include_str!("activate_window.doc/focus_2.md")]
+    /// Returns what this request should focus.
     #[must_use]
     pub const fn focus(&self) -> FocusRequest {
         self.focus
@@ -107,13 +68,5 @@ mod tests {
         assert_eq!(req.target(), win());
         assert_eq!(req.focus(), FocusRequest::Element(node));
         assert_eq!(req.focus().element(), Some(node));
-    }
-
-    #[test]
-    fn activation_result_predicate() {
-        assert!(ActivationResult::Activated.is_activated());
-        assert!(!ActivationResult::Denied.is_activated());
-        assert!(!ActivationResult::Unsupported.is_activated());
-        assert!(!ActivationResult::Failed(Box::from("x")).is_activated());
     }
 }

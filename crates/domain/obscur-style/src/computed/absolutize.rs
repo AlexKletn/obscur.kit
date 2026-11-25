@@ -1,14 +1,14 @@
-#![doc = include_str!("absolutize.doc/_module.md")]
+#![doc = include_str!("../../docs/api/computed/absolutize.doc/_module.md")]
 
 use crate::property::{
-    BackgroundLayer, BackgroundPosition, BackgroundSize, BoxShadow, ConicGradient, FilterFunction,
-    FilterOp, GridTrack, GridTrackList, Length, LengthContext, LengthExpr, PropertyValue,
-    RadialGradient, RadialSize, Transform, TransformFunction, TransformOrigin,
+    BackgroundLayer, BackgroundPosition, BackgroundSize, BoxShadow, ClipRadius, ConicGradient,
+    FilterFunction, FilterOp, GridTrack, GridTrackList, Length, LengthContext, LengthExpr,
+    PropertyValue, RadialGradient, RadialSize, Transform, TransformFunction, TransformOrigin,
 };
 use obscur_geometry::AffineTransform;
 
-#[doc = include_str!("absolutize.doc/absolutize_value.md")]
-pub(super) fn absolutize_value(value: PropertyValue, ctx: &LengthContext) -> PropertyValue {
+#[doc = include_str!("../../docs/api/computed/absolutize.doc/absolutize_value.md")]
+pub(crate) fn absolutize_value(value: PropertyValue, ctx: &LengthContext) -> PropertyValue {
     match value {
         PropertyValue::Length(length) => PropertyValue::Length(length.absolutize(ctx)),
         PropertyValue::Calc(expr) => collapse_calc(expr.absolutize(ctx), ctx),
@@ -20,15 +20,43 @@ pub(super) fn absolutize_value(value: PropertyValue, ctx: &LengthContext) -> Pro
         }
         PropertyValue::FilterFunctions(list) => absolutize_filter_functions(&list, ctx),
         PropertyValue::TransformFunctions(list) => absolutize_transform_functions(&list, ctx),
+        PropertyValue::ClipRectangle { reference_box, kind, coordinates, radii } => PropertyValue::ClipRectangle {
+            reference_box,
+            kind,
+            coordinates: Box::new(coordinates.map(|length| length.absolutize(ctx))),
+            radii: radii.map(|radii| Box::new(radii.map(|corner| corner.map(|length| length.absolutize(ctx))))),
+        },
+        PropertyValue::ClipEllipse { reference_box, center, radii, circle } => PropertyValue::ClipEllipse {
+            reference_box,
+            center: center.map(|coordinate| coordinate.absolutize(ctx)),
+            radii: radii.map(|radius| match radius {
+                ClipRadius::Length(length) => ClipRadius::Length(length.absolutize(ctx)),
+                _ => radius,
+            }),
+            circle,
+        },
+        PropertyValue::ClipPolygon { even_odd, reference_box, points } => PropertyValue::ClipPolygon {
+            even_odd, reference_box,
+            points: points.iter().map(|[x, y]| [x.absolutize(ctx), y.absolutize(ctx)]).collect(),
+        },
         PropertyValue::BackgroundSize(size) => {
             PropertyValue::BackgroundSize(absolutize_background_size(size, ctx))
         }
+        PropertyValue::BackgroundSizes(sizes) => PropertyValue::BackgroundSizes(
+            sizes.iter().map(|&size| absolutize_background_size(size, ctx)).collect(),
+        ),
         PropertyValue::BackgroundPosition(position) => PropertyValue::BackgroundPosition(
-            BackgroundPosition::new(position.x().absolutize(ctx), position.y().absolutize(ctx)),
+            absolutize_background_position(position, ctx),
+        ),
+        PropertyValue::BackgroundPositions(positions) => PropertyValue::BackgroundPositions(
+            positions.iter().map(|&position| absolutize_background_position(position, ctx)).collect(),
         ),
         PropertyValue::TransformOrigin(origin) => PropertyValue::TransformOrigin(
             TransformOrigin::new(origin.x().absolutize(ctx), origin.y().absolutize(ctx)),
         ),
+        PropertyValue::LinearGradient(gradient) => {
+            PropertyValue::LinearGradient(absolutize_linear(&gradient, ctx))
+        }
         PropertyValue::RadialGradient(gradient) => {
             PropertyValue::RadialGradient(absolutize_radial(&gradient, ctx))
         }
@@ -51,9 +79,14 @@ pub(super) fn absolutize_value(value: PropertyValue, ctx: &LengthContext) -> Pro
         PropertyValue::Keyword(_)
         | PropertyValue::Number(_)
         | PropertyValue::Color(_)
-        | PropertyValue::LinearGradient(_)
         | PropertyValue::BackgroundImageUrl(_)
-        | PropertyValue::BackgroundRepeat(_)
+        | PropertyValue::BackgroundRepeat(_) | PropertyValue::BackgroundRepeats(_)
+            | PropertyValue::BackgroundBlendModes(_)
+            | PropertyValue::ClipBox(_)
+            | PropertyValue::ClipSvgPath { .. }
+            | PropertyValue::BackgroundClips(_)
+            | PropertyValue::BackgroundOrigins(_)
+            | PropertyValue::BackgroundAttachments(_)
         | PropertyValue::ObjectFit(_)
         | PropertyValue::FontFamilies(_)
         | PropertyValue::GridLine(_)
@@ -63,7 +96,13 @@ pub(super) fn absolutize_value(value: PropertyValue, ctx: &LengthContext) -> Pro
         // `content` and a registry name are plain text; neither carries a
         // length to fold.
         | PropertyValue::String(_)
+        | PropertyValue::ContainerNames(_)
         | PropertyValue::Name(_)
+        | PropertyValue::ContainerRef { .. }
+        | PropertyValue::ContainerTemplate(_)
+        | PropertyValue::FlexFlowTemplate(_)
+        | PropertyValue::GapTemplate(_)
+        | PropertyValue::VariableTemplate(_)
         | PropertyValue::CustomRef(_)
         // Text, not a value: it is parsed at substitution and never survives to
         // the step that folds lengths.
@@ -74,7 +113,7 @@ pub(super) fn absolutize_value(value: PropertyValue, ctx: &LengthContext) -> Pro
     }
 }
 
-#[doc = include_str!("absolutize.doc/collapse_calc.md")]
+#[doc = include_str!("../../docs/api/computed/absolutize.doc/collapse_calc.md")]
 fn collapse_calc(expr: LengthExpr, ctx: &LengthContext) -> PropertyValue {
     match expr.resolve(ctx) {
         Some(px) => PropertyValue::Length(Length::px(px)),
@@ -82,7 +121,7 @@ fn collapse_calc(expr: LengthExpr, ctx: &LengthContext) -> PropertyValue {
     }
 }
 
-#[doc = include_str!("absolutize.doc/absolutize_shadow.md")]
+/// Absolutizes a shadow's four lengths, leaving its color and `inset` flag alone.
 fn absolutize_shadow(shadow: &BoxShadow, ctx: &LengthContext) -> BoxShadow {
     BoxShadow::new(
         shadow.offset_x().absolutize(ctx),
@@ -94,20 +133,23 @@ fn absolutize_shadow(shadow: &BoxShadow, ctx: &LengthContext) -> BoxShadow {
     )
 }
 
-#[doc = include_str!("absolutize.doc/absolutize_transform_functions.md")]
+#[doc = include_str!("../../docs/api/computed/absolutize.doc/absolutize_transform_functions.md")]
 fn absolutize_transform_functions(
     list: &[TransformFunction],
     ctx: &LengthContext,
 ) -> PropertyValue {
+    // Translation percentages use the element's used size on each axis.
+    let mut ctx = *ctx;
+    ctx.percent_basis = None;
     let mut composed = AffineTransform::IDENTITY;
     for function in list {
-        let Some(coeffs) = function.resolve(ctx) else {
+        let Some(coeffs) = function.resolve(&ctx) else {
             // One unknown distance and the whole list stays symbolic: a matrix
             // built from the rest would place the element at a distance nobody
             // authored. The value keeps whatever this context DID fold, so a
             // later pass (a measured `ch`) can finish it.
             return PropertyValue::TransformFunctions(
-                list.iter().map(|f| f.absolutize(ctx)).collect(),
+                list.iter().map(|f| f.absolutize(&ctx)).collect(),
             );
         };
         composed = composed.multiply(AffineTransform { coeffs });
@@ -115,7 +157,7 @@ fn absolutize_transform_functions(
     PropertyValue::Transform(Transform::new(composed.coeffs))
 }
 
-#[doc = include_str!("absolutize.doc/absolutize_filter_functions.md")]
+#[doc = include_str!("../../docs/api/computed/absolutize.doc/absolutize_filter_functions.md")]
 fn absolutize_filter_functions(list: &[FilterFunction], ctx: &LengthContext) -> PropertyValue {
     let mut ops: Vec<FilterOp> = Vec::with_capacity(list.len());
     for function in list {
@@ -127,18 +169,14 @@ fn absolutize_filter_functions(list: &[FilterFunction], ctx: &LengthContext) -> 
                         list.iter().map(|f| f.absolutize_blur(ctx)).collect(),
                     );
                 };
-                // A zero (or negative) radius carries no op, matching the CSS
-                // lowering: `blur(0)` must stay byte-identical to no filter.
-                if radius > 0.0 {
-                    ops.push(FilterOp::Blur(radius));
-                }
+                ops.push(FilterOp::Blur(radius.max(0.0)));
             }
         }
     }
     PropertyValue::Filter(ops.into_boxed_slice())
 }
 
-#[doc = include_str!("absolutize.doc/absolutize_filter.md")]
+#[doc = include_str!("../../docs/api/computed/absolutize.doc/absolutize_filter.md")]
 fn absolutize_filter(op: &FilterOp, ctx: &LengthContext) -> FilterOp {
     match op {
         FilterOp::DropShadow(shadow) => FilterOp::DropShadow(absolutize_shadow(shadow, ctx)),
@@ -154,7 +192,19 @@ fn absolutize_filter(op: &FilterOp, ctx: &LengthContext) -> FilterOp {
     }
 }
 
-#[doc = include_str!("absolutize.doc/absolutize_background_size.md")]
+fn absolutize_background_position(
+    position: BackgroundPosition,
+    ctx: &LengthContext,
+) -> BackgroundPosition {
+    BackgroundPosition::from_edge_offsets(
+        position.x().absolutize(ctx),
+        position.y().absolutize(ctx),
+        position.end_edges(),
+    )
+}
+
+/// Absolutizes the explicit per-axis form of `background-size`; the keyword forms
+/// carry no length.
 fn absolutize_background_size(size: BackgroundSize, ctx: &LengthContext) -> BackgroundSize {
     match size {
         BackgroundSize::Explicit { width, height } => BackgroundSize::Explicit {
@@ -165,22 +215,50 @@ fn absolutize_background_size(size: BackgroundSize, ctx: &LengthContext) -> Back
     }
 }
 
-#[doc = include_str!("absolutize.doc/absolutize_radial.md")]
+/// Resolves font-relative and viewport-relative linear repeat lengths while retaining percentages.
+fn absolutize_linear(
+    gradient: &crate::property::LinearGradient,
+    ctx: &LengthContext,
+) -> crate::property::LinearGradient {
+    let mut resolved = gradient.clone();
+    resolved.period = gradient.period().map(|period| period.absolutize(ctx));
+    if let Some(positions) = gradient.repeat_positions() {
+        resolved = resolved.with_repeat_positions(
+            positions
+                .iter()
+                .map(|position| position.map(|length| length.absolutize(ctx)))
+                .collect(),
+        );
+    }
+    resolved
+}
+
+/// Absolutizes a radial gradient's center and its explicit-radius size.
 fn absolutize_radial(gradient: &RadialGradient, ctx: &LengthContext) -> RadialGradient {
     let size = match gradient.size() {
         RadialSize::Length(length) => RadialSize::Length(length.absolutize(ctx)),
+        RadialSize::Ellipse(x, y) => RadialSize::Ellipse(x.absolutize(ctx), y.absolutize(ctx)),
         keyword => keyword,
     };
-    RadialGradient::new(
+    let resolved = RadialGradient::new(
         gradient.shape(),
         size,
         gradient.center_x().absolutize(ctx),
         gradient.center_y().absolutize(ctx),
         gradient.stops().to_vec(),
-    )
+    );
+    if let Some(positions) = gradient.repeat_positions() {
+        return resolved.with_repeat_positions(
+            positions
+                .iter()
+                .map(|position| position.map(|length| length.absolutize(ctx)))
+                .collect(),
+        );
+    }
+    resolved
 }
 
-#[doc = include_str!("absolutize.doc/absolutize_conic.md")]
+/// Absolutizes a conic gradient's center; its start angle is not a length.
 fn absolutize_conic(gradient: &ConicGradient, ctx: &LengthContext) -> ConicGradient {
     ConicGradient::new(
         gradient.from_angle_deg(),
@@ -190,28 +268,39 @@ fn absolutize_conic(gradient: &ConicGradient, ctx: &LengthContext) -> ConicGradi
     )
 }
 
-#[doc = include_str!("absolutize.doc/absolutize_layer.md")]
+/// Absolutizes one `background-image` layer of a multi-layer list.
 fn absolutize_layer(layer: &BackgroundLayer, ctx: &LengthContext) -> BackgroundLayer {
     match layer {
         BackgroundLayer::Radial(gradient) => {
             BackgroundLayer::Radial(absolutize_radial(gradient, ctx))
         }
         BackgroundLayer::Conic(gradient) => BackgroundLayer::Conic(absolutize_conic(gradient, ctx)),
-        BackgroundLayer::Linear(_) | BackgroundLayer::Url(_) => layer.clone(),
+        BackgroundLayer::Linear(gradient) => {
+            BackgroundLayer::Linear(absolutize_linear(gradient, ctx))
+        }
+        BackgroundLayer::None | BackgroundLayer::Url(_) => layer.clone(),
     }
 }
 
-#[doc = include_str!("absolutize.doc/absolutize_track.md")]
+/// Absolutizes a grid track's sizing lengths, recursing through `minmax()` and
+/// `repeat(auto-fill | auto-fit, …)`.
 fn absolutize_track(track: &GridTrack, ctx: &LengthContext) -> GridTrack {
     match track {
         GridTrack::Fixed(length) => GridTrack::Fixed(length.absolutize(ctx)),
+        GridTrack::FitContent(limit) => GridTrack::FitContent(limit.absolutize(ctx)),
+        GridTrack::FitContentMath(limit) => GridTrack::FitContentMath(limit.absolutize(ctx)),
         GridTrack::MinMax(min, max) => GridTrack::MinMax(
             Box::new(absolutize_track(min, ctx)),
             Box::new(absolutize_track(max, ctx)),
         ),
-        GridTrack::AutoRepeat { fill, tracks } => GridTrack::AutoRepeat {
+        GridTrack::AutoRepeat {
+            fill,
+            tracks,
+            line_names,
+        } => GridTrack::AutoRepeat {
             fill: *fill,
             tracks: tracks.iter().map(|t| absolutize_track(t, ctx)).collect(),
+            line_names: line_names.clone(),
         },
         // No length to absolutize: a fraction, and the content-sized keywords.
         GridTrack::Fr(_) | GridTrack::Auto | GridTrack::MinContent | GridTrack::MaxContent => {
@@ -220,28 +309,20 @@ fn absolutize_track(track: &GridTrack, ctx: &LengthContext) -> GridTrack {
     }
 }
 
-#[doc = include_str!("absolutize.doc/absolute_font_size.md")]
-pub(super) fn absolute_font_size(
+#[doc = include_str!("../../docs/api/computed/absolutize.doc/absolute_font_size.md")]
+pub(crate) fn absolute_font_size(
     specified: Option<Length>,
-    parent_font_size: f32,
-    root_font_size: f32,
-    viewport_width: f32,
-    viewport_height: f32,
+    mut ctx: LengthContext,
     parent_ch_width: Option<f32>,
 ) -> f32 {
+    let parent_font_size = ctx.font_size;
     let Some(specified) = specified else {
         return parent_font_size;
     };
     // Every base here is the PARENT's, per §6.1.2 above: its size is both the `em`
     // base and the `%` basis, and its `0` advance is the `ch` base. A stated basis
     // is honest here in a way it is not anywhere else.
-    let mut ctx = LengthContext::new(
-        parent_font_size,
-        root_font_size,
-        viewport_width,
-        viewport_height,
-    )
-    .with_percent_basis(parent_font_size);
+    ctx = ctx.with_percent_basis(parent_font_size);
     if let Some(ch_width) = parent_ch_width {
         ctx = ctx.with_ch_width(ch_width);
     }
@@ -586,6 +667,7 @@ mod tests {
                     Box::new(GridTrack::Fr(1.0)),
                 ),
                 GridTrack::AutoRepeat {
+                    line_names: Box::from([Box::from([Box::<str>::from("start")]), Box::from([])]),
                     fill: true,
                     tracks: vec![GridTrack::Fixed(Length::Vw(10.0))].into_boxed_slice(),
                 },
@@ -615,6 +697,7 @@ mod tests {
         assert_eq!(
             out.tracks()[2],
             GridTrack::AutoRepeat {
+                line_names: Box::from([Box::from([Box::<str>::from("start")]), Box::from([])]),
                 fill: true,
                 tracks: vec![GridTrack::Fixed(Length::px(80.0))].into_boxed_slice(),
             }
@@ -641,11 +724,19 @@ mod tests {
     fn font_size_resolves_em_and_percent_against_the_parent() {
         // `2em` and `200%` are the same declaration on `font-size`.
         assert_eq!(
-            absolute_font_size(Some(Length::Em(2.0)), 10.0, 16.0, 800.0, 600.0, None),
+            absolute_font_size(
+                Some(Length::Em(2.0)),
+                LengthContext::new(10.0, 16.0, 800.0, 600.0),
+                None
+            ),
             20.0
         );
         assert_eq!(
-            absolute_font_size(Some(Length::Percent(200.0)), 10.0, 16.0, 800.0, 600.0, None),
+            absolute_font_size(
+                Some(Length::Percent(200.0)),
+                LengthContext::new(10.0, 16.0, 800.0, 600.0),
+                None
+            ),
             20.0
         );
     }
@@ -654,7 +745,11 @@ mod tests {
     fn font_size_resolves_rem_against_the_root_not_the_parent() {
         // The audit's headline case, at its source: `2rem` is 2 x the ROOT size.
         assert_eq!(
-            absolute_font_size(Some(Length::Rem(2.0)), 10.0, 16.0, 800.0, 600.0, None),
+            absolute_font_size(
+                Some(Length::Rem(2.0)),
+                LengthContext::new(10.0, 16.0, 800.0, 600.0),
+                None
+            ),
             32.0
         );
     }
@@ -662,11 +757,19 @@ mod tests {
     #[test]
     fn font_size_resolves_viewport_units_and_absolute_px() {
         assert_eq!(
-            absolute_font_size(Some(Length::Vw(5.0)), 16.0, 16.0, 800.0, 600.0, None),
+            absolute_font_size(
+                Some(Length::Vw(5.0)),
+                LengthContext::new(16.0, 16.0, 800.0, 600.0),
+                None
+            ),
             40.0
         );
         assert_eq!(
-            absolute_font_size(Some(Length::px(24.0)), 16.0, 16.0, 800.0, 600.0, None),
+            absolute_font_size(
+                Some(Length::px(24.0)),
+                LengthContext::new(16.0, 16.0, 800.0, 600.0),
+                None
+            ),
             24.0
         );
     }
@@ -675,22 +778,34 @@ mod tests {
     fn an_absent_or_unresolvable_font_size_falls_back_to_the_parent() {
         // Absent -> inherit the parent's size (`font-size` inherits).
         assert_eq!(
-            absolute_font_size(None, 24.0, 16.0, 800.0, 600.0, None),
+            absolute_font_size(None, LengthContext::new(24.0, 16.0, 800.0, 600.0), None),
             24.0
         );
         // `auto` is not a font-size; `ch` needs a shaper this step has no reach
         // to. Both take the parent's size rather than invent one.
         assert_eq!(
-            absolute_font_size(Some(Length::Auto), 24.0, 16.0, 800.0, 600.0, None),
+            absolute_font_size(
+                Some(Length::Auto),
+                LengthContext::new(24.0, 16.0, 800.0, 600.0),
+                None
+            ),
             24.0
         );
         assert_eq!(
-            absolute_font_size(Some(Length::Ch(2.0)), 24.0, 16.0, 800.0, 600.0, None),
+            absolute_font_size(
+                Some(Length::Ch(2.0)),
+                LengthContext::new(24.0, 16.0, 800.0, 600.0),
+                None
+            ),
             24.0,
             "not 0.5em x 2 = the parent size by accident: a 3ch would give 24 too"
         );
         assert_eq!(
-            absolute_font_size(Some(Length::Ch(9.0)), 24.0, 16.0, 800.0, 600.0, None),
+            absolute_font_size(
+                Some(Length::Ch(9.0)),
+                LengthContext::new(24.0, 16.0, 800.0, 600.0),
+                None
+            ),
             24.0
         );
     }

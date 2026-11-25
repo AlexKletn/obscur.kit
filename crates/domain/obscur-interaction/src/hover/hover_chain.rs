@@ -1,59 +1,61 @@
-#![doc = include_str!("hover_chain.doc/_module.md")]
+//! The [`HoverChain`] — the ordered chain of nodes under the pointer, topmost
+//! toward root (hover; parallels the hit chain in spec §4.7).
 
 use std::slice::Iter;
 
 use obscur_identity::NodeId;
 
-#[doc = include_str!("hover_chain.doc/HoverChain.md")]
+#[doc = include_str!("../../docs/api/hover/hover_chain.doc/HoverChain.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HoverChain {
     nodes: Vec<NodeId>,
 }
 
 impl HoverChain {
-    #[doc = include_str!("hover_chain.doc/new.md")]
+    /// Creates an empty hover chain (the pointer is over nothing).
     #[must_use]
     pub fn new() -> Self {
         Self { nodes: Vec::new() }
     }
 
-    #[doc = include_str!("hover_chain.doc/from_nodes.md")]
+    /// Builds a hover chain from `nodes`, ordered topmost-first (index `0`)
+    /// toward the root (last).
     #[must_use]
     pub fn from_nodes(nodes: Vec<NodeId>) -> Self {
         Self { nodes }
     }
 
-    #[doc = include_str!("hover_chain.doc/topmost.md")]
+    /// The topmost node — the hover target — or `None` if the chain is empty.
     #[must_use]
     pub fn topmost(&self) -> Option<NodeId> {
         self.nodes.first().copied()
     }
 
-    #[doc = include_str!("hover_chain.doc/nodes.md")]
+    /// The nodes along the chain, topmost-first through root.
     #[must_use]
     pub fn nodes(&self) -> &[NodeId] {
         &self.nodes
     }
 
-    #[doc = include_str!("hover_chain.doc/contains.md")]
+    /// Returns whether `node` appears anywhere in the chain.
     #[must_use]
     pub fn contains(&self, node: NodeId) -> bool {
         self.nodes.contains(&node)
     }
 
-    #[doc = include_str!("hover_chain.doc/len.md")]
+    /// The number of nodes in the chain.
     #[must_use]
     pub fn len(&self) -> usize {
         self.nodes.len()
     }
 
-    #[doc = include_str!("hover_chain.doc/is_empty.md")]
+    /// Returns whether the chain is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
     }
 
-    #[doc = include_str!("hover_chain.doc/iter.md")]
+    /// Iterates over the nodes, topmost-first through root.
     pub fn iter(&self) -> Iter<'_, NodeId> {
         self.nodes.iter()
     }

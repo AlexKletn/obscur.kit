@@ -1,5 +1,6 @@
-#![doc = include_str!("message_delivery.doc/_module.md")]
+//! `MessageDelivery` (skeleton stub for the spec-defined entity; not yet implemented).
 
-#[doc = include_str!("message_delivery.doc/MessageDelivery.md")]
+/// Placeholder for the `MessageDelivery` entity. See the Obscur Kit 2 specs for its
+/// contract; this stub exists to materialise the target source layout.
 #[derive(Debug)]
 pub struct MessageDelivery;

@@ -1,20 +1,21 @@
-#![doc = include_str!("type_checker.doc/_module.md")]
+//! `TypeChecker`: the type-checking helper for props and simple expressions
+//! (spec §2.9, §2.10).
 
 use crate::symbol::Symbol;
 use crate::typing::{ExpressionType, TypeError, ValueType};
 
-#[doc = include_str!("type_checker.doc/TypeChecker.md")]
+#[doc = include_str!("../../docs/api/typing/type_checker.doc/TypeChecker.md")]
 #[derive(Debug, Clone, Default)]
 pub struct TypeChecker;
 
 impl TypeChecker {
-    #[doc = include_str!("type_checker.doc/new.md")]
+    /// Creates a new type checker.
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    #[doc = include_str!("type_checker.doc/infer_literal.md")]
+    #[doc = include_str!("../../docs/api/typing/type_checker.doc/infer_literal.md")]
     #[must_use]
     pub fn infer_literal(&self, text: &str) -> ExpressionType {
         match text {
@@ -35,14 +36,14 @@ impl TypeChecker {
         }
     }
 
-    #[doc = include_str!("type_checker.doc/infer_reference.md")]
+    #[doc = include_str!("../../docs/api/typing/type_checker.doc/infer_reference.md")]
     #[must_use]
     pub fn infer_reference(&self, symbol: &Symbol, declared: ValueType) -> ExpressionType {
         let _ = symbol;
         ExpressionType::dynamic(declared)
     }
 
-    #[doc = include_str!("type_checker.doc/check_assignable.md")]
+    #[doc = include_str!("../../docs/api/typing/type_checker.doc/check_assignable.md")]
     pub fn check_assignable(
         &self,
         value: &ExpressionType,
@@ -60,7 +61,7 @@ impl TypeChecker {
         }
     }
 
-    #[doc = include_str!("type_checker.doc/check_condition.md")]
+    #[doc = include_str!("../../docs/api/typing/type_checker.doc/check_condition.md")]
     pub fn check_condition(&self, cond: &ExpressionType, offset: u32) -> Result<(), TypeError> {
         if cond.is_assignable_to(&ValueType::Bool) {
             Ok(())
@@ -70,19 +71,19 @@ impl TypeChecker {
     }
 }
 
-#[doc = include_str!("type_checker.doc/is_quoted_text.md")]
+/// Returns whether `text` is a double-quoted string literal.
 fn is_quoted_text(text: &str) -> bool {
     let bytes = text.as_bytes();
     bytes.len() >= 2 && bytes[0] == b'"' && bytes[bytes.len() - 1] == b'"'
 }
 
-#[doc = include_str!("type_checker.doc/is_integer.md")]
+/// Returns whether `text` is an integer literal (`[+-]?[0-9]+`).
 fn is_integer(text: &str) -> bool {
     let digits = text.strip_prefix(['+', '-']).unwrap_or(text);
     !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit())
 }
 
-#[doc = include_str!("type_checker.doc/is_float.md")]
+/// Returns whether `text` is a float literal (`[+-]?[0-9]+.[0-9]+`).
 fn is_float(text: &str) -> bool {
     let body = text.strip_prefix(['+', '-']).unwrap_or(text);
     let Some((int_part, frac_part)) = body.split_once('.') else {

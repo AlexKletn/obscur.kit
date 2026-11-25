@@ -1,16 +1,17 @@
-#![doc = include_str!("turn_clock.doc/_module.md")]
+//! How much time one turn of the desktop-surface loop is worth.
 
-#[doc = include_str!("turn_clock.doc/TurnClock.md")]
+#[doc = include_str!("../../docs/api/app/turn_clock.doc/TurnClock.md")]
 #[derive(Debug)]
 pub(super) struct TurnClock {
-    #[doc = include_str!("turn_clock.doc/last.md")]
+    /// When this clock was last read. `None` until the first reading, which is worth no
+    /// time: there is nothing for it to be an interval from.
     last: Option<std::time::Instant>,
-    #[doc = include_str!("turn_clock.doc/ceiling.md")]
+    /// The largest interval a single reading may report, in seconds.
     ceiling: f32,
 }
 
 impl TurnClock {
-    #[doc = include_str!("turn_clock.doc/new.md")]
+    /// A clock that has not been read yet, clamping any one reading to `ceiling`.
     pub(super) const fn new(ceiling: f32) -> Self {
         Self {
             last: None,
@@ -18,7 +19,7 @@ impl TurnClock {
         }
     }
 
-    #[doc = include_str!("turn_clock.doc/elapsed.md")]
+    #[doc = include_str!("../../docs/api/app/turn_clock.doc/elapsed.md")]
     pub(super) fn elapsed(&mut self, now: std::time::Instant) -> f32 {
         // `replace`, in one step, is the whole of this type. Reading the mark
         // and moving it are the same event: a caller that could do one without

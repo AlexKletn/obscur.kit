@@ -313,3 +313,131 @@ fn st_01_the_first_frame_does_not_wait_on_resources() {
         list.iter().map(support::describe).collect::<Vec<_>>()
     );
 }
+
+#[doc = include_str!("spec_ch5_resources.doc/zero_extent_image_reports_decode_failure.md")]
+#[test]
+fn zero_extent_image_reports_decode_failure() {
+    struct EmptyDecoder;
+
+    impl ResourceDecoder for EmptyDecoder {
+        fn supports(&self, kind: ResourceKind) -> bool {
+            kind == ResourceKind::Image
+        }
+
+        fn decode(
+            &self,
+            _kind: ResourceKind,
+            _bytes: &[u8],
+        ) -> Result<DecodedResource, ResourceError> {
+            Ok(DecodedResource::new(
+                Arc::from([]),
+                ResourceMetadata::new().with_intrinsic_size(Size::new(0.0, 0.0)),
+            ))
+        }
+    }
+
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VW, VW));
+    runtime.set_diagnostic_sink(Box::new(Recorder {
+        seen: Rc::clone(&seen),
+    }));
+    runtime.set_resource_providers(
+        Arc::new(CountingLoader {
+            calls: Arc::clone(&calls),
+            bytes: Arc::from([]),
+        }),
+        Arc::new(EmptyDecoder),
+    );
+    let view = View::from_fragment(ViewFragment::from_nodes(vec![
+        Image::new("empty.png").into_view_node(),
+    ]));
+    let _ = runtime.render_now(&view, &[]);
+    assert_eq!(runtime.poll_resource_tasks(), 0);
+    let result = runtime.render_now(&view, &[]);
+    assert_eq!(runtime.poll_resource_tasks(), 0);
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+    assert_eq!(runtime.cached_resource_counts(), (0, 0));
+    assert!(
+        !result
+            .snapshot()
+            .display_list()
+            .commands()
+            .iter()
+            .any(|command| matches!(command, PaintCommand::DrawImage { .. }))
+    );
+
+    let diagnostics = seen.borrow();
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].code.as_str(), "resource.load_failed");
+    assert!(diagnostics[0].message.contains("empty.png"));
+    assert!(
+        diagnostics[0]
+            .message
+            .contains("decoded image has zero extent")
+    );
+}
+
+#[doc = include_str!("spec_ch5_resources.doc/panicking_decoder_reports_load_failure.md")]
+#[test]
+fn panicking_decoder_reports_load_failure() {
+    struct PanickingDecoder;
+
+    impl ResourceDecoder for PanickingDecoder {
+        fn supports(&self, kind: ResourceKind) -> bool {
+            kind == ResourceKind::Image
+        }
+
+        fn decode(
+            &self,
+            _kind: ResourceKind,
+            _bytes: &[u8],
+        ) -> Result<DecodedResource, ResourceError> {
+            panic!("test decoder panic");
+        }
+    }
+
+    for threaded in [false, cfg!(feature = "task-smol")] {
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(VW, VW));
+        runtime.set_diagnostic_sink(Box::new(Recorder {
+            seen: Rc::clone(&seen),
+        }));
+        #[cfg(feature = "task-smol")]
+        if threaded {
+            obscur_kit::bootstrap::KitBootstrap::new().install_blocking_executor(&mut runtime);
+        }
+        runtime.set_resource_providers(
+            Arc::new(CountingLoader {
+                calls: Arc::new(AtomicUsize::new(0)),
+                bytes: Arc::from([]),
+            }),
+            Arc::new(PanickingDecoder),
+        );
+        let view = View::from_fragment(ViewFragment::from_nodes(vec![
+            Image::new("panic.png").into_view_node(),
+        ]));
+        let _ = runtime.render_now(&view, &[]);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while seen.borrow().is_empty() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "missing failure, threaded={threaded}"
+            );
+            let _ = runtime.poll_resource_tasks();
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        let _ = runtime.render_now(&view, &[]);
+        let _ = runtime.poll_resource_tasks();
+        let diagnostics = seen.borrow();
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code.as_str(), "resource.load_failed");
+        assert!(diagnostics[0].message.contains("panic.png"));
+        assert!(
+            diagnostics[0]
+                .message
+                .contains("resource loader or decoder panicked")
+        );
+        assert_eq!(runtime.cached_resource_counts(), (0, 0));
+    }
+}

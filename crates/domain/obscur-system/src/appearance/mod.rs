@@ -1,6 +1,10 @@
-#![doc = include_str!("mod.doc/_module.md")]
+#![doc = include_str!("../../docs/api/appearance/mod.doc/_module.md")]
 mod appearance_provider;
-pub use appearance_provider::{AppearanceCallback, AppearanceProvider, NullAppearanceProvider};
+pub use appearance_provider::AppearanceProvider;
+mod appearance_callback;
+pub use appearance_callback::AppearanceCallback;
+mod null_appearance_provider;
+pub use null_appearance_provider::NullAppearanceProvider;
 mod appearance_watch;
 pub use appearance_watch::AppearanceWatch;
 mod color_scheme;
@@ -13,3 +17,11 @@ mod system_font;
 pub use system_font::SystemFont;
 mod system_palette;
 pub use system_palette::SystemPalette;
+mod window_button;
+pub use window_button::WindowButton;
+mod window_button_icons;
+pub use window_button_icons::WindowButtonIcons;
+mod window_button_layout;
+pub use window_button_layout::WindowButtonLayout;
+mod window_decoration;
+pub use window_decoration::WindowDecoration;

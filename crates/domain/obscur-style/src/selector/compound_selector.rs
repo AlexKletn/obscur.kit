@@ -1,28 +1,29 @@
-#![doc = include_str!("compound_selector.doc/_module.md")]
+//! A compound selector: contiguous simple selectors ([`CompoundSelector`]).
 
 use super::selector_specificity::SelectorSpecificity;
 use super::simple_selector::SimpleSelector;
 
-#[doc = include_str!("compound_selector.doc/CompoundSelector.md")]
+#[doc = include_str!("../../docs/api/selector/compound_selector.doc/CompoundSelector.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompoundSelector {
     simples: Vec<SimpleSelector>,
 }
 
 impl CompoundSelector {
-    #[doc = include_str!("compound_selector.doc/new.md")]
+    /// Creates a compound selector from its simple selectors.
     #[must_use]
     pub const fn new(simples: Vec<SimpleSelector>) -> Self {
         Self { simples }
     }
 
-    #[doc = include_str!("compound_selector.doc/simples.md")]
+    /// Returns the simple selectors making up this compound.
     #[must_use]
     pub fn simples(&self) -> &[SimpleSelector] {
         &self.simples
     }
 
-    #[doc = include_str!("compound_selector.doc/specificity.md")]
+    /// Returns the specificity of this compound: the sum of its simples'
+    /// contributions.
     #[must_use]
     pub fn specificity(&self) -> SelectorSpecificity {
         self.simples

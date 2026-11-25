@@ -1,24 +1,24 @@
-#![doc = include_str!("layer_surface_event.doc/_module.md")]
+//! What a desktop surface reports back between frames.
 
 use obscur_geometry::{ScaleFactor, Size};
 
-#[doc = include_str!("layer_surface_event.doc/LayerSurfaceEvent.md")]
+#[doc = include_str!("../../docs/api/layer/layer_surface_event.doc/LayerSurfaceEvent.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LayerSurfaceEvent {
-    #[doc = include_str!("layer_surface_event.doc/Configured.md")]
+    #[doc = include_str!("../../docs/api/layer/layer_surface_event.doc/Configured.md")]
     Configured(Size),
-    #[doc = include_str!("layer_surface_event.doc/Resized.md")]
+    /// The surface's logical size changed after it was configured.
     Resized(Size),
-    #[doc = include_str!("layer_surface_event.doc/ScaleFactorChanged.md")]
+    #[doc = include_str!("../../docs/api/layer/layer_surface_event.doc/ScaleFactorChanged.md")]
     ScaleFactorChanged(ScaleFactor),
-    #[doc = include_str!("layer_surface_event.doc/CloseRequested.md")]
+    #[doc = include_str!("../../docs/api/layer/layer_surface_event.doc/CloseRequested.md")]
     CloseRequested,
-    #[doc = include_str!("layer_surface_event.doc/Woken.md")]
+    #[doc = include_str!("../../docs/api/layer/layer_surface_event.doc/Woken.md")]
     Woken,
 }
 
 impl LayerSurfaceEvent {
-    #[doc = include_str!("layer_surface_event.doc/new_size.md")]
+    #[doc = include_str!("../../docs/api/layer/layer_surface_event.doc/new_size.md")]
     #[must_use]
     pub const fn new_size(&self) -> Option<Size> {
         match self {
@@ -27,7 +27,7 @@ impl LayerSurfaceEvent {
         }
     }
 
-    #[doc = include_str!("layer_surface_event.doc/redraws.md")]
+    #[doc = include_str!("../../docs/api/layer/layer_surface_event.doc/redraws.md")]
     #[must_use]
     pub const fn redraws(&self) -> bool {
         matches!(

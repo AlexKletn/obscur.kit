@@ -1,41 +1,45 @@
-#![doc = include_str!("semantic_action.doc/_module.md")]
+//! An action an accessibility node supports or can receive (spec §7.1).
 
-#[doc = include_str!("semantic_action.doc/SemanticAction.md")]
+#[doc = include_str!("../../docs/api/semantic/semantic_action.doc/SemanticAction.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum SemanticAction {
-    #[doc = include_str!("semantic_action.doc/Activate.md")]
+    /// Activate the node (click or press). The default.
     #[default]
     Activate,
-    #[doc = include_str!("semantic_action.doc/Focus.md")]
+    /// Give the node keyboard focus.
     Focus,
-    #[doc = include_str!("semantic_action.doc/Increment.md")]
+    /// Increase the node's value by one step.
     Increment,
-    #[doc = include_str!("semantic_action.doc/Decrement.md")]
+    /// Decrease the node's value by one step.
     Decrement,
-    #[doc = include_str!("semantic_action.doc/Expand.md")]
+    /// Expand the node to reveal its content.
     Expand,
-    #[doc = include_str!("semantic_action.doc/Collapse.md")]
+    /// Collapse the node to hide its content.
     Collapse,
-    #[doc = include_str!("semantic_action.doc/ScrollIntoView.md")]
+    /// Scroll the node into the visible viewport.
     ScrollIntoView,
-    #[doc = include_str!("semantic_action.doc/Dismiss.md")]
+    /// Dismiss the node (e.g. close a dialog or tooltip).
     Dismiss,
-    #[doc = include_str!("semantic_action.doc/ShowContextMenu.md")]
+    /// Show the node's context menu.
     ShowContextMenu,
-    #[doc = include_str!("semantic_action.doc/SetValue.md")]
+    /// Set the node's value directly.
     SetValue,
-    #[doc = include_str!("semantic_action.doc/Select.md")]
+    /// Select the node within its container.
     Select,
-    #[doc = include_str!("semantic_action.doc/Copy.md")]
+    /// Moves the caret or changes the directional selection in editable text.
+    SetTextSelection,
+    /// Copy the node's content to the clipboard.
     Copy,
-    #[doc = include_str!("semantic_action.doc/Paste.md")]
+    /// Paste clipboard content into the node.
     Paste,
-    #[doc = include_str!("semantic_action.doc/Cut.md")]
+    /// Cut the node's content to the clipboard.
     Cut,
 }
 
 impl SemanticAction {
-    #[doc = include_str!("semantic_action.doc/is_value_change.md")]
+    /// Returns whether this action mutates the node's value (spec §7.1):
+    /// [`Increment`](Self::Increment), [`Decrement`](Self::Decrement), and
+    /// [`SetValue`](Self::SetValue).
     #[must_use]
     pub const fn is_value_change(&self) -> bool {
         matches!(self, Self::Increment | Self::Decrement | Self::SetValue)

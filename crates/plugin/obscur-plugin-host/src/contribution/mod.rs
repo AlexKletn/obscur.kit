@@ -8,5 +8,7 @@ mod contribution_instance;
 pub use contribution_instance::ContributionInstance;
 mod contribution_registry;
 pub use contribution_registry::ContributionRegistry;
+mod mounted_view;
+pub use mounted_view::MountedView;
 mod extension_point_registry;
 pub use extension_point_registry::ExtensionPointRegistry;

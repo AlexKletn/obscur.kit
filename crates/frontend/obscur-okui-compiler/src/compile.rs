@@ -1,187 +1,21 @@
-#![doc = include_str!("compile.doc/_module.md")]
-
-use std::collections::HashMap;
+#![doc = include_str!("../docs/api/compile.doc/_module.md")]
 
 use obscur_capability::CapabilityId;
 use obscur_okui_syntax::ast::{Document, Element};
-use obscur_ui_ir::document::UiIrDocument;
-use obscur_ui_ir::source::SourceMap;
-use obscur_view::contract::ComponentSurface;
 
-use crate::lowering::{LoweringError, UiIrLowering};
-use crate::resolution::{NameResolver, ResolutionError};
+use crate::lowering::UiIrLowering;
+use crate::resolution::NameResolver;
 use crate::symbol::{Symbol, SymbolKind, SymbolTable};
-use crate::typing::TypeError;
 use crate::validation::{
-    CapabilityValidator, CollectionValidator, CommandSurface, CommandValidator, ComponentContract,
-    ContractValidator, ExpressionValidator, OutletValidator, ValidationDiagnostic,
-    default_contracts,
+    CapabilityValidator, CollectionValidator, CommandSurface, CommandValidator, ContractValidator,
+    ExpressionValidator, OutletValidator,
 };
 
-#[doc = include_str!("compile.doc/ContractRegistry.md")]
-#[derive(Debug, Clone, Default)]
-pub struct ContractRegistry {
-    contracts: HashMap<Box<str>, ComponentContract>,
-}
+pub use crate::compile_diagnostic::CompileDiagnostic;
+pub use crate::compile_result::CompileResult;
+pub use crate::contract_registry::ContractRegistry;
 
-impl ContractRegistry {
-    #[doc = include_str!("compile.doc/new.md")]
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    #[doc = include_str!("compile.doc/builtins.md")]
-    #[must_use]
-    pub fn builtins() -> Self {
-        let mut registry = Self::new();
-        for contract in default_contracts() {
-            registry.register(contract);
-        }
-        registry
-    }
-
-    #[doc = include_str!("compile.doc/with.md")]
-    #[must_use]
-    pub fn with(mut self, contract: ComponentContract) -> Self {
-        self.register(contract);
-        self
-    }
-
-    #[doc = include_str!("compile.doc/register.md")]
-    pub fn register(&mut self, contract: ComponentContract) -> Option<ComponentContract> {
-        self.contracts.insert(contract.component().into(), contract)
-    }
-
-    #[doc = include_str!("compile.doc/register_surface.md")]
-    pub fn register_surface(&mut self, surface: &ComponentSurface) -> Option<ComponentContract> {
-        self.register(surface.into())
-    }
-
-    #[doc = include_str!("compile.doc/with_surface.md")]
-    #[must_use]
-    pub fn with_surface(mut self, surface: &ComponentSurface) -> Self {
-        self.register_surface(surface);
-        self
-    }
-
-    #[doc = include_str!("compile.doc/get.md")]
-    #[must_use]
-    pub fn get(&self, component: &str) -> Option<&ComponentContract> {
-        self.contracts.get(component)
-    }
-
-    #[doc = include_str!("compile.doc/len.md")]
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.contracts.len()
-    }
-
-    #[doc = include_str!("compile.doc/is_empty.md")]
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.contracts.is_empty()
-    }
-}
-
-#[doc = include_str!("compile.doc/CompileDiagnostic.md")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CompileDiagnostic {
-    #[doc = include_str!("compile.doc/Resolution.md")]
-    Resolution(ResolutionError),
-    #[doc = include_str!("compile.doc/Type.md")]
-    Type(TypeError),
-    #[doc = include_str!("compile.doc/Validation.md")]
-    Validation(ValidationDiagnostic),
-    #[doc = include_str!("compile.doc/Lowering.md")]
-    Lowering(LoweringError),
-}
-
-impl std::fmt::Display for CompileDiagnostic {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Resolution(error) => write!(f, "{error}"),
-            Self::Type(error) => write!(f, "{error}"),
-            Self::Validation(diagnostic) => {
-                write!(
-                    f,
-                    "{} at offset {}",
-                    diagnostic.message(),
-                    diagnostic.offset()
-                )
-            }
-            Self::Lowering(error) => write!(f, "{error}"),
-        }
-    }
-}
-
-impl std::error::Error for CompileDiagnostic {}
-
-impl From<ResolutionError> for CompileDiagnostic {
-    fn from(error: ResolutionError) -> Self {
-        Self::Resolution(error)
-    }
-}
-
-impl From<TypeError> for CompileDiagnostic {
-    fn from(error: TypeError) -> Self {
-        Self::Type(error)
-    }
-}
-
-impl From<ValidationDiagnostic> for CompileDiagnostic {
-    fn from(diagnostic: ValidationDiagnostic) -> Self {
-        Self::Validation(diagnostic)
-    }
-}
-
-impl From<LoweringError> for CompileDiagnostic {
-    fn from(error: LoweringError) -> Self {
-        Self::Lowering(error)
-    }
-}
-
-#[doc = include_str!("compile.doc/CompileResult.md")]
-#[derive(Debug, Clone)]
-pub struct CompileResult {
-    document: Option<UiIrDocument>,
-    diagnostics: Vec<CompileDiagnostic>,
-    source_map: SourceMap,
-}
-
-impl CompileResult {
-    #[doc = include_str!("compile.doc/document.md")]
-    #[must_use]
-    pub fn document(&self) -> Option<&UiIrDocument> {
-        self.document.as_ref()
-    }
-
-    #[doc = include_str!("compile.doc/diagnostics.md")]
-    #[must_use]
-    pub fn diagnostics(&self) -> &[CompileDiagnostic] {
-        &self.diagnostics
-    }
-
-    #[doc = include_str!("compile.doc/source_map.md")]
-    #[must_use]
-    pub fn source_map(&self) -> &SourceMap {
-        &self.source_map
-    }
-
-    #[doc = include_str!("compile.doc/has_errors.md")]
-    #[must_use]
-    pub fn has_errors(&self) -> bool {
-        !self.diagnostics.is_empty()
-    }
-
-    #[doc = include_str!("compile.doc/into_document.md")]
-    #[must_use]
-    pub fn into_document(self) -> Option<UiIrDocument> {
-        self.document
-    }
-}
-
-#[doc = include_str!("compile.doc/Compiler.md")]
+#[doc = include_str!("../docs/api/compile.doc/Compiler.md")]
 #[derive(Debug, Clone, Default)]
 pub struct Compiler {
     source_name: Box<str>,
@@ -192,7 +26,7 @@ pub struct Compiler {
 }
 
 impl Compiler {
-    #[doc = include_str!("compile.doc/new_2.md")]
+    #[doc = include_str!("../docs/api/compile.doc/new_2.md")]
     #[must_use]
     pub fn new(source_name: impl Into<Box<str>>) -> Self {
         Self {
@@ -202,42 +36,46 @@ impl Compiler {
         }
     }
 
-    #[doc = include_str!("compile.doc/with_registry.md")]
+    /// Sets the contract registry the [`ContractValidator`] consults (fluent).
     #[must_use]
     pub fn with_registry(mut self, registry: ContractRegistry) -> Self {
         self.registry = registry;
         self
     }
 
-    #[doc = include_str!("compile.doc/granting.md")]
+    /// Grants `capability` to the document being compiled (fluent), so a
+    /// matching `requires="…"` declaration is satisfied.
     #[must_use]
     pub fn granting(mut self, capability: CapabilityId) -> Self {
         self.granted.push(capability);
         self
     }
 
-    #[doc = include_str!("compile.doc/claiming_command.md")]
+    #[doc = include_str!("../docs/api/compile.doc/claiming_command.md")]
     #[must_use]
     pub fn claiming_command(mut self, name: impl Into<Box<str>>) -> Self {
         self.commands.claim(name);
         self
     }
 
-    #[doc = include_str!("compile.doc/with_commands.md")]
+    /// Sets the whole [`CommandSurface`] at once (fluent) — for a caller that has
+    /// the set in hand rather than one name at a time, and the only way to declare
+    /// the empty surface ("this document binds no handler").
     #[must_use]
     pub fn with_commands(mut self, commands: CommandSurface) -> Self {
         self.commands = commands;
         self
     }
 
-    #[doc = include_str!("compile.doc/defining.md")]
+    /// Defines `symbol` (a prop or state binding) in the document's root scope so
+    /// its expressions may reference it (fluent).
     #[must_use]
     pub fn defining(mut self, symbol: Symbol) -> Self {
         self.symbols.push(symbol);
         self
     }
 
-    #[doc = include_str!("compile.doc/compile.md")]
+    #[doc = include_str!("../docs/api/compile.doc/compile.md")]
     #[must_use]
     pub fn compile(&self, document: &Document) -> CompileResult {
         let mut diagnostics = Vec::new();
@@ -298,26 +136,16 @@ impl Compiler {
             diagnostics.push(CompileDiagnostic::Lowering(error));
         }
         match outcome {
-            Ok(document) => {
-                let source_map = document.source_map().clone();
-                CompileResult {
-                    document: Some(document),
-                    diagnostics,
-                    source_map,
-                }
-            }
+            Ok(document) => CompileResult::new(Some(document), diagnostics),
             Err(error) => {
                 diagnostics.push(CompileDiagnostic::Lowering(error));
-                CompileResult {
-                    document: None,
-                    diagnostics,
-                    source_map: SourceMap::new(),
-                }
+                CompileResult::new(None, diagnostics)
             }
         }
     }
 
-    #[doc = include_str!("compile.doc/validate_contracts.md")]
+    /// Validates `element` (and its element-shaped descendants) against any
+    /// contract registered for its tag, recursively.
     fn validate_contracts(
         &self,
         element: &Element,
@@ -342,8 +170,11 @@ impl Compiler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lowering::LoweringError;
+    use crate::validation::ComponentContract;
     use obscur_okui_syntax::ast::Document;
     use obscur_okui_syntax::parser::Parser;
+    use obscur_view::contract::ComponentSurface;
 
     fn document(src: &str) -> Document {
         Document::cast(Parser::new().parse(src).tree().root().clone()).expect("Document")

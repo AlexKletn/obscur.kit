@@ -1,24 +1,29 @@
-#![doc = include_str!("grid_track_list.doc/_module.md")]
+//! `GridTrackList`: a style-local `grid-template-columns` / `-rows` value —
+//! the ordered track sizing functions plus the names on each grid line.
 
 use crate::property::GridTrack;
 
-#[doc = include_str!("grid_track_list.doc/GridTrackList.md")]
+#[doc = include_str!("../../docs/api/property/grid_track_list.doc/GridTrackList.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct GridTrackList {
-    #[doc = include_str!("grid_track_list.doc/tracks.md")]
+    /// The track sizing functions, in author order (already flat: any `repeat(…)`
+    /// was expanded before this value was built).
     tracks: Box<[GridTrack]>,
-    #[doc = include_str!("grid_track_list.doc/line_names.md")]
+    /// The names on each grid line, indexed by 0-based line position (line `i` is
+    /// the `i`-th boundary, so line `0` is before the first track). Empty when no
+    /// `[name]` group was authored; otherwise `tracks.len() + 1` buckets, each a
+    /// (possibly empty) list of the names on that line.
     line_names: Box<[Box<[Box<str>]>]>,
 }
 
 impl GridTrackList {
-    #[doc = include_str!("grid_track_list.doc/new.md")]
+    #[doc = include_str!("../../docs/api/property/grid_track_list.doc/new.md")]
     #[must_use]
     pub fn new(tracks: Box<[GridTrack]>, line_names: Box<[Box<[Box<str>]>]>) -> Self {
         Self { tracks, line_names }
     }
 
-    #[doc = include_str!("grid_track_list.doc/from_tracks.md")]
+    /// Builds a track list with no line names from an ordered iterator of tracks.
     #[must_use]
     pub fn from_tracks<I>(tracks: I) -> Self
     where
@@ -30,25 +35,26 @@ impl GridTrackList {
         }
     }
 
-    #[doc = include_str!("grid_track_list.doc/tracks_2.md")]
+    /// The track sizing functions, in author order.
     #[must_use]
     pub fn tracks(&self) -> &[GridTrack] {
         &self.tracks
     }
 
-    #[doc = include_str!("grid_track_list.doc/uses_ch.md")]
+    #[doc = include_str!("../../docs/api/property/grid_track_list.doc/uses_ch.md")]
     #[must_use]
     pub fn uses_ch(&self) -> bool {
         self.tracks.iter().any(GridTrack::uses_ch)
     }
 
-    #[doc = include_str!("grid_track_list.doc/line_names_2.md")]
+    /// The names on each grid line, indexed by 0-based line position. Empty when
+    /// no `[name]` group was authored.
     #[must_use]
     pub fn line_names(&self) -> &[Box<[Box<str>]>] {
         &self.line_names
     }
 
-    #[doc = include_str!("grid_track_list.doc/into_tracks.md")]
+    /// Consumes the list, returning its tracks (dropping any line names).
     #[must_use]
     pub fn into_tracks(self) -> Box<[GridTrack]> {
         self.tracks

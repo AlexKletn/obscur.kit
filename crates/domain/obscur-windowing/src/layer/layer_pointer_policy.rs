@@ -1,17 +1,17 @@
-#![doc = include_str!("layer_pointer_policy.doc/_module.md")]
+//! Whether pointer input stops at a layer surface or passes through it.
 
-#[doc = include_str!("layer_pointer_policy.doc/LayerPointerPolicy.md")]
+#[doc = include_str!("../../docs/api/layer/layer_pointer_policy.doc/LayerPointerPolicy.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum LayerPointerPolicy {
-    #[doc = include_str!("layer_pointer_policy.doc/Interactive.md")]
+    #[doc = include_str!("../../docs/api/layer/layer_pointer_policy.doc/Interactive.md")]
     #[default]
     Interactive,
-    #[doc = include_str!("layer_pointer_policy.doc/Transparent.md")]
+    #[doc = include_str!("../../docs/api/layer/layer_pointer_policy.doc/Transparent.md")]
     Transparent,
 }
 
 impl LayerPointerPolicy {
-    #[doc = include_str!("layer_pointer_policy.doc/takes_pointer.md")]
+    /// Whether this policy routes any pointer event to the surface at all.
     #[must_use]
     pub const fn takes_pointer(self) -> bool {
         matches!(self, Self::Interactive)

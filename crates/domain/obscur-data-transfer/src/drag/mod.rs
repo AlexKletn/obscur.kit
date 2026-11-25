@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Drag module.
 mod drag_autoscroll;
 pub use drag_autoscroll::DragAutoscroll;
 mod drag_effect;
@@ -6,7 +6,9 @@ pub use drag_effect::DragEffect;
 mod drag_preview;
 pub use drag_preview::DragPreview;
 mod drag_session;
-pub use drag_session::{DragPhase, DragSession};
+pub use drag_session::DragSession;
+mod drag_phase;
+pub use drag_phase::DragPhase;
 mod drag_source;
 pub use drag_source::DragSource;
 mod drop_target;

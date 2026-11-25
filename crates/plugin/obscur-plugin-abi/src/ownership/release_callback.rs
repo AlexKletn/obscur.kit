@@ -1,5 +1,6 @@
-#![doc = include_str!("release_callback.doc/_module.md")]
+//! `ReleaseCallback` (skeleton stub for the spec-defined entity; not yet implemented).
 
-#[doc = include_str!("release_callback.doc/ReleaseCallback.md")]
+/// Placeholder for the `ReleaseCallback` entity. See the Obscur Kit 2 specs for its
+/// contract; this stub exists to materialise the target source layout.
 #[derive(Debug)]
 pub struct ReleaseCallback;

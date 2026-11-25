@@ -1,6 +1,6 @@
 **`.okui` → generated Rust → View → headless CPU → PNG.**
 
-The codegen counterpart of [`showcase_okui_png`](./showcase_okui_png.rs).
+The codegen counterpart of [`showcase_okui_png`](../showcase_okui_png.rs).
 Where that example parses, compiles and *bridges* `showcase.okui` into a
 `View` at runtime, this one consumes a `View` that was compiled **at build
 time**: `build.rs` runs the frontend pipeline over `showcase.okui` and emits a

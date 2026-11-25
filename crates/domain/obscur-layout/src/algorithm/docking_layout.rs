@@ -1,4 +1,4 @@
-#![doc = include_str!("docking_layout.doc/_module.md")]
+//! `DockingLayout`: dock children to the container edges (`DockPanel` style).
 
 use obscur_geometry::{BoxConstraints, Point, Rect, Size};
 
@@ -6,48 +6,35 @@ use crate::model::{LayoutBox, LayoutStyle};
 
 use super::{ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput};
 
-#[doc = include_str!("docking_layout.doc/DockSide.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DockSide {
-    #[doc = include_str!("docking_layout.doc/Top.md")]
-    Top,
-    #[doc = include_str!("docking_layout.doc/Bottom.md")]
-    Bottom,
-    #[doc = include_str!("docking_layout.doc/Left.md")]
-    Left,
-    #[doc = include_str!("docking_layout.doc/Right.md")]
-    Right,
-    #[doc = include_str!("docking_layout.doc/Fill.md")]
-    Fill,
-}
+use super::DockSide;
 
-#[doc = include_str!("docking_layout.doc/DockingLayout.md")]
+#[doc = include_str!("../../docs/api/algorithm/docking_layout.doc/DockingLayout.md")]
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DockingLayout {
-    #[doc = include_str!("docking_layout.doc/sides.md")]
+    /// The dock side per child index; missing entries default to `Fill`.
     sides: Vec<DockSide>,
 }
 
 impl DockingLayout {
-    #[doc = include_str!("docking_layout.doc/new.md")]
+    /// Creates a docking layout with no configured sides (every child fills).
     #[must_use]
     pub fn new() -> Self {
         Self { sides: Vec::new() }
     }
 
-    #[doc = include_str!("docking_layout.doc/with_sides.md")]
+    /// Returns a copy whose per-child dock sides are replaced by `sides`.
     #[must_use]
     pub fn with_sides(mut self, sides: Vec<DockSide>) -> Self {
         self.sides = sides;
         self
     }
 
-    #[doc = include_str!("docking_layout.doc/push_side.md")]
+    /// Appends `side` for the next child index.
     pub fn push_side(&mut self, side: DockSide) {
         self.sides.push(side);
     }
 
-    #[doc = include_str!("docking_layout.doc/sides_2.md")]
+    /// The configured dock sides, parallel to the children by index.
     #[must_use]
     pub fn sides(&self) -> &[DockSide] {
         &self.sides

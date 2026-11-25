@@ -1,11 +1,11 @@
-#![doc = include_str!("style_diff.doc/_module.md")]
+#![doc = include_str!("../../docs/api/computed/style_diff.doc/_module.md")]
 use obscur_identity::FastSet;
 
 use crate::computed::ComputedStyle;
 use crate::property::PropertyId;
 use std::collections::HashSet;
 
-#[doc = include_str!("style_diff.doc/StyleDiff.md")]
+#[doc = include_str!("../../docs/api/computed/style_diff.doc/StyleDiff.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct StyleDiff {
     changed: Vec<PropertyId>,
@@ -13,7 +13,7 @@ pub struct StyleDiff {
 }
 
 impl StyleDiff {
-    #[doc = include_str!("style_diff.doc/between.md")]
+    #[doc = include_str!("../../docs/api/computed/style_diff.doc/between.md")]
     #[must_use]
     pub fn between(old: &ComputedStyle, new: &ComputedStyle) -> Self {
         let mut properties_in_either: FastSet<PropertyId> = HashSet::default();
@@ -37,31 +37,31 @@ impl StyleDiff {
         }
     }
 
-    #[doc = include_str!("style_diff.doc/changed_properties.md")]
+    /// Returns the changed properties in sorted order.
     #[must_use]
     pub fn changed_properties(&self) -> &[PropertyId] {
         &self.changed
     }
 
-    #[doc = include_str!("style_diff.doc/custom_properties_changed.md")]
+    /// Returns `true` when any custom property was added, removed, or changed.
     #[must_use]
     pub fn custom_properties_changed(&self) -> bool {
         self.custom_properties_changed
     }
 
-    #[doc = include_str!("style_diff.doc/is_empty.md")]
+    /// Returns `true` when nothing changed — no property and no custom property.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.changed.is_empty() && !self.custom_properties_changed
     }
 
-    #[doc = include_str!("style_diff.doc/contains.md")]
+    /// Returns `true` when `property` is among the changed properties.
     #[must_use]
     pub fn contains(&self, property: PropertyId) -> bool {
         self.changed.contains(&property)
     }
 
-    #[doc = include_str!("style_diff.doc/custom_changed.md")]
+    /// Compares the two styles' effective custom properties.
     fn custom_changed(old: &ComputedStyle, new: &ComputedStyle) -> bool {
         let mut names_in_either: HashSet<_> = HashSet::default();
         for (name, _) in old.custom_properties() {

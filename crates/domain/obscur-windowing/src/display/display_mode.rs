@@ -1,18 +1,19 @@
-#![doc = include_str!("display_mode.doc/_module.md")]
+//! A display's video mode: resolution and refresh rate (spec §6.6).
 
 use obscur_geometry::Size;
 
-#[doc = include_str!("display_mode.doc/DisplayMode.md")]
+#[doc = include_str!("../../docs/api/display/display_mode.doc/DisplayMode.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DisplayMode {
-    #[doc = include_str!("display_mode.doc/resolution.md")]
+    /// The mode's resolution in physical pixels.
     pub resolution: Size,
-    #[doc = include_str!("display_mode.doc/refresh_millihertz.md")]
+    /// The refresh rate in millihertz, or `None` if unknown.
     pub refresh_millihertz: Option<u32>,
 }
 
 impl DisplayMode {
-    #[doc = include_str!("display_mode.doc/new.md")]
+    /// Creates a mode with the given physical resolution and an unknown refresh
+    /// rate.
     #[must_use]
     pub const fn new(resolution: Size) -> Self {
         Self {
@@ -21,26 +22,26 @@ impl DisplayMode {
         }
     }
 
-    #[doc = include_str!("display_mode.doc/with_refresh_millihertz.md")]
+    /// Sets the refresh rate in millihertz, returning the updated mode.
     #[must_use]
     pub const fn with_refresh_millihertz(mut self, refresh_millihertz: u32) -> Self {
         self.refresh_millihertz = Some(refresh_millihertz);
         self
     }
 
-    #[doc = include_str!("display_mode.doc/resolution_2.md")]
+    /// Returns the mode's resolution in physical pixels.
     #[must_use]
     pub const fn resolution(&self) -> Size {
         self.resolution
     }
 
-    #[doc = include_str!("display_mode.doc/refresh_millihertz_2.md")]
+    /// Returns the refresh rate in millihertz, or `None` if unknown.
     #[must_use]
     pub const fn refresh_millihertz(&self) -> Option<u32> {
         self.refresh_millihertz
     }
 
-    #[doc = include_str!("display_mode.doc/refresh_hz.md")]
+    #[doc = include_str!("../../docs/api/display/display_mode.doc/refresh_hz.md")]
     #[must_use]
     pub fn refresh_hz(&self) -> Option<f32> {
         self.refresh_millihertz.map(|mhz| mhz as f32 / 1000.0)

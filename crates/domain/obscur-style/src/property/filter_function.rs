@@ -1,18 +1,21 @@
-#![doc = include_str!("filter_function.doc/_module.md")]
+//! One entry of a specified `filter` / `backdrop-filter` list, before its lengths
+//! are known (spec §4.13, §5.2).
 
 use crate::property::{FilterOp, LengthContext, LengthExpr};
 
-#[doc = include_str!("filter_function.doc/FilterFunction.md")]
+#[doc = include_str!("../../docs/api/property/filter_function.doc/FilterFunction.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum FilterFunction {
-    #[doc = include_str!("filter_function.doc/Op.md")]
+    /// A function already reduced to a [`FilterOp`] — every filter function except a
+    /// `blur()` written in a relative unit.
     Op(FilterOp),
-    #[doc = include_str!("filter_function.doc/Blur.md")]
+    /// A `blur(<length>)` whose radius still depends on the font or the viewport.
     Blur(LengthExpr),
 }
 
 impl FilterFunction {
-    #[doc = include_str!("filter_function.doc/uses_ch.md")]
+    /// Whether this function is written in `ch`, which needs a measured `0` advance and
+    /// so defers the whole computed value until the font is measured.
     #[must_use]
     pub fn uses_ch(&self) -> bool {
         match self {
@@ -21,7 +24,10 @@ impl FilterFunction {
         }
     }
 
-    #[doc = include_str!("filter_function.doc/absolutize_blur.md")]
+    /// Folds the `blur()` radius as far as this length context reaches, keeping the
+    /// rest symbolic; an already-resolved op is returned unchanged (its own lengths —
+    /// `drop-shadow()`'s offsets — are folded by the computed-value pass that owns
+    /// [`FilterOp`]).
     #[must_use]
     pub fn absolutize_blur(&self, ctx: &LengthContext) -> Self {
         match self {
@@ -30,7 +36,7 @@ impl FilterFunction {
         }
     }
 
-    #[doc = include_str!("filter_function.doc/resolve_blur_radius.md")]
+    #[doc = include_str!("../../docs/api/property/filter_function.doc/resolve_blur_radius.md")]
     #[must_use]
     pub fn resolve_blur_radius(&self, ctx: &LengthContext) -> Option<f32> {
         match self {

@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Event module.
 mod accessibility_action;
 pub use accessibility_action::AccessibilityAction;
 mod accessibility_focus;

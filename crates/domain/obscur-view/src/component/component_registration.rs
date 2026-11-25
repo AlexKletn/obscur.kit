@@ -1,4 +1,4 @@
-#![doc = include_str!("component_registration.doc/_module.md")]
+//! `ComponentRegistration`: one entry in the [`ComponentRegistry`](crate::component::ComponentRegistry).
 
 use obscur_identity::ComponentId;
 
@@ -7,7 +7,7 @@ use crate::component::{
     InstanceId,
 };
 
-#[doc = include_str!("component_registration.doc/ComponentRegistration.md")]
+#[doc = include_str!("../../docs/api/component/component_registration.doc/ComponentRegistration.md")]
 #[derive(Debug)]
 pub struct ComponentRegistration {
     id: ComponentId,
@@ -17,7 +17,7 @@ pub struct ComponentRegistration {
 }
 
 impl ComponentRegistration {
-    #[doc = include_str!("component_registration.doc/new.md")]
+    #[doc = include_str!("../../docs/api/component/component_registration.doc/new.md")]
     #[must_use]
     pub fn new(factory: Box<dyn ComponentFactory>, version: ComponentVersion) -> Self {
         Self {
@@ -28,37 +28,40 @@ impl ComponentRegistration {
         }
     }
 
-    #[doc = include_str!("component_registration.doc/id.md")]
+    /// The stable identity of the registered component kind.
     #[must_use]
     pub fn id(&self) -> ComponentId {
         self.id
     }
 
-    #[doc = include_str!("component_registration.doc/contract.md")]
+    /// The registered component's contract (schema, capability requirements, and
+    /// diagnostics metadata all live here — spec §2.13).
     #[must_use]
     pub fn contract(&self) -> &ComponentContract {
         &self.contract
     }
 
-    #[doc = include_str!("component_registration.doc/version.md")]
+    /// The version of this component's contract schema.
     #[must_use]
     pub fn version(&self) -> ComponentVersion {
         self.version
     }
 
-    #[doc = include_str!("component_registration.doc/factory.md")]
+    /// The factory used to instantiate this component kind.
     #[must_use]
     pub fn factory(&self) -> &dyn ComponentFactory {
         self.factory.as_ref()
     }
 
-    #[doc = include_str!("component_registration.doc/create_instance.md")]
+    #[doc = include_str!("../../docs/api/component/component_registration.doc/create_instance.md")]
     #[must_use]
     pub fn create_instance(&self, instance: InstanceId) -> ComponentInstance {
         self.factory.create_instance(instance)
     }
 
-    #[doc = include_str!("component_registration.doc/create_component.md")]
+    /// Mints a fresh renderable component value of this kind via the stored
+    /// factory — the [`create_instance`](Self::create_instance) counterpart that
+    /// carries the component's local state (spec §2.1).
     #[must_use]
     pub fn create_component(&self) -> Box<dyn ErasedComponent> {
         self.factory.create_component()

@@ -1,124 +1,30 @@
-#![doc = include_str!("command_message.doc/_module.md")]
+//! Client→server command envelope and its capability-scoped kinds (§7.6/§7.7).
 
-use super::{Inspectable, PermissionScope, SubscriptionId, Topic};
+use super::{CommandId, CommandKind, PermissionScope};
 
-#[doc = include_str!("command_message.doc/CommandId.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct CommandId(pub u64);
-
-impl CommandId {
-    #[doc = include_str!("command_message.doc/new.md")]
-    #[must_use]
-    pub const fn new(raw: u64) -> Self {
-        Self(raw)
-    }
-
-    #[doc = include_str!("command_message.doc/raw.md")]
-    #[must_use]
-    pub const fn raw(self) -> u64 {
-        self.0
-    }
-}
-
-#[doc = include_str!("command_message.doc/ControlAction.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ControlAction {
-    #[doc = include_str!("command_message.doc/Pause.md")]
-    Pause,
-    #[doc = include_str!("command_message.doc/Resume.md")]
-    Resume,
-    #[doc = include_str!("command_message.doc/StepFrame.md")]
-    StepFrame,
-    #[doc = include_str!("command_message.doc/SetInspectMode.md")]
-    SetInspectMode(bool),
-}
-
-#[doc = include_str!("command_message.doc/InjectedEvent.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum InjectedEvent {
-    #[doc = include_str!("command_message.doc/PointerDown.md")]
-    PointerDown {
-        #[doc = include_str!("command_message.doc/x.md")]
-        x: i32,
-        #[doc = include_str!("command_message.doc/y.md")]
-        y: i32,
-    },
-    #[doc = include_str!("command_message.doc/PointerUp.md")]
-    PointerUp {
-        #[doc = include_str!("command_message.doc/x_2.md")]
-        x: i32,
-        #[doc = include_str!("command_message.doc/y_2.md")]
-        y: i32,
-    },
-    #[doc = include_str!("command_message.doc/KeyDown.md")]
-    KeyDown {
-        #[doc = include_str!("command_message.doc/key.md")]
-        key: u32,
-    },
-    #[doc = include_str!("command_message.doc/KeyUp.md")]
-    KeyUp {
-        #[doc = include_str!("command_message.doc/key_2.md")]
-        key: u32,
-    },
-}
-
-#[doc = include_str!("command_message.doc/CommandKind.md")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CommandKind {
-    #[doc = include_str!("command_message.doc/Inspect.md")]
-    Inspect(Inspectable),
-    #[doc = include_str!("command_message.doc/Subscribe.md")]
-    Subscribe(Topic),
-    #[doc = include_str!("command_message.doc/Unsubscribe.md")]
-    Unsubscribe(SubscriptionId),
-    #[doc = include_str!("command_message.doc/Control.md")]
-    Control(ControlAction),
-    #[doc = include_str!("command_message.doc/Inject.md")]
-    Inject(InjectedEvent),
-}
-
-impl CommandKind {
-    #[doc = include_str!("command_message.doc/required_scope.md")]
-    #[must_use]
-    pub const fn required_scope(&self) -> PermissionScope {
-        match self {
-            Self::Inspect(_) => PermissionScope::Read,
-            Self::Subscribe(_) | Self::Unsubscribe(_) => PermissionScope::Subscribe,
-            Self::Control(_) => PermissionScope::Control,
-            Self::Inject(_) => PermissionScope::Inject,
-        }
-    }
-
-    #[doc = include_str!("command_message.doc/is_dangerous.md")]
-    #[must_use]
-    pub const fn is_dangerous(&self) -> bool {
-        matches!(self, Self::Control(_) | Self::Inject(_))
-    }
-}
-
-#[doc = include_str!("command_message.doc/CommandMessage.md")]
+/// A single client→server command with a correlation id.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommandMessage {
-    #[doc = include_str!("command_message.doc/id.md")]
+    /// Client-assigned id used to correlate the response/snapshot.
     pub id: CommandId,
-    #[doc = include_str!("command_message.doc/kind.md")]
+    /// The command body.
     pub kind: CommandKind,
 }
 
 impl CommandMessage {
-    #[doc = include_str!("command_message.doc/new_2.md")]
+    /// Creates a command message.
     #[must_use]
     pub const fn new(id: CommandId, kind: CommandKind) -> Self {
         Self { id, kind }
     }
 
-    #[doc = include_str!("command_message.doc/required_scope_2.md")]
+    /// The permission scope required to execute this command.
     #[must_use]
     pub const fn required_scope(&self) -> PermissionScope {
         self.kind.required_scope()
     }
 
-    #[doc = include_str!("command_message.doc/is_dangerous_2.md")]
+    /// Whether this command is a dangerous, audited operation.
     #[must_use]
     pub const fn is_dangerous(&self) -> bool {
         self.kind.is_dangerous()
@@ -127,6 +33,7 @@ impl CommandMessage {
 
 #[cfg(test)]
 mod tests {
+    use super::super::{ControlAction, InjectedEvent, Inspectable, SubscriptionId, Topic};
     use super::*;
 
     #[test]

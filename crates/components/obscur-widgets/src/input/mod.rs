@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Text-input control (spec §2.6, §5.11).
 
 mod input;
 pub use input::Input;

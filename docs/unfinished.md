@@ -52,15 +52,17 @@ One correction to the obvious framing: an application author *can* bolt on copy 
 
 **Effort:** M — domain command variants, a resolver arm, a runtime port, a Wayland/X11 adapter. **Done means:** Ctrl+C/X/V work in a shipped `<input>` and `<textarea>` on Linux, paste replaces the selection, undo survives it, and the port has one real adapter plus the existing `MemoryClipboard` for tests.
 
-### 4. A stylesheet can react to width and height, and to nothing else — including reduced motion
+### 4. CSS media preferences read system appearance
 
-`crates/frontend/obscur-css/src/compiler/condition_lowering.rs:149-157` lowers `min/max/plain width|inline-size` and `height|block-size`, then `// Boolean features, orientation, prefers-*, unknown names.` `_ => return None`. So `orientation`, `pointer: coarse`, `any-hover`, `prefers-color-scheme`, `prefers-reduced-motion` and `resolution` all fail closed. It is at least honest — `crates/facade/obscur-kit/src/bootstrap/css_pipeline.rs:69-70` turns each into a runtime diagnostic.
-
-Worse, and separate: even a condition that *did* lower would not gate motion. `crates/frontend/obscur-css/src/compiler/stylesheet_compiler.rs:359-366` appends `inner.motion_rules` into the enclosing scope **unconditioned**, one line above where matchable rules get wrapped in `RuleCondition::All`, with a comment saying exactly that. So `@media (prefers-reduced-motion: reduce) { * { transition: none } }` is inert twice over.
-
-On the tablet this is the row that hurts most in styling: no sheet can respond to rotation, and none can size hit targets for a finger versus a mouse. Reduced motion is an accessibility obligation, not a nicety.
-
-**Effort:** M. `orientation` and `pointer`/`hover` need a media-environment field each; `prefers-*` needs a source (the system-theme appearance port already exists and already knows the desktop's preferences). The motion asymmetry is visible one line from its fix. **Done means:** `@media (orientation: landscape)`, `(pointer: coarse)` and `(prefers-reduced-motion: reduce)` each match, and a transition authored inside a false `@media` block does not run.
+Ordinary style rules can query color scheme, reduced motion and increased
+contrast. The appearance snapshot updates those preferences together with
+the CSS variables. Conditional transition rules, animation rules and keyframe
+definitions use the same query environment. The `transition` shorthand
+honors the cascade, including a conditional `transition: none` reset.
+Orientation follows the viewport, and resolution tracks the surface scale.
+Pointer and hover queries use a host profile or the Wayland seat profile
+for windows, layer surfaces and panel popups. Automatic reporting on
+non-Wayland window backends remains open.
 
 ### 5. Nothing scrolls horizontally — and `overflow-x` still clips, so the content is hidden and unreachable
 
@@ -80,15 +82,12 @@ Deliberately deferred and said so in three places (`scrolling.rs:140-142`, `scro
 
 **Effort:** M. Widen `ScrollOffsets` to a `Point` and `ScrollContainer` to carry `content_width`/`max_scroll_left`; the four consumers follow. **Done means:** a wide table scrolls with the wheel, with a drag, with a fling, reveals a right-offscreen node on Tab, and paints a horizontal bar.
 
-### 6. Safe-area and keyboard insets have no producer anywhere
+### 6. Safe-area and keyboard insets have a host API
 
-`crates/application/obscur-runtime/src/runtime/ui_runtime/surface.rs:58,63,68` define `set_safe_area_insets`, `set_keyboard_insets`, `set_environment`. Every caller in the tree is a test (`crates/facade/obscur-kit/tests/environment_insets.rs`, `spec_ch6b_insets.rs`, `crates/application/obscur-runtime/tests/scroll_containers.rs:84,130,161`). Neither `app/runner.rs` nor `app/layer_runner.rs` mentions insets, and `App` has no door onto them either.
-
-So on the tablet `env(safe-area-inset-*)` is permanently zero — content sits under the cutout and the rounded corners — and because keyboard geometry never arrives, a focused field is never lifted out from under the on-screen keyboard, even though the scroll-into-view machinery that would do it exists and is tested. §6.15's spec tests are green precisely because the test supplies by hand what production never supplies: the chapter is closed at the runtime seam and open at every seam that would feed it.
-
-There is an irony worth naming: `../obscur.virtual-keyboard` is a kit application that occludes the bottom of the screen, and there is no channel by which it, or the compositor, could tell another kit application so.
-
-**Effort:** S for the `App`/`AppControl` setter; M for sourcing real values from winit and from the layer surface. **Done means:** a notched device (or a fake reporting insets) shows `env(safe-area-inset-top)` non-zero in a computed style, and a focused field scrolls clear of a reported keyboard rect.
+`UiRuntime` consumes both values and `AppControl` queues them for standalone
+applications. The integration test supplies both via `AppControl` and verifies
+the resulting CSS and independent keyboard reset. Automatic inset sourcing
+by bundled platform adapters remains open.
 
 ### 7. Touch stops at tap, pan, long-press and fling
 
@@ -219,15 +218,12 @@ The four-way agreement is deliberate and documented, and it must be kept — nar
 
 **Effort:** S–M. **Done means:** all four sites call one `padding_box_of(computed, node, bounds)`, the rounded clip uses reduced radii, and a test asserts a child does not paint over a 10 px border.
 
-### 19. SVG drops `fill-rule` and `fill-opacity`
+### 19. SVG fill rule and paint opacity — fixed
 
-`crates/adapters/obscur-resource-decode/src/decoder/svg_vectorizer.rs:130` builds `Path::new()` and never calls `with_fill_rule`, so every shape gets `NonZero` even though the scene model carries the concept (`crates/domain/obscur-scene/src/path/path.rs:26`) and both backends honour it. `:118-127` hardcodes alpha to 1.0 and never reads usvg's `Fill::opacity()`. Neither is covered by the documented scope note in `scene_vector.doc/SceneVector.md`, which lists gradients, patterns, masks, filters and text.
-
-So every even-odd path — a ring icon, a donut, a counter-shaped glyph, the letter O — fills solid, and `fill-opacity="0.5"` renders opaque. Silently wrong pixels on the most ordinary asset a UI ships.
-
-(One nearby lead was refuted and should not be reopened: group transforms are *not* dropped — usvg pre-resolves ancestor transforms into absolute path data, per `usvg-0.46.0/src/tree/mod.rs:1384-1387`.)
-
-**Effort:** S — fill-rule is close to a one-liner; opacity is one multiply. **Done means:** a ring SVG shows its hole and a half-opaque fill is half opaque, pinned by a CPU-render test.
+The vector decoder preserves the SVG fill rule and the opacity of solid fills and strokes.
+For `currentColor`, paint opacity multiplies the computed color’s alpha at draw time.
+The `svg_preserves_fill_rule_and_paint_opacity` integration test checks the transparent hole
+of an even-odd path and the resulting alpha for both literal and host-resolved fills.
 
 ### 20. `visibility` does nothing, and `revert` is not lowered
 
@@ -249,17 +245,17 @@ The hints matter for the second stated target: purpose is exactly what tells an 
 
 **Effort:** S for the cursor area (the runtime already computes the caret geometry); M for hints, which need a channel to the compositor's text-input protocol. **Done means:** the candidate list follows the caret, and a `type="password"` field reports a sensitive purpose that a keyboard adapter can read.
 
-### 22. Five capabilities the runtime has, that `App` has no door onto
+### 22. Standalone application capabilities
 
-`App` is the documented one-call entry point, and every one of these forces an author into `control.with_runtime(…)` or into abandoning `App` entirely. All four external consumers open their `main` with a registration loop for this reason.
+`App::component` registers custom components during startup and returns a
+typed error if a component identifier conflicts. Windowed apps can obtain a
+thread-safe wake callback through `App::on_window_waker`. Window operations are
+available through `AppControl`.
 
-- **Registering a component** — the toolkit's own extension point. `checks/facade-consumer/src/badge.rs:76`, `checks/layer-consumer/src/panel.rs:62`, `../test-app/src/app/mod.rs:53`, `../obscur.virtual-keyboard/crates/keyboard-app/src/main.rs:770` all call `runtime.register_component(...)` inside `with_runtime`. `App` has no `component()` method, though the queue is already drained before the first frame (`app_parts.rs:118`).
-- **Waking the loop from another thread.** `App::waker` is `#[cfg(feature = "shell-layer")]` and takes a `LayerWaker` (`app/app.rs:126-131`); `AppControl` is `Rc<RefCell<…>>` and cannot cross a thread. The winit `EventLoopProxy` that would do it is constructed at `app/runner.rs:123`, is `Send`, and is private. So a windowed app with a directory scan, a network poll or an inotify watch has no supported way to say "rebuild".
-- **Controlling its own window.** `app/runner.rs:712`'s `CloseRequested => event_loop.exit()` is the only exit; the `winit::window::Window` is private. No quit, no title change, no resize, no fullscreen — while the layer path has a full 141-line `LayerControl`.
-- **Installing the system theme.** `install_system_theme` (`kit_bootstrap.rs:95,130`) has no caller under `src/app/`, so `--obscur-sys-*` is absent from every shipped application and `var(--obscur-sys-accent)` resolves to nothing. `App` *is* the host in this entry point, so the doc's "a host installs them" framing does not cover it.
-- **Serving DevTools.** `docs/api/11-diagnostics.md:41-49` starts from `inspect_source_from(&rt)` — a `&UiRuntime` an `App` consumer never holds — and continues into a blocking `accept`/`serve` that cannot live inside `with_runtime`. Both in-repo hosting examples own their loop.
-
-**Effort:** S each, M for the bundle. **Done means:** `App::component`, a `Send` wake handle for the windowed path, a `WindowControl` mirroring `LayerControl`, `App::system_theme()`, and one `App`-based DevTools example.
+`App::system_theme` installs a provider snapshot on both runners and
+subscribes to changes when the provider supplies a watch.
+`AppControl::set_system_appearance` also accepts host snapshots.
+A DevTools example using `App` remains open.
 
 ### 23. The scrollbar is a rectangle
 
@@ -267,13 +263,14 @@ The hints matter for the second stated target: purpose is exactly what tells an 
 
 **Effort:** M. **Done means:** dragging the thumb scrolls, and `::part(scrollbar-thumb)` restyles it.
 
-### 24. Five layout observers are built and none is driven
+### 24. The runtime drives all five geometry observers
 
-`crates/domain/obscur-layout/src/observer/` — 695 lines, 24 unit tests. `ResizeObserver`, `LayoutObserver` and `TransformObserver` have zero references anywhere in `crates/` or `tools/`; `IntersectionObserver` and `VisibilityObserver` are named only by `crates/facade/obscur-kit/tests/spec_ch4b_observers.rs:27-28`, which constructs them itself and feeds them rects it computed — so §4.4 reads green while nothing in the runtime constructs any of the five. §4.4's actual requirements (callbacks after layout commit, coalescing, scheduling the next transaction, no recursive mutation, scoped auto-cleanup) do not exist. `docs/api/12-reality.md` contains zero occurrences of "observer" — its own method would have caught this and was never run for this module.
-
-No lazy-loading, no visibility callbacks, no resize callbacks, in a toolkit whose stated origin use case is large virtualized lists. `IntersectionObserver` is the one that pays for itself first, and the memory note records "scroll-chain geometry + observer driver" as an owner-approved build, so the decision to fill this already exists.
-
-**Effort:** L. **Done means:** an application registers an `IntersectionObserver` on a node and is called after layout commit when it enters the viewport, with coalescing and cleanup pinned by tests.
+`UiRuntime` publishes observations after a frame's layout commit, coalesces
+unchanged observations, and removes subscriptions when their nodes leave the
+retained tree. Callbacks can request a follow-up UI commit. Integration tests
+cover resize, layout, visibility, intersection and transform notifications.
+Visibility accounts for inherited CSS `visibility` as well as viewport and
+scroll clipping. Intersection tracks geometric overlap.
 
 ### 25. Theming: three presets in a drawer
 
@@ -287,8 +284,6 @@ Real theming happens through a different mechanism entirely (the `--obscur-sys-*
 
 Each is documented at its own site with a reason; none is worth its own campaign, all are worth a reader knowing.
 
-- **Locale-aware number, date and currency formatting is unbuilt** (`crates/domain/obscur-localization/src/lib.doc/_module.md:36-45`): `MessageValue::integer` renders ASCII digits with no grouping in every locale, so a Russian or French user sees `1234567` in an app whose *plural agreement* around that number is already correct. The reason (per-locale CLDR pattern vendoring is a different order of problem) is sound; the mismatch is unusually visible. M–L.
-- **RTL is not reordered in caret geometry** (`crates/application/obscur-runtime/src/orchestration/caret_geometry.doc/line_caret_x.md:15`) and base direction is unwired because "a half-wired base direction is worse" (`text_attributes.doc/direction_for.md:20`). Arabic and Hebrew place the caret wrongly. M.
 - **`fit-content(<length-percentage>)` lowers to no sizing keyword at all** (`crates/domain/obscur-style/src/property/layout_keyword.doc/SIZING_FIT_CONTENT.md:6`). S.
 - **Flex has no `order` reordering and no baseline alignment** (`crates/domain/obscur-layout/src/algorithm/flex_layout.doc/FlexLayout.md:62`); `AlignItems` has no `Baseline` variant, so `align-items: baseline` is dropped as invalid and the item keeps `stretch` — which is what a browser does for a non-baseline item, so it reads as a missing feature, not a layout bug. M.
 - **`justify-content: stretch` and `normal` are not accepted by the parser** (`crates/domain/obscur-style/src/property/layout_keyword.rs:310-320`) even though the layout model implements `Stretch` and `align-content: stretch` parses fine. The rendered result is right by accident (the initial value already stretches auto tracks), but the declaration cannot override an earlier `justify-content: center`. S.
@@ -408,7 +403,11 @@ Two traps for whoever fixes it. `docs/api/12-reality.md:85` states the feature i
 
 **38. `docs/layer-consumer-audit.md`'s finding 2-K is diagnosed wrong and has no status row.** Both halves as written are refuted: open style scope works and is pinned by `crates/facade/obscur-kit/tests/component_output_is_styled.rs` (5/5 green, including `a_descendant_selector_climbs_from_the_document_into_an_open_component`), and inline `style="…"` reaches a component internal fine (`orchestration/inline_styles.rs:88` walks every node with no scope gate; measured landing on the span inside a button). The real defect underneath is item 1, and it is larger. The consumer's own CSS still asserts the inline-style claim (`suggestion_bar.css:98-101`), so the `::part()` workaround it drove people to was chosen partly on a false premise. Two of the audit's six named elements (`.setting-hint`, `.drag-grip`) sit inside plain `<div>`s and should be styled by items 1's mechanism — that half looks like generalisation from the button cases. **S** to rewrite the finding; the fix is item 1.
 
-**39. `LayerWindow::supports` reports `ExclusiveKeyboard` as `Native` while delivering no keys.** `crates/adapters/obscur-shell-layer/src/surface/layer_window.rs:347-361` — the comment says "wlr-layer-shell names all three keyboard modes", true of the protocol, false of this adapter. The feature's own doc states the intended contract: "Where it is unavailable the honest fallback is on-demand focus, reported as `Emulated`" (`crates/domain/obscur-windowing/src/port/layer_backend.doc/ExclusiveKeyboard.md`). So a host that does the right thing — asks `supports()` before choosing a focus policy — is told the capability is native, hands the compositor an exclusive keyboard grab (`layer_window.rs:384`) and then eats every keystroke, which on a wlroots desktop means the user cannot type anywhere until the process is killed. Nothing reaches that state by default (`LayerFocusPolicy::default() == Never`), and `grep ExclusiveKeyboard docs/` finds only a passing mention, so no ledger tracks it. The capability model exists precisely so a host is not lied to. **S** — `Limited` or `Emulated`, plus a sentence in `supports.md`.
+**39. Layer keyboard input is wired.** SCTK binds the keyboard seat, routes
+presses and releases to the panel or popup, and the facade delivers panel
+events to the runtime. The capability table advertises exclusive focus at
+layer-shell version 1 and on-demand focus from version 4. The mapping and key
+conversion are covered by adapter tests.
 
 **40. Five stale ledger rows, each cheap, each capable of sending someone to re-do closed work.**
 - `media_environment.doc/MediaEnvironment.md` and `docs/conformance-audit.md:542` both say the `unsupported` field has no production reader — false since `css_pipeline.rs:69-71`.
@@ -570,258 +569,84 @@ All probes were built out of workspace on the `checks/facade-consumer` pattern (
 
 ### Part A — breaks an application
 
-#### A1. Every math function containing a percentage is silently discarded
+#### A1. CSS math with percentages in layout and border radii — fixed
 
-`width: calc(100% - 40px)` becomes `auto`. `width: calc(50%)` — a math function with a percentage and no arithmetic at all — measures 0 where the identical `width: 50%` measures 200.
+Layout retains percentage expressions until the containing block provides the basis.
+`percentage_math_uses_the_layout_axis_basis` covers dimensions, margins, and
+signed insets with `calc()`, `min()`, `max()`, and `clamp()`.
+Border radii resolve horizontal and vertical percentages against the respective
+border-box dimensions. `percentage_radius_math_rounds_paint_and_hits` covers
+the resulting clip and hit testing. The styling API and length resolution docs
+describe the deferred calculation.
 
-```
-.a{flex:none;height:20px;width:50%}                     [control: bare %]
-    [0 css diagnostic(s) raised for this sheet]
-    got  x=0.00 y=0.00 w=200.00 h=20.00   want w=200
-.a{flex:none;height:20px;width:calc(100px + 20px)}      [control: calc, no %]
-    got  x=0.00 y=0.00 w=120.00 h=20.00   want w=120
-.a{flex:none;height:20px;width:calc(100% - 40px)}
-    got  x=0.00 y=0.00 w=  0.00 h=20.00   want w=360
-.a{flex:none;height:20px;width:min(50%, 100px)}
-    got  x=0.00 y=0.00 w=  0.00 h=20.00   want w=100
-.a{flex:none;height:20px;width:clamp(100px, 50%, 150px)}
-    got  x=0.00 y=0.00 w=  0.00 h=20.00   want w=150
-.a{flex:none;height:20px;width:calc(50%)}
-    got  x=0.00 y=0.00 w=  0.00 h=20.00   want w=200
-.a{flex:none;width:100px;height:calc(100% - 40px)}
-    got  x=0.00 y=0.00 w=100.00 h=300.00  want h=260
-.o{position:absolute;left:calc(50% - 50px);top:20px;width:100px;height:50px}
-    got  x=0.00 y=20.00 w=100.00 h=50.00  want x=150
-.o{position:absolute;left:50%;...}                      [control]
-    got  x=200.00 y=20.00 w=100.00 h=50.00
-.a{margin-left:calc(25% + 10px)}   got x=  0.00   want x=110
-.a{margin-left:calc(10px + 10px)}  got x= 20.00   [control, correct]
-```
+#### A2. Invalid CSS length declarations in the cascade — fixed
 
-Every sheet raised **zero** diagnostics (checked `.errors` *and* `.unsupported`). The value survives compilation intact — `Declaration { property: Width, value: Calc(Diff(Leaf(Percent(100.0)), Leaf(Px(LogicalPx(40.0))))) }` — and dies at the layout bridge.
+Length longhands validate the entire declaration before entering the cascade.
+Unsupported keywords and multi-token values leave earlier valid declarations
+in force. The layout regression verifies progressive-enhancement fallback.
 
-`crates/application/obscur-runtime/src/orchestration/length_resolution.rs:83` — `Some(PropertyValue::Calc(expr)) => expr.resolve(ctx).map_or(Dimension::Auto, Dimension::Px)`. `LengthContext` carries no percentage basis, so `LengthExpr::resolve` returns `None` for anything containing `%` and the declaration collapses. The pixel-only twin is `:111` (`.unwrap_or(0.0)`). `grep -rn "PropertyValue::Calc" crates/application/` returns exactly those two lines. Structural cause: `crates/domain/obscur-layout/src/model/dimension.rs:5-18` is `Auto | Px | Percent | MinContent | MaxContent | FitContent` — no expression variant, so nothing symbolic can survive to the point where the containing block is known.
+#### A3. Negative literals in nonnegative CSS lengths — fixed
 
-The runtime's own doc directory records the behaviour (`length_resolution.doc/length_context.md`: "a `%` term inside `calc()` therefore does not fold here (that value falls back to `auto`/`0`, still without an unsupported-feature diagnostic)"; `margin_edges_of.md` likewise) — a known wart, not a stated non-goal. The author-facing contradiction is `docs/api/04-styling.md:229-233`, which tells authors math functions "are accepted wherever a `<length>` is" with `ch` as the sole caveat.
+Length longhands reject negative literals outside signed properties.
+Padding and border shorthands reject the entire declaration if one
+component is invalid. The layout regression preserves valid earlier
+geometry while allowing a legal negative margin.
 
-**Effort:** L — it needs a `Dimension` variant that carries the expression to layout, or a percentage basis threaded into `LengthContext`. **Done means:** `width: calc(100% - 40px)` in a 400px CB measures 360, `min()`/`max()`/`clamp()` with a percentage resolve, and the two `length_resolution.doc` files plus `docs/api/04-styling.md` stop disagreeing.
+#### A4. Percentage padding and gaps — verified
 
-#### A2. An unrecognised value does not get dropped — it overwrites the valid declaration before it
+The layout bridge retains symbolic percentages and math for padding and
+gap. Layout tests cover resolving both padding axes from the containing
+inline size, resize, text and paint alignment, and the distinct gap bases
+for flex and grid.
 
-```
-$ /home/alex/probe-lane-css/target/debug/inv          (parent widened to 137 so a wrong number cannot be a coincidence)
-baseline                 Some((60.0, 20.0))    <= .a{width:137px} .b{width:60px;height:20px}
--webkit-fill-available   Some((137.0, 20.0))   <= .b{width:60px; width:-webkit-fill-available; height:20px}
-stretch                  Some((137.0, 20.0))
--moz-available           Some((137.0, 20.0))
-aut0 (typo)              Some((137.0, 20.0))
-red (wrong type kw)      Some((137.0, 20.0))
-two rules                Some((137.0, 20.0))   <= .b{width:60px;...} .b{width:-webkit-fill-available}
-lower spec later         Some((60.0, 20.0))    <= correct: specificity still wins
-multi-token              Some((137.0, 20.0))   <= width: not a length          -- and NO diagnostic
-bad dimension            Some((60.0, 20.0))    <= width: 100qq   correctly dropped
-bad function             Some((60.0, 20.0))    <= width: frobnicate(3)  correctly dropped
-height invalid           Some((60.0, 0.0))
-max-width invalid        Some((60.0, 20.0))    <= 50px lost
-min-height invalid       Some((60.0, 20.0))    <= 40px lost
-$ ... /inv2
-margin-left invalid   (x,y,w,h)=Some((0.0, 0.0, 60.0, 20.0))   <= 23px lost
-padding-left invalid  (x,y,w,h)=Some((0.0, 0.0, 60.0, 20.0))   <= 11px lost (content 71 -> 60)
-left invalid          (x,y,w,h)=Some((0.0, 7.0, 60.0, 20.0))   <= abspos left 30px -> 0
-invalid then valid    (x,y,w,h)=Some((0.0, 0.0, 60.0, 20.0))   <= order, not something else
-```
+#### A5. Absolute sizing with opposing insets — fixed
 
-Every `<length>` longhand is in scope. `width: 100px; width: -webkit-fill-available` is the progressive-enhancement idiom; here the fallback is destroyed by the enhancement.
+The positioned-box solver preserves explicit dimensions, clamps the used
+border box against size constraints, and solves auto and fixed margins.
+It resolves opposing insets using the containing block’s direction.
+End-to-end cases cover centering, stretching, percentage margins and RTL.
 
-`lower_keyword` (`crates/frontend/obscur-css/src/compiler/value_lowering.rs:51`) never fails — an unknown word is minted as an inert interned keyword — so `lower_for_property` returns `Some`, `property_compiler.rs:120-134` builds a `CompiledDeclaration::Standard`, and `stylesheet_compiler.rs:324-330` pushes it into the block, where it outranks the earlier declaration by source order and computes to the property's initial value. **The fix is already half-written:** `keyword_value_is_foreign(property, &decl.value)` is computed three lines below the push at `:341-345` and used only to record a diagnostic, never to skip the push. And that check matches a one-element slice (`longhand_catalog.rs:265`), so `width: not a length` does the same damage with no diagnostic at all.
+#### A6. Default flex cross-axis alignment — fixed
 
-Three places in the tree assert the opposite: `stylesheet_compiler.rs:336-338` ("so it is dropped in effect"), `restyle_phase.rs:155-157` ("dropped it and kept the rest (§4.13)"), `style_matching_coordinator.doc/collect_invalid_value_faults.md:7` ("a `width: not-a-length` never reaches the cascade").
+The flex engine stretches wrapped lines for `align-content: normal` on a
+definite cross axis. The end-to-end test compares the omitted value, normal,
+and flex-start. The grid regression distinguishes normal, which stretches
+automatic rows, from explicitly authored flex-start.
 
-**Effort:** S. **Done means:** the foreign-keyword check gates the push instead of only the diagnostic, `lower_value` refuses a multi-component value it cannot lower, and a test asserts `width: 60px; width: -webkit-fill-available` measures 60.
+#### A7. Positional alignment when content overflows — fixed
 
-#### A3. Negative lengths are applied where CSS requires non-negative
+Flex and grid share content-distribution arithmetic. Center and end
+alignment use signed free space. The space distribution modes keep their
+start fallback on overflow. An end-to-end regression checks both axes of
+flex and grid, including overflowing flex items with automatic margins.
 
-```
-$ /tmp/probe-degen/target/release/pa      (.a 200x100 containing .b 60x20; tuples are (x,y,w,h))
-control:                 a=(0,0,200,100)   b=(0,0,60,20)
-padding: -10px:          a=(0,0,180,80)    b=(-10,-10,60,20)
-padding-left: -10px:     a=(0,0,190,100)   b=(-10,0,60,20)
-border: -5px solid red:  a=(0,0,190,90)    b=(-5,-5,60,20)
-width: -50px:            a=(0,0,0,100)
-max-width: -50px:        a=(0,0,0,100)
-margin: -10px:           a=(-10,-10,200,100)   [legal, handled correctly]
-$ /tmp/probe-degen/target/release/pb
-flex gap:0px    -> 2nd item x=40      flex gap:-10px -> x=30 (items overlap)
-flex gap:-1e30px -> x=-1e30
-font-size:16px  -> h=21.792           font-size:-10px -> h=0.0 (text disappears)
-$ /tmp/probe-negrange/...              (independent probe)
-later width:-50px    -> a w=0.0    <= .a{width:200px} ... .a{width:-50px}
-padding: 10px -10px  -> a=(0,0,180,120) b=(-10,10,60,20)   <= half a shorthand applied
-padding:-1e9px       -> b=(-1000000000.0, -1000000000.0, 60, 20)
-```
+#### A8. Axis-specific gap longhands — verified
 
-Two things are wrong at once. An invalid declaration **overrides a valid earlier one** (`width: 200px` then `width: -50px` measures 0), and one invalid component of a shorthand applies the other half. `padding: -10px` is the worst: the parent's box shrinks *and* the child is placed at (-10,-10), outside the box that reports as containing it — geometry a browser cannot produce.
+CSS compiles `row-gap` and `column-gap` independently, and the layout model
+retains both axes. The spec cases now exercise the column longhand directly in
+flex and grid. The layout CSS suite covers shorthand precedence, variable
+substitution, and independent percentage bases.
 
-Confirmed at compile level: `Declaration { property: PaddingTop, value: Length(Px(LogicalPx(-10.0))) }`, errors=0, unsupported=0.
+#### A9. Non-finite wheel deltas — fixed
 
-Site is `crates/frontend/obscur-css/src/compiler/property_compiler.rs:472-483` — `lower_length_longhand` has no per-property range. (`is_length_longhand` at `longhand_catalog.rs:150-205` is only the unitless-zero gate; it is not the defect, it is the right shape for the fix.) The governing rule is already stated three hundred lines away at `property_compiler.rs:459-468`: "a declaration whose value does not match the property's grammar is dropped (CSS Syntax 3 §9)". The numeric-range half was never written.
+Scroll chains ignore non-finite deltas per axis and the offset store rejects
+them independently. The wheel regression checks that NaN preserves both the
+scroll position and the hit target, and that subsequent wheel input works.
 
-Rows measured **inert** and not worth a test: `flex-basis: -10px`, `outline-width: -3px`, `min-width: -50px`, non-flex `gap: -10px`. `line-height: -2` and `line-height: -10px` are handled **correctly** (fall back to `normal`, 21.792).
+#### A10. Primary-button input in five windowed demos — fixed in the input path
 
-**Effort:** S. **Done means:** an `is_non_negative_longhand(property)` sibling returns `None` from the length path, `.a{width:200px} .a{width:-50px}` measures 200, and `padding: 10px -10px` applies nothing.
+`windowed_counter`, `controls_window`, `showcase_window`, `uikit_window` and
+`wireframe_live_window` use the winit pointer converter for primary-button
+press and release. The converter supplies the trusted native event that click
+dispatch requires. CI compiles all five examples. A live click check is still
+pending.
 
-#### A4. Percentage `padding` and percentage `gap` compute to zero, with no diagnostic
+#### A11. Interactive headless proofs failed to click — fixed
 
-```
-.cb{width:400px;height:300px} .a{width:200px;height:100px;padding-left:10%}
-  [0 css diagnostic(s) raised for this sheet]
-    node -> x=0.00 y=0.00 w=200.00 h=100.00     want w=240
-.cb{...} .a{width:200px;height:100px;padding-left:40px}     [control]
-    node -> x=0.00 y=0.00 w=240.00 h=100.00     correct
+The local event drivers in `controls_headless` and `wireframe_live_headless`
+mark their synthetic input as trusted. CI runs both proofs, which assert that
+the checkboxes toggle and that disabled controls ignore clicks.
 
-.a{padding:10%;height:20px}      -> w=400.00 h= 20.00   want h=100
-.a{padding:40px;height:20px}     -> w=400.00 h=100.00   [control]
-
-child of .a{padding-left:10%;padding-top:25%}   -> x= 0.00 y=  0.00   want x=40 y=100
-child of .a{padding-left:40px;padding-top:100px}-> x=40.00 y=100.00   [control]
-
-.c{display:flex;width:400px;height:50px;gap:10%} -> 2nd item x=100.00   want x=140
-.c{display:flex;width:400px;height:50px;gap:40px}-> 2nd item x=140.00   [control]
-```
-
-The percentage survives the whole CSS pipeline — `Declaration { property: PaddingLeft, value: Length(Percent(10.0)) }`, `Gap` likewise, errors=0 unsupported=0 — and is discarded at the layout bridge: `crates/application/obscur-runtime/src/orchestration/length_resolution.rs:108`, `Length::Percent(_) | Length::Auto => 0.0` inside `length_px_of`, reached for padding through `insets_of` (`:143-157`, called at `layout_style_mapping.rs:75,86`) and for gap at `layout_style_mapping.rs:110`.
-
-Structural cause: `LayoutStyle::padding`/`::border` are `obscur_geometry::Insets` (plain f32), while `margin` is a `MarginEdges` of `Margin`, which carries `Percent` and resolves correctly (`model/margin.rs:29`) and got a written "# Why this is not `Dimension`" section. The two halves of the box model were modelled differently. Neither `layout_style.doc/padding.md` nor `gap.md` mentions percentages; `layout_style_mapping.doc/layout_style_from.md:25-27` records the consequence without a reason. Nothing here can even emit a diagnostic — `grep -n "sink\|Diagnostic"` over both files returns nothing.
-
-`border-width` shares `insets_of` but does not accept percentages in CSS, so it is not a live instance. `docs/api/04-styling.md:229` ("Percentages stay symbolic until layout knows the containing block") is affirmatively false for these properties.
-
-**Effort:** M. **Done means:** `padding-left: 10%` of a 400px CB is 40px on all four edges (block axis against the inline size), `gap: 10%` resolves, and `layout_style.doc/padding.md` says so.
-
-#### A5. An absolutely positioned box throws away its explicit `width`/`height` when both insets are set, and never consults margins at all
-
-```
-CSS base: .cb{position:relative;width:400px;height:300px}
-left:10px right:10px width:100px height:50px
-    got  x= 10.00 y=  0.00 w=380.00 h= 50.00     want x=10 w=100
-left:0 right:0 width:100px margin-left:auto margin-right:auto
-    got  x=  0.00 y=  0.00 w=400.00 h= 50.00     want x=150 w=100
-top:10px bottom:10px height:50px (left:0 width:20px)
-    got  x=  0.00 y= 10.00 w= 20.00 h=280.00     want y=10 h=50
-CONTROL  left:10px right:10px (no width)  -> w=380.00   correct (stretch)
-CONTROL  left:10px width:100px (no right) -> w=100.00   correct
-MARGIN   left:10px margin-left:20px width:100px  -> x= 10.00   want x=30
-MARGIN2  left:10 right:10 margin-left:20 margin-right:30 (no width) -> x=10.00 w=380.00  want x=30 w=330
-MAXW     left:0 right:0 max-width:100px -> w=400.00   want w=100
-```
-
-css-position-3:1468-1472 — over-constrained, ignore `right` (ltr) and solve for it: x=10, w=100. `:1494-1496` is the block-axis twin ("ignore the value for bottom"). `:1455-1459` is the centred-dialog idiom (`left:0;right:0;width:X;margin-inline:auto` → equal margins, x=150).
-
-`crates/domain/obscur-layout/src/model/inset.rs:144` — `(Some(start), Some(end)) => (cb_origin + start, (cb_extent - start - end).max(0.0))` is the one arm of `resolve_axis` that never reads its `explicit` parameter. Margins are not merely un-consulted when `auto`; they are **absent from the signature**: `arrange_pass.rs:421` calls `resolve_absolute_box(cb, width, height, natural, box_sizing, border_padding)` and `inset.rs:42-49` has no margin parameter to receive one — so even the currently-correct stretch arm is wrong once a margin is present (MARGIN/MARGIN2 above).
-
-`inset.doc/resolve_absolute_box.md` describes the behaviour ("The insets win; the explicit/natural width is ignored") and in the next paragraph grounds the function in "CSS 2.1 §10.3.7" — the section mandating the rule it violates. The only test pinning it is the crate-local `inset.rs:243 both_insets_stretch_to_containing_block`, not a spec oracle. The `MAXW` row confirms ledger Appendix B is real and **downstream of this**: fixing the clamp alone still yields 400, because the size being clamped came from the insets rather than the author. `docs/servo-algorithm-catalog.md:169` row E-7 is adjacent but is written as a margin-distribution refinement and does not say an explicit size is discarded.
-
-**Effort:** M. **Done means:** over-constrained resolution drops `right`/`bottom`, `resolve_absolute_box` takes margins and solves the auto-margin equation, and `left:0;right:0;width:100px;margin-inline:auto` centres.
-
-#### A6. `align-content`'s initial value is `flex-start`, not `stretch`
-
-```
-UNAUTHORED   .c{display:flex;flex-wrap:wrap;width:100px;height:300px} .i{flex:none;width:100px;height:50px}
-  item0  x=0.00 y=  0.00 w=100.00 h=50.00
-  item1  x=0.00 y= 50.00 w=100.00 h=50.00
-EXPLICIT align-content:stretch
-  item0  x=0.00 y=  0.00
-  item1  x=0.00 y=150.00        correct
-EXPLICIT align-content:flex-start
-  item1  x=0.00 y= 50.00        byte-identical to unauthored
-```
-
-`specs/w3c/css-flexbox-1.txt:2959-2960` — `Initial: stretch`. The engine computes it correctly; it never reaches the code path. `layout_style_mapping.rs:261-264` delegates `align_content_of` to `justify_content_keyword`, whose no-keyword arm is `FlexStart` (`:252`); default is `layout_style.rs:117`; the gate that skips the whole §8.4 block is `flex_layout.rs:450-451`, `!matches!(style.align_content, JustifyContent::FlexStart)`.
-
-`crates/domain/obscur-style/src/computed/initial_value.rs:205-224` justifies every deferred keyword initial by asserting the consumer's fallback *equals* the CSS initial; for `AlignContent` that is false. `docs/unfinished.md:240` lists ten properties verified that way — `align-content` is absent from the list and is its counterexample. `layout_style.doc/align_content.md` says the field is "Ignored by flex", which the explicit run disproves. `tests/spec_ch4_flex.rs:204-224` passes only because it spells the keyword out.
-
-**Do not fix this by flipping the default to `Stretch`.** `FlexStart` is doubling as the unauthored/`normal` sentinel: `grid_layout.rs:228-231` reads `matches!(style.justify_content, FlexStart | Stretch)` as "normal behaves as stretch", and probing grid confirms that reading is currently producing *right* answers (`display:grid;grid-template-rows:50px 50px;height:300px` correctly packs at y=0/50, because `normal` stretches only auto-max tracks). A one-token flip fixes flex and makes an authored `align-content: flex-start` on a grid indistinguishable from normal.
-
-**Effort:** M. **Done means:** a distinct `Normal` variant exists, an unauthored wrapping flex container puts its second line at y=150, and an authored `flex-start` on a grid is still distinguishable.
-
-#### A7. Negative free space is dropped by three of the four content-distribution sites
-
-```
-# one 150x200 item in a 100x100 flex row; free = -50 main, -100 cross
-justify-content:flex-start    -> [(0.0, 0.0, 150.0, 200.0)]
-justify-content:center        -> [(0.0, 0.0, 150.0, 200.0)]    want x=-25
-justify-content:flex-end      -> [(0.0, 0.0, 150.0, 200.0)]    want x=-50
-justify-content:space-between -> [(0.0, 0.0, ...)]             correct (safe flex-start)
-align-items:center            -> [(0.0, -50.0, ...)]           CONTROL: correct
-align-items:flex-end          -> [(0.0, -100.0, ...)]          CONTROL: correct
-
-# two 80x40 items in a 100-wide row; free = -60 (rules out "single item")
-justify-content:center        -> [(0.0,..), (80.0,..)]         want x=-30, 50
-justify-content:flex-end      -> [(0.0,..), (80.0,..)]         want x=-60, 20
-
-# three 60px columns in a 100px grid area; leftover = -80
-GRID justify-content:center   -> [(0.0,..), (60.0,..), (120.0,..)]   want x=-40, 20, 80
-GRID justify-content:end      -> [(0.0,..), (60.0,..), (120.0,..)]   want x=-80, -20, 40
-
-# three 100x60 lines in a 100-tall wrap box; free = -80
-align-content:center          -> [y=0.0, y=60.0, y=120.0]      want y=-40, 20, 80
-align-content:flex-end        -> [y=0.0, y=60.0, y=120.0]      want y=-80, -20, 40
-```
-
-css-flexbox-1:2637-2643 for `center`: "(If the leftover free-space is negative, the flex items will overflow equally in both directions.)"; `:3005-3006` the same for `align-content: center`. Only `space-between`/`space-around`/`space-evenly` have a negative fallback (`:2653`, `:2674`) — and those the engine gets right, in both the one-item and two-item runs, so this is not a consistent "safe alignment" policy leaking; it is a fallback written for three keywords applied to all five.
-
-Three sites, all the same shape, all short-circuiting *before* the keyword `match`: `flex_line_placement.rs:281` (`if free_for_justify <= 0.0 || count == 0`), `flex_layout.rs:504` (`if free <= 0.0 || n == 0`), `grid_track_positions.rs:23` (`if n == 0 || leftover <= 0.0`). The correct behaviour already exists three files over in the per-item cross axis, which is the control above — so the two axes of one flex container disagree. `grid_track_positions.doc/content_distribution.md` documents the behaviour without a spec citation or a reason. `tests/spec_ch4_alignment_gap.rs:56-73` asserts `>= 0.0` but only for `space-between`, which stays correct under a fix.
-
-**Effort:** S. **Done means:** `center`/`flex-end`/`end` overflow the line at all three sites, the `space-*` fallbacks are unchanged, and the guard moves inside the keyword `match`.
-
-#### A8. The `column-gap` and `row-gap` longhands do not exist
-
-```
---- flex row, column-gap:20px
-    [css-unsupported] UnsupportedCssFeature { kind: Property, name: "column-gap", span: SourceSpan { start: 40, end: 55 } }
-    2nd item x = 100.00   want 120   => WRONG
---- flex row, gap:20px (control)          2nd item x = 120.00   => OK
---- flex column, row-gap:20px             2nd item y =  50.00   want 70  => WRONG
---- flex column, gap:20px (control)       2nd item y =  70.00   => OK
---- grid column-gap:20px                  2nd cell x = 100.00   want 120
-```
-
-The layout is right and only the property name is unrecognised. Mildest of this group because the compiler is honest: it raises `UnsupportedCssFeature` and `css_pipeline.rs:66-71` forwards it as a diagnostic on the standard `App` path. It is here because `column-gap` is what authored stylesheets actually write.
-
-`crates/frontend/obscur-css/src/compiler/longhand_catalog.rs` has no entry for either longhand; `crates/domain/obscur-style/src/property/property_id.rs:197-198,393` carries a single `Gap`. The fix is smaller than it looks: only the *flex* model is single-scalar (`layout_style.rs:67-68`). `GridLayout` already has independent `column_gap`/`row_gap` fields and `with_column_gap`/`with_row_gap` builders (`grid_layout.rs:24-27,52-62`); they are collapsed by one caller, `formatting_context.rs:22`, `GridLayout::with_template(template.clone(), gap, gap)`.
-
-The only existing acknowledgement is a translation note inside two spec-test module docs (`tests/spec_ch4_alignment_gap.doc/_module.md:10-11`, `tests/spec_ch4_grid.doc/_module.md:11-12`): the spec-deriving agent wrote `column-gap` and the harness had to re-author it as `gap`. That is a workaround, not a non-goal.
-
-**Effort:** S. **Done means:** two catalog entries, two `PropertyId`s, a second field on `LayoutStyle`, and `formatting_context.rs:22` stops passing `gap` twice.
-
-#### A9. One NaN wheel notch permanently freezes a scroll container and makes everything inside it unhittable
-
-```
-$ /tmp/probe-degen/target/release/p4
-[ok ] hit at (10,10) unscrolled: Some("row0")
-[ok ] hit at (10,10) after scroll_by(90): (90.0, Some("row3"))
-[ok ] hit after handle_scroll(NaN) then scroll_by(90): (NaN, NaN, None)
-[ok ] re-render after NaN scroll: (NaN, NaN, None)
-
-$ (independent probe, adds a sibling outside the port and a recovery attempt)
-A2 scroll_by(NaN)      ret=NaN then scroll_by(90)=NaN top=NaN hit(10,10)=(true, None) hit_outside=Some("OUTSIDE")
-A3 handle_scroll(NaN)  top=NaN hit(10,10)=(true, None)
-A4 re-render x2        top=NaN hit(10,10)=(true, None)
-A5 recover set(0.0)    top=0 hit(10,10)=Some("row0") scroll_by(90)=90
-A6 set_scroll_top(NaN) top=45 hit(10,10)=Some("row1")     <- the sibling writer refuses it
-A7 inf/-inf            +inf->500  -inf->0                  <- only NaN slips through f32::clamp
-A8 poisoned boxes      1/47 nodes have non-finite origin.y (the scrollbar-thumb, into inspect_snapshot)
-B2 hit target after NaN: classes=Some(["port"]) depth=Some(2)
-```
-
-`ScrollOffsets::shift` (`crates/application/obscur-runtime/src/runtime/scroll_offsets.rs:66-71`) is missing the `is_finite` guard its sibling `set` has at `:56-63` and documents at `scroll_offsets.doc/set.md`: "A non-finite `px` is ignored: nothing is written and nothing is refolded, so a `NaN` cannot reach either the map or an observer's coordinates." `shift.md` has neither the guard nor a sentence saying it does not need one. The NaN passes `f32::clamp` unchanged and `refold` then does `layout_box.bounds.origin.y -= NaN` (`:110`) for every node under the container. Entered from `ui_runtime/scrolling.rs:90` (`scroll_by`) and `:146` (`handle_wheel`).
-
-Scope, measured: the port's subtree only — nodes outside it stay hittable, `handle_pointer` returns the container itself rather than nothing, and an explicit `set_scroll_top(port, 0.0)` fully recovers. No amount of scrolling or re-rendering does. Realistic entry is a host or app computing a delta and passing it to the public `scroll_by`/`handle_scroll`; winit will not emit NaN, and `pan_recognizer.rs:113-118` already guards `dt <= 0.0`, so the internal fling path cannot manufacture one.
-
-**Effort:** S. **Done means:** `shift` opens with the same `is_finite` guard as `set`, and a test passes NaN through `handle_wheel` and asserts the container is unmoved and still hittable.
-
-#### A10. Five windowed demos hand-roll pointer events without `.as_trusted()`, so nothing in them is clickable
-
-```
 --- trusted = false (== what the 5 windowed examples build) ---
   button up dispatch = PointerDispatch { target: Some(NodeId(4294967297)), hover_changed: false,
       focus_changed: false, command: None, current_target: None, trust: Untrusted }
@@ -882,239 +707,75 @@ Blast radius is exactly these two: only the click default action is trust-gated,
 
 ### Part B — wrong pixels, wrong numbers
 
-#### B1. The two backends interpolate gradient stops in different colour spaces
+#### B1. Gradient interpolation color space — fixed
 
-```
-$ /tmp/probe-renderers/target/debug/grad_probe
-linear-gradient(red, green) across 64px, sampled along the middle row:
-  x= 0  cpu=(253,  1,  0)  vello=(255,  0,  0)
-  x=16  cpu=(189, 33,  0)  vello=(212, 80,  0)
-  x=32  cpu=(126, 65,  0)  vello=(166,105,  0)
-  x=48  cpu=( 62, 97,  0)  vello=(113,120,  0)
-  x=63  cpu=(  2,127,  0)  vello=( 13,128,  0)
-```
+CPU linear and conic gradients sample premultiplied Oklab using the same
+conversion as Vello. The Vulkan regression compares the middle pixel of a
+red-to-green CSS gradient against the expected Oklab color on both backends.
+CPU radial fills and strokes now use the same Oklab sampling with a
+tiny-skia shader that maps a unit circle into the scene ellipse. A Vulkan
+regression checks both axes and pad, repeat, and reflect extension. The
+pad case uses authored CSS with distinct horizontal and vertical radii.
+The repeat case uses CSS with mixed units and a non-zero first stop.
+A period that collapses to zero is rendered with the weighted average color.
+Linear repeats share the stop-distance resolution and preserve the first
+stop’s signed offset across mixed units.
 
-Diagnosed, not inferred: computing both candidate ramps from scratch against css-color-4 §9.2 matrices at pixel centres gives `srgb_lerp` = [253,1,0] / [189,33,0] / [126,65,0] / [62,97,0] / [2,127,0] and `oklab_lerp` = [254,9,0] / [211,81,0] / [165,106,0] / [111,120,0] / [14,128,0]. The CPU column matches the sRGB lerp to the unit at all nine samples; Vello matches Oklab within 1–3 units.
+#### B2. Vello offscreen readback alpha — fixed
 
-Same cause on the other brushes:
+`render_to_image` converts straight texture bytes when needed, returning tight premultiplied
+RGBA8 after unpadding. The GPU regression compares a translucent color
+against the CPU pixmap and checks the transparent pixels and row stride.
 
-```
---- linear gradient black->white: max channel delta 35, 1024/4096 pixels differ by >2
-      (16,20): cpu=(68,68,68) gpu=(34,34,34)        <- a factor of 2 in luminance
---- conic gradient: max delta 105, 2284/4096 off by >3
-      (32,50): cpu=(130,125,0) gpu=(208,169,0)
---- repeating linear gradient: 4096/4096 off by >3 (ramp positions agree exactly, only colours differ)
---- dashed stroke: max delta 0, 0/4096   <- control, backends agree
-```
+#### B3. Glyph run advance for invisible spacing — fixed
 
-The CPU midpoint (126,65,0) is, to within one unit, the number `crates/adapters/obscur-render-vello/src/conversion/brush_converter.doc/GRADIENT_INTERPOLATION_CS.md` names as the bug it was fixed to avoid: "peniko itself defaults a `Gradient` to sRGB … which produces the muddy dark midpoint of e.g. `linear-gradient(red, green)`" … "the tag alone left the red→green midpoint at the muddy sRGB `(127, 64, 0)`".
+Scene glyph runs can carry a total advance independent of the glyphs that
+paint. The text painter records the full pen advance when it suppresses
+control glyphs. The CPU proof checks the actual position of the glyph after
+the tab for both tab sizes and compares the reported run widths.
 
-`crates/adapters/obscur-render-cpu/src/renderer/brush_fill.rs:115` (`lerp_color`) and `:122` (`premul_lerp_color`) mix raw sRGB channels, used by `fill_linear` (`:140`) and `fill_conic` (`:19`). Versus `brush_converter.rs:12` (`GRADIENT_INTERPOLATION_CS = ColorSpaceTag::Oklab`) and `:105` (`stops`, densifying through `premul_oklab`/`oklab_lerp`).
+#### B4. Overflow in CSS numbers, transform folding, and length resolution — fixed
 
-Not covered by the CPU/GPU policy: `cpu_renderer.doc/_module.md:29-32` enumerates the gradient approximation as exactly one thing — "the **radial** brush still degrades to a flat solid of its first stop" — and says linear and conic "rasterize for real"; its determinism boundary says "only rasterization, anti-aliasing, and precision differ", which a hue shift is not. `grep -rn -i oklab crates/adapters/obscur-render-cpu/` → zero hits, though `obscur-scene`'s `convert.doc/linear_srgb_to_oklab.md` says the forward conversion exists precisely because "densifying a gradient's stops in Oklab needs this forward direction". `docs/servo-algorithm-catalog.md:181` row F-4 already records "gradient/mix interpolation space … default **Oklab**" as `[MISSING — gradient gap]`.
+CSS numbers saturate when narrowed to f32, including angle and absolute-unit
+conversions. Affine multiplication recomputes overflowing coefficients in
+f64 before narrowing. Layout resolves percentages and length expressions in
+f64 before narrowing so a 100% child can keep a large finite parent width.
 
-**Effort:** M. **Done means:** the CPU mixers densify in Oklab through the primitive `obscur-scene` already ships, `linear-gradient(red, green)` measures the same midpoint on both backends, and a test pins one sample.
+#### B5. Large-radius SVG arcs — fixed
 
-#### B2. `VelloRenderer::render_to_image` returns straight alpha while its doc promises premultiplied
+The path parser computes arc geometry in f64, using the chord to recover
+shallow sweeps and evaluating offsets relative to the start. The final
+endpoint is exact. Arc controls outside the scene coordinate range return
+a structured parse error. Tests cover radii from 1e18 to 3e38.
 
-```
-$ /tmp/probe-renderers/target/debug/png_probe
-scene: one rect, straight colour rgba(0.2,0.4,0.6,0.5)
-       => an honest straight-alpha PNG pixel is (51, 102, 153, 128)
+#### B6. Compact SVG arc flags and progress diagnostics — fixed
 
-cpu  raw pixmap byte  (16,16) = [26, 51, 77, 128]
-cpu  PNG pixel        (16,16) = [52, 102, 153, 128]
+The parser reads each flag as one binary digit. Absolute and relative arc
+regressions compare compressed and spaced forms. Progress reports malformed
+path data through the runtime diagnostics and paints its built-in track.
+Consecutive draws with the same warning on the same node emit it once.
 
-vello raw readback byte (16,16) = [52, 102, 153, 128]
-vello PNG pixel         (16,16) = [104, 203, 255, 128]
-```
+#### B7. Layout recursion limit now emits a diagnostic
 
-Not ambiguous: premultiplied-in-encoded-space would be 26, premultiplied-in-linear-space 35; 52 is exactly the straight sRGB byte. 52·255/128 = 103.6, 102·255/128 = 203.2, 153·255/128 = 304.8 → clipped 255 — tiny_skia's demultiply-on-encode applied to data that was never multiplied.
-
-`crates/adapters/obscur-render-vello/src/renderer/vello_renderer.doc/render_to_image.md:17-18` says "The returned bytes are **premultiplied** RGBA8 (Vello's texture output), so they can be handed straight to e.g. `tiny_skia::Pixmap::from_vec`." Four other files in the same crate say the opposite, unprompted: `premultiply_blit.wgsl:3` ("Vello writes STRAIGHT alpha"), `premultiply_blit.doc/PremultiplyBlitter.md:3-4` (which records this exact defect being found and fixed once before on the Wayland present path — "a card authored at `alpha: 0.72` over a dark desktop measured `(255, 252, 249)` where an honest blend is `(187, 183, 181)`"), `effects/color_matrix.doc/_module.md:20`, `effects/gaussian_blur.rs:360`. The on-screen path has a whole WGSL pass for this; the read-back path at `vello_renderer.rs:455-462` copies the texture bytes verbatim.
-
-**Blast radius is one row of one example, not eleven.** All 11 `*_vello_png` examples were built and run and their PNGs measured by alpha histogram: ten contain **zero** partial-alpha pixels (each paints an opaque full-viewport background), so demultiply divides by 1 and they are bit-identical to a correct render. Only `wireframe_kit_vello.png` is affected, on row 6656: 2019 pixels, two values `(255,255,249,227)` and `(255,255,255,196)` — the antialiased bottom page edge pushed to white and clipped. 0.014% of the image.
-
-The suite cannot see it: `tests/fractional_edge.rs:246 the_gpu_backend_keeps_the_same_extreme_pixels` is `#[ignore = "needs a GPU adapter"]`, returns early without an adapter, and asserts only coverage — no channel value is ever compared across backends.
-
-**Effort:** S. **Done means:** either the un-padding copy multiplies rgb by alpha, or `render_to_image.md` and the 11 call sites are corrected — and a test compares one translucent pixel across the two backends.
-
-#### B3. `GlyphRun::advance()` drops a control character's glyph; `white_space_proof` panics on `tab-size: 8` and passes `tab-size: 4` by 0.431 px of coincidence
-
-```
-$ cargo run -p obscur-kit --example white_space_proof
-[block] 1 line(s): [22.5]
-...
-thread 'main' (3504871) panicked at crates/facade/obscur-kit/examples/white_space_proof.rs:163:5:
-D(tab-size:8): pen after tab (22.5) must land on 8·space (45.8)
-EXIT=101
-```
-
-Measured from the display list (DejaVu Sans 18px, space advance 5.7217, content `"a\tb"`, `white-space: pre`), `run.advance()` beside the run's real painted extent `max(g.x() + g.advance())`:
-
-```
-space-only   glyphs=1 run.advance()=  5.722 painted_extent=  5.722
-tab-size:1   glyphs=2 run.advance()= 22.456 painted_extent= 22.869
-      cluster=0 x= 0.000 adv=11.030   cluster=2 x= 11.443 adv=11.426
-tab-size:4   glyphs=2 run.advance()= 22.456 painted_extent= 34.312   cluster=2 x= 22.887
-tab-size:8   glyphs=2 run.advance()= 22.456 painted_extent= 57.199   cluster=2 x= 45.773
-tab-size:16  glyphs=2 run.advance()= 22.456 painted_extent=102.973   cluster=2 x= 91.547
-plain-ab     glyphs=2 run.advance()= 22.456 painted_extent= 22.456
-a-space-b    glyphs=3 run.advance()= 28.178 painted_extent= 28.178
-```
-
-Cluster 1 is absent at every tab-size; the run for `"a\tb"` is byte-for-byte the run for `"ab"`. A 4.6× under-report at tab-size 16. The tab-stop math itself is **correct** — 'b' lands on 2·/4·/8·/16·space exactly — so this is a wrong reported number, not a wrong picture.
-
-The false pass is real and the example is worse than it looks: `advances[0]+advances[1]` = 11.030+11.426 = 22.456 against `4*space_adv` = 22.8868 with a 0.5 px tolerance — **0.4308 px** of margin, on a sum containing no tab at all. The `advances.len() >= 2` gate at `:150` lets a 2-glyph run through where 3 were intended. Two further assertions at `:164` would also fail if execution reached them: `22.456 > 22.456` and `22.456 > 28.178` — the tab lines report *narrower* than the single-space line.
-
-`crates/application/obscur-runtime/src/orchestration/text_painter.rs:49-68` — `let any_control = content.chars().any(char::is_control);` … `if !suppressed { glyphs.push(...) }` … `pen_x += glyph.x_advance();`. The advance survives in the pen; the glyph is dropped from the run. Consumed by `crates/domain/obscur-scene/src/text/glyph_run.rs:101-103`. The suppression is deliberate and documented — but `text_painter.doc/positioned_run.md` promises the opposite of what happens: "the suppression is purely visual, leaving byte offsets, **advances**, and line breaks untouched."
-
-Scope, measured: no runtime or renderer code reads the scene `GlyphRun::advance()` (`text_painter.rs:285,390` call obscur-text's `ShapedRun::advance`, which *does* include the tab), so layout, line boxes, caret walk and rasterization are unaffected. What is wrong is the number a facade consumer reads back, and the example that reads it. Newline-only content does not diverge (a line-terminating newline is the last glyph, so the sum agrees); an interior tab is the case that bites.
-
-**Effort:** S. **Done means:** either the suppressed glyph is emitted with zero ink or `GlyphRun` carries a run advance independent of its glyph list; `white_space_proof` exits 0; and its `tab-size: 4` assertion measures something a tab-free run could not satisfy.
-
-#### B4. `narrow_f32` saturates to ±inf with no diagnostic, and the transform fold then manufactures NaN in coefficients the author never wrote
-
-```
-$ /tmp/probe-parsers/target/debug/nums2
-transform: translate(1e39px)  -> errors=0 unsupported=0
-   Transform { matrix: [1.0, 0.0, 0.0, 1.0, inf, NaN], is_none: false }
-transform: rotate(1e39deg)    -> Transform { matrix: [NaN, NaN, NaN, NaN, 0.0, 0.0] }
-transform: scale(1e39)        -> Transform { matrix: [inf, NaN, NaN, inf, 0.0, 0.0] }
-transform: scaleX(1e39)       -> [inf, NaN, 0.0, 1.0, 0.0, 0.0]
-transform: matrix(1e39,0,0,1,0,0) -> [inf, NaN, 0.0, 1.0, 0.0, 0.0]
-width: 1e39px                 -> Length(Px(LogicalPx(inf)))
-font-size: 1e39px             -> Length(Px(LogicalPx(inf)))
-filter: blur(1e39px)          -> Filter([Blur(inf)])
-flex-grow: 1e39               -> Number(inf)
-
-$ /tmp/probe-parsers/target/debug/consequence
-translate(1e39px) matrix maps rect ->
-  Rect { origin: Point { x: inf, y: inf }, size: Size { width: NaN, height: -inf } }
-  point (10,10) -> Point { x: inf, y: NaN }
-```
-
-`1e400` and a 41-digit integer give the same; so does the finite-in-f32 `transform: scale(3.5e38)`.
-
-Two separate wrongs. (a) `crates/frontend/obscur-css/src/compiler/property_compiler.rs:258-260` — `narrow_f32` is a bare `value as f32`, while `property_compiler.doc/narrow_f32.md` calls it "this single checked-narrowing point [that] keeps the (intentional) truncation contained". It is not checked and does not truncate. `z-index: 1e400` is already refused as unsupported; lengths are not. (b) Even granting inf, `translate(1e39px)` names only an x offset, so `f` must be 0.0 — the NaN is manufactured by composing `AffineTransform::IDENTITY` with the function, where `0.0 * inf` is NaN. `affine_transform.rs:63-76` (`multiply`), driven from `transform_lowering.rs:33-41` (`flatten_or_defer`). `transform_lowering.doc/_module.md` describes the fold and says nothing about non-finite input. The element then has NaN paint and hit geometry rather than merely being scaled off-screen.
-
-Related, and the same class: `Dimension::resolve` (`crates/domain/obscur-layout/src/model/dimension.rs:27`) computes `base * percent / 100.0`, so a 100% child of a large finite parent overflows —
-
-```
-[ok ] parent width:3.4e36px, child 100%: (Some(3.4e36), Some(3.4e36))
-[ok ] parent width:1e37px,   child 100%: (Some(1e37),   Some(inf))
-```
-
-The obvious reassociation is **not** the fix: `base / 100.0 * percent` still yields `inf` for 100% of `f32::MAX`, turns 100% of 1e30 into 1.0000001e30, and flushes a denormal base to 0. What is missing is a finite clamp on the resolved length, which the kit has nowhere.
-
-**Effort:** S. **Done means:** `narrow_f32` clamps to `f32::MAX`/`MIN` or refuses the declaration; the transform fold cannot produce a NaN from finite-signed author input; resolved lengths are clamped finite; and `narrow_f32.md` stops claiming a check that is not there.
-
-*(Not adversarially re-run — measured once.)*
-
-#### B5. An SVG arc with a large radius produces NaN path points, defeating the parser's own finiteness filter
-
-```
-$ /tmp/probe-parsers/target/debug/consequence
-M0 0 A1e18 1e18 0 0 1 100 0  -> Some(CubicTo { control1: (-9.999999e17, -5.5228486e17), … })
-M0 0 A2e19 2e19 0 0 1 100 0  -> Some(CubicTo { control1: Point { x: NaN, y: NaN },
-                                               control2: Point { x: NaN, y: NaN },
-                                               end:      Point { x: NaN, y: NaN } })
-M0 0 A1e20 1e20 0 0 1 100 0  -> all NaN
-M0 0 A1e30 1e30 0 0 1 100 0  -> all NaN
-$ (earlier run) M0 0 A1e30 1e30 0 0 1 100 0 -> Ok(2 segs) nan_or_inf=true
-   bounds=Some(Rect { origin: (0,0), size: Size { width: 0.0, height: 0.0 } })
-```
-
-`parse_path_data` returns `Ok` in every case, and the NaN silently collapses `bounds()` to a 0×0 rect. The correct output is close to the chord (0,0)→(100,0) — a shallow sliver of a huge circle.
-
-The parser deliberately refuses non-finite *input* numbers (`crates/domain/obscur-scene/src/path/path_data.rs:371`, `.filter(|value| value.is_finite())`), so accepting the input and emitting NaN geometry one function later breaks its own invariant. Cause is f32 overflow in the endpoint→centre conversion at `:236-260`: `rx*rx*ry*ry` overflows above rx ≈ 1.8e19, `numerator` becomes `inf - inf` = NaN, and `.max(0.0)` launders it to 0.0 while `cx`/`cy` still come out NaN. The only in-tree consumer, `crates/components/obscur-widgets/src/progress/progress_painter.rs:92`, does `.ok().filter(|path| !path.is_empty())` — so it accepts the NaN path and hands it to the renderer.
-
-**Effort:** S. **Done means:** the F.6 conversion runs in f64 (or the radii are clamped), and a large-radius arc produces finite points and a real `bounds()`.
-
-*(Not adversarially re-run.)*
-
-#### B6. Compressed SVG arc flags — the form SVGO emits — are rejected, so an optimized path silently draws nothing
-
-```
-$ /tmp/probe-parsers/target/debug/arcflags
-M0 0 A50 50 0 1 1 100 0  -> Ok [MoveTo(0,0), CubicTo{…}, CubicTo{…}]
-M0 0 A50 50 0 11 100 0   -> Err PathDataError { at: 22, what: MissingNumber }
-M0 0 a50 50 0 0150 0     -> Err PathDataError { at: 20, what: MissingNumber }
-M0 0 A50 50 0 0150 0     -> Err PathDataError { at: 20, what: MissingNumber }
-M0 0 A50 50 0 1 1100 0   -> Err PathDataError { at: 22, what: MissingNumber }
-```
-
-All four rejected forms are well-formed SVG: the path grammar defines `flag: "0" | "1"` as a single character and makes the separator after each flag optional. `A50 50 0 11 100 0` is rx=50 ry=50 rot=0 large-arc=1 sweep=1 end=(100,0). SVGO's `convertPathData` is on by default and emits exactly this, so any icon or progress track run through a standard optimizer fails to parse.
-
-`crates/domain/obscur-scene/src/path/path_data.rs:160-168` — the `b'A'` arm reads all seven operands with `self.number()`, which at `:337` scans a maximal digit run and swallows `11` as one number. The two flags need a single-character reader. Consequence is silent: `progress_painter.rs:92` turns the `Err` into "no track drawn", with no diagnostic anywhere.
-
-**Effort:** S. **Done means:** a dedicated flag reader, the four inputs above parse identically to their spaced forms, and `progress_painter` reports a path it could not parse.
-
-*(Not adversarially re-run.)*
-
-#### B7. Past 256 tree levels, nodes silently get no box and no paint — and an auto-height ancestor at depth 1 collapses to 0
-
-```
-$ /tmp/probe-degen/target/debug/pc
-depth 253: nodes=255 with-box=255 leaf=Some((10.0, 10.0)) diagnostics=0
-depth 254: nodes=256 with-box=256 leaf=Some((10.0, 10.0)) diagnostics=0
-depth 255: nodes=257 with-box=256 leaf=None               diagnostics=0
-depth 260: nodes=262 with-box=256 leaf=None               diagnostics=0
-
-$ (independent probe: red leaf, scene statistics, hit test)
-n=254 boxed=256 leaf_box=Some((10.0,10.0)) leaf_is_target=true
-      target=Some("depth=255 classes=[\"leaf\"]")
-      scene=SceneStatistics { command_count: 1, draw_count: 1, ... } diags=0
-n=255 boxed=256 leaf_box=None              leaf_is_target=false
-      target=Some("depth=255 classes=[\"d\"]")
-      scene=SceneStatistics { command_count: 0, draw_count: 0, ... } diags=0
-
-$ (auto-height ancestor: .root{width:100px}, leaf 10x10)
-n=253 root(w,h)=Some((100.0, 10.0))
-n=254 root(w,h)=Some((100.0,  0.0))     <- a node at DEPTH 1 reports the wrong height
-n=300 root(w,h)=Some((100.0,  0.0))
-```
-
-`draw_count` 1 → 0: the fill is genuinely not emitted. The press lands on the ancestor. `diags=0` with a collecting `DiagnosticSink` installed. And the measure side returns `Size::ZERO`, so the zero propagates all the way up — this is not only an invisible tail, it is a wrong number at a shallow, on-screen container.
-
-Both bails are bare silent returns: `crates/application/obscur-runtime/src/orchestration/arrange_pass.rs:70` (`if depth == 0 { return; }`) and `measure_pass.rs:95` (`return Size::ZERO;`), budget from `layout_coordinator.rs:28` (`MAX_DEPTH: u32 = 256`) passed in at `:303`. `layout_coordinator.doc/MAX_DEPTH.md` says verbatim: "It is deliberately generous (far deeper than any realistic UI tree) so it never truncates a well-formed tree." Every run above is a well-formed acyclic tree that it truncates.
-
-256 is not stack-tuned — depth 254 completes on an 8 MB main-thread stack with no sign of pressure, so raising it is available. The load-bearing fix is the missing `report(...)` this codebase emits for every other silent degradation (`unsupported_effects`, `css.unsupported_at_rule`, `css.invalid_value`); today an author gets a green compile, a blank region, a dead click target and a container measuring 0.
-
-**Effort:** S. **Done means:** exhausting the budget reports a diagnostic, `MAX_DEPTH.md` stops claiming non-truncation, and a test asserts the diagnostic fires at 257.
+When measurement or arrangement reaches the depth limit, the runtime reports
+`layout.depth_limit` with the first affected node. The layout pass retains
+its bounded fallback: deep boxes can be omitted, and zero intrinsic
+measurements can affect the size of auto-sized ancestors.
+`layout_depth_limit_reports_the_first_omitted_node` exercises the boundary
+through `UiRuntime::render_now`.
 
 ---
 
 ### Part C — crashes and hangs on hostile input
 
-#### C1. `Reconciler::reconcile_into` recurses without a depth cap and aborts the process
+#### C1. Deep view reconciliation uses an explicit work stack
 
-```
-$ ulimit -s
-8192
-$ /tmp/probe-degen/target/release/p6 10000 full
-built 10000
-
-thread 'main' (3554024) has overflowed its stack
-fatal runtime error: stack overflow, aborting
-exit=134
-```
-
-SIGSEGV, not a catchable panic — `catch_unwind` does not see it. gdb on the release binary:
-
-```
-#3  obscur_tree::reconciliation::reconciler::apply_props ()
-#4  obscur_tree::reconciliation::reconciler::Reconciler::reconcile_into ()
-#5..#11 ...::reconcile_into ()   (identical frame, repeating)
-```
-
-Thresholds, binary-searched: release / 8 MiB main stack — n=9000 lays out 9002 nodes cleanly, n=10000 aborts. Release under `ulimit -s 2048` (a default `std::thread` stack) — n=2000 fine, n=2500 aborts. ~880 bytes per level. Building and dropping the same 50 000-deep `View` without rendering is fine, so the recursion is the toolkit's, not the fixture's. At n=9000 the whole `render_now` + cascade + layout + `inspect_snapshot` pipeline completes, so reconciliation is the *binding* constraint: capping this one walk fixes the shape.
-
-`crates/domain/obscur-tree/src/reconciliation/reconciler.rs:205` — `self.reconcile_into(tree, id, children.nodes(), plan);` — entered from `:48` (`reconcile_root`) and `:61` (`reconcile`). `grep -rn MAX_DEPTH crates/` finds a cap only on the layout side; `reconcile_into.md` reads in full "Recurses into each element child. A no-op if `parent` is stale."
-
-The layout precedent's rationale only half-transfers: `MAX_DEPTH.md` argues *cycle* safety over the `RetainedTree`, and the reconciler walks the owned `ViewNode` tree, which cannot be cyclic. Only the "never overflows the stack" half applies. Reachable from ordinary public API (`ViewNode::element(...).with_children(...)` + `render_now`) — not from a hand-authored `.okui`, but from a recursive component over unbounded data.
-
-**Effort:** S. **Done means:** a depth counter that stops recursing and reports, and a 20 000-deep view returns a diagnostic instead of SIGSEGV.
+Both reconciliation entry points process children through an explicit stack
+of sibling groups, preserving the depth-first order of plan operations.
+The outlet and virtual-collection discovery walks use an explicit stack as
+well. The reconciler regression test creates and reuses all nodes of a
+20,000-level view. Layout retains its separate depth limit and reports it
+through `layout.depth_limit`.
 
 #### C2. The CSS value parser has no recursion cap: ~6 KB of `(` aborts the process
 
@@ -1162,49 +823,24 @@ Every other recovery path in this parser is explicitly hardened against non-prog
 
 **Effort:** S. **Done means:** a depth counter in `parse_components` and a nesting counter in `parse_rules`, each returning a `CssParseError` past a hard limit; 100 000 `(` and 100 000 nested `@media` both produce a diagnostic.
 
-#### C3. `set_viewport_scroll` stores a NaN its sibling refuses
+#### C3. Non-finite viewport scroll coordinates — fixed
 
-```
-$ /tmp/probe-degen/target/debug/p1
-[ok ] set_viewport_scroll(NaN,0): ((NaN, 0.0), Some((0.0, 0.0)))
-[ok ] set_content_offset(NaN,0):  ((0.0, 0.0), Some((0.0, 0.0)))
-[ok ] set_viewport_scroll(inf,0): ((inf, 0.0), Some((0.0, 0.0)))
-[ok ] set_content_offset(inf,0):  ((0.0, 0.0), Some((0.0, 0.0)))
-```
+The viewport setter preserves the previous value on each axis that receives
+a non-finite coordinate. Tests cover mixed-axis updates, the document
+viewport origin, and sticky layout after an invalid update.
 
-`surface_geometry.rs:88-90` is a `const fn` storing whatever it is handed; `:74-80` drops non-finite components per axis and says so in its public doc ("Non-finite components are ignored"). `set_viewport_scroll.md` is silent.
-
-Measured effect on layout: **none.** A NaN scroll yields the identical arrangement to scroll 0 (sticky child at y=50, siblings unmoved), inf and 1e30 clamp correctly to 360, and a following sane `set_viewport_scroll(0,100)` recovers fully. The only residue is `document_viewport()` → `resource_resolution.rs:52` → `resource_bridge.rs:714/724`, where a NaN rect makes `rects_intersect` false and every image is marked `VisibilityPriority::Offscreen`. That priority is read only by `image_cache.rs:110` and `cache/eviction_policy.rs`; there is no visibility-gated lazy load in the tree, so the consequence is degraded eviction ranking while a host is holding a NaN — not deferred image loading.
-
-**Effort:** S. **Done means:** `set_viewport_scroll` filters non-finite components the way `set_content_offset` does, and its doc says so.
 
 ---
 
 ### Part D — cosmetic
 
-#### D1. Synthetic bold is 1.34× heavier on Vello than on the CPU backend
+#### D1. Synthetic bold uses the same outline expansion across renderers — fixed
 
-At 24 px the ink proxy is a weak signal; measured geometrically at 300 px with one glyph on a 512² canvas, bbox at the alpha≥128 half-coverage crossing:
-
-```
-font_size = 300
-  plain  cpu bbox@128=(129, 166, 292, 379) area=14154.1
-         gpu bbox@128=(129, 166, 292, 379) area=14167.4
-  bold   cpu bbox@128=(124, 161, 297, 384) area=19358.4
-         gpu bbox@128=(123, 160, 298, 385) area=21133.6
-  cpu grow per side: left=5 right=5 top=5 bottom=5
-  gpu grow per side: left=6 right=6 top=6 bottom=6
-  gpu/cpu area gain ratio = 1.339
-  predicted from constants: cpu 0.03/2=4.5 px/side, gpu 0.02=6 px/side, ratio 1.333
-```
-
-Plain agrees to 0.09% in area and to the pixel on all four sides, so nothing here is AA noise. Size-independent, not the 10.8% the 24 px proxy suggests.
-
-Cause confirmed in dependency source, not inferred: tiny_skia's `Stroke { width: font_size * 0.03 }` is **centred** on the filled outline, so 0.015 em/side (`crates/adapters/obscur-render-cpu/src/renderer/glyph_raster.rs:69`, applied `:86-89`), whereas Vello's `FontEmbolden` amount goes to `kurbo::expand_path` (`vello_encoding-0.9.0/src/glyph_cache.rs:206-216`), documented at `kurbo-0.13.1/src/expand.rs:110-126` as an outward offset **per side**, so 0.02 em/side (`crates/adapters/obscur-render-vello/src/conversion/scene_converter.rs:28`, applied `:320-321`).
-
-Neither constant's doc mentions the other backend. The italic pair does: `FAUX_ITALIC_SKEW.md` ends "Matches the CPU backend's factor so both fake the same slant." That sentence exists for the constant that agrees and is missing from the one that does not. No test pins either.
-
-**Effort:** S. **Done means:** the CPU fraction becomes 0.04 or the Vello fraction 0.015, a test pins the pair, and the surviving doc says it matches the other backend.
+The scene model defines one outward expansion of 0.015 em for CPU, Vello
+compute, Hybrid, and Lyon. The CPU/Vello raster regression compares the
+increase in glyph alpha coverage and fails with the old Vello amount.
+CPU now fills all the outlines of one text command together. Regression
+tests cover overlapping regular and synthetic-bold glyphs.
 
 ---
 
@@ -1792,408 +1428,159 @@ Absolute millisecond figures below are machine-load-dependent (four agents share
 
 ### Part A — the incremental path disagrees with a cold render, or leaves state nothing can repair
 
-#### A1. The hover chain is only ever written by a pointer event, so `:hover` paints on the wrong element after any frame that moves, removes or scrolls a box
+#### A1. Hover after layout and scroll changes — fixed
 
-Three shapes, all release, all through the public API, all with the pointer stationary.
+The runtime re-hit-tests the stationary cursor after layout and applies one
+corrective restyle and arrange pass before painting. The regression checks
+the red fill in that same frame, clears the removed node from the hover chain,
+and checks that scrolling retargets hover immediately. Animated transforms
+are sampled for the hit index before the hover pass, with a regression for
+an animated box entering and leaving the stationary cursor without relayout.
+Changes first discovered during composition can request one corrective frame.
 
-**A box grows under the cursor.** Sheet `.row{height:50px;background-color:#000} .row:hover{background-color:#f00} .tall{height:150px}`; three rows; move to (10,120) so row 2 is hovered; re-render with row 0 at 150 px.
+#### A2. Scroll state when a container loses its box — fixed
 
-```
-[hover@120 (row2)] hovered() = Some(4294967300)  #r2 · 0,100 200x50
-[after r0 grows]   hovered() = Some(4294967300)  #r2 · 0,200 200x50
-    #r0 (0,150) bg=Color(0,0,0,1)   #r1 (150,50) bg=Color(0,0,0,1)   #r2 (200,50) bg=Color(1,0,0,1)
-[re-move to the SAME point] hovered() = Some(4294967298)  #r0.row.tall · 0,0 200x150
-```
+The runtime clears scroll offsets and motion when the node has no layout box
+or its overflow no longer establishes a scroll container. A surviving
+`overflow: hidden` container retains its position, as does a container whose
+content temporarily shrinks. The regression exercises both reset paths and
+both retention cases through the public runtime API.
 
-Not just a computed field. Filtering the emitted `DisplayList` for red fills, with the cursor fixed at y=120: red at `(100,50)` before, `(200,50)` after the growth, `(0,150)` after a jiggle to identical coordinates. The `:hover` background is composed onto a row 80 px from the cursor, and the row the cursor is inside is left unstyled until the user moves the mouse.
+#### A3. Non-finite motion ticks — fixed
 
-**The hovered row is deleted** (5 rows → 3, hover at (10,220)): `hovered() = Some(4294967302)`, `still in tree = false`, and `hovered_inspect()` returns `None` so DevTools goes blind. The control is one line away in the same frame hook: the same removal leaves `focused = None`.
+The runtime ignores non-finite time steps before advancing animations, gesture
+recognizers, or scrolling. The standalone timeline, fling, and long-press
+integrators also reject those steps. Regressions check finite and infinite
+repeats, an armed hold, and a live fling that settles on subsequent valid ticks.
 
-**A wheel scroll — the commonest trigger, and not in the original claim.** Ten 50 px rows in a 200 px `overflow-y: scroll` viewport, cursor at (10,120): after `handle_scroll(100.0, (10,120))` the list scrolls and `hovered()` still names `#r2`; a jiggle to the same point re-targets `#r4`.
-
-`crates/application/obscur-runtime/src/runtime/ui_runtime/pointer_dispatch.rs:69` (`self.hover = chain;`) is the only writer of `UiRuntime::hover`; a grep of `self.hover` across `obscur-runtime` returns that write and five reads (`pseudo_state_projection.rs:46`, `frame_pipeline.rs:272`, `interaction_state.rs:14,:34`, `diagnostics.rs:66`). The reconciled-frame hook exists and covers only focus: `frame_pipeline.rs:134` `self.drop_focus_if_removed()`, whose own doc names the defect it closed — "`focused` went on naming a dead id". `handle_scroll` (`ui_runtime/scrolling.rs:110`) is not `handle_pointer`, so it never touches the chain either. Not deliberate: `ui_runtime.doc/hover.md` ("the nodes currently under the pointer, topmost-first") and `interaction_state.doc/hovered.md` assert the opposite, `hover_update.doc/for_event.md` records only the touch-release policy, and nothing locks in the current behaviour — the facade's `incremental_restyle.rs` drives hover through `set_pseudo_state`, bypassing the chain. `specs/w3c/selectors-4.txt` §9.1 lists `remove-hovered-element.html` among the `:hover` tests.
-
-**Effort:** M. The removal half is the cheap one — a `drop_hover_if_removed()` beside `drop_focus_if_removed()`. The moved-box and scrolled-box halves need a re-hit-test after layout, and `PointerSessions` retains presses, pans, holds, captures and last clicks but no last hover position, so a last screen point per hover-capable pointer has to be recorded first. **Done means:** a test grows a row under a fixed cursor and asserts the red fill moves to the row containing the cursor in the same frame; a test deletes the hovered row and asserts `hovered() == None`; a test wheel-scrolls under a fixed cursor and asserts the new row hovers.
-
-#### A2. A scroll offset outlives the box ceasing to be a scroll container, so re-showing it jumps the content 150 px with no gesture
-
-One node, class flipped between `.scroller{height:50px;overflow:auto}` and `.plain{height:50px}` with the ComponentId held constant (so the reconciler updates in place), 10 × 20 px items inside.
-
-```
-A. scrolled scroller : node=NodeId(4294967297) scroll_top=150 hit(10,10)=item#8
-B. same node, overflow gone : same_node=true scroll_top=0 hit(10,10)=item#0
-B'. set_scroll_top(node, 0.0) while not a container -> ignored, no effect
-C. scroller again    : same_node=true scroll_top=150 hit(10,10)=item#8
-D. replaced by a NEW node : same=false scroll_top=0 hit(10,10)=item#0
-E. COLD scroller     : scroll_top=0 hit(10,10)=item#0
-K. display:none round trip, same node : 150 -> 0 -> 150
-```
-
-Scene stream, warm C vs cold E: warm len=6, cold len=4; warm carries `PushTransform(AffineTransform { coeffs: [1,0,0,1,0,-150] })` + `PopTransform` the cold render does not emit. This is the single divergence the differential harness flagged out of 43 hand-built scenarios (`scroll-container-destroyed-and-recreated`): 10 layout boxes off by exactly −150 px and ~100 hit-grid points naming a different row (warm `/0/7`, cold `/0/0`).
-
-Two things this is not. The `overflow` flip is contrived; **`display: none` is the archetypal tab-panel / collapsible pattern and reaches the same ghost** — the box loses its layout box, drops out of `scroll_containers` (`orchestration/scroll.rs:96-98`, which needs both `establishes_scroll_container` and `boxes.get(&node)`), and the offset returns on re-show. And the recovery path is closed while it matters: `set_scroll_top` early-returns for a node that is not a live overflowing container (`ui_runtime/scrolling.rs:71-74`, documented), so an application cannot pre-emptively clear the ghost — only correct after the jump is painted. Note that `inspect_snapshot` reports content-space boxes (`orchestration/inspect.rs:110`), so `item0.y` reads `0.0` in every case; the −150 lives in the paint transform, the hit fold and `ScrollOffsets::projection`.
-
-Two boundaries a fix must not cross, both measured. `overflow: hidden` correctly does **not** reset (150 / 150 / 150) — `establishes_scroll_container` (`overflow_axes.rs:86-94`) keeps `hidden` a container, matching CSSOM. And the content-shrink neighbour is stated policy through the identical code path: content 10 → 1 → 10 items with `overflow` never removed gives 150 / 0 / 150, which `scroll_offsets.doc/ScrollOffsets.md` blesses. `ScrollOffsets` deliberately holds "neither the tree, the boxes nor the computed styles", so it cannot tell the two apart — the fix belongs in the caller that can see box-presence. The docs do contradict the behaviour on this case: `scrolling.doc/scroll_top.md` ("an unscrollable box is at the top by definition") is falsified one frame later.
-
-`crates/application/obscur-runtime/src/runtime/scroll_offsets.rs:23` — `offsets: FastMap<NodeId, f32>`, with no `remove`, `retain` or `clear` anywhere in the workspace; `runtime/layout_classifier.rs` mentions neither `Overflow` nor `Display`.
-
-**Effort:** S. **Done means:** one decision, then either `ScrollOffsets.md` covers it explicitly, or a caller seats the offset to 0 when the node stops having a scroll container's box — scoped to `establishes_scroll_container == false` or "no layout box", leaving `overflow: hidden` and the content-shrink case byte-identical. A test asserts the `display:none` round trip ends at 0.
-
-#### A3. One NaN frame delta into `advance_motion` hangs the UI thread if any animation repeats infinitely, and otherwise completes every timeline, fires every armed long press, and leaves an immortal NaN fling
-
-**The hang is the ordinary CSS path.** `@keyframes spin{from{width:0px}to{width:100px}}` + `.row{animation:spin 1s linear infinite}` through `CssPipeline`, render, `advance_motion(0.25)`, then `advance_motion(f32::NAN)`:
-
-```
-t=0.25 active_animations=1
-calling advance_motion(NaN) ...        <- last line printed
-EXIT=124        # timeout 180, release
-```
-
-Same through `animate_with` with `MotionPlayback{repeat: Infinite}`, and on the bare `Timeline`. `animation-iteration-count: infinite` compiles to `RepeatCount::Infinite` at `crates/frontend/obscur-css/src/compiler/animation_compiler.rs:269`. A spinner is the most common CSS animation there is.
-
-`crates/domain/obscur-motion/src/timeline/timeline.rs:142` is `if remaining <= 0.0 { return; }` — false for NaN. `remaining < time_to_end` is also false, so control falls into the "iteration completed" branch, `remaining -= time_to_end` stays NaN, and with `Finite(n)` `saturating_add` eventually terminates (jumping the animation to its endpoint) while **`Infinite` never sets `exhausted`, so the `loop` at `:160` never exits**.
-
-The other three effects, from the same one tick:
-
-```
-(fling)  after the flick scroll_top=120; ticks 159.03 / 196.19 / 231.56
-         after ONE NaN tick: scroll_top=NaN; 2000 good ticks later: still NaN
-         set_scroll_top(0) -> 0; one more tick -> NaN   (five repair rounds, each surviving one frame)
-(longpress) 0.1s of a 0.5s threshold held, fired=0 -> after NaN, fired=1   (control: 0.2s, fired=0)
-(finite anim) t=0.5 active=1 width=50 -> after -0.4 active=1 width=50 -> after NaN active=0 width=100
-(frame loop) control settles quiet after 20 drained ticks; the NaN fling is quiet=false after 20001
-```
-
-`fling.rs:24` (`seconds <= 0.0`) admits NaN and `:39` (`is_done` = `velocity.abs() <= rest_speed`) makes it immortal, so `flings.retain(|_, f| !f.is_done())` (`pointer_sessions.rs:367`) keeps it forever and it returns a NaN travel on every subsequent good frame. The stall net written for exactly this case — `gestures.doc/advance_flings.md`: "a fling that went on being advanced would keep asking for frames while moving nothing" — is `(after - before).abs() < f32::EPSILON` (`ui_runtime/gestures.rs:129`), which `NaN - NaN` never satisfies. `long_press_recognizer.rs:26` has the same `seconds <= 0.0`. Recovery exists but is two calls and the runtime never performs either: a fresh touch Down removes the fling (`pointer_sessions.rs:232`), then `set_scroll_top(0)` sticks.
-
-Not deliberate, and the sibling integrator proves it: `time_driver.rs:28` is `if delta > 0.0`, and `time_driver.doc/advance.md` says "Only a strictly positive `delta` accumulates; a negative delta (**and `NaN`**) is ignored". `Timeline::with_delay` special-cases `is_nan()`. `ui_runtime/motion.rs:79` guards its own canvas clock with `delta.max(0.0)` in the same function that hands the raw delta to the three unguarded sites at `:73`, `:74`, `:84`.
-
-Distinct from ledger item **A9** (line 796), which is the NaN *wheel notch* into `ScrollOffsets::shift` and explicitly scopes itself out of the fling path ("the internal fling path cannot manufacture one") and asserts "an explicit `set_scroll_top(port, 0.0)` fully recovers" — false while a fling is live. Reachability: every in-tree host filters NaN by accident (`runner.rs:334`, `layer_runner.rs:195` are `if delta > 0.0`; `headless_host.rs:89` divides u64 nanos), so the door is an application driving its own clock — the documented contract (`docs/conformance-audit.md:443`), and the same reachability class the ledger already accepted for A9.
-
-**Effort:** S. **Done means:** `advance_motion` rejects a non-finite delta at the door (or each of `Timeline::advance`, `Fling::advance`, `LongPressRecognizer::advance` flips its guard to `if delta > 0.0`); a test ticks an `infinite` timeline with `f32::NAN` and asserts it returns unchanged; a test ticks an armed 0.5 s hold with NaN and asserts it has not fired; a test flings a list, ticks NaN, and asserts the offset is finite and frame demand falls to zero.
-
----
+Large finite steps also use arithmetic iteration skipping. This avoids
+stalling when subtraction of one iteration duration can no longer reduce
+the step at floating-point precision.
 
 ### Part B — breaks an application
 
-#### B1. Style state for a removed node is never pruned on the incremental path: 114 MB per minute of scrolling, and a frame-time collapse against the full pass it replaces
+#### B1. Incremental restyle prunes removed nodes — fixed
 
-The largest item in this pass. Four lanes found it independently and two adversaries reproduced it to within 0.2 % on RSS.
+The runtime prunes node-owned state after reconciliation. The regression
+`a_departed_node_keeps_no_computed_style` slides a keyed window and checks
+that removed nodes lose their computed styles during incremental frames.
+Runtime tests cover removed pseudo-class state and scroll offsets.
 
-**Semantic proof.** Render 20 rows, keep the 15 NodeIds about to die, render 5 rows:
+#### B2. A fixed working set stops reloading evicted images
 
-```
-15 nodes removed: in tree=0, computed_style() still answers for 15, layout box for 0
-after 200 more frames at 5 children: 15 dead nodes still styled
-after 200 churn cycles: 150 of 150 sampled dead nodes still styled
-after a viewport change (full restyle): 0 still styled
-```
+The runtime retains decoded size and cost while an image is referenced or
+resident. A missing image retries when it fits or can replace lower-priority
+pixels. Equal-priority images do not displace each other on retries.
+Intrinsic dimensions survive pixel eviction and budget changes schedule
+a resource frame. Budget pressure reports `resource.image_cache_pressure`.
+The runtime regression exercises stable frames, visibility priority, and
+reloading after a budget increase.
 
-`UiRuntime::computed_style(n)` returns `Some` for a node `tree().get(n)` returns `None` for. `styling.doc/computed_style.md` states the opposite in writing — "[`None`] when the node was never styled (**absent from the tree**, …)" — so the public API contradicts its own contract.
+#### B3. Surface acquire shutdown and resize coalescing — fixed
 
-**The stated origin use case.** A `.list` holding a 30-row window over a 100 000-row model, 3 nodes per row, keyed by index, window sliding one row per frame — a virtualized list under a continuous scroll. `tree.len()` pinned at 122.
+The worker's request sender disconnects before shutdown joins the worker,
+including when an image request fills the queue. Resize stores the latest
+extent in shared state and does not consume a queue slot. A failed send
+rolls back the in-flight claim. The worker discards a texture acquired for
+a superseded extent and wakes the window loop to request the next image.
+Tests cover queue shutdown, nonblocking requests, and resize coalescing
+without a compositor.
 
-```
-frame  500 ( 8.3s of 60Hz scrolling): rss +17588 kB   frame  8.60 ms
-frame 1500 (25.0s):                   rss +49616 kB   frame 23.84 ms
-frame 3000 (50.0s):                   rss +97572 kB   frame 47.01 ms
-3000 frames in 76.5s wall.  frame 20 = 1.59 ms.  growth = 32.52 kB/frame = 114.3 MB per minute
-```
+#### B4. Resource loads that never deliver an outcome — fixed
 
-Control, same binary, the repository's own escape hatch (`restyle_phase.rs:84`):
+Deferred and off-thread loads convert loader or decoder panics into a failed
+outcome. A per-job completion channel lets the bridge detect a job dropped by
+the executor on the next result poll. A job still pending after 60 seconds
+fails on the next result poll, and its late reply cannot replace the failure.
+Both cases use the normal `resource.load_failed` diagnostic. The timeout
+abandons the result without stopping a worker already running.
 
-```
-OBSCUR_FULL_RESTYLE=1
-frame  500: rss +1104 kB   frame 1.446 ms
-frame 3000: rss +1104 kB   frame 1.367 ms
-3000 frames in 4.3s wall.  growth = 0.37 kB/frame
-```
+#### B5. SVG element resource diagnostics — fixed
 
-The optimisation ends up 34× slower than the path it replaces, and still climbing linearly, while leaking 97 MB.
+SVG and raster load failures share the same diagnostic path. An accepted failure emits
+`resource.load_failed` with the URL, resource handle, referring node and window. An SVG
+element with a missing loader or vector decoder emits `resource.no_loader` once per URL.
+The `svg_resource_failures_report_once` integration test covers a missing file, a
+malformed SVG and an absent vector decoder across successive frames.
 
-**It does not flatten and it is not the live tree.** With a 3-row window (`tree.len()`=14, constant) out to 4000 frames — 10× the removals of the original checkpoint — the growth is the same 32 kB/frame and frame time still reaches 74 ms. A 14-node tree leaks exactly as fast as a 122-node one, so the cost scales with nodes *ever removed*. Independent runs at 8000, 10000, 16000 and 20000 frames are all dead straight. `idle` mode (the same tree re-rendered with zero churn, 400–3000 frames) is flat to the byte at 51–155 µs/frame, so it takes churn; `NO_CSS=1` leaks identically, so it is not CSS-specific; a `toggle` view whose rows return under the same keys leaks identically, so it is not keyed-identity-specific.
+#### B6. SVG background images — fixed
 
-**The map, measured directly.** An instrumented copy outside the repo, 20 rows re-keyed per frame over a constant 22-node tree: after 100 generations `cascaded=2001 custom=2000 computed=2002`; after 1000, `20001 / 20000 / 20002` with VmRSS 23 MB → 179 MB. Under `OBSCUR_FULL_RESTYLE=1` the same 100 generations end at `21 / 20 / 22` and 5 MB. `layout_boxes().len()` stays at the live count throughout — the layout side is the correct model of what the style side should be doing.
+The resource bridge routes SVG background URLs through the vector decoder and keeps
+single-layer and stacked background URLs live. Scene composition paints the vector
+paths with CSS background size, position, repeat, and clipping. The pixel regression
+`svg_background_tiles_stay_vector` covers both single and stacked backgrounds.
+A vector background layer with more than 8192 visible tiles is skipped to bound
+display list growth.
 
-**Attribution, two independent ways.** `valgrind --tool=massif` on the churn binary names 16 430 064 of an 18 821 689-byte peak in one chain: `hashbrown::RawTableInner::fallible_with_capacity` ← `StyleResolver::resolve` ← `StyleCoordinator::resolve_incremental` ← `RestylePhase::invalidated` ← `run_frame` ← `render_now`. `callgrind` puts the per-frame cost in `PropertyValue::uses_ch` (14.0 %) and `ComputedStyle::get` (~24 %) reached from `layout_style_from` — the conversion of stale entries, not the resolve.
-
-**Mechanism.** `crates/application/obscur-runtime/src/orchestration/style_coordinator.rs:117-165` — `resolve_incremental` walks `Self::preorder(root, …)` over the **live** tree and only inserts (`:151` `if dirty.is_invalidated(node) || !styles.contains_key(&node)`, `:160` `styles.insert(node, computed)`); there is no removal for a key the walk no longer reaches. `restyle_phase.rs:184-241` hands the retained map straight back, `style_phase.rs:164` (`std::mem::take(self.retained)`) carries it across frames, and the field is `ui_runtime.rs:107`. A removal does **not** widen to a full pass: `restyle_phase.rs:253` `ReconciliationOp::Remove { parent, .. } => roots.push((*parent)?)` pushes the parent, so the incremental path is exactly the path a list takes. `style_resolver.rs:64` `ComputedStyle::with_capacity(COMPUTED_PROPERTIES.len())` (~124) sets the per-entry cost at ~4 kB regardless of sheet size — an empty sheet leaks 58 kB/frame, a 200-rule sheet 62 kB/frame.
-
-**`StyleInputs.cascaded`/`.custom` leak alongside it, for a different reason than first reported.** An instrumented run counts `dirty_seen=20979 departed_skipped=0` — the `continue` at `style_matching_coordinator.rs:99-102` is taken **zero times** and cannot be taken by a departed node, because `RestyleScope::expand` returns early for a root absent from the tree (`restyle_scope.rs:36-38`, stated policy in `expand.md`) and `mark_subtree` only walks live children, so dirty ⊆ live tree always. Clearing in that branch would fix nothing. What is missing is a **removal-driven** prune: `ReconciliationOp::Remove { id, .. }` carries the removed id (`obscur-tree/src/reconciliation/reconciliation_op.rs:18,44`) and no phase uses it.
-
-**Turn cost into a per-frame walk.** The leaked map is scanned whole every composing frame at `layout_coordinator.rs:43-59` (`layout_styles_from` maps **every** entry through `layout_style_from`, from `arrange_phase.rs:89`), `resource_bridge.rs:309`, `:392`, `:429`, `grid_areas.rs:16`, `grid_lines.rs:18`, and `layout_classifier.rs:122,:169` — so frame cost tracks the map, not the tree.
-
-**Correction worth keeping.** "For the life of the process" is too strong. Any full restyle throws the map away and rebuilds from the live tree, and a viewport flip of 1 px every 500 frames plateaus RSS at +10.5 MB and holds frame cost at 1–5 ms across 1600 further frames of identical churn. The bound is the **interval between full restyles** — viewport change, stylesheet change, media-environment change, an unbounded scope, or the escape hatch. For a steady-state application that neither resizes nor swaps sheets — the file-manager list this toolkit exists for — that interval is unbounded in practice. That reset behaviour is also the cheapest interim mitigation, and the reason nobody has noticed.
-
-Not deliberate. No `.doc/*.md` states retention of a dead node's style; `ui_runtime.doc/computed.md` justifies only retention *across frames*, `restyle_phase.doc/invalidated.md` states the opposite contract ("what the phase pays is proportional to the dirty set"), and every neighbour on the same frame prunes by liveness — `generated_content.rs:144` does exactly the right `retain` under a comment explaining why ("node ids carry a generation, so a dead id can never be mistaken for a live one here"), as do `motion_driver.rs:126-132`, `measure_cache.rs:53`, `arrange_cache.rs:97`, `inline_styles.rs:123`, `resource_bridge.rs:344,373`, `handler_registry.rs:111`. `image_cache.doc/new.md` calls an unbounded map "a leak that only shows itself after the program has been running".
-
-**Effort:** M. **Done means:** `ComputedStyles`, `StyleInputs.cascaded` and `StyleInputs.custom` hold one entry per live node; `computed_style()` returns `None` for a node absent from the tree, restoring its documented contract; the `filelist` probe reports flat RSS and flat frame time over 3000 frames with no `OBSCUR_FULL_RESTYLE`; a test churns a keyed window for N frames and asserts the three map lengths equal the tree length.
-
-#### B2. A working set larger than the image-cache budget re-loads and re-decodes every frame, forever — and the default budget is enough to trigger it
-
-Filed against a host-set 20-byte budget; the reachable case needs no configuration at all.
-
-```
-DEFAULT budget, 600 <img> nodes (8 on screen), 60 frames:
-  loader_calls=5792  per_frame=17.39ms  painted_last_frame=512  diagnostics=0
-  stats=CacheStatistics { hits: 30208, misses: 5792, evictions: 5280, insertions: 5792, entries: 512 }
-DEFAULT budget, same tree, 240 frames: loader_calls=21632  per_frame=15.21ms  diagnostics=0
-unlimited budget, same tree, 60 frames: loader_calls=600   per_frame=6.53ms   painted=600
-```
-
-(21632 − 5792) / 180 = **88.0 loads per frame, exactly 600 − 512**, linear over 4× the iterations. Frame cost 6.53 → 17.39 ms, a 2.66× regression with a 16-byte in-memory image and a no-IO loader; with `FsResourceLoader` and real PNGs those 88 are 88 disk reads and decodes per frame. The byte cap has the same shape — a budget seating 4 of 5 visible images gives `loader_calls=64` over 60 frames and paints 4 of 5, with the missing one rotating; seating 5 gives `loader_calls=5`.
-
-Cause: `resolve_element_images` (`resource_bridge.rs:488-502`) walks the **whole retained tree**, not the viewport, so the working set is the number of image URLs in the tree, while `DEFAULT_MAX_ENTRIES = 512` (`image_cache.rs:15`) is justified in its doc as "well above what any one screen shows". `eviction_policy.rs:19` `choose_victim` has no referenced-this-frame veto; `image_cache.rs:133-151` `insert` evicts in a loop until the newcomer fits; `resource_bridge.rs:246-250` `release_evicted` drops the victim's `image_handles` entry, which is the only guard that would have stopped the re-request next frame. A non-virtualized directory listing of 600 files, or a gallery holding five full-screen 4K photos (the byte cap "seats four"), reaches this with no configuration; a virtualized list does not.
-
-Not deliberate: `image_cache.doc/DEFAULT_MAX_BYTES.md` names thrash as the harm being *avoided* ("a budget small enough to thrash is worse than none"), and its sizing reasoning is screen-bounded while the resolve pass is tree-bounded. The single-oversized-image case *is* deliberate and does hold (1 loader call, never retried), which is what makes this the odd one out.
-
-Two remedies that look right and are not: the "visible this frame" veto never fires here (the churning entries are all `Offscreen` and tie), and refusing the insert would replace a reload loop with a permanently-unpainted image.
-
-**Effort:** M. **Done means:** a tree that does not change between frames issues O(images) loader calls, not O(frames), at any budget — either a per-URL back-off keyed on "evicted while still referenced", or a viewport-bounded resolve pass. And the condition is reported: `diagnostics=0` across all 12 probe runs today, so a host has no signal that its frame time tripled.
-
-#### B3. The surface acquirer's one-slot channel silently drops three different messages: dropping it hangs, a lost request freezes the window, and a resize burst configures the wrong size
-
-`sync_channel::<AcquireRequest>(1)` (`surface_acquirer.rs:41`) carries `Image`, `Resize` and `Stop`, and every send is a discarded `try_send`. Reproduced against the real file copied verbatim (only the doc attributes and three GPU `use` lines rewritten) driving a stub surface whose `current_texture()` sleeps.
-
-**Drop hangs.** A resize queued while an acquire is in flight, then the surface goes away:
-
-```
-$ timeout 30 ./acq-probe drop-loses-stop
-channel holds the resize; dropping the acquirer now
-exit=124        # nothing after that line ever printed
-$ for t in /proc/$PID/task/*; do echo "$(cat $t/comm) wchan=$(cat $t/wchan)"; done
-acq-probe          wchan=__futex_wait      # main, inside JoinHandle::join
-obscur-surface-    wchan=__futex_wait      # acquire thread, parked in inbox.recv()
-```
-
-Control with nothing queued: `drop returned after 1.400203109s`. And `spawn(); request(); drop()` needs no resize at all: **40 / 40 hangs**. `Drop::drop` (`:119-131`) `try_send`s `Stop` into the full slot, then joins; the loop is `while let Ok(request) = inbox.recv()` (`:148`) and `self.requests` is a live struct field, so `recv()` can never return `Err` and the thread can never exit. Reached from `layer_runner.rs` (acquirer dropped at the end of `run`, after `resize_to_surface` at `:179`/`:233`) and `runner.rs:204` (after `acquirer.resize` at `:544`).
-
-**A lost request freezes the window.** The windowed runner's shape, one `WindowEvent::Resized` delivered mid-acquire, three consecutive runs:
-
-```
-presented 0 frames in 5 s; pending=true; surface 800x600 (window 800x600); acquires 1
-presented 0 frames in 5 s; pending=true; surface 800x600 (window 800x600); acquires 1
-presented 0 frames in 5 s; pending=true; surface 800x600 (window 800x600); acquires 1
-```
-
-`resize()` fills the slot; the next redraw finds no image, calls `request()`, whose `try_send(Image)` fails and returns without scheduling anything (`:60-71`); no image is coming, so the acquire thread never rings the wake, so no redraw is ever requested. `runner.rs:300-306` and `:313-320` are the only two exits from `render_frame` that do not call `self.request_redraw()`; `about_to_wait` (`:726-741`) re-arms only on `poll_resource_tasks() > 0` or `control.has_pending()`, neither true on an idle UI. The inline comment at `:64-67` — "A full channel means a request is already in flight, which is the same state `outstanding` records" — is the invariant, and `resize` and `Drop` are what falsify it. Symptom in production: a window that stops repainting after a resize until the pointer moves.
-
-**A resize burst keeps the oldest extent.** Three resizes while the thread is inside a 400 ms acquire: `configures seen: 1 ; surface ended at 800x600` after asking for 800x600, 900x700, 1000x800. A resize drag is exactly this shape, as is a compositor sending `Configured` + `ScaleFactorChanged` in one batch.
-
-The layer runner escapes the second and third of these because it calls `acquirer.request()` unconditionally every turn under a 16 ms bounded wait (`layer_runner.rs:125-127`) and re-checks the extent (`:227-235`) — measured converging in 31 turns with 0 stale images dropped. It does not escape the first.
-
-Not adversarially re-run (no verdict was issued for this lane); the evidence above is the lane's own, and the drop-hang is 40/40 deterministic.
-
-**Effort:** M. **Done means:** dropping a `SurfaceAcquirer` with a request queued returns within one acquire; a refused `request()` is retried or reported rather than silently lost; a burst of resizes leaves the swapchain at the last extent asked for. A test drives all three against a stub surface.
-
-#### B4. A load whose result never arrives is parked in `Loading` for the life of the runtime — and the shipped executor reaches it through a panicking loader or decoder
-
-The send is the **last statement** of the closure at `resource_bridge.rs:566-574`, so anything that prevents it loses the load with no record. Two doors, both measured, plus a third at `:598-606` with the identical shape.
-
-**An executor that drops the job** (`fn run_blocking(&self, _job: Box<dyn FnOnce() + Send>) {}` — the shape of `spawn_blocking` on a shut-down runtime, a bounded pool that rejects, or a worker that dies before `tx.send`), 50 frames with `poll_resource_tasks()`:
-
-```
-[dropexec]              resources=1 cached=(0,0) drawn=0 diags=[] misses:50
-[baseline-no-executor]  resources=1 cached=(1,0) drawn=1 diags=[] hits:49 insertions:1
-```
-
-**The shipped executor plus a panicking decoder** — `KitBootstrap::install_blocking_executor` → `SmolSpawner::run_blocking` = `blocking::unblock(job).detach()` (`obscur-task-smol/src/spawner/smol_spawner.rs:77-79`), a perfectly well-behaved port, and an ordinary third-party-codec failure:
-
-```
-thread 'blocking-1' panicked at: third-party decoder panicked on this input
-[panicking-decoder-real-executor] resources=1 cached=(0,0) drawn=0 diags=[]
-```
-
-The process survives (the pool isolates the panic) and the resource is stuck in the same silent `Loading`. **No executor misbehaviour is required.** A panicking *loader* gives the same result, against a control where the same loader returning `Err(SourceUnavailable)` emits `resource.load_failed` with the URL. A file that is simply absent reports `NotFound` on both paths, so the runtime does distinguish dead from slow for every failure it hears about — this one it never hears about.
-
-**Stickier than first reported.** Three recoveries a host might try: stop referencing the URL for a frame and reference it again → `drawn=0 resources=1`, the handle is not released; install a working executor afterwards and render 50 more frames → `misses` climbs 50 → 151 while nothing is re-requested, because `image_handles.contains_key` at `:429`/`:505` skips the URL every frame; only `set_resource_providers` recovers it, and that is a wholesale provider reset for every URL, documented nowhere as a recovery path.
-
-Not deliberate. `blocking_executor.md` and `load_image.md` describe the two arms as differing only in *when* the load runs ("both paths end in the same place: `apply_outcome`"). `image_handles.md` says a URL is "requested at most once" and the comment at `:429` justifies the guard as "already resolved, or already attempted (and failed)" — a job that never completes is neither. And `resolve_background_images`'s no-provider branch (`:383-410`) drives an unserviceable request straight to terminal `Failed` with a named diagnostic precisely so a caller "can tell it is dead rather than parked in `loading` behind a slow network". Partially acknowledged in `smol_spawner.doc/run_blocking.md` ("a detached task is never polled … the image is not painted"), but nothing on the runtime side records that a load can be parked forever with no diagnostic, and `resource_bridge.rs` has no in-flight registry, deadline or reaper.
-
-**Effort:** S. **Done means:** the job is wrapped so a panic becomes a `ResourceError` on the channel, and a result that never arrives eventually reaches a terminal state with a `resource.load_failed`. A test installs a job-dropping executor and asserts the hub entry becomes `Failed` with a diagnostic; a test installs a panicking decoder on the real `SmolSpawner` and asserts the same.
-
-#### B5. Every failure on the SVG element path is silent, while the identical raster failure beside it reports
-
-Measured on the **real shipped stack** (`KitBootstrap::install_image_resources` + `install_vector_resources` = `FsResourceLoader` + `ImageDecoder` + `SvgVectorizer`, exactly what `App` wires at `app_parts.rs:154-155`), real files on disk, 3 frames + `poll_resource_tasks()`:
-
-```
-missing.svg (file absent)    : diags=[] resource_count=1 cached=(0,0) painted=0
-missing.png (file absent)    : diags=["resource.load_failed … NotFound"]
-broken.svg  (usvg refuses)   : diags=[] resource_count=1 cached=(0,0) painted=0
-broken.png  (decoder refuses): diags=["resource.load_failed … DecodeFailed(\"The image format could not be determined\")"]
-no providers at all, logo.svg: diags=[] resource_count=0
-no providers at all, logo.png: diags=["resource.no_loader … "]
-```
-
-A typo'd icon filename is the reachable case: `.png` reports, `.svg` says nothing, in a plain `App` with everything installed. Nothing else records it either — `resource_count()` is a bare integer, DevTools' resources panel prints only that count (`devtools.rs:158-165`), and the per-URL `ResourceState` is `pub(crate) state_of` (`:110`), referenced by one unit test and unreachable from an application.
-
-Two independent holes in `resource_bridge.rs`: `:231`, the `ResourceOutcome::Vector` `Err` arm calls `self.hub.fail(handle, version, error)` and drops the result where the `Image` arm three lines above calls `report_failure` (`:208-213`); and `:521-523`, `resolve_element_vectors` returns early when a provider is absent with no `report_unresolvable_source` — it is not even given a `ResourceReporting` (`resource_resolution.rs:84-86` passes the tree alone, unlike its three siblings), and the raster no-provider branch cannot cover it because `:475` filters vector sources out of that loop.
-
-The docs assert the parity that is broken: `resource_bridge.doc/vector_decoder.md` — "an SVG source paints nothing — **the same policy an absent raster decoder has for a bitmap**"; `resources.doc/set_vector_decoder.md` — "exactly as an unloadable bitmap does". The raster branch's own comment at `:466-471` says why it reports: "each referenced `src` is named once on the diagnostics channel so a missing provider is loud, not silent."
-
-**Effort:** S. **Done means:** one `report_failure` in the Vector `Err` arm, and `ResourceReporting` threaded into `resolve_element_vectors` for a `resource.no_loader` on the early return; a test asserts a missing `.svg` and a malformed `.svg` each emit exactly one diagnostic naming the URL.
-
-#### B6. `background-image: url(*.svg)` is handed to the raster decoder and never to the installed `VectorDecoder`
-
-Same runtime, same loader, same bytes, real CSS through `StylesheetParser` + `StylesheetCompiler`, real `ImageDecoder` + real `SvgVectorizer`:
-
-```
-REAL stack | background-image: url(icon.svg)  cached=(0,0) dl=[] 
-    diags=["resource.load_failed … DecodeFailed(\"The image format could not be determined\")"]
-REAL stack | <img src=icon.svg>               cached=(0,1) dl=["PushTransform","DrawPath","PopTransform"] diags=[]
-REAL stack | background-image: url(pic.png)   cached=(1,0) dl=["DrawImage"] diags=[]
-MOCK raster| background-image: url(icon.svg)  cached=(1,0) dl=["DrawImage"] diags=[]
-```
-
-The PNG arm rules out "backgrounds are broken generally". The mock arm is the silent-corruption variant: a permissive host raster decoder "decodes" the SVG as a bitmap and the working vector decoder is never consulted — which contradicts `install_vector_resources.md`'s own policy that an SVG must never be "rasterized behind the author's back". `resource_bridge.rs:377` `resolve_background_images` has no `is_vector_source` filter where the element path filters at `:477` and `:498`, and `resolve_element_vectors` (`:519-528`) only scans `node.attributes().image_source()`.
-
-**The obvious one-line fix is not sufficient**, and this is the correction that matters: `scene_coordinator.rs:379` resolves a background image with `background_image_url_of(...).and_then(|url| images.get(url))` — the raster map only — while the compositor's only vector lookup is `:500`, keyed on the element `src` attribute. Filtering in the bridge would fill `vector_cache` and still emit an empty display list, and an SVG background additionally needs `background-size`/`repeat`/`position` over a vector, which the vector emit path does not express.
-
-**Effort:** M for (a), S for (b). **Done means:** either SVG backgrounds work end to end — bridge routing plus a vector arm in `paint_background_layer`, with `background-size`/`repeat`/`position` honoured — or a diagnostic that names the real cause ("SVG is not supported as a `background-image`; use `<img src>`") instead of `DecodeFailed`. Either way the `is_vector_source` guard the element path already applies closes the silent-rasterization path.
 
 ---
 
 ### Part C — what only grows
 
-#### C1. `ScrollOffsets.offsets` keeps one entry per node whose offset was ever written, forever
+#### C1. Scroll offsets of removed nodes — fixed
 
-`crates/application/obscur-runtime/src/runtime/scroll_offsets.rs:24` has `set`, `shift`, `seat` and no removal of any kind — no `retain`, `remove` or `clear` anywhere in the workspace. Measured by mounting, scrolling and unmounting a scroller N times:
+Reconciliation drops removed nodes’ stored offsets, scroll motions, motion
+deltas, and velocities. A 10,000-cycle mount/unmount regression checks that
+only live nodes keep offset entries.
 
-```
-gen   250: offsets.len()=  251 dead=  250
-gen  4999: offsets.len()= 5000 dead= 4999
-```
+#### C2. Resource provider replacement — fixed
 
-`len()` equals the generation count exactly at every sample; 10× the iterations gives 10× the entries, no flattening. Consequence is memory only and modest — `FastMap<NodeId, f32>` is ~17–34 B per entry, so ~85–170 kB at 5000 — because the map is read only through `get`, `refold` builds from the live containers, and the public `scroll_top` resolves through the live tree (a dead node reads `0.0`, confirmed). Generational NodeIds make a stale entry unreachable rather than mis-attributable. Population is every node whose offset was ever *written*, a superset of "ever scrolled": `seat` also seeds from the `VirtualFor` model-replacement reset (`virtual_lists.rs:183`) and the textarea caret-follow (`ui_runtime/caret_visibility.rs:42`).
+Replacing the shared loader releases raster and vector resource handles and clears
+their caches and queues. Replacing the vector decoder applies the same cleanup to
+SVG requests. The regression test checks hub counts, retention of raster work
+during a vector-only replacement, and rejection of a late reply from an old provider.
 
-No `.doc/*.md` records a retention policy for departed nodes; the type doc's retention rationale is about relayout only, and there is no scroll-restoration feature that would need one. 18 `retain`/prune sites exist in the crate; this file is not among them.
+#### C3. Pseudo-class states of removed nodes — fixed
 
-**Effort:** S. **Done means:** one `retain` in `refold` (`:77-113`), which already holds the live tree and already runs every frame from `frame_pipeline.rs:355` — `self.offsets.retain(|node, _| fold.tree.get(*node).is_some())`, the same shape as `motion_driver.rs:126-132`. A test asserts `offsets.len()` tracks the live container count over N mount/unmount generations.
+Reconciliation prunes pseudo-class state for removed nodes. A 10,000-cycle
+regression sets states through the public runtime API and checks that a
+departing node loses its state while a surviving node keeps its state.
 
-#### C2. `set_resource_providers` / `set_vector_decoder` clear `image_handles` without releasing the hub, stranding one unreachable entry per URL already loaded
-
-`resource_bridge.rs:123` and `:146` both call `self.image_handles.clear()` with no `self.hub.release(handle)`. `image_handles` is the only place the bridge keeps a `ResourceHandle`, and `hub.release` is the only per-entry reclaim path (`dispose_namespace` is the sole alternative and nothing in the tree calls it). **One swap is enough:**
-
-```
-before swap:                  resource_count=50  cached=(50, 0)
-right after ONE swap:         resource_count=50  cached=(0, 0)
-after 50 more urls post-swap: resource_count=100 cached=(50, 0)
-```
-
-The pixels go; the 50 hub entries stay with no handle left to release them. The swap path breaks a bound the no-swap path respects — with a working provider pair and no swap, `retain_referenced` keeps hub and cache in step and `resource_count` is capped by `DEFAULT_MAX_ENTRIES`: `after 2000 unique urls, resource_count=512`. One swap per URL and the ceiling is gone, linear at 1×/10×/100×: `100 → 100`, `1000 → 1000`, `10000 → 10000` (rss 9392 kB, ~400 B per entry). A second shape with its own control: `hub.request` (`resource_hub.rs:38-45`) reuses an entry by `by_source` and calls `entry.retain()`, so 100 swaps of the *same* URL end at `resource_count=1` against a no-swap control's `0` — a permanently unbalanced refcount. And `set_vector_decoder` leaks the *raster* handles, because it wipes the shared "already requested" map while clearing only `vector_cache`.
-
-Not deliberate: `set_providers.md` mentions only dropping cached images and handles; the comment at `:121` covers the abandoned `deferred_loads` and stops. Three places state release as the discipline — `image_handles.md`, `release_evicted.md`, and `:363-372` ("Released, not merely forgotten: the hub is refcounted, and an entry nothing refers to is what `release` exists to reclaim"). `retain_referenced.md` names the wholesale clear on provider replacement as the inadequate predecessor it was written to fix, so this is the one case that fix missed. The tests at `:934-1024` assert on `bookkeeping_counts()` only, never `hub.len()`, and each installs providers once.
-
-A stock `App` leaks nothing — `app_parts.rs:151-156` installs both providers once before any frame. Reaching this needs a swap after frames have loaded, which `KitBootstrap::install_image_resources(runtime, sandbox_root)` (`kit_bootstrap.rs:232-245`) invites: it takes a sandbox root, so a host that re-roots — a file manager changing directory — swaps per navigation and strands every thumbnail loaded so far. `resource_count()` is public API and the DevTools number (`devtools.rs:160`).
-
-**Effort:** S. **Done means:** both methods release each handle before clearing, as `release_evicted` (`:246-252`) and `retain_referenced` (`:363-372`) already do; a test asserts `hub` length returns to the referenced count after a provider swap. Second benefit: with the entries released, an in-flight load started under the old providers finds its handle gone and `hub.complete` returns `false` at `:191`, so stale pixels cannot reach the cache.
-
-#### C3. `PseudoStates` is never pruned, so a node removed while carrying a state keeps it — and on the input-free path the map grows without bound
-
-Render 6 rows, `set_pseudo_state(rows[5], PseudoState::HOVER)`, render, then render 2 rows:
-
-```
-tree.get(rows[5]).is_some() = false
-pseudo of a removed node: PseudoState(1)
-```
-
-Growing/shrinking 6↔2 rows and setting HOVER on the last live row each frame, public API only, no input events — exactly 0.5 entries per frame, no flattening at 100×:
-
-```
-E(100 frames):   live = 2, DEAD ids still carrying a pseudo state = 50
-E(1000 frames):  live = 2, DEAD ids still carrying a pseudo state = 500
-E(10000 frames): live = 2, DEAD ids still carrying a pseudo state = 5000
-```
-
-Each is cloned into `StyleKey.pseudo` every frame (`style_phase.rs:202`) and walked twice by `RestyleScope::changed_states` (`restyle_scope.rs:16-31`), so it is per-frame cost as well as memory.
-
-Two limits, both measured, and they are what keep this small. **One pointer event clears the whole map** — `recompute_pseudo_states` (`interaction_state.rs:30-40`) replaces `self.pseudo` wholesale with a projection built from the live hover chain, focus and pressed set; the same 10 000-frame churn driven through `handle_pointer` strands **0** entries. So the leak lives only where interaction state is driven programmatically and no input is delivered — the toolkit's own tests and `css_motion_proof.rs`, the only in-repo callers. **It can never be misapplied**: NodeIds are generational, the row occupying the ghost's old slot computes `PseudoState(0)` and paints blue rather than the `:hover` red, and `RestyleScope::expand` returns bounded-`true` for a dead id so a stranded entry never widens a restyle scope either.
-
-`pseudo_states.rs:30-37` removes an entry only when it is set to empty; `pseudo_states.doc/set.md` documents only that canonicalisation and no retention policy. The precedent is one line from where the fix belongs: `drop_focus_if_removed` (`focus.rs:210-229`) runs from `frame_pipeline.rs:134` on exactly the reconciled frame that strands the entry.
-
-**Effort:** S. **Done means:** a `retain` against the tree beside `drop_focus_if_removed`; a probe reports 0 dead ids carrying a pseudo state after 10 000 churn frames on both the `set_pseudo_state` and `handle_pointer` paths.
 
 ---
 
 ### Part D — hangs and crashes on input a host controls
 
-#### D1. `grid-row-start` / `grid-column-start` take an unclamped i32 and layout is linear in it, so one CSS integer OOM-kills the UI process
+#### D1. Authored grid placement respects the implicit track limit
 
-Real CSS through `StylesheetParser` + `StylesheetCompiler`, one `.cell` in a 2×2 grid, one `render_now`, release:
+The layout solver clamps numeric lines, signed offsets and anchored spans
+to at most 1,024 implicit tracks on either side of the explicit grid.
+Placement wholly outside the limit uses the nearest edge track. The
+limit also applies to direct Rust `GridPlacement` inputs. Unit tests
+cover both edges and spans that cross them. The runtime emits
+`layout.grid_track_limit` for the first affected item in a layout pass.
+The CSS integration test checks attribution and verifies that an in-range
+item on the same track produces no warning.
 
-```
-grid-row-start: 3          ->   1.17 ms
-grid-row-start: 1000       ->   1.34 ms
-grid-row-start: 100000     ->  41.26 ms, rss 12 MB
-grid-row-start: 2500000    ->   1.07 s,  [peak] 172.9 MB
-grid-row-start: 5000000    ->   2.06 s,  [peak] 328.3 MB
-grid-row-start: 10000000   ->   4.03 s,  [peak] 653.2 MB
-grid-row-start: 20000000   ->   8.00 s,  [peak] 1303.4 MB
-grid-row-start: 2000000000 ->   exit=124 under `timeout 45`, [peak] pinned at MemoryMax
-grid-column-start: 20000000 ->  5.21 s,  [peak] 1324.5 MB
-```
+#### D2. Wayland renderer targets retain their surface and display — fixed
 
-Dead linear on both axes: ~0.40 µs and ~68 bytes per implicit track. **Memory, not time, is the binding limit** — `grid-row-start: 2147483647` needs ~146 GB, so the frame does not finish slowly, the process dies. A five-digit typo already costs 41 ms, a dropped frame, and layout runs synchronously on the UI thread inside `render_now`. The compiler reports `unsupported: 0` at every value including `2147483647` and `99999999999` (which saturates to `i32::MAX` through `*n as i32`). Negative lines are safe — `resolve_axis` normalises from-end against `num_tracks` and clamps.
+`LayerWindow::target()` returns a cloneable owner of the SCTK layer and
+the Wayland connection. Both stay alive when the target outlives the
+window event loop, and the surface role is dropped before the connection.
+The target derives thread safety from its owners. The compositor-backed
+test drops the window and verifies both handles on a separate thread.
 
-`crates/frontend/obscur-css/src/compiler/grid_placement.rs:33` — `ParsedValue::Number(n) if n.fract() == 0.0 && *n != 0.0 => Some(*n as i32)`, no bound. It reaches `grid_item_placement.rs:52-58` (`n_cols`/`n_rows_flow` grown to the anchor) and `:174-186` `mark_block`, whose `while occ.len() < row + rspan { occ.push(vec![false; width]) }` materialises one `Vec` per implicit track.
+#### D3. Invalid host image extents — fixed
 
-The policy exists in the same directory, twice, and was not applied here: `grid_line_span` at `:50` is `Some((*n as u32).min(u32::from(u16::MAX)) as u16)`, and `grid_track_lowering.rs:9` declares `MAX_REPEAT: usize = 1024` with the doc reason "so a pathological repetition count cannot blow up the track list". Ledger line 1223 records `repeat(1000000, 1fr)` as probed and cleared ("capped, 4 ms") — the sweep looked at the neighbouring door and never tried this one. No `.doc` in `grid_item_placement.doc/`, `grid_placement.doc/` or `grid_line.doc/` states an unbounded implicit grid as policy.
+The runtime rejects zero, negative, fractional, non-finite and out-of-range decoded
+pixel dimensions before constructing a scene image. A zero-extent decoded image
+produces one `resource.load_failed` diagnostic and leaves no cache or draw entry.
+The extent check is at the decoder boundary, so directly authored empty scene
+images retain their existing behavior.
 
-**Effort:** S. **Done means:** `grid_line_integer` clamps the way `grid_line_span` does; a test asserts `grid-row-start: 2000000000` renders in bounded time and memory, with a diagnostic naming the clamp.
-
-#### D2. `LayerWindow::target()` is a safe method handing out `Copy + Send + Sync + 'static` raw Wayland pointers whose "must not outlive the window" contract nothing enforces
-
-From a facade consumer with feature `shell-layer`, this compiles with no `unsafe` block and no borrow error:
-
-```rust
-fn escapes(window: LayerWindow) -> LayerWindowTarget {
-    let target = window.target();
-    drop(window);   // the wl_surface and the connection are destroyed here
-    target          // ... and these raw pointers are still live, Send, Sync, 'static
-}
-```
-
-```
-$ cargo build --release --bin target_escape   # Finished
-$ ./target_escape
-`fn escapes(LayerWindow) -> LayerWindowTarget` COMPILED with no unsafe block
-```
-
-A safe consumer can free the objects and hand the handles to `wgpu::Instance::create_surface` — a use-after-free reachable entirely from safe code. `layer_window_target.rs:12-32` derives `Clone, Copy`, has `unsafe impl Send`/`Sync`, no lifetime parameter, and a `pub const unsafe fn new` that the safe accessor at `layer_window.rs:271-281` bypasses. The `SAFETY` comment there states an obligation ("the target's contract is that it must not outlive it") the type gives no caller a way to discharge and no way to violate visibly; `layer_window.doc/target.md` documents only a null-pointer panic. Exported to every consumer via `surface/mod.rs:9,11` and `facade/obscur-kit/src/lib.rs:95`. This is the only `unsafe` in the tree outside test fixtures.
-
-The shipped paths are sound: in both runners the `SurfaceAcquirer` is declared after the `LayerWindow` and drops first, and its `Drop` joins the acquire thread. The hole is the public API, not the in-tree caller. Not adversarially re-run.
-
-**Effort:** S. **Done means:** `target()` is `unsafe fn`, or `LayerWindowTarget` borrows the window (`LayerWindowTarget<'a>`), or it holds clones of the smithay objects that keep them alive. A consumer that writes the function above no longer compiles.
-
-#### D3. A host decoder's zero-extent `Ok` is admitted to the cache as a live entry and drawn, with no diagnostic
-
-A `ResourceDecoder` returning `Ok(DecodedResource::new(Arc::from(Vec::new()), … with_intrinsic_size(Size::new(0.0, 0.0))))`, two frames:
-
-```
-mode=zero : cached=(1,0) stats entries=1 bytes=0 diags n=0 dl=1
-   DrawImage { image: SceneImage { width: 0, height: 0, pixels: Shared([]), … } }
-mode=fail : cached=(0,0) entries=0 diags n=1 codes=["resource.load_failed"] dl=0
-```
-
-The byte-length guard passes because `0*0*4 == 0`. The difference that matters is the **signal**, not the pixels: an honest failure emits `resource.load_failed` at `Error` with the referring node and `RecoveryAction::Fallback` (`resource_bridge.rs:673-693`) and leaves the resource terminal; a zero-extent `Ok` sits `ready` as a 0-byte cache entry with nothing reported.
-
-Scope is small and worth stating plainly. It is **not** reachable from the shipped decoder: the workspace enables only PNG and JPEG (`Cargo.toml:70`), both codecs reject zero dimensions themselves (`Invalid image dimensions`, `Image width or height is set to zero`), and a truncated file already yields `DecodeFailed("unexpected end of file")` — the behaviour this asks for. Nothing downstream needs teaching either: `image_tiling.rs:30` and `image_painter.rs:30` both guard `iw == 0 || ih == 0` in their first statement, and both `.doc/draw_image.md` files state it as policy. `SceneImage::new` accepting 0×0/0 bytes is pinned by the deliberate test `zero_sized_image_needs_zero_bytes` (`scene_image.rs:140-143`).
-
-**Effort:** S. **Done means:** a `DecodeFailed("decoded image has zero extent")` beside the byte-length rejection in `resource_outcome.rs:101-106`, so a host decoder that degenerates silently is reported rather than caching a live empty entry. Defence-in-depth against a decoder already violating `resource_decoder.doc/decode.md`, not a user-reachable defect.
 
 ---
 
 ### Part E — one documentation defect and one orphan
 
-#### E1. `set_pseudo_state`'s doc omits the ownership rule, and `:focus-within` has no producer
+#### E1. Interaction pseudo-state ownership and focus-within — fixed
 
-`styling.doc/set_pseudo_state.md` ("Records `state` as `node`'s interaction state for subsequent frames") and `docs/api/03-runtime.md:83` omit the rule stated one level down in `orchestration/pseudo_states.doc/PseudoStates.md` and `selector/pseudo_state.doc/PseudoState.md`: the map is the runtime's projection of live input, and any hover/focus/press change reseats it **wholesale** (`interaction_state.rs:30-39` assigns; `pseudo_state_projection.rs:44` starts from `PseudoStates::new()`; fired at `pointer_dispatch.rs:225` and `focus.rs:49`). Measured: a host bit set on a row is gone after one pointer move onto *any* row, and symmetrically a host `set` destroys the runtime's live HOVER bit.
+The runtime projects `:focus-within` onto the focused node and its logical
+ancestors. The incremental style test checks focus moving across branches
+and clearing when the focused node is removed. The public docs describe
+manual pseudo-state overrides and the view attributes for persistent
+application-owned state.
 
-That is correct behaviour with a misleading doc, not state loss — the door for host-owned `:checked`/`:disabled` is the `CHECKED`/`DISABLED` view attribute (`tree_element.rs:105-118`, ungated by local name; `style_attribute.rs:97`), which survives every pointer move and composes with `:hover` (measured: green background and red text simultaneously). `set_pseudo_state.md` also names "the input step" as its caller, and the runtime's input step does not call it. Merging instead of assigning in `recompute_pseudo_states` would be the wrong fix: it would make a stale host HOVER bit unclearable, since the projection's only way to say "no longer hovered" is the absence of an entry.
-
-Separately: `PseudoState::FOCUS_WITHIN` is compiled (`selector_compiler.rs:182`), matched (`selector_matcher.rs:185`) and advertised in `docs/api/04-styling.md:46`, but **no code in the workspace ever sets it**, so `:focus-within` matches nothing and cannot be polyfilled through `set_pseudo_state` either.
-
-**Effort:** S. **Done means:** the two doc sites state the ownership rule and point host-owned structural state at the view attributes; `:focus-within` either gets a producer in the focus projection or comes out of the advertised list.
 
 ---
 
@@ -2244,7 +1631,6 @@ The negative results are the larger half of what this pass learned, and nothing 
 
 **Nothing was dropped as already present in the ledger**, but two items sit next to existing ones and are deliberately distinct: A3 against **A9** (line 796), which is the NaN wheel notch into `ScrollOffsets::shift` and explicitly scopes itself out of the fling path — and whose claim that "`set_scroll_top(port, 0.0)` fully recovers" A3 falsifies; and B1 against **item 9** (line 112), which is the opposite complaint (restyle scope too *wide* on a state change) and shares no mechanism.
 
-**Four findings carry no adversarial verdict** because none was issued for that lane: the three surface-acquirer symptoms (B3) and the `LayerWindowTarget` escape (D2). Their evidence is the originating lane's own; B3's drop-hang is 40/40 deterministic and D2 is a compile-or-not fact, so both are cheap to re-check.
 
 ---
 

@@ -1,18 +1,20 @@
-#![doc = include_str!("identity_match.doc/_module.md")]
+//! `IdentityMatch`: the reuse-or-create decision for one desired child.
 
 use obscur_identity::NodeId;
 
-#[doc = include_str!("identity_match.doc/IdentityMatch.md")]
+#[doc = include_str!("../../docs/api/reconciliation/identity_match.doc/IdentityMatch.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum IdentityMatch {
-    #[doc = include_str!("identity_match.doc/Reuse.md")]
+    /// Reuse the existing retained node identified by this [`NodeId`],
+    /// preserving its identity across the update (including across a reorder).
     Reuse(NodeId),
-    #[doc = include_str!("identity_match.doc/Create.md")]
+    /// No compatible existing node was available; a fresh node must be created.
     Create,
 }
 
 impl IdentityMatch {
-    #[doc = include_str!("identity_match.doc/reused.md")]
+    /// Returns the reused [`NodeId`] when this is a [`IdentityMatch::Reuse`],
+    /// or `None` for a [`IdentityMatch::Create`].
     #[must_use]
     pub const fn reused(self) -> Option<NodeId> {
         match self {
@@ -21,13 +23,13 @@ impl IdentityMatch {
         }
     }
 
-    #[doc = include_str!("identity_match.doc/is_reuse.md")]
+    /// Returns `true` if this decision reuses an existing node.
     #[must_use]
     pub const fn is_reuse(self) -> bool {
         matches!(self, Self::Reuse(_))
     }
 
-    #[doc = include_str!("identity_match.doc/is_create.md")]
+    /// Returns `true` if this decision creates a fresh node.
     #[must_use]
     pub const fn is_create(self) -> bool {
         matches!(self, Self::Create)

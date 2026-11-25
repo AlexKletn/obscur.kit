@@ -1,4 +1,4 @@
-#![doc = include_str!("canned_image_decoder.doc/_module.md")]
+//! A decoder that always answers the same way.
 
 use std::sync::Arc;
 
@@ -7,7 +7,7 @@ use obscur_resources::handle::ResourceKind;
 use obscur_resources::port::{DecodedResource, ResourceDecoder};
 use obscur_resources::state::{ResourceError, ResourceMetadata};
 
-#[doc = include_str!("canned_image_decoder.doc/CannedImageDecoder.md")]
+#[doc = include_str!("../../docs/api/mock/canned_image_decoder.doc/CannedImageDecoder.md")]
 #[derive(Debug, Clone)]
 pub struct CannedImageDecoder;
 

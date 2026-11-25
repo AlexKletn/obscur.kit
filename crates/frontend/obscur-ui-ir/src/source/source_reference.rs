@@ -1,8 +1,8 @@
-#![doc = include_str!("source_reference.doc/_module.md")]
+//! A span within a named source [`SourceReference`] (spec §2.5 source maps).
 
 use crate::source::SourceLocation;
 
-#[doc = include_str!("source_reference.doc/SourceReference.md")]
+#[doc = include_str!("../../docs/api/source/source_reference.doc/SourceReference.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SourceReference {
     source: Box<str>,
@@ -11,7 +11,7 @@ pub struct SourceReference {
 }
 
 impl SourceReference {
-    #[doc = include_str!("source_reference.doc/new.md")]
+    /// Creates a reference to the span `[start, end]` within `source`.
     #[must_use]
     pub fn new(source: impl Into<Box<str>>, start: SourceLocation, end: SourceLocation) -> Self {
         Self {
@@ -21,37 +21,39 @@ impl SourceReference {
         }
     }
 
-    #[doc = include_str!("source_reference.doc/point.md")]
+    /// Creates an empty reference to the single point `at` within `source`
+    /// (`start == end`).
     #[must_use]
     pub fn point(source: impl Into<Box<str>>, at: SourceLocation) -> Self {
         Self::new(source, at, at)
     }
 
-    #[doc = include_str!("source_reference.doc/source.md")]
+    /// Returns the source identifier (path, logical name, or id).
     #[must_use]
     pub fn source(&self) -> &str {
         &self.source
     }
 
-    #[doc = include_str!("source_reference.doc/start.md")]
+    /// Returns the start of the span.
     #[must_use]
     pub const fn start(&self) -> SourceLocation {
         self.start
     }
 
-    #[doc = include_str!("source_reference.doc/end.md")]
+    /// Returns the end of the span.
     #[must_use]
     pub const fn end(&self) -> SourceLocation {
         self.end
     }
 
-    #[doc = include_str!("source_reference.doc/byte_len.md")]
+    /// Returns the length of the span in bytes (`end.offset - start.offset`),
+    /// saturating to `0` if the offsets are out of order.
     #[must_use]
     pub const fn byte_len(&self) -> u32 {
         self.end.offset().saturating_sub(self.start.offset())
     }
 
-    #[doc = include_str!("source_reference.doc/is_empty.md")]
+    /// Returns whether the span is empty (`start == end`).
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.start == self.end

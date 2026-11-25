@@ -1,64 +1,50 @@
-#![doc = include_str!("drag_coordinator.doc/_module.md")]
+//! Drives a drag-and-drop session from pointer input: [`DragCoordinator`].
 
 use obscur_data_transfer::drag::{DragEffect, DragPhase, DragSession, DragSource, DropTarget};
 use obscur_geometry::Point;
 use obscur_identity::{FastMap, NodeId, VersionStamp};
 
-use crate::transaction::{
-    ProvisionalTransaction, TransactionCommit, TransactionValidator, UiOperation,
-};
+use crate::transaction::{ProvisionalTransaction, TransactionValidator, UiOperation};
 
-#[doc = include_str!("drag_coordinator.doc/DragOutcome.md")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DragOutcome {
-    #[doc = include_str!("drag_coordinator.doc/Dropped.md")]
-    Dropped {
-        #[doc = include_str!("drag_coordinator.doc/target.md")]
-        target: NodeId,
-        #[doc = include_str!("drag_coordinator.doc/effect.md")]
-        effect: DragEffect,
-        #[doc = include_str!("drag_coordinator.doc/commit.md")]
-        commit: TransactionCommit,
-    },
-    #[doc = include_str!("drag_coordinator.doc/Cancelled.md")]
-    Cancelled,
-}
+use super::DragOutcome;
 
-#[doc = include_str!("drag_coordinator.doc/DragCoordinator.md")]
+#[doc = include_str!("../../docs/api/orchestration/drag_coordinator.doc/DragCoordinator.md")]
 #[derive(Debug, Default)]
 pub struct DragCoordinator {
-    #[doc = include_str!("drag_coordinator.doc/session.md")]
+    /// The live session, or [`None`] when no drag is in flight.
     session: Option<DragSession>,
-    #[doc = include_str!("drag_coordinator.doc/targets.md")]
+    /// The drop targets a host registered, by node.
     targets: FastMap<NodeId, DropTarget>,
-    #[doc = include_str!("drag_coordinator.doc/provisional.md")]
+    /// The work the current hover would cause, staged and unapplied. Rebuilt on
+    /// every enter/leave, because only the target the drop *lands* on does any.
     provisional: ProvisionalTransaction,
 }
 
 impl DragCoordinator {
-    #[doc = include_str!("drag_coordinator.doc/new.md")]
+    /// Creates a coordinator with no session and no registered targets.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    #[doc = include_str!("drag_coordinator.doc/register_target.md")]
+    /// Registers `target` as a drop site, replacing any previous registration for
+    /// its node.
     pub fn register_target(&mut self, target: DropTarget) {
         self.targets.insert(target.node(), target);
     }
 
-    #[doc = include_str!("drag_coordinator.doc/unregister_target.md")]
+    /// Removes the drop target registered for `node`, if any.
     pub fn unregister_target(&mut self, node: NodeId) {
         self.targets.remove(&node);
     }
 
-    #[doc = include_str!("drag_coordinator.doc/is_target.md")]
+    /// Whether `node` is a registered drop target.
     #[must_use]
     pub fn is_target(&self, node: NodeId) -> bool {
         self.targets.contains_key(&node)
     }
 
-    #[doc = include_str!("drag_coordinator.doc/begin.md")]
+    #[doc = include_str!("../../docs/api/orchestration/drag_coordinator.doc/begin.md")]
     pub fn begin(&mut self, source: DragSource) -> bool {
         if self.is_active() {
             return false;
@@ -68,7 +54,7 @@ impl DragCoordinator {
         true
     }
 
-    #[doc = include_str!("drag_coordinator.doc/is_active.md")]
+    /// Whether a drag is in flight.
     #[must_use]
     pub fn is_active(&self) -> bool {
         self.session
@@ -76,13 +62,13 @@ impl DragCoordinator {
             .is_some_and(|session| session.phase().is_active())
     }
 
-    #[doc = include_str!("drag_coordinator.doc/session_2.md")]
+    /// The live session, for a host that wants to draw the drag.
     #[must_use]
     pub fn session(&self) -> Option<&DragSession> {
         self.session.as_ref()
     }
 
-    #[doc = include_str!("drag_coordinator.doc/pointer_moved.md")]
+    #[doc = include_str!("../../docs/api/orchestration/drag_coordinator.doc/pointer_moved.md")]
     pub fn pointer_moved(&mut self, position: Point, under: Option<NodeId>) -> bool {
         let Some(session) = self.session.as_mut() else {
             return false;
@@ -124,7 +110,7 @@ impl DragCoordinator {
         false
     }
 
-    #[doc = include_str!("drag_coordinator.doc/release.md")]
+    #[doc = include_str!("../../docs/api/orchestration/drag_coordinator.doc/release.md")]
     pub fn release(
         &mut self,
         validator: &TransactionValidator,
@@ -160,7 +146,7 @@ impl DragCoordinator {
         Some(outcome)
     }
 
-    #[doc = include_str!("drag_coordinator.doc/cancel.md")]
+    #[doc = include_str!("../../docs/api/orchestration/drag_coordinator.doc/cancel.md")]
     pub fn cancel(&mut self) -> bool {
         let Some(session) = self.session.as_mut() else {
             return false;
@@ -173,14 +159,14 @@ impl DragCoordinator {
         true
     }
 
-    #[doc = include_str!("drag_coordinator.doc/stage_for.md")]
+    #[doc = include_str!("../../docs/api/orchestration/drag_coordinator.doc/stage_for.md")]
     fn stage_for(node: NodeId) -> ProvisionalTransaction {
         let mut provisional = ProvisionalTransaction::new();
         provisional.stage(UiOperation::Rerender { node });
         provisional
     }
 
-    #[doc = include_str!("drag_coordinator.doc/phase.md")]
+    /// The phase of the live session, for tests and diagnostics.
     #[must_use]
     pub fn phase(&self) -> Option<DragPhase> {
         self.session.as_ref().map(DragSession::phase)

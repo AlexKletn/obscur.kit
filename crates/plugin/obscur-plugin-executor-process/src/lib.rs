@@ -1,6 +1,6 @@
-#![doc = include_str!("lib.doc/_module.md")]
+//! Process/IPC `PluginExecutor` adapter.
 
-#[doc = include_str!("lib.doc/executor.md")]
+/// Running a plugin in a separate process.
 pub mod executor;
-#[doc = include_str!("lib.doc/transport.md")]
+/// How the host and that process exchange messages.
 pub mod transport;

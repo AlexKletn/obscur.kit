@@ -1,4 +1,4 @@
-#![doc = include_str!("portal_appearance_provider.doc/_module.md")]
+//! Reading appearance from `xdg-desktop-portal`.
 
 use std::process::Command;
 
@@ -11,35 +11,35 @@ use obscur_system::appearance::{
 
 use super::monitor_watch::MonitorWatch;
 
-#[doc = include_str!("portal_appearance_provider.doc/NAMESPACE.md")]
+/// The portal settings namespace all three keys live in.
 const NAMESPACE: &str = "org.freedesktop.appearance";
 
-#[doc = include_str!("portal_appearance_provider.doc/PortalAppearanceProvider.md")]
+#[doc = include_str!("../../docs/api/provider/portal_appearance_provider.doc/PortalAppearanceProvider.md")]
 #[derive(Debug, Clone)]
 pub struct PortalAppearanceProvider {
     tool: Box<str>,
 }
 
 impl PortalAppearanceProvider {
-    #[doc = include_str!("portal_appearance_provider.doc/new.md")]
+    /// Read through `gdbus`.
     #[must_use]
     pub fn new() -> Self {
         Self::with_tool("gdbus")
     }
 
-    #[doc = include_str!("portal_appearance_provider.doc/with_tool.md")]
+    /// Read through a nominated tool, and for tests.
     #[must_use]
     pub fn with_tool(tool: impl Into<Box<str>>) -> Self {
         Self { tool: tool.into() }
     }
 
-    #[doc = include_str!("portal_appearance_provider.doc/tool.md")]
+    /// The tool this provider shells out to.
     #[must_use]
     pub fn tool(&self) -> &str {
         &self.tool
     }
 
-    #[doc = include_str!("portal_appearance_provider.doc/read_all.md")]
+    /// One `Settings.ReadAll` call for the namespace, or nothing.
     fn read_all(&self) -> Option<String> {
         let output = Command::new(&*self.tool)
             .args([
@@ -84,7 +84,7 @@ impl AppearanceProvider for PortalAppearanceProvider {
         SupportLevel::Limited
     }
 
-    #[doc = include_str!("portal_appearance_provider.doc/watch_support.md")]
+    #[doc = include_str!("../../docs/api/provider/portal_appearance_provider.doc/watch_support.md")]
     fn watch_support(&self) -> SupportLevel {
         if tool_available(&self.tool) {
             // `org.freedesktop.portal.Settings` declares a `SettingChanged`
@@ -96,7 +96,7 @@ impl AppearanceProvider for PortalAppearanceProvider {
         }
     }
 
-    #[doc = include_str!("portal_appearance_provider.doc/watch.md")]
+    #[doc = include_str!("../../docs/api/provider/portal_appearance_provider.doc/watch.md")]
     fn watch(&self, on_change: AppearanceCallback) -> Option<AppearanceWatch> {
         MonitorWatch::spawn(
             &self.tool,
@@ -114,7 +114,7 @@ impl AppearanceProvider for PortalAppearanceProvider {
     }
 }
 
-#[doc = include_str!("portal_appearance_provider.doc/parse.md")]
+#[doc = include_str!("../../docs/api/provider/portal_appearance_provider.doc/parse.md")]
 fn parse(text: &str) -> SystemAppearance {
     SystemAppearance {
         color_scheme: read_u32(text, "color-scheme").and_then(scheme_of),
@@ -132,11 +132,13 @@ fn parse(text: &str) -> SystemAppearance {
         text_scale: None,
         cursor_size: None,
         icon_theme: None,
+        window_radius: None,
+        window_decoration: None,
         reduced_motion: None,
     }
 }
 
-#[doc = include_str!("portal_appearance_provider.doc/scheme_of.md")]
+#[doc = include_str!("../../docs/api/provider/portal_appearance_provider.doc/scheme_of.md")]
 const fn scheme_of(value: u32) -> Option<ColorScheme> {
     // The portal's own numbering: 0 no preference, 1 dark, 2 light. Zero is the
     // absence of an answer, so it stays absent rather than becoming light.
@@ -147,7 +149,7 @@ const fn scheme_of(value: u32) -> Option<ColorScheme> {
     }
 }
 
-#[doc = include_str!("portal_appearance_provider.doc/read_u32.md")]
+/// The `<uint32 N>` that follows a named key.
 fn read_u32(text: &str, key: &str) -> Option<u32> {
     let at = text.find(&format!("'{key}'"))?;
     let rest = &text[at..];
@@ -161,7 +163,7 @@ fn read_u32(text: &str, key: &str) -> Option<u32> {
         .ok()
 }
 
-#[doc = include_str!("portal_appearance_provider.doc/read_accent.md")]
+#[doc = include_str!("../../docs/api/provider/portal_appearance_provider.doc/read_accent.md")]
 fn read_accent(text: &str) -> Option<Color> {
     let at = text.find("'accent-color'")?;
     let rest = &text[at..];
@@ -182,7 +184,7 @@ fn read_accent(text: &str) -> Option<Color> {
     (in_range(r) && in_range(g) && in_range(b)).then(|| Color::rgb(r, g, b))
 }
 
-#[doc = include_str!("portal_appearance_provider.doc/tool_available.md")]
+/// Whether the tool is on `PATH` at all.
 fn tool_available(tool: &str) -> bool {
     Command::new("sh")
         .args(["-c", &format!("command -v {tool}")])

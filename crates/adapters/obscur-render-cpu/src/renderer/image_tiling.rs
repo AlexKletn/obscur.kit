@@ -1,4 +1,4 @@
-#![doc = include_str!("image_tiling.doc/_module.md")]
+#![doc = include_str!("../../docs/api/renderer/image_tiling.doc/_module.md")]
 
 use obscur_geometry::Rect;
 use obscur_scene::color::AlphaMode;
@@ -8,13 +8,18 @@ use obscur_scene::path::Path;
 use crate::renderer::clip_mask::build_clip_mask;
 use crate::renderer::skia_lowering::to_sk_path;
 
-#[doc = include_str!("image_tiling.doc/MAX_TILES_PER_AXIS.md")]
+/// The largest number of image copies drawn per axis for a tiled
+/// (`background-repeat`) background — a bounded-loop guard against a pathological
+/// tiny-tile / huge-region combination. The visible output is clipped to `region`
+/// regardless, so this only caps wasted work (documented limitation).
 const MAX_TILES_PER_AXIS: i32 = 8192;
 
-#[doc = include_str!("image_tiling.doc/MIN_TILE_EXTENT.md")]
+/// The smallest tile extent (logical px) that still tiles: a tile at or below this
+/// on an axis is treated as non-repeating on that axis, so a degenerate size can
+/// never spin the tile loop.
 const MIN_TILE_EXTENT: f32 = 0.5;
 
-#[doc = include_str!("image_tiling.doc/draw_image.md")]
+#[doc = include_str!("../../docs/api/renderer/image_tiling.doc/draw_image.md")]
 #[allow(clippy::cast_precision_loss, clippy::too_many_arguments)]
 pub(crate) fn draw_image(
     pixmap: &mut tiny_skia::Pixmap,
@@ -123,7 +128,11 @@ pub(crate) fn draw_image(
     }
 }
 
-#[doc = include_str!("image_tiling.doc/tile_index_range.md")]
+/// Computes the inclusive tile index range `[start, end]` covering the span
+/// `[r0, r1]` with copies at `t0 + k * ts` (`ts > 0`). A non-repeating axis
+/// (`repeat == false`) is the single index `0`. The range is padded by one on each
+/// side (so a partially-visible edge tile is drawn) and clamped to
+/// [`MAX_TILES_PER_AXIS`] copies — the `region` clip trims any overdraw.
 #[allow(clippy::cast_possible_truncation)]
 fn tile_index_range(repeat: bool, r0: f32, r1: f32, t0: f32, ts: f32) -> (i32, i32) {
     if !repeat || ts <= 0.0 {
@@ -142,7 +151,9 @@ fn tile_index_range(repeat: bool, r0: f32, r1: f32, t0: f32, ts: f32) -> (i32, i
     (start, end)
 }
 
-#[doc = include_str!("image_tiling.doc/premultiply_rgba.md")]
+/// Premultiplies straight-alpha RGBA8 bytes into the premultiplied form
+/// `tiny-skia` expects: each color channel is scaled by `alpha / 255` (rounded),
+/// the alpha channel kept. The input length must be a multiple of four.
 #[allow(clippy::cast_possible_truncation)]
 fn premultiply_rgba(straight: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(straight.len());

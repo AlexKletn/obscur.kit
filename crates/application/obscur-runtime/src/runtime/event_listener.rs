@@ -1,29 +1,29 @@
-#![doc = include_str!("event_listener.doc/_module.md")]
+//! One listener attached to one node for one command, in one phase (spec §2.3).
 
 use obscur_interaction::event::{EventPhase, ListenerPhase};
 
 use super::CommandHandler;
 
-#[doc = include_str!("event_listener.doc/EventListener.md")]
+#[doc = include_str!("../../docs/api/runtime/event_listener.doc/EventListener.md")]
 pub(crate) struct EventListener {
-    #[doc = include_str!("event_listener.doc/phase.md")]
+    /// The phase this listener asked to run in.
     phase: ListenerPhase,
-    #[doc = include_str!("event_listener.doc/handler.md")]
+    /// The listener body, normalized like every other registered handler.
     handler: CommandHandler,
 }
 
 impl EventListener {
-    #[doc = include_str!("event_listener.doc/new.md")]
+    /// Registers `handler` to run in `phase`.
     pub(crate) const fn new(phase: ListenerPhase, handler: CommandHandler) -> Self {
         Self { phase, handler }
     }
 
-    #[doc = include_str!("event_listener.doc/runs_in.md")]
+    /// Returns whether this listener runs during `phase` of a propagation.
     pub(crate) const fn runs_in(&self, phase: EventPhase) -> bool {
         self.phase.runs_in(phase)
     }
 
-    #[doc = include_str!("event_listener.doc/handler_mut.md")]
+    /// Returns the listener body, for the walk to call.
     pub(crate) const fn handler_mut(&mut self) -> &mut CommandHandler {
         &mut self.handler
     }

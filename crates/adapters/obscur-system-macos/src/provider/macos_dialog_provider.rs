@@ -1,5 +1,6 @@
-#![doc = include_str!("macos_dialog_provider.doc/_module.md")]
+//! MacosDialogProvider (skeleton stub for the spec-defined entity; not yet implemented).
 
-#[doc = include_str!("macos_dialog_provider.doc/MacosDialogProvider.md")]
+/// Placeholder for the `MacosDialogProvider` entity. See the Obscur Kit 2 specs for its
+/// contract; this stub exists to materialise the target source layout.
 #[derive(Debug)]
 pub struct MacosDialogProvider;

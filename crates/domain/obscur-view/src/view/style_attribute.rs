@@ -1,72 +1,94 @@
-#![doc = include_str!("style_attribute.doc/_module.md")]
+#![doc = include_str!("../../docs/api/view/style_attribute.doc/_module.md")]
 
 use obscur_identity::InternedSymbol;
 
 use super::virtual_collection::{VIRTUAL_LIST_ID, VIRTUAL_ROW_EXTENT};
 use super::{ViewProperty, ViewValue};
 
-#[doc = include_str!("style_attribute.doc/CLASS.md")]
+/// Reserved symbol for the element's `class` attribute — a whitespace-separated
+/// list of class names (as [`ViewValue::Text`]).
 pub const CLASS: InternedSymbol = InternedSymbol::from_raw(0x0000_0001);
 
-#[doc = include_str!("style_attribute.doc/ID.md")]
+/// Reserved symbol for the element's `id` attribute (as [`ViewValue::Text`]).
 pub const ID: InternedSymbol = InternedSymbol::from_raw(0x0000_0002);
 
-#[doc = include_str!("style_attribute.doc/TYPE.md")]
+#[doc = include_str!("../../docs/api/view/style_attribute.doc/TYPE.md")]
 pub const TYPE: InternedSymbol = InternedSymbol::from_raw(0x0000_0003);
 
-#[doc = include_str!("style_attribute.doc/SRC.md")]
+#[doc = include_str!("../../docs/api/view/style_attribute.doc/SRC.md")]
 pub const SRC: InternedSymbol = InternedSymbol::from_raw(0x0000_0004);
 
-#[doc = include_str!("style_attribute.doc/DISABLED.md")]
+#[doc = include_str!("../../docs/api/view/style_attribute.doc/DISABLED.md")]
 pub const DISABLED: InternedSymbol = InternedSymbol::from_raw(0x0000_0005);
 
-#[doc = include_str!("style_attribute.doc/CHECKED.md")]
+/// Reserved symbol for a control's `checked` structural state — the `:checked`
+/// pseudo-class input (spec §4.13). Boolean state (present + truthy = checked);
+/// emitted **only when true** so a toggle re-styles. Same reserved namespace as
+/// `disabled`, so it survives reconciliation.
 pub const CHECKED: InternedSymbol = InternedSymbol::from_raw(0x0000_0006);
 
-#[doc = include_str!("style_attribute.doc/READONLY.md")]
+#[doc = include_str!("../../docs/api/view/style_attribute.doc/READONLY.md")]
 pub const READONLY: InternedSymbol = InternedSymbol::from_raw(0x0000_0007);
 
-#[doc = include_str!("style_attribute.doc/VALUE.md")]
+#[doc = include_str!("../../docs/api/view/style_attribute.doc/VALUE.md")]
 pub const VALUE: InternedSymbol = InternedSymbol::from_raw(0x0000_0008);
 
-#[doc = include_str!("style_attribute.doc/PLACEHOLDER.md")]
+#[doc = include_str!("../../docs/api/view/style_attribute.doc/PLACEHOLDER.md")]
 pub const PLACEHOLDER: InternedSymbol = InternedSymbol::from_raw(0x0000_0009);
 
-#[doc = include_str!("style_attribute.doc/LOCAL_NAME.md")]
+#[doc = include_str!("../../docs/api/view/style_attribute.doc/LOCAL_NAME.md")]
 pub const LOCAL_NAME: InternedSymbol = InternedSymbol::from_raw(0x0000_000A);
 
-#[doc = include_str!("style_attribute.doc/STYLE.md")]
+#[doc = include_str!("../../docs/api/view/style_attribute.doc/STYLE.md")]
 pub const STYLE: InternedSymbol = InternedSymbol::from_raw(0x0000_000B);
 
-#[doc = include_str!("style_attribute.doc/StyleAttributes.md")]
+#[doc = include_str!("../../docs/api/view/style_attribute.doc/StyleAttributes.md")]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StyleAttributes {
     local_name: Option<Box<str>>,
     id: Option<Box<str>>,
     classes: Vec<Box<str>>,
-    #[doc = include_str!("style_attribute.doc/image_source.md")]
+    /// A replaced element's image source key (`<img src>`), if any. Not a CSS
+    /// selector input — it is the element's own content, resolved to pixels and
+    /// painted by the runtime. Derived from the [`SRC`] reserved symbol.
     image_source: Option<Box<str>>,
-    #[doc = include_str!("style_attribute.doc/disabled.md")]
+    /// Whether the control is disabled — the `:disabled` pseudo-class input.
+    /// Derived from the [`DISABLED`] reserved symbol.
     disabled: bool,
-    #[doc = include_str!("style_attribute.doc/checked.md")]
+    /// Whether the control is checked — the `:checked` pseudo-class input.
+    /// Derived from the [`CHECKED`] reserved symbol.
     checked: bool,
-    #[doc = include_str!("style_attribute.doc/readonly.md")]
+    /// Whether the text control is readonly — the HTML `readonly` attribute
+    /// (WHATWG HTML §attr-input-readonly). Derived from the [`READONLY`] reserved
+    /// symbol. Independent of [`disabled`](Self::disabled): a readonly control is
+    /// focusable + selectable but not editable.
     readonly: bool,
-    #[doc = include_str!("style_attribute.doc/control_value.md")]
+    /// The control's declared **controlled value** (WHATWG HTML §4.10.5.5), if the
+    /// widget emits one. Derived from the [`VALUE`] reserved symbol. Not a CSS
+    /// selector input — it is the field's model value the runtime reflects into the
+    /// editing buffer. Absent for a bare editable (its text is its only value).
     control_value: Option<Box<str>>,
-    #[doc = include_str!("style_attribute.doc/virtual_extent.md")]
+    #[doc = include_str!("../../docs/api/view/style_attribute.doc/virtual_extent.md")]
     virtual_extent: Option<u32>,
-    #[doc = include_str!("style_attribute.doc/virtual_list.md")]
+    /// The virtual list a realized spacer belongs to, so the runtime can find the
+    /// container it sits in and use that container's scroll offset as the window's.
     virtual_list: Option<u32>,
-    #[doc = include_str!("style_attribute.doc/placeholder.md")]
+    /// The text control's **placeholder** hint (the CSS `::placeholder` string),
+    /// if the widget emits one. Derived from the [`PLACEHOLDER`] reserved symbol.
+    /// Not a CSS selector input — the runtime reads it to paint the placeholder as
+    /// a §4.16 synthetic part while the field is empty. Absent for a control with
+    /// no placeholder.
     placeholder: Option<Box<str>>,
-    #[doc = include_str!("style_attribute.doc/control_type.md")]
+    /// The authored `type="…"` attribute ([`TYPE`]) — HTML's "which kind", kept apart
+    /// from the element's own [`local_name`](StyleAttributes::local_name).
     control_type: Option<Box<str>>,
-    #[doc = include_str!("style_attribute.doc/inline_style.md")]
+    /// The declarations written on the node itself, uncompiled.
     inline_style: Option<Box<str>>,
 }
 
-#[doc = include_str!("style_attribute.doc/is_truthy.md")]
+/// Whether a reserved boolean state attribute's value counts as *set*. Bare
+/// presence ([`ViewValue::Null`]) or any truthy value is `true`; an explicit
+/// `false` (`Bool(false)` / `Text("false")` / zero / empty text) is `false`.
 fn is_truthy(value: &ViewValue) -> bool {
     match value {
         ViewValue::Bool(flag) => *flag,
@@ -77,14 +99,33 @@ fn is_truthy(value: &ViewValue) -> bool {
     }
 }
 
+fn virtual_extent_px(value: &ViewValue) -> Option<u32> {
+    match value {
+        ViewValue::Int(px) => u32::try_from(*px).ok(),
+        ViewValue::Float(px) if *px >= 0.0 => {
+            let rounded_px = px.round();
+            (rounded_px <= f64::from(u32::MAX)).then(|| {
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    clippy::cast_sign_loss,
+                    reason = "the rounded value is within the nonnegative u32 range"
+                )]
+                let extent_px = rounded_px as u32;
+                extent_px
+            })
+        }
+        _ => None,
+    }
+}
+
 impl StyleAttributes {
-    #[doc = include_str!("style_attribute.doc/new.md")]
+    /// Creates an empty attribute set (no local name, id, or classes).
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    #[doc = include_str!("style_attribute.doc/extract.md")]
+    #[doc = include_str!("../../docs/api/view/style_attribute.doc/extract.md")]
     #[must_use]
     pub fn extract(props: &[ViewProperty]) -> Self {
         let mut attributes = Self::new();
@@ -104,13 +145,8 @@ impl StyleAttributes {
                 }
                 _ => {}
             }
-            // The spacer extent is numeric, so it is read before the string block.
             if prop.name() == VIRTUAL_ROW_EXTENT {
-                attributes.virtual_extent = match prop.value() {
-                    ViewValue::Float(px) => (*px >= 0.0).then(|| px.round() as u32),
-                    ViewValue::Int(px) => u32::try_from(*px).ok(),
-                    _ => None,
-                };
+                attributes.virtual_extent = virtual_extent_px(prop.value());
                 continue;
             }
             if prop.name() == VIRTUAL_LIST_ID {
@@ -140,91 +176,97 @@ impl StyleAttributes {
         attributes
     }
 
-    #[doc = include_str!("style_attribute.doc/inline_style_2.md")]
+    /// The `style` attribute's text, if the node carries one.
     #[must_use]
     pub fn inline_style(&self) -> Option<&str> {
         self.inline_style.as_deref()
     }
 
-    #[doc = include_str!("style_attribute.doc/local_name.md")]
+    /// The element's local name (type), if set.
     #[must_use]
     pub fn local_name(&self) -> Option<&str> {
         self.local_name.as_deref()
     }
 
-    #[doc = include_str!("style_attribute.doc/control_type_2.md")]
+    #[doc = include_str!("../../docs/api/view/style_attribute.doc/control_type_2.md")]
     #[must_use]
     pub fn control_type(&self) -> Option<&str> {
         self.control_type.as_deref()
     }
 
-    #[doc = include_str!("style_attribute.doc/id.md")]
+    /// The element's `id`, if set.
     #[must_use]
     pub fn id(&self) -> Option<&str> {
         self.id.as_deref()
     }
 
-    #[doc = include_str!("style_attribute.doc/classes.md")]
+    /// The element's class list (possibly empty).
     #[must_use]
     pub fn classes(&self) -> &[Box<str>] {
         &self.classes
     }
 
-    #[doc = include_str!("style_attribute.doc/has_class.md")]
+    /// Whether this element carries a given class.
     #[must_use]
     pub fn has_class(&self, class: &str) -> bool {
         self.classes.iter().any(|c| c.as_ref() == class)
     }
 
-    #[doc = include_str!("style_attribute.doc/image_source_2.md")]
+    /// The element's image source key (`<img src>`), if any. This is the
+    /// element's own content — the runtime resolves it to decoded pixels and
+    /// paints it over the element's box.
     #[must_use]
     pub fn image_source(&self) -> Option<&str> {
         self.image_source.as_deref()
     }
 
-    #[doc = include_str!("style_attribute.doc/is_disabled.md")]
+    /// Whether the control reports the `disabled` structural state (`:disabled`).
     #[must_use]
     pub const fn is_disabled(&self) -> bool {
         self.disabled
     }
 
-    #[doc = include_str!("style_attribute.doc/is_checked.md")]
+    /// Whether the control reports the `checked` structural state (`:checked`).
     #[must_use]
     pub const fn is_checked(&self) -> bool {
         self.checked
     }
 
-    #[doc = include_str!("style_attribute.doc/is_readonly.md")]
+    /// Whether the text control reports the `readonly` state (HTML `readonly`).
+    /// Independent of [`is_disabled`](Self::is_disabled): a readonly control is
+    /// focusable + selectable but not editable.
     #[must_use]
     pub const fn is_readonly(&self) -> bool {
         self.readonly
     }
 
-    #[doc = include_str!("style_attribute.doc/control_value_2.md")]
+    /// The control's declared controlled value (WHATWG HTML §4.10.5.5), if the
+    /// widget emitted one. `None` for a bare editable whose text is its own value.
     #[must_use]
     pub fn control_value(&self) -> Option<&str> {
         self.control_value.as_deref()
     }
 
-    #[doc = include_str!("style_attribute.doc/placeholder_2.md")]
+    /// The text control's placeholder hint (the CSS `::placeholder` string), if
+    /// the widget emitted one. `None` for a control with no placeholder.
     #[must_use]
     pub fn placeholder(&self) -> Option<&str> {
         self.placeholder.as_deref()
     }
 
-    #[doc = include_str!("style_attribute.doc/virtual_extent_2.md")]
+    /// A realized virtual-list spacer's extent, if this node is one.
     #[must_use]
     pub fn virtual_extent(&self) -> Option<f32> {
         self.virtual_extent.map(|px| px as f32)
     }
 
-    #[doc = include_str!("style_attribute.doc/virtual_list_2.md")]
+    /// The virtual list a spacer belongs to, if this node is one.
     #[must_use]
     pub const fn virtual_list(&self) -> Option<u32> {
         self.virtual_list
     }
 
-    #[doc = include_str!("style_attribute.doc/is_empty.md")]
+    /// Whether no style attribute is set.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.local_name.is_none()
@@ -287,6 +329,19 @@ mod tests {
         assert_eq!(attrs.local_name(), None);
         assert_eq!(attrs.id(), None);
         assert!(attrs.classes().is_empty());
+    }
+
+    #[test]
+    fn virtual_extent_accepts_only_representable_nonnegative_pixels() {
+        assert_eq!(virtual_extent_px(&ViewValue::Float(12.5)), Some(13));
+        assert_eq!(
+            virtual_extent_px(&ViewValue::Float(f64::from(u32::MAX))),
+            Some(u32::MAX)
+        );
+        for px in [-0.1, f64::INFINITY, f64::NAN, f64::from(u32::MAX) + 0.5] {
+            let props = [ViewProperty::new(VIRTUAL_ROW_EXTENT, ViewValue::Float(px))];
+            assert_eq!(StyleAttributes::extract(&props).virtual_extent(), None);
+        }
     }
 
     #[test]

@@ -1,17 +1,17 @@
-#![doc = include_str!("renderer_id.doc/_module.md")]
+//! A stable identity for a renderer backend instance (spec §5.2).
 
-#[doc = include_str!("renderer_id.doc/RendererId.md")]
+#[doc = include_str!("../../docs/api/renderer/renderer_id.doc/RendererId.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RendererId(u64);
 
 impl RendererId {
-    #[doc = include_str!("renderer_id.doc/from_raw.md")]
+    /// Wraps a raw renderer identity value.
     #[must_use]
     pub const fn from_raw(raw: u64) -> Self {
         Self(raw)
     }
 
-    #[doc = include_str!("renderer_id.doc/raw.md")]
+    /// Returns the raw renderer identity value.
     #[must_use]
     pub const fn raw(self) -> u64 {
         self.0

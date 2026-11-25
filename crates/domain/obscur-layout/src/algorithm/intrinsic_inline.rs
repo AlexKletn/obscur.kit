@@ -1,14 +1,14 @@
-#![doc = include_str!("intrinsic_inline.doc/_module.md")]
+//! Resolving the inline-axis intrinsic sizing keywords by measuring content.
 
 use obscur_geometry::{BoxConstraints, Size};
 
 use crate::algorithm::{ChildMeasurer, LayoutChild};
 use crate::model::Dimension;
 
-#[doc = include_str!("intrinsic_inline.doc/UNBOUNDED.md")]
+#[doc = include_str!("../../docs/api/algorithm/intrinsic_inline.doc/UNBOUNDED.md")]
 const UNBOUNDED: f32 = f32::INFINITY;
 
-#[doc = include_str!("intrinsic_inline.doc/probe.md")]
+#[doc = include_str!("../../docs/api/algorithm/intrinsic_inline.doc/probe.md")]
 fn probe(
     children: &[LayoutChild],
     offer: f32,
@@ -34,7 +34,7 @@ fn probe(
     widest
 }
 
-#[doc = include_str!("intrinsic_inline.doc/intrinsic_inline_size.md")]
+#[doc = include_str!("../../docs/api/algorithm/intrinsic_inline.doc/intrinsic_inline_size.md")]
 pub(crate) fn intrinsic_inline_size(
     width: Dimension,
     children: &[LayoutChild],
@@ -50,7 +50,11 @@ pub(crate) fn intrinsic_inline_size(
             let max = probe(children, UNBOUNDED, block_space, measurer);
             Some(max.min(stretch.max(min)))
         }
-        Dimension::Auto | Dimension::Px(_) | Dimension::Percent(_) => None,
+        Dimension::Auto
+        | Dimension::Px(_)
+        | Dimension::Percent(_)
+        | Dimension::Affine { .. }
+        | Dimension::Math(_) => None,
     }
 }
 
@@ -197,7 +201,7 @@ mod tests {
             Dimension::Percent(50.0),
         ] {
             assert_eq!(
-                intrinsic_inline_size(dim, &one(), 100.0, 100.0, &mut m),
+                intrinsic_inline_size(dim.clone(), &one(), 100.0, 100.0, &mut m),
                 None,
                 "{dim:?} resolves by arithmetic, not by measuring"
             );

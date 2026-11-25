@@ -1,7 +1,23 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Port module.
 mod layer_backend;
-pub use layer_backend::{LayerBackend, LayerError, LayerFeature, NullLayerBackend};
+pub use layer_backend::LayerBackend;
+mod layer_error;
+pub use layer_error::LayerError;
+mod layer_feature;
+pub use layer_feature::LayerFeature;
+mod null_layer_backend;
+pub use null_layer_backend::NullLayerBackend;
 mod loop_waker;
 pub use loop_waker::LoopWaker;
 mod window_backend;
-pub use window_backend::{NullWindowBackend, WindowBackend, WindowError, WindowFeature};
+pub use window_backend::WindowBackend;
+mod window_error;
+pub use window_error::WindowError;
+mod window_feature;
+pub use window_feature::WindowFeature;
+mod null_window_backend;
+pub use null_window_backend::NullWindowBackend;
+mod layer_capabilities;
+pub use layer_capabilities::LayerCapabilities;
+mod layer_platform;
+pub use layer_platform::LayerPlatform;

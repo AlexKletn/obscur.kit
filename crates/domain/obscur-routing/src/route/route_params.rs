@@ -1,59 +1,59 @@
-#![doc = include_str!("route_params.doc/_module.md")]
+//! Typed parameters captured from a route pattern match (spec §6.13).
 
 use std::collections::BTreeMap;
 use std::collections::btree_map;
 use std::str::FromStr;
 
-#[doc = include_str!("route_params.doc/RouteParams.md")]
+#[doc = include_str!("../../docs/api/route/route_params.doc/RouteParams.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RouteParams {
-    #[doc = include_str!("route_params.doc/values.md")]
+    /// The captured parameters, keyed by name for deterministic iteration.
     values: BTreeMap<Box<str>, Box<str>>,
 }
 
 impl RouteParams {
-    #[doc = include_str!("route_params.doc/new.md")]
+    /// Creates an empty set of parameters.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    #[doc = include_str!("route_params.doc/insert.md")]
+    /// Inserts a parameter, replacing any existing value for the same key.
     pub fn insert(&mut self, key: impl Into<Box<str>>, value: impl Into<Box<str>>) {
         self.values.insert(key.into(), value.into());
     }
 
-    #[doc = include_str!("route_params.doc/get.md")]
+    /// Returns the raw string value for `key`, if present.
     #[must_use]
     pub fn get(&self, key: &str) -> Option<&str> {
         self.values.get(key).map(|v| &**v)
     }
 
-    #[doc = include_str!("route_params.doc/get_parsed.md")]
+    #[doc = include_str!("../../docs/api/route/route_params.doc/get_parsed.md")]
     #[must_use]
     pub fn get_parsed<T: FromStr>(&self, key: &str) -> Option<T> {
         self.get(key).and_then(|v| v.parse().ok())
     }
 
-    #[doc = include_str!("route_params.doc/contains.md")]
+    /// Returns whether a parameter named `key` is present.
     #[must_use]
     pub fn contains(&self, key: &str) -> bool {
         self.values.contains_key(key)
     }
 
-    #[doc = include_str!("route_params.doc/len.md")]
+    /// Returns the number of captured parameters.
     #[must_use]
     pub fn len(&self) -> usize {
         self.values.len()
     }
 
-    #[doc = include_str!("route_params.doc/is_empty.md")]
+    /// Returns whether no parameters are captured.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.values.is_empty()
     }
 
-    #[doc = include_str!("route_params.doc/iter.md")]
+    /// Returns an iterator over the parameters in sorted key order.
     pub fn iter(&self) -> btree_map::Iter<'_, Box<str>, Box<str>> {
         self.values.iter()
     }

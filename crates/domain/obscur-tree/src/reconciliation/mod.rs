@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Reconciliation module.
 mod child_matcher;
 pub use child_matcher::ChildMatcher;
 mod child_matching;
@@ -11,3 +11,6 @@ mod reconciliation_op;
 pub use reconciliation_op::ReconciliationOp;
 mod reconciliation_plan;
 pub use reconciliation_plan::ReconciliationPlan;
+
+mod duplicate_key;
+pub use duplicate_key::DuplicateKey;

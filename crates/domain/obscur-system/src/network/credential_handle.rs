@@ -1,6 +1,6 @@
-#![doc = include_str!("credential_handle.doc/_module.md")]
+#![doc = include_str!("../../docs/api/network/credential_handle.doc/_module.md")]
 
-#[doc = include_str!("credential_handle.doc/CredentialHandle.md")]
+#[doc = include_str!("../../docs/api/network/credential_handle.doc/CredentialHandle.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CredentialHandle {
     scheme: Box<str>,
@@ -8,7 +8,7 @@ pub struct CredentialHandle {
 }
 
 impl CredentialHandle {
-    #[doc = include_str!("credential_handle.doc/new.md")]
+    #[doc = include_str!("../../docs/api/network/credential_handle.doc/new.md")]
     #[must_use]
     pub fn new(scheme: impl Into<Box<str>>, reference: impl Into<Box<str>>) -> Self {
         Self {
@@ -17,25 +17,27 @@ impl CredentialHandle {
         }
     }
 
-    #[doc = include_str!("credential_handle.doc/bearer.md")]
+    /// Creates a `"Bearer"`-scheme handle referring to the opaque host-side
+    /// `reference` (spec §5.15).
     #[must_use]
     pub fn bearer(reference: impl Into<Box<str>>) -> Self {
         Self::new("Bearer", reference)
     }
 
-    #[doc = include_str!("credential_handle.doc/scheme.md")]
+    /// Returns the authentication scheme (spec §5.15).
     #[must_use]
     pub fn scheme(&self) -> &str {
         &self.scheme
     }
 
-    #[doc = include_str!("credential_handle.doc/reference.md")]
+    /// Returns the opaque host-side reference — **not** the secret (spec §5.15,
+    /// §7.12).
     #[must_use]
     pub fn reference(&self) -> &str {
         &self.reference
     }
 
-    #[doc = include_str!("credential_handle.doc/redacted_debug.md")]
+    #[doc = include_str!("../../docs/api/network/credential_handle.doc/redacted_debug.md")]
     #[must_use]
     pub fn redacted_debug(&self) -> String {
         format!("CredentialHandle({}, <redacted>)", self.scheme)

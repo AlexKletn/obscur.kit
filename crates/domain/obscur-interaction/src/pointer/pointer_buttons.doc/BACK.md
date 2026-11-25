@@ -1,1 +1,0 @@
-Bit for [`PointerButton::Back`].

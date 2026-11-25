@@ -1,4 +1,4 @@
-#![doc = include_str!("editable_field.doc/_module.md")]
+//! What the retained tree says about an editable field: [`EditableField`].
 
 use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::NodeId;
@@ -8,11 +8,11 @@ use obscur_view::view::EVENT_INPUT;
 
 use super::{AncestorChain, SemanticTreeBuilder};
 
-#[doc = include_str!("editable_field.doc/EditableField.md")]
+#[doc = include_str!("../../docs/api/runtime/editable_field.doc/EditableField.md")]
 pub(crate) struct EditableField;
 
 impl EditableField {
-    #[doc = include_str!("editable_field.doc/editable_ancestor.md")]
+    #[doc = include_str!("../../docs/api/runtime/editable_field.doc/editable_ancestor.md")]
     pub(crate) fn editable_ancestor(tree: &RetainedTree, target: NodeId) -> Option<NodeId> {
         AncestorChain::of(tree, Some(target))
             .into_iter()
@@ -23,7 +23,7 @@ impl EditableField {
             })
     }
 
-    #[doc = include_str!("editable_field.doc/holds_its_own_value.md")]
+    #[doc = include_str!("../../docs/api/runtime/editable_field.doc/holds_its_own_value.md")]
     fn holds_its_own_value(node: &RetainedNode) -> bool {
         // `on:input` is how EVERY value-bearing control reports itself, exactly
         // as on the web — a slider, a checkbox and a field all speak through it.
@@ -42,12 +42,20 @@ impl EditableField {
         )
     }
 
-    #[doc = include_str!("editable_field.doc/is_multiline.md")]
+    /// Whether the editable `node` is a **multi-line** field (a `<textarea>`): it
+    /// carries the reserved CSS type `textarea` (emitted by a multi-line
+    /// [`Input`](obscur_widgets::input::Input)). A multi-line editable inserts a
+    /// newline on `Enter` and moves the caret vertically on ArrowUp/ArrowDown; a
+    /// single-line `input` does neither (its Enter stays activation/submit).
     pub(crate) fn is_multiline(tree: &RetainedTree, node: NodeId) -> bool {
         tree.get(node).and_then(|n| n.attributes().local_name()) == Some("textarea")
     }
 
-    #[doc = include_str!("editable_field.doc/first_text_descendant.md")]
+    /// Returns `field`'s first text leaf (depth-first, in child order) — the node
+    /// the session text is painted on, whose box origin the click-caret x is
+    /// measured from. Mirrors the compose walk's editing-text selection: the field
+    /// itself if it directly carries text, else its first `Text` descendant. `None`
+    /// when the subtree has no text node.
     pub(crate) fn first_text_descendant(tree: &RetainedTree, node: NodeId) -> Option<NodeId> {
         let n = tree.get(node)?;
         if n.kind().text().is_some() {
@@ -61,14 +69,17 @@ impl EditableField {
         None
     }
 
-    #[doc = include_str!("editable_field.doc/collect_text.md")]
+    /// Concatenates the text content of the editable subtree rooted at `node`
+    /// (the node plus its descendants, in tree order) — the seed for a fresh
+    /// editing session. A single-line text field has one `Text` child, so this
+    /// is that child's content.
     pub(crate) fn collect_text(tree: &RetainedTree, node: NodeId) -> String {
         let mut out = String::new();
         Self::collect_text_into(tree, node, &mut out);
         out
     }
 
-    #[doc = include_str!("editable_field.doc/collect_text_into.md")]
+    #[doc = include_str!("../../docs/api/runtime/editable_field.doc/collect_text_into.md")]
     fn collect_text_into(tree: &RetainedTree, node: NodeId, out: &mut String) {
         let Some(n) = tree.get(node) else {
             return;
@@ -84,7 +95,7 @@ impl EditableField {
         }
     }
 
-    #[doc = include_str!("editable_field.doc/declared_control_value.md")]
+    #[doc = include_str!("../../docs/api/runtime/editable_field.doc/declared_control_value.md")]
     pub(crate) fn declared_control_value(tree: &RetainedTree, node: NodeId) -> Option<String> {
         tree.get(node)
             .and_then(|n| n.attributes().control_value())

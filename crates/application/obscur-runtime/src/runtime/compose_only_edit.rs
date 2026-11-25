@@ -1,4 +1,4 @@
-#![doc = include_str!("compose_only_edit.doc/_module.md")]
+//! Whether a text edit can skip style and layout: [`ComposeOnlyEdit`].
 
 use obscur_identity::NodeId;
 use obscur_style::computed::{ComputedStyle, ComputedValue};
@@ -10,21 +10,23 @@ use obscur_tree::tree::RetainedTree;
 use super::EditableField;
 use crate::orchestration::{ComputedStyles, alignment_for, direction_for, white_space_for};
 
-#[doc = include_str!("compose_only_edit.doc/ComposeOnlyEdit.md")]
+#[doc = include_str!("../../docs/api/runtime/compose_only_edit.doc/ComposeOnlyEdit.md")]
 pub(crate) struct ComposeOnlyEdit<'a> {
-    #[doc = include_str!("compose_only_edit.doc/tree.md")]
+    /// The retained tree: whether the field is a `<textarea>`, and where its text
+    /// leaf is.
     tree: &'a RetainedTree,
-    #[doc = include_str!("compose_only_edit.doc/computed.md")]
+    /// This frame's computed styles: the white-space, alignment, direction and
+    /// width the three conditions are read from.
     computed: &'a ComputedStyles,
 }
 
 impl<'a> ComposeOnlyEdit<'a> {
-    #[doc = include_str!("compose_only_edit.doc/new.md")]
+    /// Bundles the retained frame for one box-stability question.
     pub(crate) const fn new(tree: &'a RetainedTree, computed: &'a ComputedStyles) -> Self {
         Self { tree, computed }
     }
 
-    #[doc = include_str!("compose_only_edit.doc/is_box_stable.md")]
+    #[doc = include_str!("../../docs/api/runtime/compose_only_edit.doc/is_box_stable.md")]
     pub(crate) fn is_box_stable(&self, field: NodeId) -> bool {
         // A multiline field grows a line box when a line is added: not box-stable.
         if EditableField::is_multiline(self.tree, field) {
@@ -49,7 +51,7 @@ impl<'a> ComposeOnlyEdit<'a> {
     }
 }
 
-#[doc = include_str!("compose_only_edit.doc/alignment_ignores_width.md")]
+#[doc = include_str!("../../docs/api/runtime/compose_only_edit.doc/alignment_ignores_width.md")]
 fn alignment_ignores_width(alignment: TextAlignment, direction: TextDirection) -> bool {
     match alignment {
         TextAlignment::Left | TextAlignment::Justify => true,
@@ -59,7 +61,7 @@ fn alignment_ignores_width(alignment: TextAlignment, direction: TextDirection) -
     }
 }
 
-#[doc = include_str!("compose_only_edit.doc/has_definite_px_width.md")]
+#[doc = include_str!("../../docs/api/runtime/compose_only_edit.doc/has_definite_px_width.md")]
 fn has_definite_px_width(style: Option<&ComputedStyle>) -> bool {
     style
         .and_then(|s| s.get(PropertyId::Width))

@@ -1,23 +1,25 @@
-#![doc = include_str!("tree_update_converter.doc/_module.md")]
+//! Builds an AccessKit [`TreeUpdate`] from a [`SemanticSnapshot`] (§7.1).
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::hash::{DefaultHasher, Hash, Hasher};
 
-use accesskit::{Node, NodeId, Tree, TreeUpdate};
-use obscur_accessibility::semantic::SemanticRelation;
+use accesskit::{Node, NodeId, Role, TextPosition, TextSelection, Tree, TreeUpdate};
+use obscur_accessibility::semantic::{SemanticRelation, SemanticValue};
 use obscur_accessibility::tree::SemanticSnapshot;
 use obscur_identity::NodeId as DomainNodeId;
+use unicode_segmentation::UnicodeSegmentation;
 
 use super::NodeConverter;
 use crate::error::AccessKitBridgeError;
 
-#[doc = include_str!("tree_update_converter.doc/TreeUpdateConverter.md")]
+#[doc = include_str!("../../docs/api/conversion/tree_update_converter.doc/TreeUpdateConverter.md")]
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct TreeUpdateConverter {
     node: NodeConverter,
 }
 
 impl TreeUpdateConverter {
-    #[doc = include_str!("tree_update_converter.doc/new.md")]
+    /// Creates a converter over a fresh [`NodeConverter`].
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -25,18 +27,18 @@ impl TreeUpdateConverter {
         }
     }
 
-    #[doc = include_str!("tree_update_converter.doc/node_converter.md")]
+    /// Returns the inner [`NodeConverter`], e.g. to map ids consistently.
     #[must_use]
     pub const fn node_converter(&self) -> &NodeConverter {
         &self.node
     }
 
-    #[doc = include_str!("tree_update_converter.doc/convert.md")]
+    #[doc = include_str!("../../docs/api/conversion/tree_update_converter.doc/convert.md")]
     pub fn convert(&self, snapshot: &SemanticSnapshot) -> Result<TreeUpdate, AccessKitBridgeError> {
         self.convert_with_focus(snapshot, None)
     }
 
-    #[doc = include_str!("tree_update_converter.doc/convert_with_focus.md")]
+    #[doc = include_str!("../../docs/api/conversion/tree_update_converter.doc/convert_with_focus.md")]
     pub fn convert_with_focus(
         &self,
         snapshot: &SemanticSnapshot,
@@ -46,14 +48,32 @@ impl TreeUpdateConverter {
 
         let children = Self::reconstruct_children(snapshot, root);
 
-        let nodes: Vec<(NodeId, Node)> = snapshot
+        let mut used_ids: BTreeSet<_> = snapshot
             .iter()
-            .filter(|(_, node)| !node.is_ignored())
-            .map(|(id, node)| {
-                let child_ids = children.get(&id).map_or(&[][..], Vec::as_slice);
-                (self.node.node_id(id), self.node.convert(node, child_ids))
-            })
+            .map(|(id, _)| self.node.node_id(id))
             .collect();
+        let mut nodes = Vec::new();
+        for (id, node) in snapshot.iter().filter(|(_, node)| !node.is_ignored()) {
+            let child_ids = children.get(&id).map_or(&[][..], Vec::as_slice);
+            let id = self.node.node_id(id);
+            let mut converted = self.node.convert(node, child_ids);
+            if let (SemanticValue::Text(text), Some(selection)) =
+                (node.value(), node.text_selection)
+                && selection
+                    .iter()
+                    .all(|&offset| text.is_char_boundary(offset))
+            {
+                append_text_runs(
+                    &mut converted,
+                    id,
+                    text,
+                    selection,
+                    &mut used_ids,
+                    &mut nodes,
+                );
+            }
+            nodes.push((id, converted));
+        }
 
         let focus_id = focus
             .filter(|id| snapshot.get(*id).is_some_and(|n| !n.is_ignored()))
@@ -66,7 +86,9 @@ impl TreeUpdateConverter {
         })
     }
 
-    #[doc = include_str!("tree_update_converter.doc/reconstruct_children.md")]
+    /// Rebuilds a parent→children map from the snapshot's own child links, adds
+    /// the ownership its `Owns` relations express, then attaches every
+    /// still-parentless non-ignored node to the root.
     fn reconstruct_children(
         snapshot: &SemanticSnapshot,
         root: DomainNodeId,
@@ -116,7 +138,7 @@ impl TreeUpdateConverter {
         children
     }
 
-    #[doc = include_str!("tree_update_converter.doc/graft_links.md")]
+    #[doc = include_str!("../../docs/api/conversion/tree_update_converter.doc/graft_links.md")]
     fn graft_links(
         snapshot: &SemanticSnapshot,
         ancestor: DomainNodeId,
@@ -142,6 +164,83 @@ impl TreeUpdateConverter {
     }
 }
 
+fn append_text_runs(
+    field: &mut Node,
+    field_id: NodeId,
+    text: &str,
+    selection: [usize; 2],
+    used_ids: &mut BTreeSet<NodeId>,
+    nodes: &mut Vec<(NodeId, Node)>,
+) {
+    let mut children = field.children().to_vec();
+    let mut positions = [None; 2];
+    let mut start = 0;
+    // Split on hard line breaks and keep the final empty run at a trailing break.
+    for (index, line) in text
+        .split_inclusive('\n')
+        .chain((text.is_empty() || text.ends_with('\n')).then_some(""))
+        .enumerate()
+    {
+        let mut hash = DefaultHasher::new();
+        (field_id.0, index).hash(&mut hash);
+        let mut id = NodeId(hash.finish());
+        while !used_ids.insert(id) {
+            id.0 = id.0.wrapping_sub(1);
+        }
+        let mut lengths = Vec::new();
+        for grapheme in line.graphemes(true) {
+            if let Ok(length) = u8::try_from(grapheme.len()) {
+                lengths.push(length);
+            } else {
+                lengths.extend(grapheme.chars().map(|ch| ch.len_utf8() as u8));
+            }
+        }
+        let mut end = 0;
+        let ends: Vec<_> = lengths
+            .iter()
+            .map(|&length| {
+                end += usize::from(length);
+                end
+            })
+            .collect();
+        let line_end = start + line.len();
+        for (position, offset) in positions.iter_mut().zip(selection) {
+            if offset >= start && offset <= line_end {
+                *position = Some(TextPosition {
+                    node: id,
+                    character_index: ends.partition_point(|&end| end <= offset - start),
+                });
+            }
+        }
+
+        let mut run = Node::new(Role::TextRun);
+        run.set_value(line);
+        let mut word_lengths = Vec::new();
+        let mut previous = 0;
+        for (offset, word) in line.split_word_bound_indices() {
+            let end = ends.partition_point(|&end| end <= offset + word.len());
+            let mut length = end - previous;
+            while length > usize::from(u8::MAX) {
+                word_lengths.push(u8::MAX);
+                length -= usize::from(u8::MAX);
+            }
+            if length > 0 {
+                word_lengths.push(length as u8);
+            }
+            previous = end;
+        }
+        run.set_word_lengths(word_lengths);
+        run.set_character_lengths(lengths);
+        children.push(id);
+        nodes.push((id, run));
+        start = line_end;
+    }
+    field.set_children(children);
+    if let [Some(anchor), Some(focus)] = positions {
+        field.set_text_selection(TextSelection { anchor, focus });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -150,6 +249,43 @@ mod tests {
 
     fn node(n: u64, role: SemanticRole) -> SemanticNode {
         SemanticNode::new(DomainNodeId::from_raw(n), role)
+    }
+
+    #[test]
+    fn editable_selection_references_grapheme_positions_across_lines() {
+        let root = DomainNodeId::from_raw(1);
+        let field = DomainNodeId::from_raw(2);
+        let mut tree = SemanticTree::new();
+        tree.insert(node(1, SemanticRole::Group), None);
+        tree.insert(node(2, SemanticRole::TextInput), Some(root));
+        tree.set_root(root);
+        let text = "ae\u{301}\né";
+        tree.project_editing(field, text, [text.len(), 1]);
+        let snapshot = SemanticSnapshot::from_tree(&tree);
+        let converter = TreeUpdateConverter::new();
+        let output = converter
+            .convert_with_focus(&snapshot, Some(field))
+            .unwrap();
+        let find = |id| {
+            output
+                .nodes
+                .iter()
+                .find(|(key, _)| *key == id)
+                .map(|(_, node)| node)
+                .unwrap()
+        };
+        let input = find(output.focus);
+        let selection = input.text_selection().unwrap();
+        assert_eq!(selection.anchor.node, input.children()[1]);
+        assert_eq!(selection.anchor.character_index, 1);
+        assert_eq!(selection.focus.node, input.children()[0]);
+        assert_eq!(selection.focus.character_index, 1);
+        assert_eq!(find(selection.focus.node).character_lengths(), &[1, 3, 1]);
+        assert_eq!(find(selection.anchor.node).character_lengths(), &[2]);
+        let again = converter
+            .convert_with_focus(&snapshot, Some(field))
+            .unwrap();
+        assert_eq!(output.nodes, again.nodes);
     }
 
     fn two_node_snapshot() -> SemanticSnapshot {

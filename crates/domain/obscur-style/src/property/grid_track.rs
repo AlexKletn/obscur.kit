@@ -1,43 +1,57 @@
-#![doc = include_str!("grid_track.doc/_module.md")]
+#![doc = include_str!("../../docs/api/property/grid_track.doc/_module.md")]
 
-use crate::property::Length;
+use crate::property::{Length, LengthExpr};
 
-#[doc = include_str!("grid_track.doc/GridTrack.md")]
+#[doc = include_str!("../../docs/api/property/grid_track.doc/GridTrack.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum GridTrack {
-    #[doc = include_str!("grid_track.doc/Fixed.md")]
+    /// A fixed track length (`100px`, `50%`, `2em`, …), resolved to pixels later.
     Fixed(Length),
-    #[doc = include_str!("grid_track.doc/Fr.md")]
+    /// A flexible fraction (`fr`): shares leftover space proportionally.
     Fr(f32),
-    #[doc = include_str!("grid_track.doc/Auto.md")]
+    /// Content-sized: as large as the biggest item placed in the track.
     Auto,
-    #[doc = include_str!("grid_track.doc/MinContent.md")]
+    /// `min-content`: the largest of the items' min-content contributions — as
+    /// narrow as the track can be without its items overflowing (CSS Grid §7.2.3).
     MinContent,
-    #[doc = include_str!("grid_track.doc/MaxContent.md")]
+    /// `max-content`: the largest of the items' max-content contributions — as
+    /// wide as the items want given unbounded space (CSS Grid §7.2.3).
     MaxContent,
-    #[doc = include_str!("grid_track.doc/MinMax.md")]
+    /// An intrinsic grid track with a length or percentage growth cap.
+    FitContent(Length),
+    /// An intrinsic grid track capped by a CSS math expression.
+    FitContentMath(LengthExpr),
+    /// `minmax(min, max)`: sized by `max`, floored at `min`. Each bound is itself
+    /// a [`GridTrack`].
     MinMax(Box<GridTrack>, Box<GridTrack>),
-    #[doc = include_str!("grid_track.doc/AutoRepeat.md")]
+    /// A `repeat(auto-fill | auto-fit, <track-list>)` auto-repetition: `fill` is
+    /// `true` for `auto-fill` (empty tracks kept), `false` for `auto-fit` (empty
+    /// tracks collapse). `tracks` is one copy of the repeated pattern. The
+    /// repetition count is resolved against the container size inside layout.
     AutoRepeat {
-        #[doc = include_str!("grid_track.doc/fill.md")]
+        /// `true` for `auto-fill`, `false` for `auto-fit`.
         fill: bool,
-        #[doc = include_str!("grid_track.doc/tracks.md")]
+        /// One copy of the repeated track pattern.
         tracks: Box<[GridTrack]>,
+        /// Names on each boundary of the repeated pattern, when authored.
+        line_names: Box<[Box<[Box<str>]>]>,
     },
 }
 
 impl GridTrack {
-    #[doc = include_str!("grid_track.doc/minmax.md")]
+    /// Builds a [`MinMax`](GridTrack::MinMax) track from a `min` and `max` bound,
+    /// boxing each so callers need not.
     #[must_use]
     pub fn minmax(min: GridTrack, max: GridTrack) -> Self {
         GridTrack::MinMax(Box::new(min), Box::new(max))
     }
 
-    #[doc = include_str!("grid_track.doc/uses_ch.md")]
+    #[doc = include_str!("../../docs/api/property/grid_track.doc/uses_ch.md")]
     #[must_use]
     pub fn uses_ch(&self) -> bool {
         match self {
-            Self::Fixed(length) => length.is_ch(),
+            Self::Fixed(length) | Self::FitContent(length) => length.is_ch(),
+            Self::FitContentMath(limit) => limit.uses_ch(),
             Self::MinMax(min, max) => min.uses_ch() || max.uses_ch(),
             Self::AutoRepeat { tracks, .. } => tracks.iter().any(Self::uses_ch),
             Self::Fr(_) | Self::Auto | Self::MinContent | Self::MaxContent => false,
@@ -60,6 +74,7 @@ mod tests {
         // `repeat(auto-fill, 20ch)`: the pattern is where the `ch` hides.
         assert!(
             GridTrack::AutoRepeat {
+                line_names: Box::from([]),
                 fill: true,
                 tracks: vec![GridTrack::Fixed(Length::Ch(20.0))].into_boxed_slice(),
             }
@@ -79,6 +94,7 @@ mod tests {
         assert!(!GridTrack::minmax(GridTrack::Auto, GridTrack::Fr(1.0)).uses_ch());
         assert!(
             !GridTrack::AutoRepeat {
+                line_names: Box::from([]),
                 fill: false,
                 tracks: vec![GridTrack::Fixed(Length::px(80.0))].into_boxed_slice(),
             }

@@ -1,4 +1,4 @@
-#![doc = include_str!("radio.doc/_module.md")]
+//! `Radio`: a headless two-state radio-button control (spec §2.6).
 
 use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
@@ -10,7 +10,7 @@ use obscur_view::view::{
 
 use super::RadioProps;
 
-#[doc = include_str!("radio.doc/Radio.md")]
+#[doc = include_str!("../../docs/api/radio/radio.doc/Radio.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Radio {
     label: Box<str>,
@@ -20,22 +20,26 @@ pub struct Radio {
 }
 
 impl Radio {
-    #[doc = include_str!("radio.doc/COMPONENT_ID.md")]
+    #[doc = include_str!("../../docs/api/radio/radio.doc/COMPONENT_ID.md")]
     pub const COMPONENT_ID: ComponentId = ComponentId::from_raw(0x00D0_000C);
 
-    #[doc = include_str!("radio.doc/DOT_ID.md")]
+    /// Component id of the circular indicator sub-part (`.radio-dot`), in the
+    /// widget sub-part id space (`..1C`).
     const DOT_ID: ComponentId = ComponentId::from_raw(0x00D0_001C);
-    #[doc = include_str!("radio.doc/FILL_ID.md")]
+    /// Component id of the filled centre dot sub-part (`.radio-fill`, `..2C`).
     const FILL_ID: ComponentId = ComponentId::from_raw(0x00D0_002C);
 
-    #[doc = include_str!("radio.doc/PROP_ROLE.md")]
+    /// Interned name of the semantic-role property (`role`); shares the
+    /// `0x00D1_NNXX` scheme with `NN = 0C` (radio): role=`00`, disabled=`01`,
+    /// selected=`02`.
     const PROP_ROLE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0C00);
-    #[doc = include_str!("radio.doc/PROP_DISABLED.md")]
+    /// Interned name of the `disabled` state property.
     const PROP_DISABLED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0C01);
-    #[doc = include_str!("radio.doc/PROP_SELECTED.md")]
+    /// Interned name of the `selected` state property.
     pub(crate) const PROP_SELECTED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0C02);
 
-    #[doc = include_str!("radio.doc/new.md")]
+    /// Creates an enabled, *unselected* radio showing `label` that fires
+    /// `command` on change.
     #[must_use]
     pub fn new(label: impl Into<Box<str>>, command: InternedSymbol) -> Self {
         Self {
@@ -46,75 +50,78 @@ impl Radio {
         }
     }
 
-    #[doc = include_str!("radio.doc/selected.md")]
+    /// Sets the selected state, returning the updated radio (fluent builder).
     #[must_use]
     pub fn selected(mut self, selected: bool) -> Self {
         self.selected = selected;
         self
     }
 
-    #[doc = include_str!("radio.doc/disabled.md")]
+    /// Sets the disabled state, returning the updated radio (fluent builder).
     #[must_use]
     pub fn disabled(mut self, disabled: bool) -> Self {
         self.disabled = disabled;
         self
     }
 
-    #[doc = include_str!("radio.doc/select.md")]
+    /// Selects this radio (a no-op while disabled). Deselection is the group's
+    /// concern — a radio does not deselect itself on re-activation.
     pub fn select(&mut self) {
         if !self.disabled {
             self.selected = true;
         }
     }
 
-    #[doc = include_str!("radio.doc/toggle.md")]
+    /// Toggles the selected state (a no-op while disabled). Mirrors
+    /// [`Checkbox::toggle`](crate::checkbox::Checkbox::toggle) for symmetry;
+    /// most groups will call [`select`](Self::select) instead.
     pub fn toggle(&mut self) {
         if !self.disabled {
             self.selected = !self.selected;
         }
     }
 
-    #[doc = include_str!("radio.doc/is_selected.md")]
+    /// Returns whether this radio is selected.
     #[must_use]
     pub const fn is_selected(&self) -> bool {
         self.selected
     }
 
-    #[doc = include_str!("radio.doc/set_selected.md")]
+    /// Sets the selected state in place.
     pub fn set_selected(&mut self, selected: bool) {
         self.selected = selected;
     }
 
-    #[doc = include_str!("radio.doc/command.md")]
+    /// Returns the command fired when the radio changes.
     #[must_use]
     pub const fn command(&self) -> InternedSymbol {
         self.command
     }
 
-    #[doc = include_str!("radio.doc/label.md")]
+    /// Returns the radio label.
     #[must_use]
     pub fn label(&self) -> &str {
         &self.label
     }
 
-    #[doc = include_str!("radio.doc/is_disabled.md")]
+    /// Returns whether the radio is disabled.
     #[must_use]
     pub const fn is_disabled(&self) -> bool {
         self.disabled
     }
 
-    #[doc = include_str!("radio.doc/set_disabled.md")]
+    /// Sets the disabled state in place.
     pub fn set_disabled(&mut self, disabled: bool) {
         self.disabled = disabled;
     }
 
-    #[doc = include_str!("radio.doc/semantic_role.md")]
+    /// Returns the accessible role of this control.
     #[must_use]
     pub const fn semantic_role(&self) -> SemanticRole {
         SemanticRole::RadioButton
     }
 
-    #[doc = include_str!("radio.doc/view.md")]
+    #[doc = include_str!("../../docs/api/radio/radio.doc/view.md")]
     #[must_use]
     pub fn view(&self) -> View {
         let mut node = ViewNode::element(Self::COMPONENT_ID)
@@ -153,7 +160,7 @@ impl Radio {
         View::single(node)
     }
 
-    #[doc = include_str!("radio.doc/contents.md")]
+    #[doc = include_str!("../../docs/api/radio/radio.doc/contents.md")]
     #[must_use]
     pub(crate) fn contents(selected: bool, label: &str) -> ViewFragment {
         // The circular indicator sub-part: a `.radio-dot`, with the filled

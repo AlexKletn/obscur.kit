@@ -1,23 +1,30 @@
-#![doc = include_str!("cascade_sheets.doc/_module.md")]
+//! [`CascadeSheets`]: where a frame's stylesheets come from, and the order the
+//! cascade receives them in.
+
+use super::author_sheets::AuthorSheets;
 
 use obscur_style::matching::Stylesheet;
 
-#[doc = include_str!("cascade_sheets.doc/AuthorSheets.md")]
-pub(crate) struct AuthorSheets(Vec<Stylesheet>);
-
-#[doc = include_str!("cascade_sheets.doc/CascadeSheets.md")]
+#[doc = include_str!("../../docs/api/runtime/cascade_sheets.doc/CascadeSheets.md")]
 #[derive(Debug)]
 pub(crate) struct CascadeSheets {
-    #[doc = include_str!("cascade_sheets.doc/reactive.md")]
+    /// The stylesheets the reactive frame path matches against the rebuilt view,
+    /// parallel to the runtime-held root view builder. Empty by default; the
+    /// explicit `&[Stylesheet]`-taking render paths pass their own slice and
+    /// never read this.
     reactive: Vec<Stylesheet>,
-    #[doc = include_str!("cascade_sheets.doc/retained_author.md")]
+    #[doc = include_str!("../../docs/api/runtime/cascade_sheets.doc/retained_author.md")]
     retained_author: Vec<Stylesheet>,
-    #[doc = include_str!("cascade_sheets.doc/default_sheet.md")]
+    /// The built-in **user-agent (UA) default** sheet, matched first (below every
+    /// author sheet) on every render path. [`None`] by default, in which case
+    /// [`cascade`](Self::cascade) hands the author sheets through untouched.
     default_sheet: Option<Stylesheet>,
 }
 
 impl CascadeSheets {
-    #[doc = include_str!("cascade_sheets.doc/new.md")]
+    /// No sheets from any source: no reactive set, nothing retained, no UA
+    /// default — the state in which [`cascade`](Self::cascade) returns whatever
+    /// the frame supplied and nothing else.
     pub(crate) const fn new() -> Self {
         Self {
             reactive: Vec::new(),
@@ -26,27 +33,27 @@ impl CascadeSheets {
         }
     }
 
-    #[doc = include_str!("cascade_sheets.doc/set_reactive.md")]
+    #[doc = include_str!("../../docs/api/runtime/cascade_sheets.doc/set_reactive.md")]
     pub(crate) fn set_reactive(&mut self, sheets: Vec<Stylesheet>) {
         self.reactive = sheets;
     }
 
-    #[doc = include_str!("cascade_sheets.doc/take_reactive.md")]
+    #[doc = include_str!("../../docs/api/runtime/cascade_sheets.doc/take_reactive.md")]
     pub(crate) fn take_reactive(&mut self) -> Vec<Stylesheet> {
         std::mem::take(&mut self.reactive)
     }
 
-    #[doc = include_str!("cascade_sheets.doc/set_default.md")]
+    /// Installs the built-in UA default sheet, replacing any previous one.
     pub(crate) fn set_default(&mut self, sheet: Stylesheet) {
         self.default_sheet = Some(sheet);
     }
 
-    #[doc = include_str!("cascade_sheets.doc/has_default.md")]
+    /// Whether a UA default sheet has been installed.
     pub(crate) const fn has_default(&self) -> bool {
         self.default_sheet.is_some()
     }
 
-    #[doc = include_str!("cascade_sheets.doc/author_for_frame.md")]
+    #[doc = include_str!("../../docs/api/runtime/cascade_sheets.doc/author_for_frame.md")]
     pub(crate) fn author_for_frame(&mut self, supplied: &[Stylesheet]) -> AuthorSheets {
         if supplied.is_empty() {
             return AuthorSheets(self.retained_author.clone());
@@ -55,7 +62,7 @@ impl CascadeSheets {
         AuthorSheets(supplied.to_vec())
     }
 
-    #[doc = include_str!("cascade_sheets.doc/cascade.md")]
+    #[doc = include_str!("../../docs/api/runtime/cascade_sheets.doc/cascade.md")]
     pub(crate) fn cascade(&self, author: AuthorSheets) -> Vec<Stylesheet> {
         let AuthorSheets(mut sheets) = author;
         if let Some(default) = &self.default_sheet {

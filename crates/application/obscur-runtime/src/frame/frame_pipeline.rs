@@ -1,4 +1,4 @@
-#![doc = include_str!("frame_pipeline.doc/_module.md")]
+//! The synchronous, deterministic frame driver: [`FramePipeline`].
 
 use obscur_scene::scene::Scene;
 use obscur_style::matching::{MediaEnvironment, Stylesheet};
@@ -14,23 +14,23 @@ use crate::transaction::ReconcileEnactor;
 
 use super::{FrameContext, FrameResult};
 
-#[doc = include_str!("frame_pipeline.doc/FramePipeline.md")]
+#[doc = include_str!("../../docs/api/frame/frame_pipeline.doc/FramePipeline.md")]
 // Not `Clone`: it owns a `SceneCoordinator`, which holds a `Box<dyn TextShaper>`
 // (a replaceable, non-cloneable shaping port) and so cannot be cloned.
 #[derive(Debug, Default)]
 pub struct FramePipeline {
-    #[doc = include_str!("frame_pipeline.doc/reconciler.md")]
+    /// Turns the desired view tree into retained-tree structure.
     reconciler: Reconciler,
-    #[doc = include_str!("frame_pipeline.doc/style.md")]
+    /// Resolves computed styles over the retained tree.
     style: StyleCoordinator,
-    #[doc = include_str!("frame_pipeline.doc/layout.md")]
+    /// Drives layout over the retained tree.
     layout: LayoutCoordinator,
-    #[doc = include_str!("frame_pipeline.doc/scene.md")]
+    /// Composes the paint-ordered display list.
     scene: SceneCoordinator,
 }
 
 impl FramePipeline {
-    #[doc = include_str!("frame_pipeline.doc/new.md")]
+    /// Creates a pipeline with fresh coordinators and a fresh reconciler.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -41,7 +41,7 @@ impl FramePipeline {
         }
     }
 
-    #[doc = include_str!("frame_pipeline.doc/run.md")]
+    #[doc = include_str!("../../docs/api/frame/frame_pipeline.doc/run.md")]
     #[must_use]
     pub fn run(
         &self,
@@ -57,7 +57,7 @@ impl FramePipeline {
         self.finish_frame(tree, scene, ctx, reconciled, inputs)
     }
 
-    #[doc = include_str!("frame_pipeline.doc/run_matched.md")]
+    #[doc = include_str!("../../docs/api/frame/frame_pipeline.doc/run_matched.md")]
     #[must_use]
     pub fn run_matched(
         &self,
@@ -72,13 +72,13 @@ impl FramePipeline {
         let reconciled = self.commit_reconcile(tree, desired);
 
         // 2. Match: build cascade inputs from the sheets against the fresh tree,
-        //    gating `@media`/`@container` rules by this frame's viewport (§4.13).
+        //    gating `@media` rules by this frame's viewport (§4.13).
         let environment = MediaEnvironment::viewport(ctx.viewport().width, ctx.viewport().height);
         let inputs = StyleMatchingCoordinator::new().build_inputs_env(tree, sheets, &environment);
         self.finish_frame(tree, scene, ctx, reconciled, &inputs)
     }
 
-    #[doc = include_str!("frame_pipeline.doc/commit_reconcile.md")]
+    #[doc = include_str!("../../docs/api/frame/frame_pipeline.doc/commit_reconcile.md")]
     fn commit_reconcile(&self, tree: &mut RetainedTree, desired: &View) -> bool {
         let (commit, _plan) = ReconcileEnactor::new()
             .commit_root(&self.reconciler, tree, desired)
@@ -88,7 +88,7 @@ impl FramePipeline {
         !commit.is_empty()
     }
 
-    #[doc = include_str!("frame_pipeline.doc/finish_frame.md")]
+    #[doc = include_str!("../../docs/api/frame/frame_pipeline.doc/finish_frame.md")]
     fn finish_frame(
         &self,
         tree: &mut RetainedTree,
@@ -142,12 +142,13 @@ impl FramePipeline {
         // Authored grid templates (`grid-template-columns`/`-rows`) become a
         // per-node side-table so a grid container dispatches the real track-sizing
         // algorithm; a grid node with no template falls back to a single column.
-        let grid_templates = self.layout.grid_templates_from(
+        let mut grid_templates = self.layout.grid_templates_from(
             &computed,
             ctx.viewport(),
             root_font,
             Some(self.scene.paragraph()),
         );
+        crate::orchestration::defer_repeated_grid_lines(&mut grid_templates, tree, &computed);
         // Text leaves are shaped + wrapped to their available width inside the
         // layout pass through the scene's paragraph orchestrator (disjoint field,
         // so a legal split borrow), so `self.scene` later re-wraps and paints

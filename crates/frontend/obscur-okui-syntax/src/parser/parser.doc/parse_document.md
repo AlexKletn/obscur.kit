@@ -1,1 +1,0 @@
-`document := (element | expression | text)*`

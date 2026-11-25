@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Contract module.
 mod capability_contract;
 pub use capability_contract::CapabilityContract;
 mod capability_requirement;
@@ -6,7 +6,11 @@ pub use capability_requirement::CapabilityRequirement;
 mod child_contract;
 pub use child_contract::ChildContract;
 mod component_surface;
-pub use component_surface::{ChildrenSurface, ComponentSurface, PropTypeSurface};
+pub use component_surface::ComponentSurface;
+mod children_surface;
+pub use children_surface::ChildrenSurface;
+mod prop_type_surface;
+pub use prop_type_surface::PropTypeSurface;
 mod event_contract;
 pub use event_contract::EventContract;
 mod prop_contract;

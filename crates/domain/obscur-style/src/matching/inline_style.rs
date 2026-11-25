@@ -1,21 +1,25 @@
-#![doc = include_str!("inline_style.doc/_module.md")]
+#![doc = include_str!("../../docs/api/matching/inline_style.doc/_module.md")]
 
 use std::sync::Arc;
 
 use crate::matching::BlockDeclaration;
 use crate::property::CustomProperty;
 
-#[doc = include_str!("inline_style.doc/InlineStyle.md")]
+/// The declarations of one `style` attribute.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct InlineStyle {
-    #[doc = include_str!("inline_style.doc/declarations.md")]
+    /// The declarations, in the order they were written.
     declarations: Arc<[BlockDeclaration]>,
-    #[doc = include_str!("inline_style.doc/custom_properties.md")]
+    /// The custom properties (`--name: value`) the block declared, in the order
+    /// they were written. Held apart from the declarations for the same reason a
+    /// [`StyleRule`](crate::matching::StyleRule) holds them apart: they are keyed
+    /// by name, not by [`PropertyId`](crate::property::PropertyId), and they
+    /// cascade a step before every longhand does.
     custom_properties: Arc<[CustomProperty]>,
 }
 
 impl InlineStyle {
-    #[doc = include_str!("inline_style.doc/new.md")]
+    /// Builds a block from its declarations.
     #[must_use]
     pub fn new(declarations: impl Into<Arc<[BlockDeclaration]>>) -> Self {
         Self {
@@ -24,32 +28,36 @@ impl InlineStyle {
         }
     }
 
-    #[doc = include_str!("inline_style.doc/with_custom_properties.md")]
+    /// Returns a copy of this block carrying `properties` as the custom properties
+    /// it declared, replacing any it already carried. Shares the declarations with
+    /// the original rather than copying them.
     #[must_use]
     pub fn with_custom_properties(mut self, properties: impl Into<Arc<[CustomProperty]>>) -> Self {
         self.custom_properties = properties.into();
         self
     }
 
-    #[doc = include_str!("inline_style.doc/custom_properties_2.md")]
+    /// The custom properties the block declared, in the order they were written.
+    /// Empty for the ordinary `style` attribute, which declares none.
     #[must_use]
     pub fn custom_properties(&self) -> &[CustomProperty] {
         &self.custom_properties
     }
 
-    #[doc = include_str!("inline_style.doc/empty.md")]
+    /// A block that declares nothing — what an unparseable or absent `style` yields.
     #[must_use]
     pub fn empty() -> Self {
         Self::default()
     }
 
-    #[doc = include_str!("inline_style.doc/declarations_2.md")]
+    /// The declarations, in the order they were written: source order decides a tie
+    /// inside one block, so `color:red;color:blue` is blue.
     #[must_use]
     pub fn declarations(&self) -> &[BlockDeclaration] {
         &self.declarations
     }
 
-    #[doc = include_str!("inline_style.doc/is_empty.md")]
+    /// Whether the block declares nothing.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         // A block that declares only `--brand: #f00` declares SOMETHING; callers

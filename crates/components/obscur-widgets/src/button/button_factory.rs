@@ -1,4 +1,4 @@
-#![doc = include_str!("button_factory.doc/_module.md")]
+//! The registry entry that mints `button` components (spec §2.2).
 
 use obscur_identity::ComponentId;
 use obscur_view::component::{
@@ -7,27 +7,27 @@ use obscur_view::component::{
 
 use super::{Button, ButtonComponent, ButtonProps};
 
-#[doc = include_str!("button_factory.doc/ButtonFactory.md")]
+#[doc = include_str!("../../docs/api/button/button_factory.doc/ButtonFactory.md")]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ButtonFactory;
 
 impl ComponentFactory for ButtonFactory {
-    #[doc = include_str!("button_factory.doc/component_id.md")]
+    #[doc = include_str!("../../docs/api/button/button_factory.doc/component_id.md")]
     fn component_id(&self) -> ComponentId {
         Button::COMPONENT_ID
     }
 
-    #[doc = include_str!("button_factory.doc/contract.md")]
+    #[doc = include_str!("../../docs/api/button/button_factory.doc/contract.md")]
     fn contract(&self) -> ComponentContract {
         ButtonProps::contract()
     }
 
-    #[doc = include_str!("button_factory.doc/create_instance.md")]
+    /// A fresh instance handle for one mounted `<button>`.
     fn create_instance(&self, instance: InstanceId) -> ComponentInstance {
         ComponentInstance::new(instance, Button::COMPONENT_ID)
     }
 
-    #[doc = include_str!("button_factory.doc/create_component.md")]
+    #[doc = include_str!("../../docs/api/button/button_factory.doc/create_component.md")]
     fn create_component(&self) -> Box<dyn ErasedComponent> {
         Box::new(ButtonComponent)
     }

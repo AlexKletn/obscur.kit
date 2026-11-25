@@ -1,10 +1,10 @@
-#![doc = include_str!("frame_result.doc/_module.md")]
+//! The outcome of a produced frame: [`FrameResult`].
 
 use obscur_scene::scene::SceneSnapshot;
 
 use super::FrameId;
 
-#[doc = include_str!("frame_result.doc/FrameResult.md")]
+#[doc = include_str!("../../docs/api/frame/frame_result.doc/FrameResult.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct FrameResult {
     id: FrameId,
@@ -16,7 +16,7 @@ pub struct FrameResult {
 }
 
 impl FrameResult {
-    #[doc = include_str!("frame_result.doc/new.md")]
+    #[doc = include_str!("../../docs/api/frame/frame_result.doc/new.md")]
     // The four phase flags are the spec-mandated per-phase outcome of a frame;
     // they are distinct booleans by design, not a flags struct.
     #[allow(clippy::fn_params_excessive_bools)]
@@ -39,43 +39,43 @@ impl FrameResult {
         }
     }
 
-    #[doc = include_str!("frame_result.doc/id.md")]
+    /// Returns the identity of the produced frame.
     #[must_use]
     pub const fn id(&self) -> FrameId {
         self.id
     }
 
-    #[doc = include_str!("frame_result.doc/snapshot.md")]
+    /// Returns the immutable scene snapshot a renderer consumes.
     #[must_use]
     pub const fn snapshot(&self) -> &SceneSnapshot {
         &self.snapshot
     }
 
-    #[doc = include_str!("frame_result.doc/reconciled.md")]
+    /// Whether reconciliation changed the retained tree.
     #[must_use]
     pub const fn reconciled(&self) -> bool {
         self.reconciled
     }
 
-    #[doc = include_str!("frame_result.doc/restyled.md")]
+    /// Whether the style phase resolved any computed styles.
     #[must_use]
     pub const fn restyled(&self) -> bool {
         self.restyled
     }
 
-    #[doc = include_str!("frame_result.doc/relaid_out.md")]
+    /// Whether the layout phase arranged any boxes.
     #[must_use]
     pub const fn relaid_out(&self) -> bool {
         self.relaid_out
     }
 
-    #[doc = include_str!("frame_result.doc/composed.md")]
+    /// Whether a scene was composed for this frame.
     #[must_use]
     pub const fn composed(&self) -> bool {
         self.composed
     }
 
-    #[doc = include_str!("frame_result.doc/is_balanced.md")]
+    #[doc = include_str!("../../docs/api/frame/frame_result.doc/is_balanced.md")]
     #[must_use]
     pub fn is_balanced(&self) -> bool {
         self.snapshot.is_balanced()

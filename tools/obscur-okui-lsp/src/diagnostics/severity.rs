@@ -1,20 +1,22 @@
-#![doc = include_str!("severity.doc/_module.md")]
+//! `LspSeverity`: the severity of an [`LspDiagnostic`](crate::LspDiagnostic),
+//! mirroring the LSP `DiagnosticSeverity` enumeration.
 
-#[doc = include_str!("severity.doc/LspSeverity.md")]
+/// The severity of a diagnostic, matching the LSP `DiagnosticSeverity` values
+/// (`Error = 1`, `Warning = 2`, `Information = 3`, `Hint = 4`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum LspSeverity {
-    #[doc = include_str!("severity.doc/Error.md")]
+    /// A hard error: the source is invalid.
     Error,
-    #[doc = include_str!("severity.doc/Warning.md")]
+    /// A warning: suspicious but not fatal.
     Warning,
-    #[doc = include_str!("severity.doc/Information.md")]
+    /// Informational feedback.
     Information,
-    #[doc = include_str!("severity.doc/Hint.md")]
+    /// A gentle hint.
     Hint,
 }
 
 impl LspSeverity {
-    #[doc = include_str!("severity.doc/code.md")]
+    /// Returns the LSP wire code for this severity (`Error = 1` … `Hint = 4`).
     #[must_use]
     pub const fn code(self) -> u8 {
         match self {
@@ -25,7 +27,7 @@ impl LspSeverity {
         }
     }
 
-    #[doc = include_str!("severity.doc/label.md")]
+    /// Returns a short lowercase label for CLI output.
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {

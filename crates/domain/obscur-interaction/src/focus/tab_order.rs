@@ -1,17 +1,19 @@
-#![doc = include_str!("tab_order.doc/_module.md")]
+//! The [`TabOrder`] computing the tab navigation sequence (spec §7.1 focus).
 
 use obscur_identity::NodeId;
 
 use super::FocusNode;
 
-#[doc = include_str!("tab_order.doc/TabOrder.md")]
+#[doc = include_str!("../../docs/api/focus/tab_order.doc/TabOrder.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TabOrder {
     ordered: Vec<NodeId>,
 }
 
 impl TabOrder {
-    #[doc = include_str!("tab_order.doc/compute.md")]
+    /// Computes the tab sequence over `nodes`, keeping only tab-focusable nodes
+    /// and ordering them by tab-index priority (positive ascending, then `0`),
+    /// preserving input order within each group.
     #[must_use]
     pub fn compute(nodes: &[FocusNode]) -> Self {
         let mut eligible: Vec<&FocusNode> = nodes.iter().filter(|n| n.is_tab_focusable()).collect();
@@ -27,25 +29,25 @@ impl TabOrder {
         }
     }
 
-    #[doc = include_str!("tab_order.doc/nodes.md")]
+    /// Returns the resolved tab sequence.
     #[must_use]
     pub fn nodes(&self) -> &[NodeId] {
         &self.ordered
     }
 
-    #[doc = include_str!("tab_order.doc/first.md")]
+    /// Returns the first node in the sequence, if any.
     #[must_use]
     pub fn first(&self) -> Option<NodeId> {
         self.ordered.first().copied()
     }
 
-    #[doc = include_str!("tab_order.doc/last.md")]
+    /// Returns the last node in the sequence, if any.
     #[must_use]
     pub fn last(&self) -> Option<NodeId> {
         self.ordered.last().copied()
     }
 
-    #[doc = include_str!("tab_order.doc/next_after.md")]
+    #[doc = include_str!("../../docs/api/focus/tab_order.doc/next_after.md")]
     #[must_use]
     pub fn next_after(&self, current: Option<NodeId>, wrap: bool) -> Option<NodeId> {
         let Some(current) = current else {
@@ -65,7 +67,7 @@ impl TabOrder {
         }
     }
 
-    #[doc = include_str!("tab_order.doc/previous_before.md")]
+    #[doc = include_str!("../../docs/api/focus/tab_order.doc/previous_before.md")]
     #[must_use]
     pub fn previous_before(&self, current: Option<NodeId>, wrap: bool) -> Option<NodeId> {
         let Some(current) = current else {
@@ -85,19 +87,19 @@ impl TabOrder {
         }
     }
 
-    #[doc = include_str!("tab_order.doc/contains.md")]
+    /// Returns whether `node` is part of the tab sequence.
     #[must_use]
     pub fn contains(&self, node: NodeId) -> bool {
         self.ordered.contains(&node)
     }
 
-    #[doc = include_str!("tab_order.doc/len.md")]
+    /// Returns the number of nodes in the sequence.
     #[must_use]
     pub fn len(&self) -> usize {
         self.ordered.len()
     }
 
-    #[doc = include_str!("tab_order.doc/is_empty.md")]
+    /// Returns whether the sequence is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.ordered.is_empty()

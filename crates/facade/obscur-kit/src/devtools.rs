@@ -1,53 +1,111 @@
-#![doc = include_str!("devtools.doc/_module.md")]
+#![doc = include_str!("../docs/api/devtools.doc/_module.md")]
 
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+mod shared_inspect_source;
+pub use shared_inspect_source::SharedInspectSource;
+mod diagnostic_event_sink;
+pub use diagnostic_event_sink::DiagnosticEventSink;
+mod runtime_event_publisher;
+pub use runtime_event_publisher::RuntimeEventPublisher;
 
 use obscur_devtools_protocol::message::{
-    ControlAction, EventKind, EventSeverity, InjectedEvent, Inspectable, SnapshotPayload, Topic,
+    ControlAction, InjectedEvent, Inspectable, SnapshotPayload, StableSelector,
 };
-use obscur_devtools_server::bridge::{InspectSource, SnapshotInspectSource};
-use obscur_devtools_server::transport::EventQueue;
+use obscur_devtools_server::bridge::SnapshotInspectSource;
 
-use crate::diagnostics::{Diagnostic, DiagnosticSeverity, DiagnosticSink};
 use crate::geometry::Point;
-use crate::identity::{NodeId, VersionStamp};
+use crate::identity::NodeId;
 use crate::interaction::pointer::{PointerDevice, PointerEvent, PointerEventKind, PointerId};
 use crate::perf::FrameStats;
 use crate::runtime::orchestration::TreeInspection;
 use crate::runtime::{PointerDispatch, UiRuntime};
+use crate::view::view::{AUTOMATION_ID, TEST_ID, ViewValue};
 
-#[doc = include_str!("devtools.doc/inspect_source_from.md")]
+#[doc = include_str!("../docs/api/devtools.doc/inspect_source_from.md")]
 #[must_use]
 pub fn inspect_source_from(runtime: &UiRuntime) -> SnapshotInspectSource {
     let snapshot = runtime.inspect_snapshot();
     let ids: Vec<u64> = snapshot.nodes.iter().map(|node| node.node.raw()).collect();
+    let semantic = runtime.semantic_snapshot();
 
-    // EventFlow and PluginState are deliberately left to their typed defaults:
-    // the runtime keeps no dispatch log to report a flow from, and the plugin tier
-    // is a declared-deferred skeleton with no state to show. Synthesising either
-    // would give an inspector a confident answer about something that does not
-    // exist — worse than an honest empty.
-    SnapshotInspectSource::new()
+    let mut source = SnapshotInspectSource::new()
+        .with_stable_nodes(stable_nodes(runtime))
         .with_snapshot(Inspectable::Tree, tree_payload(&snapshot, ids.clone()))
         .with_snapshot(Inspectable::Layout, layout_payload(&snapshot, ids.clone()))
         .with_snapshot(Inspectable::Styles, styles_payload(&snapshot, ids))
         .with_snapshot(Inspectable::Focus, focus_payload(runtime))
-        .with_snapshot(Inspectable::Accessibility, accessibility_payload(runtime))
+        .with_snapshot(Inspectable::Accessibility, accessibility_payload(&semantic))
+        .with_semantic_nodes(
+            semantic
+                .iter()
+                .filter(|(_, node)| !node.state().hidden)
+                .map(|(id, node)| {
+                    (
+                        id.raw(),
+                        format!("{:?}", node.role()).into(),
+                        node.name().map(Into::into),
+                    )
+                }),
+        )
         .with_snapshot(Inspectable::Scene, scene_payload(runtime))
         .with_snapshot(Inspectable::Animations, animations_payload(runtime))
         .with_snapshot(Inspectable::Resources, resources_payload(runtime))
-        .with_snapshot(Inspectable::Caches, caches_payload(runtime))
+        .with_snapshot(Inspectable::Caches, caches_payload(runtime));
+    if let Some(trace) = runtime.command_trace() {
+        let count = trace.len() as u64;
+        let mut nodes = Vec::new();
+        let mut lines = Vec::new();
+        for entry in trace {
+            nodes.extend(entry.target.map(NodeId::raw));
+            lines.push(format!(
+                "{:?} {:?} target={:?} command={} handled={} default_prevented={}",
+                entry.origin,
+                entry.trust,
+                entry.target.map(NodeId::raw),
+                entry.command.raw(),
+                entry.handled,
+                entry.default_prevented,
+            ));
+        }
+        source.set_snapshot(
+            Inspectable::EventFlow,
+            SnapshotPayload::new(format!("{count} command dispatch(es)"), count, nodes)
+                .with_detail(lines.join("\n")),
+        );
+    }
+    source
 }
 
-#[doc = include_str!("devtools.doc/tree_payload.md")]
+fn stable_nodes(runtime: &UiRuntime) -> Vec<(StableSelector, u64)> {
+    let mut result = Vec::new();
+    for (id, node) in runtime.tree().iter() {
+        let id = id.raw();
+        result.push((StableSelector::Node(id), id));
+        if let Some(component) = node.kind().component_id() {
+            result.push((StableSelector::Component(component.raw()), id));
+        }
+        for property in node.props() {
+            let ViewValue::Text(value) = property.value() else {
+                continue;
+            };
+            let selector = match property.name() {
+                TEST_ID => StableSelector::TestId(value.clone()),
+                AUTOMATION_ID => StableSelector::AutomationId(value.clone()),
+                _ => continue,
+            };
+            result.push((selector, id));
+        }
+    }
+    result
+}
+
+/// The whole annotated tree as an agent-readable indented dump.
 fn tree_payload(snapshot: &TreeInspection, ids: Vec<u64>) -> SnapshotPayload {
     let node_count = snapshot.len() as u64;
     SnapshotPayload::new(format!("{node_count} nodes"), node_count, ids)
         .with_detail(snapshot.to_string())
 }
 
-#[doc = include_str!("devtools.doc/layout_payload.md")]
+/// One line of absolute geometry per laid-out node.
 fn layout_payload(snapshot: &TreeInspection, ids: Vec<u64>) -> SnapshotPayload {
     let layout_lines: Vec<String> = snapshot
         .nodes
@@ -73,7 +131,7 @@ fn layout_payload(snapshot: &TreeInspection, ids: Vec<u64>) -> SnapshotPayload {
     .with_detail(layout_lines.join("\n"))
 }
 
-#[doc = include_str!("devtools.doc/styles_payload.md")]
+/// One line of key computed styles per node that resolved any.
 fn styles_payload(snapshot: &TreeInspection, ids: Vec<u64>) -> SnapshotPayload {
     let style_lines: Vec<String> = snapshot
         .nodes
@@ -96,7 +154,7 @@ fn styles_payload(snapshot: &TreeInspection, ids: Vec<u64>) -> SnapshotPayload {
     .with_detail(style_lines.join("\n"))
 }
 
-#[doc = include_str!("devtools.doc/focus_payload.md")]
+/// The current focus and hover targets.
 fn focus_payload(runtime: &UiRuntime) -> SnapshotPayload {
     SnapshotPayload::summary(format!(
         "focused: {} · hovered: {}",
@@ -105,12 +163,13 @@ fn focus_payload(runtime: &UiRuntime) -> SnapshotPayload {
     ))
 }
 
-#[doc = include_str!("devtools.doc/accessibility_payload.md")]
-fn accessibility_payload(runtime: &UiRuntime) -> SnapshotPayload {
+/// The semantic tree derived from the retained tree.
+fn accessibility_payload(
+    semantic: &obscur_accessibility::tree::SemanticSnapshot,
+) -> SnapshotPayload {
     // The semantic tree the runtime already derives from the retained tree — the
     // same one a platform AX bridge consumes, so an inspector and a screen reader
     // see one truth rather than two.
-    let semantic = runtime.semantic_snapshot();
     SnapshotPayload::new(
         format!("{} semantic node(s)", semantic.len()),
         semantic.len() as u64,
@@ -125,7 +184,7 @@ fn accessibility_payload(runtime: &UiRuntime) -> SnapshotPayload {
     )
 }
 
-#[doc = include_str!("devtools.doc/scene_payload.md")]
+/// The composed display list this frame actually paints.
 fn scene_payload(runtime: &UiRuntime) -> SnapshotPayload {
     let commands = runtime.snapshot();
     let command_count = commands.display_list().commands().len() as u64;
@@ -145,7 +204,7 @@ fn scene_payload(runtime: &UiRuntime) -> SnapshotPayload {
     )
 }
 
-#[doc = include_str!("devtools.doc/animations_payload.md")]
+/// How many motion timelines are running right now.
 fn animations_payload(runtime: &UiRuntime) -> SnapshotPayload {
     let running = runtime.active_animation_count() as u64;
     SnapshotPayload::new(
@@ -155,7 +214,7 @@ fn animations_payload(runtime: &UiRuntime) -> SnapshotPayload {
     )
 }
 
-#[doc = include_str!("devtools.doc/resources_payload.md")]
+/// Everything requested this session, whatever its state.
 fn resources_payload(runtime: &UiRuntime) -> SnapshotPayload {
     let requested = runtime.resource_count() as u64;
     SnapshotPayload::new(
@@ -165,7 +224,7 @@ fn resources_payload(runtime: &UiRuntime) -> SnapshotPayload {
     )
 }
 
-#[doc = include_str!("devtools.doc/caches_payload.md")]
+/// What is resolved and held, split by kind, with the image cache's budget counters.
 fn caches_payload(runtime: &UiRuntime) -> SnapshotPayload {
     // A raster image and a parsed vector document are cached separately and cost
     // differently, so the two are counted apart rather than summed away. The image
@@ -192,12 +251,12 @@ fn caches_payload(runtime: &UiRuntime) -> SnapshotPayload {
     ))
 }
 
-#[doc = include_str!("devtools.doc/node_label.md")]
+/// Renders an optional node id as `#N` or `none`.
 fn node_label(raw: Option<u64>) -> String {
     raw.map_or_else(|| "none".to_owned(), |id| format!("#{id}"))
 }
 
-#[doc = include_str!("devtools.doc/apply_injected.md")]
+#[doc = include_str!("../docs/api/devtools.doc/apply_injected.md")]
 pub fn apply_injected(runtime: &mut UiRuntime, event: InjectedEvent) -> Option<PointerDispatch> {
     // Deliberately NOT `.as_trusted()` — see the note above.
     let pointer = |kind, x: i32, y: i32| {
@@ -220,7 +279,9 @@ pub fn apply_injected(runtime: &mut UiRuntime, event: InjectedEvent) -> Option<P
     }
 }
 
-#[doc = include_str!("devtools.doc/apply_control.md")]
+/// Applies one authorized [`ControlAction`] (drained from the endpoint) to
+/// `runtime`. `SetInspectMode` toggles the in-window overlay; frame-scheduling
+/// actions (pause/resume/step) are left to the host's own frame loop policy.
 pub fn apply_control(runtime: &mut UiRuntime, action: ControlAction) {
     match action {
         ControlAction::SetInspectMode(on) => runtime.set_inspect_mode(on),
@@ -228,7 +289,7 @@ pub fn apply_control(runtime: &mut UiRuntime, action: ControlAction) {
     }
 }
 
-#[doc = include_str!("devtools.doc/perf_payload.md")]
+#[doc = include_str!("../docs/api/devtools.doc/perf_payload.md")]
 #[must_use]
 pub fn perf_payload(stats: &FrameStats) -> SnapshotPayload {
     let ms = |d: std::time::Duration| d.as_secs_f32() * 1000.0;
@@ -259,149 +320,19 @@ pub fn perf_payload(stats: &FrameStats) -> SnapshotPayload {
     .with_detail(detail)
 }
 
-#[doc = include_str!("devtools.doc/live_source.md")]
+/// Builds the full live inspect source a windowed host publishes each frame:
+/// [`inspect_source_from`] (tree/layout/styles/focus) plus the
+/// [`Inspectable::Rendering`] frame-perf snapshot from `stats`. One call so a
+/// host does not re-assemble the two every frame.
 #[must_use]
 pub fn live_source(runtime: &UiRuntime, stats: &FrameStats) -> SnapshotInspectSource {
     inspect_source_from(runtime).with_snapshot(Inspectable::Rendering, perf_payload(stats))
 }
 
-#[doc = include_str!("devtools.doc/SharedInspectSource.md")]
-#[derive(Clone, Default)]
-pub struct SharedInspectSource {
-    inner: Arc<Mutex<SnapshotInspectSource>>,
-    #[doc = include_str!("devtools.doc/clients.md")]
-    clients: Arc<AtomicUsize>,
-}
-
-impl SharedInspectSource {
-    #[doc = include_str!("devtools.doc/new.md")]
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    #[doc = include_str!("devtools.doc/set.md")]
-    pub fn set(&self, source: SnapshotInspectSource) {
-        let mut guard = self
-            .inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        *guard = source;
-    }
-
-    #[doc = include_str!("devtools.doc/has_client.md")]
-    #[must_use]
-    pub fn has_client(&self) -> bool {
-        self.clients.load(Ordering::Relaxed) > 0
-    }
-
-    #[doc = include_str!("devtools.doc/client_connected.md")]
-    pub fn client_connected(&self) {
-        self.clients.fetch_add(1, Ordering::Relaxed);
-    }
-
-    #[doc = include_str!("devtools.doc/client_disconnected.md")]
-    pub fn client_disconnected(&self) {
-        // Saturating: an unmatched disconnect must never wrap to "many clients".
-        let _ = self
-            .clients
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
-                Some(n.saturating_sub(1))
-            });
-    }
-}
-
-impl InspectSource for SharedInspectSource {
-    fn snapshot(&self, target: Inspectable) -> SnapshotPayload {
-        self.inner
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .snapshot(target)
-    }
-}
-
-#[doc = include_str!("devtools.doc/DiagnosticEventSink.md")]
-pub struct DiagnosticEventSink {
-    events: EventQueue,
-}
-
-impl DiagnosticEventSink {
-    #[doc = include_str!("devtools.doc/new_2.md")]
-    #[must_use]
-    pub fn new(events: EventQueue) -> Self {
-        Self { events }
-    }
-}
-
-impl DiagnosticSink for DiagnosticEventSink {
-    fn emit(&self, diagnostic: &Diagnostic) {
-        // A full queue drops its oldest and counts the loss in
-        // `EventQueue::dropped`, which is where a host reads it; failing the
-        // emit here would only turn a reported gap into an unreported one.
-        let _ = self.events.push(
-            Topic::Diagnostics,
-            EventKind::Diagnostic {
-                severity: event_severity(diagnostic.severity),
-                code: diagnostic.code.as_str().into(),
-                message: diagnostic.message.as_str().into(),
-            },
-        );
-    }
-}
-
-#[doc = include_str!("devtools.doc/event_severity.md")]
-const fn event_severity(severity: DiagnosticSeverity) -> EventSeverity {
-    match severity {
-        DiagnosticSeverity::Trace => EventSeverity::Trace,
-        DiagnosticSeverity::Info => EventSeverity::Info,
-        DiagnosticSeverity::Warning => EventSeverity::Warning,
-        DiagnosticSeverity::Error => EventSeverity::Error,
-        DiagnosticSeverity::Critical => EventSeverity::Critical,
-    }
-}
-
-#[doc = include_str!("devtools.doc/RuntimeEventPublisher.md")]
-pub struct RuntimeEventPublisher {
-    events: EventQueue,
-    #[doc = include_str!("devtools.doc/last_commit.md")]
-    last_commit: VersionStamp,
-    #[doc = include_str!("devtools.doc/last_focus.md")]
-    last_focus: Option<NodeId>,
-}
-
-impl RuntimeEventPublisher {
-    #[doc = include_str!("devtools.doc/attach.md")]
-    #[must_use]
-    pub fn attach(runtime: &UiRuntime, events: EventQueue) -> Self {
-        Self {
-            events,
-            last_commit: runtime.commit_version(),
-            last_focus: runtime.focused(),
-        }
-    }
-
-    #[doc = include_str!("devtools.doc/publish.md")]
-    pub fn publish(&mut self, runtime: &UiRuntime) {
-        let commit = runtime.commit_version();
-        if commit != self.last_commit {
-            self.last_commit = commit;
-            // See `DiagnosticEventSink::emit` on the dropped return.
-            let _ = self.events.push(
-                Topic::Frames,
-                EventKind::FrameCommitted { id: commit.raw() },
-            );
-        }
-        let focus = runtime.focused();
-        if focus != self.last_focus {
-            self.last_focus = focus;
-            let _ = self.events.push(Topic::Focus, EventKind::FocusChanged);
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use obscur_devtools_server::bridge::InspectSource;
     use std::time::Duration;
 
     #[test]

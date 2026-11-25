@@ -1,78 +1,196 @@
-#![doc = include_str!("layer_control.doc/_module.md")]
+//! A handle to a live desktop surface.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use super::layer_control_state::LayerControlState;
+use super::popup_content::PopupContent;
+use super::popup_request::PopupRequest;
 use crate::geometry::Size;
-use crate::windowing::layer::{LayerSettings, LayerSurfaceState};
+use crate::identity::NodeId;
+use crate::runtime::UiRuntime;
+use crate::shell_layer::event::PopupActivation;
+use crate::view::view::View;
+use crate::windowing::layer::{
+    LayerEdge, LayerPopupEvent, LayerPopupFrame, LayerSettings, LayerSurfaceState,
+};
+use crate::windowing::port::LayerError;
 
-#[doc = include_str!("layer_control.doc/LayerControl.md")]
+#[doc = include_str!("../../docs/api/app/layer_control.doc/LayerControl.md")]
 #[derive(Clone, Default)]
 pub struct LayerControl {
-    inner: Rc<RefCell<ControlState>>,
-}
-
-#[doc = include_str!("layer_control.doc/ControlState.md")]
-#[derive(Default)]
-struct ControlState {
-    pending: Option<LayerSettings>,
-    close_requested: bool,
-    size: Size,
-    scale: f32,
-    state: LayerSurfaceState,
+    inner: Rc<RefCell<LayerControlState>>,
 }
 
 impl LayerControl {
-    #[doc = include_str!("layer_control.doc/new.md")]
+    /// A handle to a surface that has not been configured yet.
     #[must_use]
     pub fn new() -> Self {
         Self {
-            inner: Rc::new(RefCell::new(ControlState {
+            inner: Rc::new(RefCell::new(LayerControlState {
                 scale: 1.0,
-                ..ControlState::default()
+                ..LayerControlState::default()
             })),
         }
     }
 
-    #[doc = include_str!("layer_control.doc/reconfigure.md")]
+    #[doc = include_str!("../../docs/api/app/layer_control.doc/reconfigure.md")]
     pub fn reconfigure(&self, settings: LayerSettings) {
         self.inner.borrow_mut().pending = Some(settings);
     }
 
-    #[doc = include_str!("layer_control.doc/close.md")]
+    /// Queue a popup anchored to a laid-out element, with a logical-pixel RGBA frame.
+    pub fn show_popup(&self, anchor: NodeId, side: LayerEdge, frame: LayerPopupFrame) {
+        self.inner.borrow_mut().popup = Some(PopupRequest::Show(anchor, side, frame));
+    }
+
+    /// Open a popup containing a View. The requested dimensions are in logical pixels.
+    pub fn show_popup_view(&self, anchor: NodeId, side: LayerEdge, size: (u32, u32), view: View) {
+        self.show_popup_view_with(anchor, side, size, move || view.clone(), |_| {});
+    }
+
+    /// Open a popup with a reactive view builder and configure its independent runtime before its first frame.
+    pub fn show_popup_view_with(
+        &self,
+        anchor: NodeId,
+        side: LayerEdge,
+        size: (u32, u32),
+        build: impl FnMut() -> View + 'static,
+        configure: impl FnOnce(&mut UiRuntime) + 'static,
+    ) {
+        self.inner.borrow_mut().popup = Some(PopupRequest::View(
+            anchor,
+            side,
+            size,
+            PopupContent {
+                build: Box::new(build),
+                configure: Box::new(configure),
+            },
+            None,
+        ));
+    }
+
+    /// Open a grabbed menu while handling a native panel pointer down, touch down, or key press.
+    pub fn show_popup_menu(
+        &self,
+        anchor: NodeId,
+        side: LayerEdge,
+        size: (u32, u32),
+        view: View,
+    ) -> Result<(), LayerError> {
+        self.show_popup_menu_with(anchor, side, size, move || view.clone(), |_| {})
+    }
+
+    /// Open a grabbed reactive menu and configure its runtime while handling the initiating native panel press.
+    pub fn show_popup_menu_with(
+        &self,
+        anchor: NodeId,
+        side: LayerEdge,
+        size: (u32, u32),
+        build: impl FnMut() -> View + 'static,
+        configure: impl FnOnce(&mut UiRuntime) + 'static,
+    ) -> Result<(), LayerError> {
+        let mut state = self.inner.borrow_mut();
+        let activation = state.popup_activation.take().ok_or_else(|| {
+            LayerError::InvalidSettings(
+                "a grabbed menu must open inside a native panel press handler".into(),
+            )
+        })?;
+        state.popup = Some(PopupRequest::View(
+            anchor,
+            side,
+            size,
+            PopupContent {
+                build: Box::new(build),
+                configure: Box::new(configure),
+            },
+            Some(activation),
+        ));
+        Ok(())
+    }
+
+    pub(super) fn set_popup_activation(&self, activation: Option<PopupActivation>) {
+        self.inner.borrow_mut().popup_activation = activation;
+    }
+
+    /// Queue a reactive popup frame after application state changes.
+    pub fn request_popup_frame(&self) {
+        self.inner.borrow_mut().popup_frame_requested = true;
+    }
+
+    pub(super) fn take_popup_frame_request(&self) -> bool {
+        core::mem::take(&mut self.inner.borrow_mut().popup_frame_requested)
+    }
+
+    /// Queue closure of the native popup.
+    pub fn close_popup(&self) {
+        self.inner.borrow_mut().popup = Some(PopupRequest::Close);
+    }
+
+    /// Register a callback for popup configuration, pointer input, errors and closure.
+    pub fn on_popup_event(&self, handler: impl FnMut(&Self, LayerPopupEvent) + 'static) {
+        self.inner.borrow_mut().popup_handler = Some(Box::new(handler));
+    }
+
+    pub(super) fn has_pending_popup(&self) -> bool {
+        let state = self.inner.borrow();
+        state.popup.is_some() || state.popup_frame_requested
+    }
+
+    pub(super) fn take_popup(&self) -> Option<PopupRequest> {
+        self.inner.borrow_mut().popup.take()
+    }
+
+    pub(super) fn dispatch_popup_event(&self, event: LayerPopupEvent) {
+        let handler = self.inner.borrow_mut().popup_handler.take();
+        if let Some(mut handler) = handler {
+            handler(self, event);
+            let mut state = self.inner.borrow_mut();
+            if state.popup_handler.is_none() {
+                state.popup_handler = Some(handler);
+            }
+        }
+    }
+
+    #[doc = include_str!("../../docs/api/app/layer_control.doc/close.md")]
     pub fn close(&self) {
         self.inner.borrow_mut().close_requested = true;
     }
 
-    #[doc = include_str!("layer_control.doc/size.md")]
+    /// The surface's logical size, as the platform last settled it.
     #[must_use]
     pub fn size(&self) -> Size {
         self.inner.borrow().size
     }
 
-    #[doc = include_str!("layer_control.doc/scale.md")]
+    /// The display scale the surface is currently rendering at.
     #[must_use]
     pub fn scale(&self) -> f32 {
         self.inner.borrow().scale
     }
 
-    #[doc = include_str!("layer_control.doc/state.md")]
+    /// Where the surface is in its lifecycle.
     #[must_use]
     pub fn state(&self) -> LayerSurfaceState {
         self.inner.borrow().state
     }
 
-    #[doc = include_str!("layer_control.doc/take_pending.md")]
+    /// Take the pending reconfiguration, if a handler left one.
     pub(super) fn take_pending(&self) -> Option<LayerSettings> {
         self.inner.borrow_mut().pending.take()
     }
 
-    #[doc = include_str!("layer_control.doc/close_requested.md")]
+    #[doc = include_str!("../../docs/api/app/layer_control.doc/has_pending.md")]
+    pub(super) fn has_pending(&self) -> bool {
+        self.inner.borrow().pending.is_some()
+    }
+
+    /// Whether a handler has asked for the surface to be taken down.
     pub(super) fn close_requested(&self) -> bool {
         self.inner.borrow().close_requested
     }
 
-    #[doc = include_str!("layer_control.doc/publish.md")]
+    #[doc = include_str!("../../docs/api/app/layer_control.doc/publish.md")]
     pub(super) fn publish(&self, size: Size, scale: f32, state: LayerSurfaceState) {
         let mut inner = self.inner.borrow_mut();
         inner.size = size;
@@ -137,5 +255,29 @@ mod tests {
         control.close();
         assert!(control.close_requested());
         assert!(control.close_requested());
+    }
+    #[test]
+    fn a_popup_event_handler_can_queue_the_next_popup_operation() {
+        let control = LayerControl::new();
+        control.on_popup_event(|control, event| {
+            if matches!(event, LayerPopupEvent::Closed) {
+                control.close_popup();
+            }
+        });
+        control.dispatch_popup_event(LayerPopupEvent::Closed);
+        assert!(matches!(control.take_popup(), Some(PopupRequest::Close)));
+    }
+    #[test]
+    fn a_grabbed_menu_cannot_open_without_native_activation() {
+        let control = LayerControl::new();
+        let result = control.show_popup_menu_with(
+            NodeId::from_raw(42),
+            LayerEdge::Bottom,
+            (100, 100),
+            || panic!("must not build without activation"),
+            |_| {},
+        );
+        assert!(matches!(result, Err(LayerError::InvalidSettings(_))));
+        assert!(!control.has_pending_popup());
     }
 }

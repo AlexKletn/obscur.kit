@@ -1,23 +1,28 @@
-#![doc = include_str!("pointer_release.doc/_module.md")]
+//! What a pointer release resolved to: [`PointerRelease`].
 
 use obscur_identity::NodeId;
 use obscur_interaction::pointer::PointerEvent;
 
 use super::PointerSessions;
 
-#[doc = include_str!("pointer_release.doc/PointerRelease.md")]
+#[doc = include_str!("../../docs/api/runtime/pointer_release.doc/PointerRelease.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PointerRelease {
-    #[doc = include_str!("pointer_release.doc/clicked.md")]
+    /// The node this release clicked, or [`None`] when it was not a click: no
+    /// press of this pointer's own, a press on another node, a press on empty
+    /// space, or an untrusted gesture.
     clicked: Option<NodeId>,
-    #[doc = include_str!("pointer_release.doc/clicks.md")]
+    /// The click run this release completes — `1`, `2` or `3` — carried on **this
+    /// pointer's own press**, so another pointer pressing in between cannot turn
+    /// a single tap into a double one.
     clicks: u32,
-    #[doc = include_str!("pointer_release.doc/press_ended.md")]
+    /// Whether the release ended a press that had a target, i.e. whether an
+    /// `:active` went out and a restyle is owed.
     press_ended: bool,
 }
 
 impl PointerRelease {
-    #[doc = include_str!("pointer_release.doc/take.md")]
+    #[doc = include_str!("../../docs/api/runtime/pointer_release.doc/take.md")]
     pub(crate) fn take(
         pointers: &mut PointerSessions,
         event: &PointerEvent,
@@ -33,17 +38,17 @@ impl PointerRelease {
         }
     }
 
-    #[doc = include_str!("pointer_release.doc/clicked_2.md")]
+    /// The node this release clicked, or [`None`] when it was not a click.
     pub(crate) const fn clicked(self) -> Option<NodeId> {
         self.clicked
     }
 
-    #[doc = include_str!("pointer_release.doc/clicks_2.md")]
+    /// The click run this release completes (`1`, `2` or `3`).
     pub(crate) const fn clicks(self) -> u32 {
         self.clicks
     }
 
-    #[doc = include_str!("pointer_release.doc/press_ended_2.md")]
+    /// Whether an outstanding press with a target went out with this release.
     pub(crate) const fn press_ended(self) -> bool {
         self.press_ended
     }

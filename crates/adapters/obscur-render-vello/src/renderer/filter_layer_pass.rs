@@ -1,4 +1,6 @@
-#![doc = include_str!("filter_layer_pass.doc/_module.md")]
+//! The `filter` layer pass: the sub-scenes the converter peeled off the main
+//! scene, rendered into their own offscreens and composited back through the
+//! adapter's owned wgpu passes (spec §5.2).
 
 use obscur_render::renderer::RendererError;
 use vello::Scene;
@@ -9,13 +11,13 @@ use crate::effects::{ColorMatrix, GaussianBlur};
 use crate::error::VelloRenderError;
 use crate::renderer::VelloFrame;
 
-#[doc = include_str!("filter_layer_pass.doc/PreparedFilterLayers.md")]
+#[doc = include_str!("../../docs/api/renderer/filter_layer_pass.doc/PreparedFilterLayers.md")]
 pub(crate) struct PreparedFilterLayers {
     layers: Vec<(VelloFrame, (f32, f32), BlurLayer)>,
 }
 
 impl PreparedFilterLayers {
-    #[doc = include_str!("filter_layer_pass.doc/render.md")]
+    #[doc = include_str!("../../docs/api/renderer/filter_layer_pass.doc/render.md")]
     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     pub(crate) fn render(
         device: &wgpu::Device,
@@ -56,14 +58,16 @@ impl PreparedFilterLayers {
         Ok(Self { layers: prepared })
     }
 
-    #[doc = include_str!("filter_layer_pass.doc/needs_color_matrix.md")]
+    /// Whether any of these layers carries a colour matrix — the question that
+    /// decides whether the [`ColorMatrix`] pipeline is built at all, so a scene
+    /// with only blurs stays byte-identical to the pre-colour-op path.
     pub(crate) fn needs_color_matrix(&self) -> bool {
         self.layers
             .iter()
             .any(|(_, _, layer)| layer.color_matrix.is_some())
     }
 
-    #[doc = include_str!("filter_layer_pass.doc/composite.md")]
+    #[doc = include_str!("../../docs/api/renderer/filter_layer_pass.doc/composite.md")]
     pub(crate) fn composite(
         &self,
         device: &wgpu::Device,
@@ -93,7 +97,7 @@ impl PreparedFilterLayers {
     }
 }
 
-#[doc = include_str!("filter_layer_pass.doc/apply_filter_layer.md")]
+#[doc = include_str!("../../docs/api/renderer/filter_layer_pass.doc/apply_filter_layer.md")]
 #[allow(clippy::too_many_arguments)]
 fn apply_filter_layer(
     device: &wgpu::Device,
@@ -119,21 +123,11 @@ fn apply_filter_layer(
         Some(transformed)
     });
 
-    // A color-transformed scratch may be translucent (e.g. `opacity()`), so it
-    // composites premultiplied; the raw blur path stays `false` (byte-identical to
-    // the shipped opaque path).
-    let (source_view, premultiply) = match &color_matrix_scratch {
-        Some(tex) => (
-            tex.create_view(&wgpu::TextureViewDescriptor::default()),
-            true,
-        ),
-        None => (
-            s_frame
-                .texture()
-                .create_view(&wgpu::TextureViewDescriptor::default()),
-            false,
-        ),
-    };
+    // Both Vello and the color-matrix pass produce straight RGBA.
+    let source_view = color_matrix_scratch
+        .as_ref()
+        .unwrap_or_else(|| s_frame.texture())
+        .create_view(&wgpu::TextureViewDescriptor::default());
 
     if layer.radius > 0.0 {
         gaussian.render_view(
@@ -155,7 +149,7 @@ fn apply_filter_layer(
             origin,
             target_view,
             target_size,
-            premultiply,
+            true,
         );
     }
 

@@ -1,8 +1,8 @@
-#![doc = include_str!("parser.doc/_module.md")]
+//! `parse`: a hand-rolled recursive-descent JSON parser.
 
 use crate::json::{JsonError, JsonValue};
 
-#[doc = include_str!("parser.doc/parse.md")]
+#[doc = include_str!("../../docs/api/json/parser.doc/parse.md")]
 pub fn parse(input: &str) -> Result<JsonValue, JsonError> {
     let chars: Vec<char> = input.chars().collect();
     let mut parser = ParseState {
@@ -18,7 +18,7 @@ pub fn parse(input: &str) -> Result<JsonValue, JsonError> {
     Ok(value)
 }
 
-#[doc = include_str!("parser.doc/ParseState.md")]
+/// The mutable cursor over the input character slice.
 struct ParseState<'a> {
     chars: &'a [char],
     pos: usize,

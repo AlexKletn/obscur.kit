@@ -69,6 +69,12 @@ So the kit asks the host, per character, for a covering face:
 FontconfigFallback::new()   // implements SystemFontFallback
 ```
 
+On Linux the fallback loads the installed face catalog in a background thread.
+An exact family lookup can use this catalog as soon as it is available. If the
+catalog is still loading or has no readable match, the lookup queries
+fontconfig directly. Set `OBSCUR_FONTCONFIG_SYNC_LOOKUP=1` to disable catalog
+loading for timing comparisons.
+
 The face is discovered *during* the frame that needed it, which is why the
 hand-off is a drain rather than a one-time list:
 

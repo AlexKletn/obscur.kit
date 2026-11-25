@@ -1,71 +1,104 @@
-#![doc = include_str!("graph.doc/_module.md")]
+//! The workspace dependency graph, built by scanning member manifests, plus
+//! DFS cycle detection.
 
 use std::collections::HashMap;
-use std::fs;
 use std::path::Path;
+use toml_edit::Item;
 
 use super::crate_node::CrateNode;
 use super::layer::Layer;
+use super::visit_mark::VisitMark;
+use crate::violation::Violation;
+use crate::workspace_manifests::{read_manifest, workspace_manifests};
 
-#[doc = include_str!("graph.doc/WorkspaceGraph.md")]
+/// The full set of workspace crate nodes and their `obscur-*` edges.
 pub(crate) struct WorkspaceGraph {
-    #[doc = include_str!("graph.doc/nodes.md")]
+    /// All member crates discovered under `crates/*/*` and `tools/*`.
     pub(crate) nodes: Vec<CrateNode>,
 }
 
 impl WorkspaceGraph {
-    #[doc = include_str!("graph.doc/from_root.md")]
-    pub(crate) fn from_root(root: &Path) -> Self {
-        let mut nodes = Vec::new();
+    /// Builds the graph by scanning every workspace member manifest under
+    /// `crates/<layer>/<crate>/Cargo.toml` and `tools/<crate>/Cargo.toml`.
+    pub(crate) fn from_root(root: &Path) -> (Self, Vec<Violation>) {
+        let mut graph = Self { nodes: Vec::new() };
+        let mut violations = Vec::new();
+        let workspace_manifest = root.join("Cargo.toml");
+        let workspace = if workspace_manifest.is_file() {
+            match read_manifest("dependency-manifest", &workspace_manifest) {
+                Ok(document) => Some(document),
+                Err(violation) => {
+                    violations.push(violation);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let workspace_deps = workspace
+            .as_ref()
+            .and_then(|document| document.get("workspace"))
+            .and_then(|table| table.get("dependencies"))
+            .and_then(Item::as_table_like);
 
-        if let Ok(layers) = fs::read_dir(root.join("crates")) {
-            for layer_entry in layers.flatten() {
-                let layer_path = layer_entry.path();
-                let Some(layer) = layer_entry.file_name().to_str().and_then(Layer::from_dir) else {
-                    continue;
-                };
-                if let Ok(crate_dirs) = fs::read_dir(&layer_path) {
-                    for crate_dir in crate_dirs.flatten() {
-                        let manifest = crate_dir.path().join("Cargo.toml");
-                        if manifest.is_file()
-                            && let Some(node) = CrateNode::parse(manifest, layer)
-                        {
-                            nodes.push(node);
-                        }
+        for manifest in workspace_manifests(root) {
+            let layer_dir = if manifest.starts_with(root.join("tools")) {
+                Some("tools")
+            } else {
+                manifest
+                    .ancestors()
+                    .nth(2)
+                    .and_then(Path::file_name)
+                    .and_then(|name| name.to_str())
+            };
+            let Some(layer) = layer_dir.and_then(Layer::from_dir) else {
+                violations.push(Violation::new(
+                    "dependency-layering",
+                    &manifest,
+                    "crate has no recognized architecture layer",
+                ));
+                continue;
+            };
+            match CrateNode::parse(manifest, layer, workspace_deps) {
+                Ok(node) => {
+                    if let Some(first) = graph.node(&node.name) {
+                        violations.push(Violation::new(
+                            "dependency-manifest",
+                            &node.manifest,
+                            format!(
+                                "duplicate package '{}' also declared in {}",
+                                node.name,
+                                first.manifest.display()
+                            ),
+                        ));
+                    } else {
+                        graph.nodes.push(node);
                     }
                 }
+                Err(violation) => violations.push(violation),
             }
         }
 
-        if let Ok(tool_dirs) = fs::read_dir(root.join("tools")) {
-            for tool_dir in tool_dirs.flatten() {
-                let manifest = tool_dir.path().join("Cargo.toml");
-                if manifest.is_file()
-                    && let Some(node) = CrateNode::parse(manifest, Layer::Tools)
-                {
-                    nodes.push(node);
-                }
-            }
-        }
-
-        Self { nodes }
+        (graph, violations)
     }
 
-    #[doc = include_str!("graph.doc/node.md")]
+    /// Looks up a node by crate name.
     pub(crate) fn node(&self, name: &str) -> Option<&CrateNode> {
         self.nodes.iter().find(|n| n.name == name)
     }
 
-    #[doc = include_str!("graph.doc/find_cycle.md")]
+    /// Returns the first dependency cycle found (as an ordered path of crate
+    /// names, closing back on the first), or `None` if the graph is acyclic.
+    /// Only edges between known workspace nodes are followed.
     pub(crate) fn find_cycle(&self) -> Option<Vec<String>> {
-        let mut color: HashMap<&str, Mark> = self
+        let mut color: HashMap<&str, VisitMark> = self
             .nodes
             .iter()
-            .map(|n| (n.name.as_str(), Mark::White))
+            .map(|n| (n.name.as_str(), VisitMark::White))
             .collect();
         let mut path: Vec<&str> = Vec::new();
         for start in &self.nodes {
-            if color[start.name.as_str()] == Mark::White
+            if color[start.name.as_str()] == VisitMark::White
                 && let Some(cycle) = self.visit(start.name.as_str(), &mut color, &mut path)
             {
                 return Some(cycle);
@@ -74,26 +107,26 @@ impl WorkspaceGraph {
         None
     }
 
-    #[doc = include_str!("graph.doc/visit.md")]
+    /// Recursive DFS helper for [`find_cycle`](Self::find_cycle).
     fn visit<'a>(
         &'a self,
         name: &'a str,
-        color: &mut HashMap<&'a str, Mark>,
+        color: &mut HashMap<&'a str, VisitMark>,
         path: &mut Vec<&'a str>,
     ) -> Option<Vec<String>> {
-        color.insert(name, Mark::Gray);
+        color.insert(name, VisitMark::Gray);
         path.push(name);
         if let Some(node) = self.node(name) {
             for dep in &node.deps {
                 match color.get(dep.as_str()) {
-                    Some(Mark::Gray) => {
+                    Some(VisitMark::Gray) => {
                         let start = path.iter().position(|&n| n == dep).unwrap_or(0);
                         let mut cycle: Vec<String> =
                             path[start..].iter().map(|&n| n.to_owned()).collect();
                         cycle.push(dep.clone());
                         return Some(cycle);
                     }
-                    Some(Mark::White) => {
+                    Some(VisitMark::White) => {
                         if let Some(cycle) = self.visit(dep.as_str(), color, path) {
                             return Some(cycle);
                         }
@@ -103,20 +136,9 @@ impl WorkspaceGraph {
             }
         }
         path.pop();
-        color.insert(name, Mark::Black);
+        color.insert(name, VisitMark::Black);
         None
     }
-}
-
-#[doc = include_str!("graph.doc/Mark.md")]
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Mark {
-    #[doc = include_str!("graph.doc/White.md")]
-    White,
-    #[doc = include_str!("graph.doc/Gray.md")]
-    Gray,
-    #[doc = include_str!("graph.doc/Black.md")]
-    Black,
 }
 
 #[cfg(test)]
@@ -133,6 +155,7 @@ mod tests {
             layer,
             manifest: PathBuf::from(format!("{name}/Cargo.toml")),
             deps: deps.iter().map(|d| (*d).to_owned()).collect(),
+            dev_deps: Vec::new(),
         }
     }
 

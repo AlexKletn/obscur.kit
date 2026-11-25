@@ -1,3 +1,3 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Prelude module.
 mod prelude;
 pub use prelude::*;

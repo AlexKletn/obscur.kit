@@ -1,34 +1,34 @@
-#![doc = include_str!("state_generation.doc/_module.md")]
+//! `StateGeneration`: monotonic change token for local view state.
 
 use obscur_identity::VersionStamp;
 
-#[doc = include_str!("state_generation.doc/StateGeneration.md")]
+#[doc = include_str!("../../docs/api/state/state_generation.doc/StateGeneration.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct StateGeneration(VersionStamp);
 
 impl StateGeneration {
-    #[doc = include_str!("state_generation.doc/INITIAL.md")]
+    /// The generation assigned to freshly created state before any mutation.
     pub const INITIAL: Self = Self(VersionStamp::from_raw(0));
 
-    #[doc = include_str!("state_generation.doc/from_raw.md")]
+    #[doc = include_str!("../../docs/api/state/state_generation.doc/from_raw.md")]
     #[must_use]
     pub const fn from_raw(raw: u64) -> Self {
         Self(VersionStamp::from_raw(raw))
     }
 
-    #[doc = include_str!("state_generation.doc/raw.md")]
+    /// Returns the raw underlying counter value.
     #[must_use]
     pub const fn raw(self) -> u64 {
         self.0.raw()
     }
 
-    #[doc = include_str!("state_generation.doc/next.md")]
+    #[doc = include_str!("../../docs/api/state/state_generation.doc/next.md")]
     #[must_use]
     pub fn next(self) -> Self {
         Self(self.0.bump())
     }
 
-    #[doc = include_str!("state_generation.doc/is_newer_than.md")]
+    #[doc = include_str!("../../docs/api/state/state_generation.doc/is_newer_than.md")]
     #[must_use]
     pub fn is_newer_than(self, other: Self) -> bool {
         self > other

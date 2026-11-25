@@ -1,21 +1,22 @@
-#![doc = include_str!("lexer.doc/_module.md")]
+//! The `.okui` lexer: turns source text into a lossless [`Token`] stream.
 
 use crate::lexer::{Token, TokenKind};
 
-#[doc = include_str!("lexer.doc/Lexer.md")]
+#[doc = include_str!("../../docs/api/lexer/lexer.doc/Lexer.md")]
 #[derive(Debug, Clone, Default)]
 pub struct Lexer {
     _private: (),
 }
 
 impl Lexer {
-    #[doc = include_str!("lexer.doc/new.md")]
+    /// Creates a new lexer.
     #[must_use]
     pub const fn new() -> Self {
         Self { _private: () }
     }
 
-    #[doc = include_str!("lexer.doc/tokenize.md")]
+    /// Tokenizes `source` into a lossless [`Token`] stream, terminated by an
+    /// [`Eof`](TokenKind::Eof) token.
     #[must_use]
     pub fn tokenize(&self, source: &str) -> Vec<Token> {
         let chars: Vec<(usize, char)> = source.char_indices().collect();
@@ -42,7 +43,8 @@ impl Lexer {
     }
 }
 
-#[doc = include_str!("lexer.doc/scan_token.md")]
+/// Scans the token starting at char index `i` (whose char is `c`), returning
+/// its kind and the char index just past its end.
 fn scan_token(chars: &[(usize, char)], i: usize, c: char) -> (TokenKind, usize) {
     let n = chars.len();
     match c {
@@ -80,7 +82,8 @@ fn scan_token(chars: &[(usize, char)], i: usize, c: char) -> (TokenKind, usize) 
     }
 }
 
-#[doc = include_str!("lexer.doc/scan_string.md")]
+/// Scans a `"..."` string starting at the opening quote at index `i`, honoring
+/// a minimal backslash escape. Returns the index just past the token.
 fn scan_string(chars: &[(usize, char)], i: usize) -> usize {
     let n = chars.len();
     let mut j = i + 1;
@@ -94,7 +97,8 @@ fn scan_string(chars: &[(usize, char)], i: usize) -> usize {
     n // unterminated: run to end of input
 }
 
-#[doc = include_str!("lexer.doc/scan_number.md")]
+/// Scans a `[0-9]+(\.[0-9]+)?` number starting at index `i`. Returns the index
+/// just past the token.
 fn scan_number(chars: &[(usize, char)], i: usize) -> usize {
     let n = chars.len();
     let mut j = i + 1;
@@ -110,22 +114,23 @@ fn scan_number(chars: &[(usize, char)], i: usize) -> usize {
     j
 }
 
-#[doc = include_str!("lexer.doc/is_ident_start.md")]
+/// Returns `true` if `c` can start an identifier.
 const fn is_ident_start(c: char) -> bool {
     c.is_ascii_alphabetic() || c == '_'
 }
 
-#[doc = include_str!("lexer.doc/is_ident_continue.md")]
+/// Returns `true` if `c` can continue an identifier.
 const fn is_ident_continue(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-')
 }
 
-#[doc = include_str!("lexer.doc/is_punct.md")]
+/// Returns `true` if `c` is punctuation with a dedicated single-char token.
 const fn is_punct(c: char) -> bool {
     matches!(c, '<' | '>' | '/' | '=' | '{' | '}' | ':')
 }
 
-#[doc = include_str!("lexer.doc/is_text_char.md")]
+/// Returns `true` if `c` belongs in a [`Text`](TokenKind::Text) run: an
+/// ordinary character that starts no other token and is not a control char.
 fn is_text_char(c: char) -> bool {
     !c.is_whitespace()
         && !is_ident_start(c)

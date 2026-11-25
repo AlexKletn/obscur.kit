@@ -1,21 +1,24 @@
-#![doc = include_str!("overflow_axes.doc/_module.md")]
+#![doc = include_str!("../../docs/api/computed/overflow_axes.doc/_module.md")]
 
 use obscur_identity::InternedSymbol;
 
 use crate::computed::ComputedStyle;
 use crate::property::{PropertyId, PropertyValue, layout_keyword};
 
-#[doc = include_str!("overflow_axes.doc/OverflowAxes.md")]
+#[doc = include_str!("../../docs/api/computed/overflow_axes.doc/OverflowAxes.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OverflowAxes {
-    #[doc = include_str!("overflow_axes.doc/inline.md")]
+    /// The used value on the inline axis (`overflow-x` in a horizontal writing mode).
     inline: InternedSymbol,
-    #[doc = include_str!("overflow_axes.doc/block.md")]
+    /// The used value on the block axis (`overflow-y` in a horizontal writing mode).
     block: InternedSymbol,
 }
 
 impl OverflowAxes {
-    #[doc = include_str!("overflow_axes.doc/of.md")]
+    /// Reads both axis longhands out of a node's computed style, treating an absent
+    /// declaration (or an absent style) as the initial `visible`, and applies §3's
+    /// pairing rule. [`None`] answers "visible on both axes", which is what a node with
+    /// no style at all means.
     #[must_use]
     pub fn of(style: Option<&ComputedStyle>) -> Self {
         let axis = |id: PropertyId| match style.map(|s| s.get(id)) {
@@ -28,7 +31,11 @@ impl OverflowAxes {
         Self::computed(axis(PropertyId::OverflowX), axis(PropertyId::OverflowY))
     }
 
-    #[doc = include_str!("overflow_axes.doc/computed.md")]
+    /// Applies css-overflow-3 §3's pairing rule to a specified `(inline, block)` pair:
+    /// if exactly one of the two is `visible` or `clip`, that one computes to `auto` or
+    /// `hidden` respectively. Exposed so a caller holding the two values already (a
+    /// test, or a phase that never had a [`ComputedStyle`](crate::computed::ComputedStyle))
+    /// can reach the same answer as [`OverflowAxes::of`].
     #[must_use]
     pub fn computed(inline: InternedSymbol, block: InternedSymbol) -> Self {
         // css-overflow-3 §3: an author who clips or scrolls ONE axis has said
@@ -59,32 +66,41 @@ impl OverflowAxes {
         }
     }
 
-    #[doc = include_str!("overflow_axes.doc/inline_axis.md")]
+    /// The used `overflow` value on the inline axis.
     #[must_use]
     pub const fn inline_axis(self) -> InternedSymbol {
         self.inline
     }
 
-    #[doc = include_str!("overflow_axes.doc/block_axis.md")]
+    /// The used `overflow` value on the block axis — the one the kit can actually
+    /// scroll, since a box carries a single scroll offset.
     #[must_use]
     pub const fn block_axis(self) -> InternedSymbol {
         self.block
     }
 
-    #[doc = include_str!("overflow_axes.doc/clips.md")]
+    /// Whether the box clips its subtree: any axis whose used value is not `visible`.
+    /// The kit clips to the whole box rather than to one axis, so one clipping axis is
+    /// enough to answer yes.
     #[must_use]
     pub fn clips(self) -> bool {
         self.inline != layout_keyword::OVERFLOW_VISIBLE
             || self.block != layout_keyword::OVERFLOW_VISIBLE
     }
 
-    #[doc = include_str!("overflow_axes.doc/block_scrolls.md")]
+    /// Whether the block axis is `scroll` or `auto` — the two values that offer the
+    /// user a scroll (and a scrollbar). `hidden` is excluded: it is scrollable
+    /// programmatically but must not answer a wheel.
     #[must_use]
     pub fn block_scrolls(self) -> bool {
         self.block == layout_keyword::OVERFLOW_SCROLL || self.block == layout_keyword::OVERFLOW_AUTO
     }
 
-    #[doc = include_str!("overflow_axes.doc/establishes_scroll_container.md")]
+    /// Whether the box is a **scroll container** in the css-overflow-3 §3 sense:
+    /// `scroll`, `auto`, or `hidden` — `hidden` included, because its content "must
+    /// still be scrollable programmatically […] and the box is therefore still a scroll
+    /// container". Only `visible` and `clip` are excluded; `clip` "forbids scrolling
+    /// entirely, through any mechanism".
     #[must_use]
     pub fn establishes_scroll_container(self) -> bool {
         // Every axis pair that scrolls at all leaves the block axis outside

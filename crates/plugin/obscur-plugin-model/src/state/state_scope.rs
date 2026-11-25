@@ -1,5 +1,12 @@
-#![doc = include_str!("state_scope.doc/_module.md")]
+//! Scopes for plugin state and cache.
 
-#[doc = include_str!("state_scope.doc/StateScope.md")]
-#[derive(Debug)]
-pub struct StateScope;
+/// Areas of ordinary plugin storage within an installation.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum StateScope {
+    /// State shared within one plugin installation.
+    Global,
+    /// Durable state of a host-identified contribution instance.
+    Instance(Box<str>),
+    /// Rebuildable cache of one plugin installation.
+    Cache,
+}

@@ -1,18 +1,22 @@
-#![doc = include_str!("color_space.doc/_module.md")]
+//! The color space a [`Color`](super::Color)'s components are expressed in.
 
-#[doc = include_str!("color_space.doc/ColorSpace.md")]
+#[doc = include_str!("../../docs/api/color/color_space.doc/ColorSpace.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ColorSpace {
-    #[doc = include_str!("color_space.doc/Srgb.md")]
+    /// Standard sRGB with the usual transfer function. This is the default
+    /// external, authored semantics for colors.
     Srgb,
-    #[doc = include_str!("color_space.doc/LinearSrgb.md")]
+    /// Linear-light sRGB primaries (no transfer function). The working space
+    /// used for compositing, blending, blur and filters.
     LinearSrgb,
-    #[doc = include_str!("color_space.doc/DisplayP3.md")]
+    /// Display P3 wide-gamut primaries. Consumers fall back to sRGB on hardware
+    /// that cannot reproduce the wider gamut.
     DisplayP3,
 }
 
 impl ColorSpace {
-    #[doc = include_str!("color_space.doc/is_linear.md")]
+    /// Returns whether components are stored in linear light (no transfer
+    /// function). True only for [`ColorSpace::LinearSrgb`].
     #[must_use]
     pub const fn is_linear(self) -> bool {
         matches!(self, Self::LinearSrgb)
@@ -20,7 +24,8 @@ impl ColorSpace {
 }
 
 impl Default for ColorSpace {
-    #[doc = include_str!("color_space.doc/default.md")]
+    /// The default color space is [`ColorSpace::Srgb`], the external authored
+    /// semantics.
     fn default() -> Self {
         Self::Srgb
     }

@@ -1,5 +1,6 @@
-#![doc = include_str!("user_activation_token.doc/_module.md")]
+//! `UserActivationToken` (skeleton stub for the spec-defined entity; not yet implemented).
 
-#[doc = include_str!("user_activation_token.doc/UserActivationToken.md")]
+/// Placeholder for the `UserActivationToken` entity. See the Obscur Kit 2 specs for its
+/// contract; this stub exists to materialise the target source layout.
 #[derive(Debug)]
 pub struct UserActivationToken;

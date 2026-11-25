@@ -1,88 +1,46 @@
-#![doc = include_str!("dialog_request.doc/_module.md")]
+//! A request to present a dialog (spec §6.9 — dialog providers).
 
-#[doc = include_str!("dialog_request.doc/MessageLevel.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MessageLevel {
-    #[doc = include_str!("dialog_request.doc/Info.md")]
-    Info,
-    #[doc = include_str!("dialog_request.doc/Warning.md")]
-    Warning,
-    #[doc = include_str!("dialog_request.doc/Error.md")]
-    Error,
-}
+use super::{FileFilter, MessageLevel};
 
-#[doc = include_str!("dialog_request.doc/FileFilter.md")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FileFilter {
-    name: Box<str>,
-    extensions: Vec<Box<str>>,
-}
-
-impl FileFilter {
-    #[doc = include_str!("dialog_request.doc/new.md")]
-    #[must_use]
-    pub fn new(
-        name: impl Into<Box<str>>,
-        extensions: impl IntoIterator<Item = impl Into<Box<str>>>,
-    ) -> Self {
-        Self {
-            name: name.into(),
-            extensions: extensions.into_iter().map(Into::into).collect(),
-        }
-    }
-
-    #[doc = include_str!("dialog_request.doc/name.md")]
-    #[must_use]
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
-    #[doc = include_str!("dialog_request.doc/extensions.md")]
-    #[must_use]
-    pub fn extensions(&self) -> &[Box<str>] {
-        &self.extensions
-    }
-}
-
-#[doc = include_str!("dialog_request.doc/DialogRequest.md")]
+#[doc = include_str!("../../docs/api/dialog/dialog_request.doc/DialogRequest.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum DialogRequest {
-    #[doc = include_str!("dialog_request.doc/OpenFile.md")]
+    /// Pick one or more existing files, optionally constrained by `filters`.
     OpenFile {
-        #[doc = include_str!("dialog_request.doc/filters.md")]
+        /// The file-type filters offered to the user; empty means unfiltered.
         filters: Vec<FileFilter>,
-        #[doc = include_str!("dialog_request.doc/allow_multiple.md")]
+        /// Whether the user may select more than one file.
         allow_multiple: bool,
     },
-    #[doc = include_str!("dialog_request.doc/SaveFile.md")]
+    /// Choose a destination to save a file to.
     SaveFile {
-        #[doc = include_str!("dialog_request.doc/suggested_name.md")]
+        /// The default file name proposed to the user.
         suggested_name: Box<str>,
-        #[doc = include_str!("dialog_request.doc/filters_2.md")]
+        /// The file-type filters offered to the user; empty means unfiltered.
         filters: Vec<FileFilter>,
     },
-    #[doc = include_str!("dialog_request.doc/PickFolder.md")]
+    /// Pick a single folder / directory.
     PickFolder,
-    #[doc = include_str!("dialog_request.doc/Message.md")]
+    /// Show an informational message the user acknowledges.
     Message {
-        #[doc = include_str!("dialog_request.doc/title.md")]
+        /// The dialog's title line.
         title: Box<str>,
-        #[doc = include_str!("dialog_request.doc/body.md")]
+        /// The dialog's body text.
         body: Box<str>,
-        #[doc = include_str!("dialog_request.doc/level.md")]
+        /// The severity/intent of the message.
         level: MessageLevel,
     },
-    #[doc = include_str!("dialog_request.doc/Confirm.md")]
+    /// Ask the user to confirm or cancel an action.
     Confirm {
-        #[doc = include_str!("dialog_request.doc/title_2.md")]
+        /// The dialog's title line.
         title: Box<str>,
-        #[doc = include_str!("dialog_request.doc/body_2.md")]
+        /// The dialog's body text describing what is being confirmed.
         body: Box<str>,
     },
 }
 
 impl DialogRequest {
-    #[doc = include_str!("dialog_request.doc/open_file.md")]
+    /// Creates a single-file open request with no filters (spec §6.9).
     #[must_use]
     pub const fn open_file() -> Self {
         Self::OpenFile {
@@ -91,7 +49,7 @@ impl DialogRequest {
         }
     }
 
-    #[doc = include_str!("dialog_request.doc/open_files.md")]
+    /// Creates a multi-file open request with no filters (spec §6.9).
     #[must_use]
     pub const fn open_files() -> Self {
         Self::OpenFile {
@@ -100,7 +58,8 @@ impl DialogRequest {
         }
     }
 
-    #[doc = include_str!("dialog_request.doc/save_file.md")]
+    /// Creates a save request proposing `suggested_name`, with no filters
+    /// (spec §6.9).
     #[must_use]
     pub fn save_file(suggested_name: impl Into<Box<str>>) -> Self {
         Self::SaveFile {
@@ -109,13 +68,14 @@ impl DialogRequest {
         }
     }
 
-    #[doc = include_str!("dialog_request.doc/pick_folder.md")]
+    /// Creates a folder-picker request (spec §6.9).
     #[must_use]
     pub const fn pick_folder() -> Self {
         Self::PickFolder
     }
 
-    #[doc = include_str!("dialog_request.doc/message.md")]
+    /// Creates a message request with the given `title`, `body`, and `level`
+    /// (spec §6.9).
     #[must_use]
     pub fn message(
         title: impl Into<Box<str>>,
@@ -129,7 +89,8 @@ impl DialogRequest {
         }
     }
 
-    #[doc = include_str!("dialog_request.doc/confirm.md")]
+    /// Creates a confirmation request with the given `title` and `body`
+    /// (spec §6.9).
     #[must_use]
     pub fn confirm(title: impl Into<Box<str>>, body: impl Into<Box<str>>) -> Self {
         Self::Confirm {
@@ -138,7 +99,8 @@ impl DialogRequest {
         }
     }
 
-    #[doc = include_str!("dialog_request.doc/is_file_dialog.md")]
+    /// Returns whether this request is a file/folder dialog rather than a
+    /// message or confirmation (spec §6.9).
     #[must_use]
     pub const fn is_file_dialog(&self) -> bool {
         matches!(
@@ -151,13 +113,6 @@ impl DialogRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn file_filter_stores_name_and_extensions() {
-        let filter = FileFilter::new("Images", ["png", "jpg"]);
-        assert_eq!(filter.name(), "Images");
-        assert_eq!(filter.extensions(), &[Box::from("png"), Box::from("jpg")]);
-    }
 
     #[test]
     fn open_file_constructors_set_multiplicity() {

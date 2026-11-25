@@ -1,10 +1,10 @@
-#![doc = include_str!("relative_font_weight.doc/_module.md")]
+#![doc = include_str!("../../docs/api/computed/relative_font_weight.doc/_module.md")]
 
 use crate::computed::ComputedStyle;
 use crate::property::{PropertyId, PropertyValue, layout_keyword};
 use obscur_identity::InternedSymbol;
 
-#[doc = include_str!("relative_font_weight.doc/resolve_relative_weight.md")]
+#[doc = include_str!("../../docs/api/computed/relative_font_weight.doc/resolve_relative_weight.md")]
 pub(super) fn resolve_relative_weight(
     value: &PropertyValue,
     parent: Option<&ComputedStyle>,
@@ -19,10 +19,12 @@ pub(super) fn resolve_relative_weight(
     ))
 }
 
-#[doc = include_str!("relative_font_weight.doc/NORMAL_FONT_WEIGHT.md")]
+/// The CSS initial `font-weight` (`normal`), and the weight a relative
+/// `bolder` / `lighter` resolves against when there is no parent weight.
 const NORMAL_FONT_WEIGHT: f32 = 400.0;
 
-#[doc = include_str!("relative_font_weight.doc/relative_weight_is_bolder.md")]
+/// Classifies a reserved relative-`font-weight` handle: `Some(true)` for
+/// `bolder`, `Some(false)` for `lighter`, and [`None`] for any other symbol.
 fn relative_weight_is_bolder(symbol: InternedSymbol) -> Option<bool> {
     if symbol == layout_keyword::FONT_WEIGHT_BOLDER {
         Some(true)
@@ -33,7 +35,9 @@ fn relative_weight_is_bolder(symbol: InternedSymbol) -> Option<bool> {
     }
 }
 
-#[doc = include_str!("relative_font_weight.doc/parent_font_weight.md")]
+/// Reads the parent's computed numeric `font-weight`, defaulting to
+/// [`NORMAL_FONT_WEIGHT`] (400) when there is no parent or the parent did not
+/// compute a numeric weight (the root's implicit parent is `normal`).
 fn parent_font_weight(parent: Option<&ComputedStyle>) -> f32 {
     parent
         .and_then(|p| p.get(PropertyId::FontWeight))
@@ -44,7 +48,7 @@ fn parent_font_weight(parent: Option<&ComputedStyle>) -> f32 {
         .unwrap_or(NORMAL_FONT_WEIGHT)
 }
 
-#[doc = include_str!("relative_font_weight.doc/resolve_relative_font_weight.md")]
+#[doc = include_str!("../../docs/api/computed/relative_font_weight.doc/resolve_relative_font_weight.md")]
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 fn resolve_relative_font_weight(parent_weight: f32, bolder: bool) -> f32 {
     let bucket = (parent_weight / 100.0).round().clamp(1.0, 9.0) as u16;

@@ -1,5 +1,5 @@
-#![doc = include_str!("window_space.doc/_module.md")]
+//! Logical coordinates relative to the window content surface.
 
-#[doc = include_str!("window_space.doc/WindowSpace.md")]
-#[derive(Debug)]
+/// Logical coordinates relative to the window content surface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WindowSpace;

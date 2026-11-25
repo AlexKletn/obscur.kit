@@ -1,24 +1,24 @@
-#![doc = include_str!("inset.doc/_module.md")]
+//! The four positioning insets of a node (`top` / `right` / `bottom` / `left`).
 
 use obscur_geometry::{Point, Rect, Size};
 
-use crate::model::{BoxSizing, Dimension};
+use crate::model::{BoxSizing, Dimension, Direction, LayoutStyle, Margin, WritingMode};
 
-#[doc = include_str!("inset.doc/Inset.md")]
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[doc = include_str!("../../docs/api/model/inset.doc/Inset.md")]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Inset {
-    #[doc = include_str!("inset.doc/top.md")]
+    /// The `top` inset.
     pub top: Dimension,
-    #[doc = include_str!("inset.doc/right.md")]
+    /// The `right` inset.
     pub right: Dimension,
-    #[doc = include_str!("inset.doc/bottom.md")]
+    /// The `bottom` inset.
     pub bottom: Dimension,
-    #[doc = include_str!("inset.doc/left.md")]
+    /// The `left` inset.
     pub left: Dimension,
 }
 
 impl Inset {
-    #[doc = include_str!("inset.doc/AUTO.md")]
+    /// The all-`auto` insets — the CSS initial value, contributing no offset.
     pub const AUTO: Self = Self {
         top: Dimension::Auto,
         right: Dimension::Auto,
@@ -26,7 +26,7 @@ impl Inset {
         left: Dimension::Auto,
     };
 
-    #[doc = include_str!("inset.doc/new.md")]
+    /// Builds insets from the four edges (top / right / bottom / left).
     #[must_use]
     pub const fn new(top: Dimension, right: Dimension, bottom: Dimension, left: Dimension) -> Self {
         Self {
@@ -37,10 +37,10 @@ impl Inset {
         }
     }
 
-    #[doc = include_str!("inset.doc/resolve_absolute_box.md")]
+    /// Solves positioned geometry with zero margins and the default writing mode. Automatic sizes stretch between paired insets. Definite sizes take precedence.
     #[must_use]
     pub fn resolve_absolute_box(
-        self,
+        &self,
         cb: Rect,
         width: Dimension,
         height: Dimension,
@@ -48,42 +48,108 @@ impl Inset {
         box_sizing: BoxSizing,
         border_padding: Size,
     ) -> Rect {
-        let to_border_box = |size: f32, bp: f32| box_sizing.content_extent(size, bp) + bp;
-        let (x, w) = resolve_axis(
-            self.left.resolve(cb.size.width),
-            self.right.resolve(cb.size.width),
-            width
-                .resolve(cb.size.width)
-                .map(|content| to_border_box(content, border_padding.width)),
-            cb.origin.x,
-            cb.size.width,
-            natural.width,
-        );
-        let (y, h) = resolve_axis(
-            self.top.resolve(cb.size.height),
-            self.bottom.resolve(cb.size.height),
-            height
-                .resolve(cb.size.height)
-                .map(|content| to_border_box(content, border_padding.height)),
-            cb.origin.y,
-            cb.size.height,
-            natural.height,
-        );
-        Rect::new(Point::new(x, y), Size::new(w, h))
+        let style = LayoutStyle {
+            width,
+            height,
+            box_sizing,
+            ..LayoutStyle::default()
+        };
+        self.resolve_absolute_style(
+            cb,
+            &style,
+            natural,
+            border_padding,
+            (WritingMode::HorizontalTb, Direction::Ltr),
+        )
     }
 
-    #[doc = include_str!("inset.doc/sticky_offset.md")]
+    /// Solves positioned border-box geometry with margins, sizing constraints and the containing block’s axes.
+    #[must_use]
+    pub fn resolve_absolute_style(
+        &self,
+        cb: Rect,
+        style: &LayoutStyle,
+        natural: Size,
+        border_padding: Size,
+        containing_axes: (WritingMode, Direction),
+    ) -> Rect {
+        let (writing, direction) = containing_axes;
+        let vertical = writing.is_vertical();
+        let inline = if vertical {
+            cb.size.height
+        } else {
+            cb.size.width
+        };
+        let solve = |extent,
+                     basis,
+                     insets: (&Dimension, &Dimension),
+                     size: (&Dimension, &Dimension, &Dimension),
+                     natural,
+                     bp,
+                     margins: (&Margin, &Margin),
+                     reversed,
+                     inline_axis| {
+            let border_box = |length| style.box_sizing.content_extent(length, bp) + bp;
+            resolve_axis(
+                extent,
+                (
+                    insets.0.resolve_signed(extent),
+                    insets.1.resolve_signed(extent),
+                ),
+                size.0.resolve(extent).map_or(natural, border_box),
+                size.0.is_auto(),
+                size.1.resolve(extent).map_or(bp, border_box),
+                size.2.resolve(extent).map_or(f32::INFINITY, border_box),
+                (margins.0.resolve(basis), margins.1.resolve(basis)),
+                (margins.0.is_auto(), margins.1.is_auto()),
+                reversed,
+                inline_axis,
+            )
+        };
+        let (x, w) = solve(
+            cb.size.width,
+            inline,
+            (&self.left, &self.right),
+            (&style.width, &style.min_width, &style.max_width),
+            natural.width,
+            border_padding.width,
+            (&style.margin.left, &style.margin.right),
+            if vertical {
+                writing == WritingMode::VerticalRl
+            } else {
+                direction == Direction::Rtl
+            },
+            !vertical,
+        );
+        let (y, h) = solve(
+            cb.size.height,
+            inline,
+            (&self.top, &self.bottom),
+            (&style.height, &style.min_height, &style.max_height),
+            natural.height,
+            border_padding.height,
+            (&style.margin.top, &style.margin.bottom),
+            vertical && direction == Direction::Rtl,
+            vertical,
+        );
+        Rect::new(
+            Point::new(cb.origin.x + x, cb.origin.y + y),
+            Size::new(w, h),
+        )
+    }
+
+    #[doc = include_str!("../../docs/api/model/inset.doc/sticky_offset.md")]
     #[must_use]
     pub fn sticky_offset(
-        self,
+        &self,
         static_pos: Point,
         node_size: Size,
         cb: Rect,
         scrollport: Rect,
     ) -> (f32, f32) {
         let used_x = sticky_axis(
-            self.left.resolve(cb.size.width),
-            self.right.resolve(cb.size.width),
+            self.left.resolve_signed(cb.size.width),
+            self.right.resolve_signed(cb.size.width),
             static_pos.x,
             node_size.width,
             cb.origin.x,
@@ -92,8 +158,8 @@ impl Inset {
             scrollport.origin.x + scrollport.size.width,
         );
         let used_y = sticky_axis(
-            self.top.resolve(cb.size.height),
-            self.bottom.resolve(cb.size.height),
+            self.top.resolve_signed(cb.size.height),
+            self.bottom.resolve_signed(cb.size.height),
             static_pos.y,
             node_size.height,
             cb.origin.y,
@@ -105,7 +171,7 @@ impl Inset {
     }
 }
 
-#[doc = include_str!("inset.doc/sticky_axis.md")]
+#[doc = include_str!("../../docs/api/model/inset.doc/sticky_axis.md")]
 // The two insets, the static position, the node extent, and the CB / scrollport
 // edges are the cohesive per-axis inputs of one clamp; they are not a public API.
 #[allow(clippy::too_many_arguments)]
@@ -131,28 +197,61 @@ fn sticky_axis(
     }
 }
 
-#[doc = include_str!("inset.doc/resolve_axis.md")]
+/// Solves one positioned axis with insets, margins, and size constraints, returning its physical offset and size.
+#[allow(clippy::too_many_arguments)]
 fn resolve_axis(
-    start: Option<f32>,
-    end: Option<f32>,
-    explicit: Option<f32>,
-    cb_origin: f32,
-    cb_extent: f32,
-    natural: f32,
+    extent: f32,
+    (mut start, mut end): (Option<f32>, Option<f32>),
+    preferred: f32,
+    auto_size: bool,
+    min: f32,
+    max: f32,
+    (mut lead, mut trail): (f32, f32),
+    (mut auto_lead, mut auto_trail): (bool, bool),
+    reversed: bool,
+    inline: bool,
 ) -> (f32, f32) {
-    match (start, end) {
-        (Some(start), Some(end)) => (cb_origin + start, (cb_extent - start - end).max(0.0)),
-        (Some(start), None) => (cb_origin + start, explicit.unwrap_or(natural)),
-        (None, Some(end)) => {
-            let size = explicit.unwrap_or(natural);
-            (cb_origin + cb_extent - end - size, size)
-        }
-        (None, None) => (cb_origin, explicit.unwrap_or(natural)),
+    if reversed {
+        std::mem::swap(&mut start, &mut end);
+        std::mem::swap(&mut lead, &mut trail);
+        std::mem::swap(&mut auto_lead, &mut auto_trail);
     }
+    let clamp = |size: f32| size.min(max).max(min);
+    let (offset, size) = match (start, end) {
+        (Some(start), Some(end)) => {
+            let available = extent - start - end - lead - trail;
+            let size = clamp(if auto_size { available } else { preferred });
+            let free = available - size;
+            if auto_lead {
+                lead += if !auto_trail {
+                    free
+                } else if inline && free < 0.0 {
+                    0.0
+                } else {
+                    free / 2.0
+                };
+            }
+            (start + lead, size)
+        }
+        (Some(start), None) => (start + lead, clamp(preferred)),
+        (None, Some(end)) => {
+            let size = clamp(preferred);
+            (extent - end - trail - size, size)
+        }
+        (None, None) => (lead, clamp(preferred)),
+    };
+    (
+        if reversed {
+            extent - offset - size
+        } else {
+            offset
+        },
+        size,
+    )
 }
 
 impl Default for Inset {
-    #[doc = include_str!("inset.doc/default.md")]
+    /// The initial value: all edges `auto`.
     fn default() -> Self {
         Self::AUTO
     }
@@ -243,7 +342,7 @@ mod tests {
     #[test]
     fn both_insets_stretch_to_containing_block() {
         // `left: 10; right: 30` pins both edges: width = 200 - 10 - 30 = 160,
-        // overriding the (ignored) explicit/natural width.
+        // when the width is automatic.
         let inset = Inset::new(
             Dimension::Px(10.0),
             Dimension::Px(30.0),
@@ -252,7 +351,7 @@ mod tests {
         );
         let rect = inset.resolve_absolute_box(
             CB,
-            Dimension::Px(5.0),
+            Dimension::Auto,
             Dimension::Auto,
             Size::new(5.0, 5.0),
             BoxSizing::ContentBox,

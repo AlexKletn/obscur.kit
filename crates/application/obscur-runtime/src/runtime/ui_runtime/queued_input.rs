@@ -1,4 +1,4 @@
-#![doc = include_str!("queued_input.doc/_module.md")]
+#![doc = include_str!("../../../docs/api/runtime/ui_runtime/queued_input.doc/_module.md")]
 
 use crate::frame::FrameReason;
 use crate::runtime::{InputDispatch, InputEvent};
@@ -7,13 +7,13 @@ use crate::scheduler::BackpressureDecision;
 use super::UiRuntime;
 
 impl UiRuntime {
-    #[doc = include_str!("queued_input.doc/queue_input.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/queued_input.doc/queue_input.md")]
     pub fn queue_input(&mut self, event: InputEvent) -> BackpressureDecision {
         self.input.push(event);
         self.request_frame(FrameReason::Input)
     }
 
-    #[doc = include_str!("queued_input.doc/dispatch_queued_input.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/queued_input.doc/dispatch_queued_input.md")]
     pub(super) fn dispatch_queued_input(&mut self) -> bool {
         // Opening the phase takes the queue and raises the latch that redirects
         // the dispatchers' own `request_frame` calls into this frame's plan;

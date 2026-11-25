@@ -1,22 +1,22 @@
-#![doc = include_str!("fast_hasher.doc/_module.md")]
+//! A non-cryptographic hasher for keys the program itself made up: `FastHasher`.
 
 use std::collections::{HashMap, HashSet};
 use std::hash::{BuildHasherDefault, Hasher};
 
-#[doc = include_str!("fast_hasher.doc/SEED.md")]
+/// The odd multiplier that diffuses each absorbed word across all 64 bits.
 const SEED: u64 = 0x51_7c_c1_b7_27_22_0a_95;
 
-#[doc = include_str!("fast_hasher.doc/FINALIZER.md")]
+/// The multiplier of the avalanche step, which carries the low bits upward.
 const FINALIZER: u64 = 0xd6e8_feb8_6659_fd93;
 
-#[doc = include_str!("fast_hasher.doc/FastHasher.md")]
+#[doc = include_str!("../../docs/api/hashing/fast_hasher.doc/FastHasher.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct FastHasher {
     hash: u64,
 }
 
 impl FastHasher {
-    #[doc = include_str!("fast_hasher.doc/absorb.md")]
+    /// Folds one 64-bit word into the running hash.
     fn absorb(&mut self, word: u64) {
         self.hash = (self.hash.rotate_left(5) ^ word).wrapping_mul(SEED);
     }
@@ -81,13 +81,13 @@ impl Hasher for FastHasher {
     }
 }
 
-#[doc = include_str!("fast_hasher.doc/FastBuildHasher.md")]
+/// Builds [`FastHasher`]s — the `S` parameter of a map or set that wants one.
 pub type FastBuildHasher = BuildHasherDefault<FastHasher>;
 
-#[doc = include_str!("fast_hasher.doc/FastMap.md")]
+/// A `HashMap` under [`FastHasher`]. Construct it with `FastMap::default()`.
 pub type FastMap<K, V> = HashMap<K, V, FastBuildHasher>;
 
-#[doc = include_str!("fast_hasher.doc/FastSet.md")]
+/// A `HashSet` under [`FastHasher`]. Construct it with `FastSet::default()`.
 pub type FastSet<T> = HashSet<T, FastBuildHasher>;
 
 #[cfg(test)]

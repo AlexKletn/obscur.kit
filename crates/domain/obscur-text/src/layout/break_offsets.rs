@@ -1,21 +1,26 @@
-#![doc = include_str!("break_offsets.doc/_module.md")]
+//! The source-text byte-offset tables the greedy paragraph wrap consults
+//! (spec §5.10, CSS Text 3 §3/§7.1).
 
 use std::collections::HashSet;
 
 use super::{Hyphenator, LineBreak, WhiteSpace};
 
-#[doc = include_str!("break_offsets.doc/BreakOffsets.md")]
+#[doc = include_str!("../../docs/api/layout/break_offsets.doc/BreakOffsets.md")]
 pub(super) struct BreakOffsets {
-    #[doc = include_str!("break_offsets.doc/hyphens.md")]
+    /// Interior break offsets proposed by the hyphenator, one word at a time.
     hyphens: HashSet<usize>,
-    #[doc = include_str!("break_offsets.doc/soft.md")]
+    /// Author soft hyphens: the byte offset of every `U+00AD` char.
     soft: HashSet<usize>,
-    #[doc = include_str!("break_offsets.doc/hangable.md")]
+    /// Byte offsets of *collapsible* trailing-hangable whitespace (CSS Text 3
+    /// §3/§7.1): a run of these at a line's end is removed from the line's used
+    /// width (it hangs). Only the collapsing modes have collapsible spaces
+    /// (normal / nowrap / pre-line); pre / pre-wrap preserve them, so nothing
+    /// hangs there and their measurement is untouched.
     hangable: HashSet<usize>,
 }
 
 impl BreakOffsets {
-    #[doc = include_str!("break_offsets.doc/collect.md")]
+    #[doc = include_str!("../../docs/api/layout/break_offsets.doc/collect.md")]
     pub(super) fn collect(
         text: &str,
         breaks: &[LineBreak],
@@ -42,27 +47,30 @@ impl BreakOffsets {
         }
     }
 
-    #[doc = include_str!("break_offsets.doc/is_hyphen_point.md")]
+    /// Whether an algorithmic hyphenation break may be taken *before* the glyph
+    /// at byte offset `cluster` (the head runs up to it, the tail resumes at it).
     pub(super) fn is_hyphen_point(&self, cluster: usize) -> bool {
         self.hyphens.contains(&cluster)
     }
 
-    #[doc = include_str!("break_offsets.doc/is_soft_hyphen.md")]
+    /// Whether byte offset `cluster` is an author soft hyphen (`U+00AD`).
     pub(super) fn is_soft_hyphen(&self, cluster: usize) -> bool {
         self.soft.contains(&cluster)
     }
 
-    #[doc = include_str!("break_offsets.doc/has_soft_hyphens.md")]
+    /// Whether the text holds any author soft hyphen at all, so the caller can
+    /// skip the pass that zeroes their advances.
     pub(super) fn has_soft_hyphens(&self) -> bool {
         !self.soft.is_empty()
     }
 
-    #[doc = include_str!("break_offsets.doc/hangs.md")]
+    /// Whether the glyph at byte offset `cluster` is a collapsible space that
+    /// **hangs** when it ends a line (CSS Text 3 §3/§7.1).
     pub(super) fn hangs(&self, cluster: usize) -> bool {
         self.hangable.contains(&cluster)
     }
 
-    #[doc = include_str!("break_offsets.doc/hyphen_offsets.md")]
+    #[doc = include_str!("../../docs/api/layout/break_offsets.doc/hyphen_offsets.md")]
     fn hyphen_offsets(
         text: &str,
         breaks: &[LineBreak],

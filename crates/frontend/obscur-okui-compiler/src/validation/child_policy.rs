@@ -1,19 +1,22 @@
-#![doc = include_str!("child_policy.doc/_module.md")]
+//! `ChildPolicy`: which children a component's contract admits (spec §2.13's
+//! "allowed children", §2.12's "allowed child contracts").
 
-#[doc = include_str!("child_policy.doc/ChildPolicy.md")]
+#[doc = include_str!("../../docs/api/validation/child_policy.doc/ChildPolicy.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum ChildPolicy {
-    #[doc = include_str!("child_policy.doc/Any.md")]
+    /// Any child is allowed: the contract does not restrict children.
     #[default]
     Any,
-    #[doc = include_str!("child_policy.doc/None.md")]
+    /// No child is allowed — a leaf position, whose content the component
+    /// synthesises itself (or which has none at all).
     None,
-    #[doc = include_str!("child_policy.doc/Only.md")]
+    /// Only children whose tag appears in this list are allowed. An empty list
+    /// admits nothing (see the type docs): emptiness is never permissive here.
     Only(Vec<Box<str>>),
 }
 
 impl ChildPolicy {
-    #[doc = include_str!("child_policy.doc/admits.md")]
+    /// Returns whether a child element written as `tag` is admitted.
     #[must_use]
     pub fn admits(&self, tag: &str) -> bool {
         match self {
@@ -23,19 +26,19 @@ impl ChildPolicy {
         }
     }
 
-    #[doc = include_str!("child_policy.doc/admits_content.md")]
+    #[doc = include_str!("../../docs/api/validation/child_policy.doc/admits_content.md")]
     #[must_use]
     pub const fn admits_content(&self) -> bool {
         !matches!(self, Self::None)
     }
 
-    #[doc = include_str!("child_policy.doc/is_none.md")]
+    /// Returns whether this policy forbids children outright.
     #[must_use]
     pub const fn is_none(&self) -> bool {
         matches!(self, Self::None)
     }
 
-    #[doc = include_str!("child_policy.doc/tags.md")]
+    #[doc = include_str!("../../docs/api/validation/child_policy.doc/tags.md")]
     #[must_use]
     pub fn tags(&self) -> &[Box<str>] {
         match self {
@@ -44,7 +47,7 @@ impl ChildPolicy {
         }
     }
 
-    #[doc = include_str!("child_policy.doc/allow.md")]
+    #[doc = include_str!("../../docs/api/validation/child_policy.doc/allow.md")]
     pub fn allow(&mut self, tag: impl Into<Box<str>>) {
         match self {
             Self::Only(tags) => tags.push(tag.into()),

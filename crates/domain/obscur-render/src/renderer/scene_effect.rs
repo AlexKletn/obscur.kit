@@ -1,36 +1,46 @@
-#![doc = include_str!("scene_effect.doc/_module.md")]
+//! The closed vocabulary of effects a display list can demand of a backend
+//! (spec §5.2).
 
-#[doc = include_str!("scene_effect.doc/SceneEffect.md")]
+#[doc = include_str!("../../docs/api/renderer/scene_effect.doc/SceneEffect.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SceneEffect {
-    #[doc = include_str!("scene_effect.doc/Gradient.md")]
+    /// A gradient brush (linear, radial, or conic) filling or stroking a path.
     Gradient,
-    #[doc = include_str!("scene_effect.doc/Clip.md")]
+    /// A geometric clip: `PushClip(Clip::Shape)`, or a shape clip carried on a
+    /// layer.
     Clip,
-    #[doc = include_str!("scene_effect.doc/Mask.md")]
+    /// A coverage mask declaration without a coverage source.
     Mask,
-    #[doc = include_str!("scene_effect.doc/Image.md")]
+    /// A coverage mask backed by an image and positioned in scene coordinates.
+    ImageMask,
+    /// A decoded raster image draw (`DrawImage`).
     Image,
-    #[doc = include_str!("scene_effect.doc/Text.md")]
+    /// A run of pre-shaped glyphs (`DrawText`).
     Text,
-    #[doc = include_str!("scene_effect.doc/Blur.md")]
+    /// A gaussian blur of the element's own content: a `filter: blur()` layer, or
+    /// the blur radius of a `DrawShadow`.
     Blur,
-    #[doc = include_str!("scene_effect.doc/Shadow.md")]
+    /// A box shadow / `filter: drop-shadow()` (`DrawShadow`).
     Shadow,
-    #[doc = include_str!("scene_effect.doc/BackdropFilter.md")]
+    /// A blur of the already-composited backdrop (`BackdropFilter`), the
+    /// frosted-glass effect.
     BackdropFilter,
-    #[doc = include_str!("scene_effect.doc/ColorMatrix.md")]
+    /// A folded 4×5 color matrix applied to a layer's content — the CSS color-op
+    /// `filter` chain (grayscale/brightness/contrast/saturate/sepia/invert/
+    /// hue-rotate/opacity).
     ColorMatrix,
-    #[doc = include_str!("scene_effect.doc/BlendMode.md")]
+    /// A non-[`Normal`](obscur_scene::paint::BlendMode::Normal) blend mode on a
+    /// layer.
     BlendMode,
 }
 
 impl SceneEffect {
-    #[doc = include_str!("scene_effect.doc/ALL.md")]
-    pub const ALL: [Self; 10] = [
+    /// Every effect in the vocabulary, in declaration order.
+    pub const ALL: [Self; 11] = [
         Self::Gradient,
         Self::Clip,
         Self::Mask,
+        Self::ImageMask,
         Self::Image,
         Self::Text,
         Self::Blur,
@@ -40,13 +50,16 @@ impl SceneEffect {
         Self::BlendMode,
     ];
 
-    #[doc = include_str!("scene_effect.doc/name.md")]
+    /// The stable name of this effect, as it appears in a
+    /// [`RendererError::UnsupportedEffect`](crate::renderer::RendererError::UnsupportedEffect)
+    /// and in the diagnostics built from it.
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
             Self::Gradient => "gradient",
             Self::Clip => "clip",
             Self::Mask => "mask",
+            Self::ImageMask => "image-mask",
             Self::Image => "image",
             Self::Text => "text",
             Self::Blur => "blur",

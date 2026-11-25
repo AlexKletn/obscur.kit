@@ -1,18 +1,19 @@
-#![doc = include_str!("gradient_stop.doc/_module.md")]
+//! A single color stop in a style-local CSS gradient.
 
 use crate::property::StyleColor;
 
-#[doc = include_str!("gradient_stop.doc/GradientStop.md")]
+#[doc = include_str!("../../docs/api/property/gradient_stop.doc/GradientStop.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GradientStop {
-    #[doc = include_str!("gradient_stop.doc/color.md")]
+    /// The stop's color, as authored (straight-alpha sRGB).
     pub color: StyleColor,
-    #[doc = include_str!("gradient_stop.doc/position.md")]
+    /// The stop's position along the gradient line in `0.0..=1.0`, or [`None`]
+    /// when unauthored (auto-distributed).
     pub position: Option<f32>,
 }
 
 impl GradientStop {
-    #[doc = include_str!("gradient_stop.doc/new.md")]
+    /// Creates a gradient stop with `color` at an explicit `position` (`0.0..=1.0`).
     #[must_use]
     pub const fn new(color: StyleColor, position: f32) -> Self {
         Self {
@@ -21,7 +22,8 @@ impl GradientStop {
         }
     }
 
-    #[doc = include_str!("gradient_stop.doc/auto.md")]
+    /// Creates a gradient stop with `color` and no authored position (its used
+    /// position is auto-distributed).
     #[must_use]
     pub const fn auto(color: StyleColor) -> Self {
         Self {
@@ -30,13 +32,13 @@ impl GradientStop {
         }
     }
 
-    #[doc = include_str!("gradient_stop.doc/color_2.md")]
+    /// Returns the stop's color.
     #[must_use]
     pub const fn color(self) -> StyleColor {
         self.color
     }
 
-    #[doc = include_str!("gradient_stop.doc/position_2.md")]
+    /// Returns the stop's authored position, if any.
     #[must_use]
     pub const fn position(self) -> Option<f32> {
         self.position

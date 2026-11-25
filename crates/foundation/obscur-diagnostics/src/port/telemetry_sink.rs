@@ -1,73 +1,24 @@
-#![doc = include_str!("telemetry_sink.doc/_module.md")]
+//! Telemetry sink port.
 
 use crate::performance::{BudgetViolation, PerformanceCounter, PerformanceSpan};
 
-#[doc = include_str!("telemetry_sink.doc/TelemetrySink.md")]
+#[doc = include_str!("../../docs/api/port/telemetry_sink.doc/TelemetrySink.md")]
 pub trait TelemetrySink {
-    #[doc = include_str!("telemetry_sink.doc/record_span.md")]
+    /// Records a completed performance span.
     fn record_span(&mut self, span: &PerformanceSpan);
 
-    #[doc = include_str!("telemetry_sink.doc/record_counter.md")]
+    /// Records the current state of a performance counter.
     fn record_counter(&mut self, counter: &PerformanceCounter);
 
-    #[doc = include_str!("telemetry_sink.doc/record_violation.md")]
+    /// Records a budget violation.
     fn record_violation(&mut self, violation: &BudgetViolation);
-}
-
-#[doc = include_str!("telemetry_sink.doc/NullTelemetrySink.md")]
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct NullTelemetrySink;
-
-impl TelemetrySink for NullTelemetrySink {
-    fn record_span(&mut self, _span: &PerformanceSpan) {}
-    fn record_counter(&mut self, _counter: &PerformanceCounter) {}
-    fn record_violation(&mut self, _violation: &BudgetViolation) {}
-}
-
-#[doc = include_str!("telemetry_sink.doc/CollectingTelemetrySink.md")]
-#[derive(Debug, Default, Clone, PartialEq, Eq)]
-pub struct CollectingTelemetrySink {
-    #[doc = include_str!("telemetry_sink.doc/spans.md")]
-    pub spans: Vec<PerformanceSpan>,
-    #[doc = include_str!("telemetry_sink.doc/counters.md")]
-    pub counters: Vec<PerformanceCounter>,
-    #[doc = include_str!("telemetry_sink.doc/violations.md")]
-    pub violations: Vec<BudgetViolation>,
-}
-
-impl CollectingTelemetrySink {
-    #[doc = include_str!("telemetry_sink.doc/new.md")]
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    #[doc = include_str!("telemetry_sink.doc/clear.md")]
-    pub fn clear(&mut self) {
-        self.spans.clear();
-        self.counters.clear();
-        self.violations.clear();
-    }
-}
-
-impl TelemetrySink for CollectingTelemetrySink {
-    fn record_span(&mut self, span: &PerformanceSpan) {
-        self.spans.push(*span);
-    }
-
-    fn record_counter(&mut self, counter: &PerformanceCounter) {
-        self.counters.push(counter.clone());
-    }
-
-    fn record_violation(&mut self, violation: &BudgetViolation) {
-        self.violations.push(violation.clone());
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
 
+    use super::super::{CollectingTelemetrySink, NullTelemetrySink};
     use super::*;
     use crate::diagnostic::DiagnosticSubsystem;
 

@@ -1,23 +1,24 @@
-#![doc = include_str!("virtual_window.doc/_module.md")]
+//! A windowless mapping of a window: [`VirtualWindow`].
 
 use obscur_geometry::{ScaleFactor, Size};
 use obscur_identity::WindowId;
 
-#[doc = include_str!("virtual_window.doc/VirtualWindow.md")]
+#[doc = include_str!("../../docs/api/host/virtual_window.doc/VirtualWindow.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct VirtualWindow {
-    #[doc = include_str!("virtual_window.doc/id.md")]
+    /// The identity of this virtual window.
     id: WindowId,
-    #[doc = include_str!("virtual_window.doc/size.md")]
+    /// The logical size of the window in logical pixels.
     size: Size,
-    #[doc = include_str!("virtual_window.doc/scale.md")]
+    /// The display scale factor mapping logical to physical pixels.
     scale: ScaleFactor,
-    #[doc = include_str!("virtual_window.doc/visible.md")]
+    /// Whether the window is currently visible.
     visible: bool,
 }
 
 impl VirtualWindow {
-    #[doc = include_str!("virtual_window.doc/new.md")]
+    /// Creates a visible virtual window with the given identity, logical `size`,
+    /// and display `scale`.
     #[must_use]
     pub const fn new(id: WindowId, size: Size, scale: ScaleFactor) -> Self {
         Self {
@@ -28,7 +29,7 @@ impl VirtualWindow {
         }
     }
 
-    #[doc = include_str!("virtual_window.doc/with_visible.md")]
+    /// Returns a copy of this window with `visible` replaced.
     #[must_use]
     pub const fn with_visible(self, visible: bool) -> Self {
         Self {
@@ -39,31 +40,32 @@ impl VirtualWindow {
         }
     }
 
-    #[doc = include_str!("virtual_window.doc/id_2.md")]
+    /// Returns the identity of this virtual window.
     #[must_use]
     pub const fn id(self) -> WindowId {
         self.id
     }
 
-    #[doc = include_str!("virtual_window.doc/size_2.md")]
+    /// Returns the logical size of the window.
     #[must_use]
     pub const fn size(self) -> Size {
         self.size
     }
 
-    #[doc = include_str!("virtual_window.doc/scale_2.md")]
+    /// Returns the display scale factor mapping logical to physical pixels.
     #[must_use]
     pub const fn scale(self) -> ScaleFactor {
         self.scale
     }
 
-    #[doc = include_str!("virtual_window.doc/visible_2.md")]
+    /// Returns whether the window is currently visible.
     #[must_use]
     pub const fn visible(self) -> bool {
         self.visible
     }
 
-    #[doc = include_str!("virtual_window.doc/physical_size.md")]
+    /// Returns the physical size of the window: the logical [`size`](Self::size)
+    /// multiplied by the [`scale`](Self::scale) factor on each axis.
     #[must_use]
     pub fn physical_size(self) -> Size {
         let factor = self.scale.get();

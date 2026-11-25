@@ -1,25 +1,18 @@
-#![doc = include_str!("sleep_inhibition.doc/_module.md")]
+//! A request to inhibit system or display sleep while presenting (spec §6.5).
 
-#[doc = include_str!("sleep_inhibition.doc/SleepInhibitionScope.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum SleepInhibitionScope {
-    #[doc = include_str!("sleep_inhibition.doc/System.md")]
-    System,
-    #[doc = include_str!("sleep_inhibition.doc/Display.md")]
-    Display,
-}
+use super::SleepInhibitionScope;
 
-#[doc = include_str!("sleep_inhibition.doc/SleepInhibition.md")]
+#[doc = include_str!("../../docs/api/presentation/sleep_inhibition.doc/SleepInhibition.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SleepInhibition {
-    #[doc = include_str!("sleep_inhibition.doc/scope.md")]
+    /// What the request keeps awake.
     pub scope: SleepInhibitionScope,
-    #[doc = include_str!("sleep_inhibition.doc/reason.md")]
+    /// An optional human-readable reason surfaced to the OS.
     pub reason: Option<Box<str>>,
 }
 
 impl SleepInhibition {
-    #[doc = include_str!("sleep_inhibition.doc/system.md")]
+    /// Creates a request to inhibit full system sleep with a reason.
     #[must_use]
     pub fn system(reason: impl Into<Box<str>>) -> Self {
         Self {
@@ -28,7 +21,8 @@ impl SleepInhibition {
         }
     }
 
-    #[doc = include_str!("sleep_inhibition.doc/display.md")]
+    /// Creates a request to inhibit display sleep and the screensaver with a
+    /// reason.
     #[must_use]
     pub fn display(reason: impl Into<Box<str>>) -> Self {
         Self {
@@ -37,7 +31,7 @@ impl SleepInhibition {
         }
     }
 
-    #[doc = include_str!("sleep_inhibition.doc/reasonless.md")]
+    /// Creates a request for `scope` with no stated reason.
     #[must_use]
     pub const fn reasonless(scope: SleepInhibitionScope) -> Self {
         Self {
@@ -46,19 +40,19 @@ impl SleepInhibition {
         }
     }
 
-    #[doc = include_str!("sleep_inhibition.doc/scope_2.md")]
+    /// Returns what the request keeps awake.
     #[must_use]
     pub const fn scope(&self) -> SleepInhibitionScope {
         self.scope
     }
 
-    #[doc = include_str!("sleep_inhibition.doc/reason_2.md")]
+    /// Returns the human-readable reason, or `None` if unstated.
     #[must_use]
     pub fn reason(&self) -> Option<&str> {
         self.reason.as_deref()
     }
 
-    #[doc = include_str!("sleep_inhibition.doc/inhibits_display.md")]
+    #[doc = include_str!("../../docs/api/presentation/sleep_inhibition.doc/inhibits_display.md")]
     #[must_use]
     pub const fn inhibits_display(&self) -> bool {
         matches!(

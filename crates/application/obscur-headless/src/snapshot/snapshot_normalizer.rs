@@ -1,4 +1,4 @@
-#![doc = include_str!("snapshot_normalizer.doc/_module.md")]
+//! Normalizes a pipeline snapshot into a stable form: [`SnapshotNormalizer`].
 
 use std::collections::BTreeSet;
 
@@ -6,18 +6,18 @@ use obscur_identity::NodeId;
 
 use super::{NormalizedNode, NormalizedPipeline, PipelineSnapshot};
 
-#[doc = include_str!("snapshot_normalizer.doc/SnapshotNormalizer.md")]
+#[doc = include_str!("../../docs/api/snapshot/snapshot_normalizer.doc/SnapshotNormalizer.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SnapshotNormalizer;
 
 impl SnapshotNormalizer {
-    #[doc = include_str!("snapshot_normalizer.doc/new.md")]
+    /// Creates a normalizer.
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    #[doc = include_str!("snapshot_normalizer.doc/normalize.md")]
+    #[doc = include_str!("../../docs/api/snapshot/snapshot_normalizer.doc/normalize.md")]
     #[must_use]
     pub fn normalize(&self, snapshot: &PipelineSnapshot) -> NormalizedPipeline {
         let computed = snapshot.computed();

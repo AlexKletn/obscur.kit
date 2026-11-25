@@ -1,14 +1,16 @@
-#![doc = include_str!("layer_loop_stats.doc/_module.md")]
+//! Where a turn of the desktop-surface loop actually goes.
 
 use std::time::Duration;
 
-#[doc = include_str!("layer_loop_stats.doc/REPORT_EVERY.md")]
+/// Turns per printed line — the same cadence the runtime's own counter uses.
 const REPORT_EVERY: u32 = 60;
 
-#[doc = include_str!("layer_loop_stats.doc/LayerLoopStats.md")]
+#[doc = include_str!("../../docs/api/app/layer_loop_stats.doc/LayerLoopStats.md")]
 #[derive(Debug, Default)]
 pub(super) struct LayerLoopStats {
-    #[doc = include_str!("layer_loop_stats.doc/each.md")]
+    /// Print every turn rather than a mean over sixty, set by
+    /// `OBSCUR_FRAME_STATS=each`. Same reasoning as the phase clock: a mean is for
+    /// watching, a line per turn is for counting.
     each: bool,
     turns: u32,
     waited: Duration,
@@ -18,7 +20,7 @@ pub(super) struct LayerLoopStats {
 }
 
 impl LayerLoopStats {
-    #[doc = include_str!("layer_loop_stats.doc/enabled.md")]
+    #[doc = include_str!("../../docs/api/app/layer_loop_stats.doc/enabled.md")]
     pub(super) fn enabled() -> Option<Self> {
         std::env::var_os("OBSCUR_FRAME_STATS").map(|asked| Self {
             each: asked.to_string_lossy() == "each",
@@ -26,8 +28,14 @@ impl LayerLoopStats {
         })
     }
 
-    #[doc = include_str!("layer_loop_stats.doc/record.md")]
-    pub(super) fn record(&mut self, waited: Duration, build: Duration, present: Duration) {
+    #[doc = include_str!("../../docs/api/app/layer_loop_stats.doc/record.md")]
+    pub(super) fn record(
+        &mut self,
+        waited: Duration,
+        build: Duration,
+        present: Duration,
+        callbacks: u64,
+    ) {
         self.turns += 1;
         self.waited += waited;
         self.build += build;
@@ -52,7 +60,7 @@ impl LayerLoopStats {
         let ms = |total: Duration| total.as_secs_f64() * 1000.0 / n;
         println!(
             "[layer-loop] {n:.0} turns | waited {:.2}ms | build {:.2}ms | present {:.2}ms \
-             (worst {:.2}ms) | turn {:.2}ms",
+             (worst {:.2}ms) | turn {:.2}ms | frame callbacks {callbacks}",
             ms(self.waited),
             ms(self.build),
             ms(self.present),
@@ -93,6 +101,7 @@ mod tests {
             Duration::from_millis(1),
             Duration::from_millis(2),
             Duration::from_millis(400),
+            0,
         );
         assert_eq!(stats.waited, Duration::from_millis(1));
         assert_eq!(stats.build, Duration::from_millis(2));
@@ -105,9 +114,14 @@ mod tests {
         // An average over sixty turns reports 7ms for that and reads as healthy.
         let mut stats = LayerLoopStats::default();
         for _ in 0..10 {
-            stats.record(Duration::ZERO, Duration::ZERO, Duration::from_millis(1));
+            stats.record(Duration::ZERO, Duration::ZERO, Duration::from_millis(1), 0);
         }
-        stats.record(Duration::ZERO, Duration::ZERO, Duration::from_millis(500));
+        stats.record(
+            Duration::ZERO,
+            Duration::ZERO,
+            Duration::from_millis(500),
+            0,
+        );
         assert_eq!(stats.worst_present, Duration::from_millis(500));
         assert!(
             stats.present.as_secs_f64() * 1000.0 / f64::from(stats.turns) < 50.0,
@@ -123,6 +137,7 @@ mod tests {
                 Duration::from_millis(1),
                 Duration::from_millis(1),
                 Duration::from_millis(1),
+                0,
             );
         }
         assert_eq!(stats.turns, 0, "the window starts again");

@@ -1,18 +1,19 @@
-#![doc = include_str!("line_join.doc/_module.md")]
+//! Stroke corner-join style.
 
-#[doc = include_str!("line_join.doc/LineJoin.md")]
+/// The shape drawn where two segments of a stroked path meet (spec §5.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LineJoin {
-    #[doc = include_str!("line_join.doc/Miter.md")]
+    /// Extend the outer edges until they meet at a sharp point, subject to the
+    /// stroke's miter limit (beyond which the join falls back to a bevel).
     Miter,
-    #[doc = include_str!("line_join.doc/Round.md")]
+    /// Round off the corner with an arc of radius half the stroke width.
     Round,
-    #[doc = include_str!("line_join.doc/Bevel.md")]
+    /// Cut the corner off with a straight edge between the two outer endpoints.
     Bevel,
 }
 
 impl Default for LineJoin {
-    #[doc = include_str!("line_join.doc/default.md")]
+    /// The default line join is [`LineJoin::Miter`].
     fn default() -> Self {
         Self::Miter
     }

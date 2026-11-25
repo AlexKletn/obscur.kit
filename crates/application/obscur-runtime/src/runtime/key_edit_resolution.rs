@@ -1,4 +1,6 @@
-#![doc = include_str!("key_edit_resolution.doc/_module.md")]
+//! What a key press means to a focused editable: [`KeyEditResolver`], [`KeyEdit`].
+
+use super::key_edit::KeyEdit;
 
 use obscur_identity::NodeId;
 use obscur_interaction::command::{KeyEvent, LogicalKey, Modifier, Modifiers, NamedKey};
@@ -11,49 +13,28 @@ use crate::orchestration::{
     ComputedStyles, LayoutBoxes, SceneCoordinator, caret_line_move, caret_visual_line_bound,
 };
 
-#[doc = include_str!("key_edit_resolution.doc/KeyEdit.md")]
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum KeyEdit {
-    #[doc = include_str!("key_edit_resolution.doc/Declined.md")]
-    Declined,
-    #[doc = include_str!("key_edit_resolution.doc/Edit.md")]
-    Edit(EditCommand),
-    #[doc = include_str!("key_edit_resolution.doc/DeleteGrapheme.md")]
-    DeleteGrapheme {
-        #[doc = include_str!("key_edit_resolution.doc/direction.md")]
-        direction: EditDirection,
-        #[doc = include_str!("key_edit_resolution.doc/cluster.md")]
-        cluster: Option<TextSelection>,
-    },
-    #[doc = include_str!("key_edit_resolution.doc/SelectAll.md")]
-    SelectAll,
-    #[doc = include_str!("key_edit_resolution.doc/History.md")]
-    History {
-        #[doc = include_str!("key_edit_resolution.doc/redo.md")]
-        redo: bool,
-    },
-    #[doc = include_str!("key_edit_resolution.doc/Commit.md")]
-    Commit,
-}
-
-#[doc = include_str!("key_edit_resolution.doc/KeyEditResolver.md")]
+#[doc = include_str!("../../docs/api/runtime/key_edit_resolution.doc/KeyEditResolver.md")]
 pub(crate) struct KeyEditResolver<'a> {
-    #[doc = include_str!("key_edit_resolution.doc/tree.md")]
+    /// The retained tree: which node is editable, and whether it is multiline.
     tree: &'a RetainedTree,
-    #[doc = include_str!("key_edit_resolution.doc/computed.md")]
+    /// This frame's computed styles, for the wrapped-layout probes.
     computed: &'a ComputedStyles,
-    #[doc = include_str!("key_edit_resolution.doc/boxes.md")]
+    /// This frame's arranged boxes: the field's text leaf must have one before a
+    /// visual-line question can be asked at all.
     boxes: &'a LayoutBoxes,
-    #[doc = include_str!("key_edit_resolution.doc/composer.md")]
+    /// The scene's paragraph orchestrator — the SAME wrapped layout the caret is
+    /// painted from, so a vertical move lands on the line the user can see.
     composer: &'a SceneCoordinator,
-    #[doc = include_str!("key_edit_resolution.doc/session.md")]
+    /// The live editing session: the buffer the keystroke edits, and the caret it
+    /// edits from.
     session: &'a TextEditSession,
-    #[doc = include_str!("key_edit_resolution.doc/modifiers.md")]
+    /// The modifiers held with this key press.
     modifiers: Modifiers,
 }
 
 impl<'a> KeyEditResolver<'a> {
-    #[doc = include_str!("key_edit_resolution.doc/new.md")]
+    /// Bundles the retained frame, the live session and the modifier state for one
+    /// keystroke.
     pub(crate) fn new(
         tree: &'a RetainedTree,
         computed: &'a ComputedStyles,
@@ -72,7 +53,7 @@ impl<'a> KeyEditResolver<'a> {
         }
     }
 
-    #[doc = include_str!("key_edit_resolution.doc/resolve.md")]
+    #[doc = include_str!("../../docs/api/runtime/key_edit_resolution.doc/resolve.md")]
     pub(crate) fn resolve(&self, target: NodeId, event: &KeyEvent) -> KeyEdit {
         // An edit needs the session to be bound to this focus's editable ancestor.
         let node = self.session.node();
@@ -153,7 +134,7 @@ impl<'a> KeyEditResolver<'a> {
         }
     }
 
-    #[doc = include_str!("key_edit_resolution.doc/vertical_move.md")]
+    #[doc = include_str!("../../docs/api/runtime/key_edit_resolution.doc/vertical_move.md")]
     fn vertical_move(&self, node: NodeId, down: bool, shift: bool) -> KeyEdit {
         if !EditableField::is_multiline(self.tree, node) {
             return KeyEdit::Declined;
@@ -192,7 +173,7 @@ impl<'a> KeyEditResolver<'a> {
         KeyEdit::Edit(EditCommand::SetSelection(new_selection))
     }
 
-    #[doc = include_str!("key_edit_resolution.doc/grapheme_cluster_range.md")]
+    #[doc = include_str!("../../docs/api/runtime/key_edit_resolution.doc/grapheme_cluster_range.md")]
     fn grapheme_cluster_range(&self, backward: bool) -> Option<(usize, usize)> {
         use unicode_segmentation::GraphemeCursor;
 
@@ -222,7 +203,7 @@ impl<'a> KeyEditResolver<'a> {
         }
     }
 
-    #[doc = include_str!("key_edit_resolution.doc/line_boundary_move.md")]
+    #[doc = include_str!("../../docs/api/runtime/key_edit_resolution.doc/line_boundary_move.md")]
     fn line_boundary_move(&self, node: NodeId, to_end: bool, shift: bool) -> EditCommand {
         match self.visual_line_boundary(node, to_end) {
             Some(target) => {
@@ -248,7 +229,9 @@ impl<'a> KeyEditResolver<'a> {
         }
     }
 
-    #[doc = include_str!("key_edit_resolution.doc/visual_line_boundary.md")]
+    /// The byte offset of the caret's **visual line** start/end for Home/End,
+    /// resolved against the field's wrapped layout, or [`None`] when the field has
+    /// no arranged text box to resolve against.
     fn visual_line_boundary(&self, node: NodeId, to_end: bool) -> Option<usize> {
         if self.session.node() != node {
             return None;
@@ -271,7 +254,7 @@ impl<'a> KeyEditResolver<'a> {
     }
 }
 
-#[doc = include_str!("key_edit_resolution.doc/spans_multiple_scalars.md")]
+#[doc = include_str!("../../docs/api/runtime/key_edit_resolution.doc/spans_multiple_scalars.md")]
 fn spans_multiple_scalars(cluster: &str) -> bool {
     cluster.chars().nth(1).is_some()
 }

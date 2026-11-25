@@ -1,16 +1,16 @@
-#![doc = include_str!("wlr_mapper.doc/_module.md")]
+//! Translation between the kit's platform-neutral layer settings and the wlr protocol.
 
 use obscur_windowing::layer::{
     LayerAnchor, LayerBand, LayerFocusPolicy, LayerReservation, LayerSettings,
 };
 use smithay_client_toolkit::shell::wlr_layer::{Anchor, KeyboardInteractivity, Layer};
 
-#[doc = include_str!("wlr_mapper.doc/WlrMapper.md")]
+#[doc = include_str!("../../docs/api/surface/wlr_mapper.doc/WlrMapper.md")]
 #[derive(Debug)]
 pub(crate) struct WlrMapper;
 
 impl WlrMapper {
-    #[doc = include_str!("wlr_mapper.doc/layer.md")]
+    /// The protocol's stacking layer for a depth band. One to one — wlr names the same four.
     pub(crate) const fn layer(band: LayerBand) -> Layer {
         match band {
             LayerBand::Background => Layer::Background,
@@ -20,7 +20,7 @@ impl WlrMapper {
         }
     }
 
-    #[doc = include_str!("wlr_mapper.doc/anchor.md")]
+    /// The protocol's anchor bitset for a set of edges.
     pub(crate) fn anchor(anchor: LayerAnchor) -> Anchor {
         let mut out = Anchor::empty();
         if anchor.top {
@@ -38,7 +38,7 @@ impl WlrMapper {
         out
     }
 
-    #[doc = include_str!("wlr_mapper.doc/keyboard.md")]
+    /// Map the panel focus policy to its layer-shell keyboard mode. The window checks the protocol version before requesting on-demand focus.
     pub(crate) const fn keyboard(focus: LayerFocusPolicy) -> KeyboardInteractivity {
         match focus {
             LayerFocusPolicy::Never => KeyboardInteractivity::None,
@@ -47,7 +47,7 @@ impl WlrMapper {
         }
     }
 
-    #[doc = include_str!("wlr_mapper.doc/exclusive_zone.md")]
+    #[doc = include_str!("../../docs/api/surface/wlr_mapper.doc/exclusive_zone.md")]
     pub(crate) const fn exclusive_zone(reservation: LayerReservation) -> i32 {
         match reservation {
             LayerReservation::None => 0,
@@ -62,7 +62,7 @@ impl WlrMapper {
         }
     }
 
-    #[doc = include_str!("wlr_mapper.doc/requested_size.md")]
+    #[doc = include_str!("../../docs/api/surface/wlr_mapper.doc/requested_size.md")]
     pub(crate) const fn requested_size(settings: &LayerSettings) -> (u32, u32) {
         // Zero is the protocol's way of saying "you decide", and an axis the
         // anchor stretches is always the compositor's to decide — a width sent

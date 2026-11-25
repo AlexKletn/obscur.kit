@@ -1,4 +1,4 @@
-#![doc = include_str!("lib.doc/_module.md")]
+//! macOS system-service providers.
 
-#[doc = include_str!("lib.doc/provider.md")]
+/// The macOS implementations of the system-service ports.
 pub mod provider;

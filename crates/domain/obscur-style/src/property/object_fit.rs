@@ -1,18 +1,19 @@
-#![doc = include_str!("object_fit.doc/_module.md")]
+//! The computed value of CSS `object-fit` (CSS Images §5.5) — the replaced-element
+//! analog of `background-size`.
 
-#[doc = include_str!("object_fit.doc/ObjectFit.md")]
+#[doc = include_str!("../../docs/api/property/object_fit.doc/ObjectFit.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ObjectFit {
-    #[doc = include_str!("object_fit.doc/Fill.md")]
+    /// Stretch to fill the box, ignoring the aspect ratio (the CSS initial).
     #[default]
     Fill,
-    #[doc = include_str!("object_fit.doc/Contain.md")]
+    /// Scale to fit inside the box, aspect ratio preserved.
     Contain,
-    #[doc = include_str!("object_fit.doc/Cover.md")]
+    /// Scale to cover the box, aspect ratio preserved (overflow clipped).
     Cover,
-    #[doc = include_str!("object_fit.doc/None.md")]
+    /// Draw at the intrinsic pixel size, unscaled.
     None,
-    #[doc = include_str!("object_fit.doc/ScaleDown.md")]
+    /// The smaller of `none` and `contain`.
     ScaleDown,
 }
 

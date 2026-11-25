@@ -221,10 +221,16 @@ assignment are two halves of one join. On any other tag `name` is an ordinary
 hashed prop. (`name_binding::attr_symbol_on` is that rule; `attr_symbol` is the
 tag-blind entry point the `Contract` derive uses, where there is no tag.)
 
-Two more are structural rather than properties: `key` (a `<For>` child's identity
-— carried on the loop node itself, not duplicated as a prop) and `requires="cap"`
+Two more are structural rather than properties: `key` (retained identity on an
+element, component, or loop item) and `requires="cap"`
 (the §2.13 capability declaration). Both are always permitted by a closed
 contract.
+
+On an element or component, `key="literal"` or `key={binding}` sets that node's
+identity. A changed key replaces its retained node. Runtime-loaded screens
+resolve key bindings to text or integers from the current screen or row data.
+Both front ends require an explicit value for `key` and reject repeated keys on
+the same node or loop.
 
 ### What an attribute may be called
 
@@ -388,15 +394,36 @@ content.
 
 ### Control flow
 
-`<If>` · `<ElseIf>` · `<Else>` · `<For>` · `<VirtualFor>`, plus `<Empty>` and
-`<Separator>` as a loop's §2.11 slots. `<Loading>` is deliberately absent — no
-signal defines when it would show.
+`<If>` · `<ElseIf>` · `<Else>` · `<For>` · `<VirtualFor>`. Compiled loops
+and runtime-loaded `<For>` and `<VirtualFor>` accept an optional `<Loading>` slot with
+an explicit Boolean `loading={pending}` binding.
+When it is true, the slot's children replace the collection output, including
+`<Empty>`. When it is false or omitted, the loop renders available rows or its
+`<Empty>` slot. A loading binding has an effect when the slot is supplied.
+Each loop accepts at most one `<Loading>`, `<Empty>` and `<Separator>` slot.
+Both front ends report duplicates at the repeated declaration.
+`<Separator>` renders between adjacent items. On `<VirtualFor>` it accepts a
+fixed logical-pixel height, for example `<Separator extent={4}>…</Separator>`.
+The default is one logical pixel. Use the surrounding view's bindings for
+separator content. The separator height contributes to scrolling and to
+the space reserved for unrealized rows.
 
 On the compiled routes these are real Rust: `<If cond={open}>` emits `if open`,
-and `<For each={items} as={item} key={item.id}>` emits `for item in &items`, so
-the body's `{item.name}` is an ordinary path. §2.11 makes a `<For>`'s `key`
-mandatory, and a keyless one is a diagnostic on the file path only — `okui!` lowers
-it silently and every row renders unkeyed.
+and `<For each={items} as={item} key={item.id}>` enumerates the collection, so
+the body's `{item.name}` is an ordinary path. Both loop forms expose the
+zero-based model `index` and use `item` as the default binding. §2.11 requires a `key` for both
+`<For>` and `<VirtualFor>`. The file compiler reports a missing-key diagnostic,
+and `okui!` rejects a loop without a key at macro expansion.
+
+In runtime-loaded screens, `If` and `ElseIf` read Boolean literals or bindings
+from `ScreenData` or the current row. Only the first matching branch is lowered.
+An adjacent `Else` supplies fallback content when all conditions are false.
+Both authoring front ends reject `ElseIf` and `Else` unless they immediately
+follow an `If` or `ElseIf` at the same nesting level.
+`If` and `ElseIf` require exactly one `cond` attribute. Use `ElseIf` for a
+conditional fallback and `Else` for an unconditional fallback.
+Boolean attributes such as `disabled={blocked}` follow the bound value. If
+the binding is removed, the attribute is omitted from the runtime view.
 
 **`key` takes a path, not a call.** `key={row.id}` and `key={row.meta.id}` are
 accepted; `key={row.keys.len()}` is refused, because an identity that runs code
@@ -434,12 +461,20 @@ expression props:
 </For>
 ```
 
-`<VirtualFor>` emits **no** loop. It is a §4.9 performance contract, so it lowers
-to a single virtual-collection marker carrying its row template, which the
-runtime realizes into a viewport-bounded window. Its template is emitted **once
-with no item binding**, so every realized row is identical: for rows that differ
-per item, use `App::virtual_list` / `UiRuntime::register_virtual_list`, which is
-told each row's model index.
+The Rust-generating paths lower `<VirtualFor each={items} as={item} key={item.id}>`
+to a virtual-list marker with a row builder. The runtime calls the builder for
+the visible and overscan indices. It binds `item` to the element at that index
+and uses the loop key for retained row identity. The generated view clones the
+collection handle once to own its data across frames. Use an `Arc<[T]>` for
+large models to share the data without copying the elements. The collection and
+any values captured by the row builder must be owned, `Send` and `Sync`.
+
+Runtime-loaded `.okui` screens accept records through
+`ScreenData::set_rows("items", rows)` before compilation. The row binding reads
+fields through paths such as `row.label` in either loop, and `key={row.id}` accepts a text or
+integer field. Updating the collection through the same handle is reflected in
+the next view. Use `<Empty>…</Empty>` to show content for an empty collection.
+The static UI IR bridge still lowers a repeated template without model data.
 
 `<Slot>` is not a control-flow tag and never was. The outlet is **lowercase
 only** (`name_binding::OUTLET_TAG` is `"slot"`), because both front ends classify

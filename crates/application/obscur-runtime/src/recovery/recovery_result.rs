@@ -1,38 +1,42 @@
-#![doc = include_str!("recovery_result.doc/_module.md")]
+//! `RecoveryResult`: the outcome of a single recovery decision (spec §1.7).
 
 use obscur_diagnostics::RecoveryAction;
 
-#[doc = include_str!("recovery_result.doc/RecoveryResult.md")]
+#[doc = include_str!("../../docs/api/recovery/recovery_result.doc/RecoveryResult.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RecoveryResult {
-    #[doc = include_str!("recovery_result.doc/Retried.md")]
+    /// The boundary is enabled and has retry budget left; the failed unit will
+    /// be retried.
     Retried,
-    #[doc = include_str!("recovery_result.doc/FellBack.md")]
+    /// The boundary is enabled but out of retries; the fallback UI is kept in
+    /// place of the failed subtree.
     FellBack,
-    #[doc = include_str!("recovery_result.doc/Propagated.md")]
+    /// The boundary is disabled; the failure escapes to the nearest enclosing
+    /// boundary.
     Propagated,
 }
 
 impl RecoveryResult {
-    #[doc = include_str!("recovery_result.doc/is_retried.md")]
+    /// Whether the decision was to retry the failed unit ([`Retried`](Self::Retried)).
     #[must_use]
     pub const fn is_retried(self) -> bool {
         matches!(self, Self::Retried)
     }
 
-    #[doc = include_str!("recovery_result.doc/is_fallback.md")]
+    /// Whether the decision was to keep the fallback UI ([`FellBack`](Self::FellBack)).
     #[must_use]
     pub const fn is_fallback(self) -> bool {
         matches!(self, Self::FellBack)
     }
 
-    #[doc = include_str!("recovery_result.doc/is_propagated.md")]
+    /// Whether the failure escaped to an enclosing boundary
+    /// ([`Propagated`](Self::Propagated)).
     #[must_use]
     pub const fn is_propagated(self) -> bool {
         matches!(self, Self::Propagated)
     }
 
-    #[doc = include_str!("recovery_result.doc/recovery_action.md")]
+    #[doc = include_str!("../../docs/api/recovery/recovery_result.doc/recovery_action.md")]
     #[must_use]
     pub const fn recovery_action(self) -> RecoveryAction {
         match self {

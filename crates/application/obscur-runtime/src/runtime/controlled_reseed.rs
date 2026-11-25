@@ -1,25 +1,16 @@
-#![doc = include_str!("controlled_reseed.doc/_module.md")]
+//! The controlled-input reseed gate: [`ControlledReseed`], [`ReseedDecision`].
+
+use super::reseed_decision::ReseedDecision;
 
 use obscur_tree::tree::RetainedTree;
 
 use super::{EditableField, TextEditSession};
 
-#[doc = include_str!("controlled_reseed.doc/ReseedDecision.md")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ReseedDecision {
-    #[doc = include_str!("controlled_reseed.doc/Keep.md")]
-    Keep,
-    #[doc = include_str!("controlled_reseed.doc/Mirror.md")]
-    Mirror(String),
-    #[doc = include_str!("controlled_reseed.doc/Reseed.md")]
-    Reseed(String),
-}
-
-#[doc = include_str!("controlled_reseed.doc/ControlledReseed.md")]
+#[doc = include_str!("../../docs/api/runtime/controlled_reseed.doc/ControlledReseed.md")]
 pub(crate) struct ControlledReseed;
 
 impl ControlledReseed {
-    #[doc = include_str!("controlled_reseed.doc/decide.md")]
+    #[doc = include_str!("../../docs/api/runtime/controlled_reseed.doc/decide.md")]
     pub(crate) fn decide(tree: &RetainedTree, session: &TextEditSession) -> ReseedDecision {
         let field = session.node();
         // The field's value as the freshly-reconciled tree now carries it (the
@@ -29,7 +20,8 @@ impl ControlledReseed {
         Self::discriminate(retained, declared, session.mirror(), session.text())
     }
 
-    #[doc = include_str!("controlled_reseed.doc/discriminate.md")]
+    /// The discriminator itself, over the four strings it compares and nothing
+    /// else — no tree, no session — so it can be driven directly.
     fn discriminate(
         retained: String,
         declared: Option<String>,

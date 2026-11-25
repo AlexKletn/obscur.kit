@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Injectable typed synthetic-input descriptors for headless tests (spec §7.4, §7.5).
 
 mod dispatch_outcome;
 pub use dispatch_outcome::DispatchOutcome;

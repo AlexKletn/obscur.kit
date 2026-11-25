@@ -1,22 +1,25 @@
-#![doc = include_str!("resolved_font.doc/_module.md")]
+//! The outcome of resolving a font for one itemized run (spec §5.10, §5.18).
 
 use crate::font::{FontFace, FontId};
 
-#[doc = include_str!("resolved_font.doc/ResolvedFont.md")]
+#[doc = include_str!("../../docs/api/font/resolved_font.doc/ResolvedFont.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedFont {
-    #[doc = include_str!("resolved_font.doc/font.md")]
+    /// The id the resolved run's glyph indices belong to.
     font: FontId,
-    #[doc = include_str!("resolved_font.doc/face.md")]
+    /// The concrete face to shape the run with.
     face: FontFace,
-    #[doc = include_str!("resolved_font.doc/synth_oblique.md")]
+    /// Whether the run's glyphs should be sheared to synthesize a slant the
+    /// matched (upright) face lacks.
     synth_oblique: bool,
-    #[doc = include_str!("resolved_font.doc/synth_bold.md")]
+    /// Whether the run's glyphs should be thickened to synthesize a bold weight
+    /// the matched (lighter) face lacks.
     synth_bold: bool,
 }
 
 impl ResolvedFont {
-    #[doc = include_str!("resolved_font.doc/new.md")]
+    /// Creates a resolution pairing `font` with the concrete `face` it names,
+    /// with no synthesis (an exact-enough match needs none).
     #[must_use]
     pub const fn new(font: FontId, face: FontFace) -> Self {
         Self {
@@ -27,7 +30,8 @@ impl ResolvedFont {
         }
     }
 
-    #[doc = include_str!("resolved_font.doc/with_synthesis.md")]
+    /// Returns this resolution flagged for synthetic styling: `oblique` shears the
+    /// glyphs to fake a slant, `bold` thickens them to fake weight (spec §5.18).
     #[must_use]
     pub const fn with_synthesis(mut self, oblique: bool, bold: bool) -> Self {
         self.synth_oblique = oblique;
@@ -35,31 +39,33 @@ impl ResolvedFont {
         self
     }
 
-    #[doc = include_str!("resolved_font.doc/font_2.md")]
+    /// Returns the id the resolved run's glyph indices belong to.
     #[must_use]
     pub const fn font(&self) -> FontId {
         self.font
     }
 
-    #[doc = include_str!("resolved_font.doc/synth_oblique_2.md")]
+    /// Returns whether the run's glyphs should be sheared to synthesize a slant
+    /// the matched face lacks (spec §5.18).
     #[must_use]
     pub const fn synth_oblique(&self) -> bool {
         self.synth_oblique
     }
 
-    #[doc = include_str!("resolved_font.doc/synth_bold_2.md")]
+    /// Returns whether the run's glyphs should be thickened to synthesize a bold
+    /// weight the matched face lacks (spec §5.18).
     #[must_use]
     pub const fn synth_bold(&self) -> bool {
         self.synth_bold
     }
 
-    #[doc = include_str!("resolved_font.doc/face_2.md")]
+    /// Returns the concrete face to shape the run with.
     #[must_use]
     pub const fn face(&self) -> &FontFace {
         &self.face
     }
 
-    #[doc = include_str!("resolved_font.doc/into_face.md")]
+    /// Consumes the resolution, returning the owned [`FontFace`].
     #[must_use]
     pub fn into_face(self) -> FontFace {
         self.face

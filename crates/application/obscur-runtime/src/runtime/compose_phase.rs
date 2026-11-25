@@ -1,49 +1,54 @@
-#![doc = include_str!("compose_phase.doc/_module.md")]
+//! The frame's paint phase: [`ComposePhase`].
 
+use obscur_diagnostics::DiagnosticSink;
+use obscur_geometry::AffineTransform;
 use obscur_identity::{FastMap, NodeId};
 use obscur_scene::command::{DisplayList, PaintCommand};
 use obscur_scene::scene::Scene;
 use obscur_tree::tree::RetainedTree;
 
 use super::{
-    FramePhase, FramePhaseClock, FrameTelemetry, MotionDriver, ResourceBridge, ScrollOffsets,
-    ScrollTargets, SurfaceGeometry, TreeInspector,
+    FramePhase, FramePhaseClock, FrameTelemetry, HitTesting, MotionDriver, ResourceBridge,
+    ScrollOffsets, ScrollTargets, SurfaceGeometry, TreeInspector,
 };
 use crate::frame::FrameContext;
 use crate::orchestration::{
-    ComputedStyles, EditingView, GeneratedContent, LayoutBoxes, SceneCoordinator,
+    ComputedStyles, EditingView, GeneratedBoxes, GeneratedContent, LayoutBoxes, SceneCoordinator,
 };
 
-#[doc = include_str!("compose_phase.doc/ComposePhase.md")]
+#[doc = include_str!("../../docs/api/runtime/compose_phase.doc/ComposePhase.md")]
 pub(crate) struct ComposePhase<'a> {
-    #[doc = include_str!("compose_phase.doc/scene.md")]
+    /// The scene this phase installs its display list into.
     scene: &'a mut Scene,
-    #[doc = include_str!("compose_phase.doc/scene_composer.md")]
+    /// Composes the paint-ordered display list.
     scene_composer: &'a SceneCoordinator,
-    #[doc = include_str!("compose_phase.doc/tree.md")]
+    /// The retained tree being painted.
     tree: &'a RetainedTree,
-    #[doc = include_str!("compose_phase.doc/boxes.md")]
+    /// This frame's arranged boxes, in unscrolled layout space.
     boxes: &'a LayoutBoxes,
-    #[doc = include_str!("compose_phase.doc/resources.md")]
+    hits: &'a mut HitTesting,
+    /// The decoded-image and parsed-vector caches phase 3c filled.
     resources: &'a ResourceBridge,
-    #[doc = include_str!("compose_phase.doc/scroll.md")]
+    /// Every scroll container's live vertical offset (CSS Overflow 3).
     scroll: &'a ScrollOffsets,
-    #[doc = include_str!("compose_phase.doc/generated_content.md")]
+    /// The §4.16 generated / synthetic decoration resolved by the style phase.
     generated_content: &'a FastMap<NodeId, GeneratedContent>,
-    #[doc = include_str!("compose_phase.doc/canvases.md")]
+    generated_boxes: Option<&'a GeneratedBoxes>,
+    #[doc = include_str!("../../docs/api/runtime/compose_phase.doc/canvases.md")]
     canvases: &'a FastMap<NodeId, Vec<PaintCommand>>,
-    #[doc = include_str!("compose_phase.doc/motion.md")]
+    /// The active timelines, read for their group-compositing presentation values.
     motion: &'a MotionDriver,
-    #[doc = include_str!("compose_phase.doc/inspector.md")]
+    /// The §7.6 DevTools projection, which owns the inspect highlight.
     inspector: &'a TreeInspector,
-    #[doc = include_str!("compose_phase.doc/surface.md")]
+    /// The surface's root transform: the device scale and the content offset.
     surface: &'a SurfaceGeometry,
-    #[doc = include_str!("compose_phase.doc/telemetry.md")]
+    /// Where the compose phase's span and command count land (spec §7.9).
     telemetry: &'a mut FrameTelemetry,
+    diagnostics: &'a dyn DiagnosticSink,
 }
 
 impl<'a> ComposePhase<'a> {
-    #[doc = include_str!("compose_phase.doc/new.md")]
+    /// Bundles the state one compose phase reads and writes.
     // A borrow bundle's constructor is exactly as wide as the state the phase
     // touches; folding these into a struct would only move the same eleven names.
     #[allow(clippy::too_many_arguments)]
@@ -52,38 +57,45 @@ impl<'a> ComposePhase<'a> {
         scene_composer: &'a SceneCoordinator,
         tree: &'a RetainedTree,
         boxes: &'a LayoutBoxes,
+        hits: &'a mut HitTesting,
         resources: &'a ResourceBridge,
         scroll: &'a ScrollOffsets,
         generated_content: &'a FastMap<NodeId, GeneratedContent>,
+        generated_boxes: Option<&'a GeneratedBoxes>,
         canvases: &'a FastMap<NodeId, Vec<PaintCommand>>,
         motion: &'a MotionDriver,
         inspector: &'a TreeInspector,
         surface: &'a SurfaceGeometry,
         telemetry: &'a mut FrameTelemetry,
+        diagnostics: &'a dyn DiagnosticSink,
     ) -> Self {
         Self {
             scene,
             scene_composer,
             tree,
             boxes,
+            hits,
             resources,
             scroll,
             generated_content,
+            generated_boxes,
             canvases,
             motion,
             inspector,
             surface,
             telemetry,
+            diagnostics,
         }
     }
 
-    #[doc = include_str!("compose_phase.doc/run.md")]
+    #[doc = include_str!("../../docs/api/runtime/compose_phase.doc/run.md")]
     pub(crate) fn run(
         &mut self,
         ctx: &FrameContext,
         computed: &mut ComputedStyles,
         editing: Option<EditingView<'_>>,
         hovered: Option<NodeId>,
+        presentation_index_current: bool,
         phase_clock: &FramePhaseClock,
     ) {
         // Images this frame references were already scored for visibility and
@@ -107,20 +119,59 @@ impl<'a> ComposePhase<'a> {
         // the real map for the length of the compose and taken out again — the
         // throwaway copy this replaced was a deep clone of every node's style,
         // paid on every frame of every animation to carry a handful of samples.
-        let undo = self.motion.apply_presentation(computed);
-        let display_list = self.scene_composer.compose_with_images_scrolled(
-            self.tree,
+        let undo = self.motion.apply_presentation(computed, self.boxes);
+        if !presentation_index_current {
+            self.hits
+                .update_presentation(self.tree, computed, self.boxes, &undo);
+        }
+        let (tree, boxes, placeholders) = if let Some(generated) = self.generated_boxes {
+            computed.extend(
+                generated
+                    .styles
+                    .iter()
+                    .map(|(&node, style)| (node, style.clone())),
+            );
+            let placeholders = self
+                .generated_content
+                .iter()
+                .filter_map(|(&node, content)| {
+                    content.placeholder.as_ref().map(|placeholder| {
+                        (
+                            node,
+                            GeneratedContent {
+                                placeholder: Some(placeholder.clone()),
+                                ..GeneratedContent::default()
+                            },
+                        )
+                    })
+                })
+                .collect();
+            (&generated.tree, &generated.boxes, Some(placeholders))
+        } else {
+            (self.tree, self.boxes, None)
+        };
+        let display_list = self.scene_composer.compose_at_surface(
+            tree,
             computed,
-            self.boxes,
+            boxes,
             editing,
             self.resources.images(),
             self.resources.vectors(),
             &scroll,
-            self.generated_content,
+            placeholders.as_ref().unwrap_or(self.generated_content),
             self.canvases,
+            self.surface
+                .root_transform()
+                .unwrap_or(AffineTransform::IDENTITY),
+            Some(self.surface.visible_content_rect()),
         );
         // Before anything else can read them, and before the early returns
         // below: what `computed_style` answers must be what the cascade said.
+        if let Some(generated) = self.generated_boxes {
+            for node in generated.styles.keys() {
+                computed.remove(node);
+            }
+        }
         MotionDriver::restore_presentation(computed, undo);
         // Inspect overlay (spec §7.6): when inspect mode is on, append a
         // highlight over the hovered node's border box on top of the scene.
@@ -130,19 +181,26 @@ impl<'a> ComposePhase<'a> {
         let display_list = self
             .inspector
             .apply_overlay(self.boxes, hovered, display_list);
-        phase_clock.finish();
         // Telemetry: mark the compose phase and count paint commands (§7.9).
         let count = display_list.len() as u64;
         self.telemetry
-            .record_phase(FramePhase::Compose, count, ctx.id());
+            .record_phase(FramePhase::Compose, count, ctx.id(), self.diagnostics);
         // Bracket the whole scene in a root device-scale transform so layout
         // (in logical px) rasterizes at physical resolution. At scale `1.0` this
         // is a no-op and the list is byte-identical (see `scaled_root`).
         self.scene
             .set_root(Self::scaled_root(self.surface, display_list));
+        // Compose ends HERE, after the device-scale wrapper and the install —
+        // `scaled_root` moves every command of the frame into a new vector, and
+        // it does so precisely on the HiDPI panels this is being measured on.
+        // The FRAME is not done: `finish()` moved to the end of `run_frame`,
+        // because closing the frame's clock here left the snapshot, the
+        // accessibility publish and the scroll refresh outside every number this
+        // instrument prints (§3.0 M1).
+        phase_clock.mark_compose();
     }
 
-    #[doc = include_str!("compose_phase.doc/scaled_root.md")]
+    #[doc = include_str!("../../docs/api/runtime/compose_phase.doc/scaled_root.md")]
     fn scaled_root(surface: &SurfaceGeometry, display_list: DisplayList) -> DisplayList {
         let Some(root) = surface.root_transform() else {
             return display_list;

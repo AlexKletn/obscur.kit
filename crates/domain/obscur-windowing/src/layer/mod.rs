@@ -1,4 +1,4 @@
-#![doc = include_str!("mod.doc/_module.md")]
+#![doc = include_str!("../../docs/api/layer/mod.doc/_module.md")]
 
 mod layer_anchor;
 pub use layer_anchor::LayerAnchor;
@@ -22,3 +22,7 @@ mod layer_surface_event;
 pub use layer_surface_event::LayerSurfaceEvent;
 mod layer_surface_state;
 pub use layer_surface_state::LayerSurfaceState;
+mod layer_popup_event;
+pub use layer_popup_event::LayerPopupEvent;
+mod layer_popup_frame;
+pub use layer_popup_frame::LayerPopupFrame;

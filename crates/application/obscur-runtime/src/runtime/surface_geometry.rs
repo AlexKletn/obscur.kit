@@ -1,52 +1,67 @@
-#![doc = include_str!("surface_geometry.doc/_module.md")]
+//! [`SurfaceGeometry`]: the host surface, and the mapping between its coordinates
+//! and the document's.
 
 use obscur_geometry::{AffineTransform, Point, Rect, Size};
+use obscur_interaction::gesture::ZoomPan;
 use obscur_resources::source::requested_density;
 
-#[doc = include_str!("surface_geometry.doc/MIN_DEVICE_SCALE.md")]
+/// The lowest device scale accepted. A non-positive or non-finite request lands
+/// here rather than producing a degenerate or `NaN` transform.
 const MIN_DEVICE_SCALE: f32 = 0.1;
 
-#[doc = include_str!("surface_geometry.doc/SurfaceGeometry.md")]
+#[doc = include_str!("../../docs/api/runtime/surface_geometry.doc/SurfaceGeometry.md")]
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SurfaceGeometry {
-    #[doc = include_str!("surface_geometry.doc/viewport.md")]
+    /// The viewport frames are laid out under, in logical CSS pixels.
     viewport: Size,
-    #[doc = include_str!("surface_geometry.doc/viewport_scroll.md")]
+    /// The document point pinned to the viewport's top-left, in logical pixels —
+    /// the viewport's own scroll position, which is what `position: sticky`
+    /// clamps against and what puts the arranged boxes into document space.
     viewport_scroll: (f32, f32),
-    #[doc = include_str!("surface_geometry.doc/device_scale.md")]
+    /// The device-pixel scale (HiDPI factor × user zoom) the composed scene
+    /// renders at. Clamped to [`MIN_DEVICE_SCALE`].
     device_scale: f32,
-    #[doc = include_str!("surface_geometry.doc/content_offset.md")]
+    /// The content scroll offset `(x, y)` in logical CSS pixels — the content
+    /// point pinned to the viewport top-left. A positive offset scrolls content
+    /// up/left (spec §4.1).
     content_offset: (f32, f32),
+    /// The optional viewport zoom and pan, separate from the device scale.
+    view_camera: Option<ZoomPan>,
 }
 
-#[doc = include_str!("surface_geometry.doc/SurfaceGeometry_2.md")]
+/// Reads take `self` by value and writes take `&mut self`: the type is four
+/// scalars and `Copy`, so a read costs the same either way and the signature says
+/// which half of the API it is in.
 impl SurfaceGeometry {
-    #[doc = include_str!("surface_geometry.doc/new.md")]
+    /// A surface of `viewport` logical pixels at scale `1.0`, unscrolled — the
+    /// identity case, in which [`root_transform`](Self::root_transform) emits
+    /// nothing and [`to_content_point`](Self::to_content_point) is the identity.
     pub(crate) const fn new(viewport: Size) -> Self {
         Self {
             viewport,
             viewport_scroll: (0.0, 0.0),
             device_scale: 1.0,
             content_offset: (0.0, 0.0),
+            view_camera: None,
         }
     }
 
-    #[doc = include_str!("surface_geometry.doc/viewport_2.md")]
+    /// The viewport frames are laid out under.
     pub(crate) const fn viewport(self) -> Size {
         self.viewport
     }
 
-    #[doc = include_str!("surface_geometry.doc/set_viewport.md")]
+    /// Sets the viewport subsequent frames are laid out under.
     pub(crate) const fn set_viewport(&mut self, viewport: Size) {
         self.viewport = viewport;
     }
 
-    #[doc = include_str!("surface_geometry.doc/device_scale_2.md")]
+    /// The device-pixel scale the composed scene renders at.
     pub(crate) const fn device_scale(self) -> f32 {
         self.device_scale
     }
 
-    #[doc = include_str!("surface_geometry.doc/set_device_scale.md")]
+    #[doc = include_str!("../../docs/api/runtime/surface_geometry.doc/set_device_scale.md")]
     pub(crate) fn set_device_scale(&mut self, scale: f32) -> bool {
         let previous = self.device_scale;
         self.device_scale = if scale.is_finite() {
@@ -57,7 +72,7 @@ impl SurfaceGeometry {
         requested_density(previous) != requested_density(self.device_scale)
     }
 
-    #[doc = include_str!("surface_geometry.doc/set_surface.md")]
+    #[doc = include_str!("../../docs/api/runtime/surface_geometry.doc/set_surface.md")]
     pub(crate) fn set_surface(&mut self, physical: Size, scale: f32) -> bool {
         let rebanded = self.set_device_scale(scale);
         let effective = self.device_scale;
@@ -65,12 +80,13 @@ impl SurfaceGeometry {
         rebanded
     }
 
-    #[doc = include_str!("surface_geometry.doc/content_offset_2.md")]
+    /// The content scroll offset `(x, y)` in logical CSS pixels.
     pub(crate) const fn content_offset(self) -> (f32, f32) {
         self.content_offset
     }
 
-    #[doc = include_str!("surface_geometry.doc/set_content_offset.md")]
+    /// Sets the content scroll offset. A non-finite component is ignored and that
+    /// axis keeps its previous value.
     pub(crate) fn set_content_offset(&mut self, x: f32, y: f32) {
         let (ox, oy) = self.content_offset;
         self.content_offset = (
@@ -79,17 +95,21 @@ impl SurfaceGeometry {
         );
     }
 
-    #[doc = include_str!("surface_geometry.doc/viewport_scroll_2.md")]
+    /// The viewport's own scroll offset `(x, y)` in logical pixels.
     pub(crate) const fn viewport_scroll(self) -> (f32, f32) {
         self.viewport_scroll
     }
 
-    #[doc = include_str!("surface_geometry.doc/set_viewport_scroll.md")]
+    /// Sets the viewport scroll offset. A non-finite component preserves the previous offset on that axis.
     pub(crate) const fn set_viewport_scroll(&mut self, x: f32, y: f32) {
-        self.viewport_scroll = (x, y);
+        let (old_x, old_y) = self.viewport_scroll;
+        self.viewport_scroll = (
+            if x.is_finite() { x } else { old_x },
+            if y.is_finite() { y } else { old_y },
+        );
     }
 
-    #[doc = include_str!("surface_geometry.doc/document_viewport.md")]
+    #[doc = include_str!("../../docs/api/runtime/surface_geometry.doc/document_viewport.md")]
     pub(crate) fn document_viewport(self) -> Rect {
         Rect::new(
             Point::new(self.viewport_scroll.0, self.viewport_scroll.1),
@@ -97,35 +117,84 @@ impl SurfaceGeometry {
         )
     }
 
-    #[doc = include_str!("surface_geometry.doc/root_transform.md")]
+    /// Returns the window’s visible rectangle in content coordinates after camera zoom and pan.
+    pub(crate) fn visible_content_rect(self) -> Rect {
+        let (x, y) = self.content_offset;
+        let camera_origin = self
+            .view_camera
+            .map_or(Point::ORIGIN, |camera| camera.content_point(Point::ORIGIN));
+        let scale = self.camera_scale();
+        Rect::new(
+            Point::new(camera_origin.x + x, camera_origin.y + y),
+            Size::new(self.viewport.width / scale, self.viewport.height / scale),
+        )
+    }
+
+    /// Installs or clears the application’s surface camera.
+    pub(crate) fn set_view_camera(&mut self, camera: Option<ZoomPan>) -> bool {
+        if let Some(camera) = camera
+            && (!camera.scale().recip().is_finite()
+                || !camera
+                    .transform()
+                    .coeffs
+                    .iter()
+                    .all(|value| value.is_finite()))
+        {
+            return false;
+        }
+        self.view_camera = camera;
+        true
+    }
+
+    /// Maps document coordinates to logical window coordinates.
+    pub(crate) fn window_transform(self) -> AffineTransform {
+        let (ox, oy) = self.content_offset;
+        let offset = AffineTransform::translate(-ox, -oy);
+        self.view_camera
+            .map_or(offset, |camera| camera.transform().multiply(offset))
+    }
+
+    /// Returns the viewport camera scale independently of device scale.
+    pub(crate) fn camera_scale(self) -> f32 {
+        self.view_camera.map_or(1.0, |camera| camera.scale())
+    }
+
+    #[doc = include_str!("../../docs/api/runtime/surface_geometry.doc/root_transform.md")]
     pub(crate) fn root_transform(self) -> Option<AffineTransform> {
         if self.is_identity() {
             return None;
         }
-        let (ox, oy) = self.content_offset;
         Some(
             AffineTransform::scale(self.device_scale, self.device_scale)
-                .multiply(AffineTransform::translate(-ox, -oy)),
+                .multiply(self.window_transform()),
         )
     }
 
-    #[doc = include_str!("surface_geometry.doc/to_content_point.md")]
+    /// Maps a host `position` (physical space) into content space — the inverse of
+    /// [`root_transform`](Self::root_transform), and the mapping applied before
+    /// hit-testing so it happens in the space layout ran in.
     pub(crate) fn to_content_point(self, position: Point) -> Point {
         if self.is_identity() {
             return position;
         }
         let (ox, oy) = self.content_offset;
-        Point::new(
-            position.x / self.device_scale + ox,
-            position.y / self.device_scale + oy,
-        )
+        let window = Point::new(
+            position.x / self.device_scale,
+            position.y / self.device_scale,
+        );
+        let content = self
+            .view_camera
+            .map_or(window, |camera| camera.content_point(window));
+        Point::new(content.x + ox, content.y + oy)
     }
 
-    #[doc = include_str!("surface_geometry.doc/is_identity.md")]
+    /// Whether the surface maps content to host coordinates unchanged — scale
+    /// exactly `1.0` and no content offset. The one condition both
+    /// [`root_transform`](Self::root_transform) and
+    /// [`to_content_point`](Self::to_content_point) branch on, written once so the
+    /// two cannot disagree about when the mapping is trivial.
     fn is_identity(self) -> bool {
-        (self.device_scale - 1.0).abs() <= f32::EPSILON
-            && self.content_offset.0 == 0.0
-            && self.content_offset.1 == 0.0
+        (self.device_scale - 1.0).abs() <= f32::EPSILON && self.window_transform().is_identity()
     }
 }
 
@@ -215,6 +284,19 @@ mod tests {
         assert_eq!(s.content_offset(), (10.0, 50.0));
         s.set_content_offset(5.0, f32::INFINITY);
         assert_eq!(s.content_offset(), (5.0, 50.0));
+    }
+
+    /// Mixed valid and invalid scroll coordinates update only the valid axes.
+    #[test]
+    fn non_finite_viewport_scroll_preserves_the_affected_axis() {
+        let mut surface = surface();
+        surface.set_viewport_scroll(40.0, 70.0);
+        surface.set_viewport_scroll(f32::NAN, 90.0);
+        assert_eq!(surface.viewport_scroll(), (40.0, 90.0));
+        surface.set_viewport_scroll(-10.0, f32::INFINITY);
+        assert_eq!(surface.viewport_scroll(), (-10.0, 90.0));
+        surface.set_viewport_scroll(f32::NEG_INFINITY, f32::NAN);
+        assert_eq!(surface.document_viewport().origin, Point::new(-10.0, 90.0));
     }
 
     #[test]

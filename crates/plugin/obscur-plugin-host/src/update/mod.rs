@@ -6,3 +6,5 @@ mod staged_handover;
 pub use staged_handover::StagedHandover;
 mod state_migration;
 pub use state_migration::StateMigration;
+mod state_migration_error;
+pub use state_migration_error::StateMigrationError;

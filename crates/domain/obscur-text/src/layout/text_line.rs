@@ -1,31 +1,31 @@
-#![doc = include_str!("text_line.doc/_module.md")]
+//! One laid-out visual line of a paragraph (spec §5.10).
 
 use obscur_geometry::{Point, Rect, Size};
 
 use crate::shaping::GlyphRun;
 use crate::span::TextRange;
 
-#[doc = include_str!("text_line.doc/TextLine.md")]
+#[doc = include_str!("../../docs/api/layout/text_line.doc/TextLine.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct TextLine {
-    #[doc = include_str!("text_line.doc/runs.md")]
+    /// The glyph runs composing the line, in visual order.
     runs: Vec<GlyphRun>,
-    #[doc = include_str!("text_line.doc/range.md")]
+    /// The byte range of the source text this line covers.
     range: TextRange,
-    #[doc = include_str!("text_line.doc/top.md")]
+    /// The y of the line box's top edge within the paragraph, in logical pixels.
     top: f32,
-    #[doc = include_str!("text_line.doc/width.md")]
+    /// The sum of the runs' advance widths, in logical pixels.
     width: f32,
-    #[doc = include_str!("text_line.doc/height.md")]
+    /// The line box height, in logical pixels.
     height: f32,
-    #[doc = include_str!("text_line.doc/baseline.md")]
+    /// The baseline offset measured down from `top`, in logical pixels.
     baseline: f32,
-    #[doc = include_str!("text_line.doc/x_offset.md")]
+    /// The horizontal start offset from alignment, in logical pixels.
     x_offset: f32,
 }
 
 impl TextLine {
-    #[doc = include_str!("text_line.doc/new.md")]
+    #[doc = include_str!("../../docs/api/layout/text_line.doc/new.md")]
     #[must_use]
     pub fn new(
         runs: Vec<GlyphRun>,
@@ -46,62 +46,63 @@ impl TextLine {
         }
     }
 
-    #[doc = include_str!("text_line.doc/with_x_offset.md")]
+    /// Returns this line with its horizontal start offset set to `x_offset`.
     #[must_use]
     pub fn with_x_offset(mut self, x_offset: f32) -> Self {
         self.x_offset = x_offset;
         self
     }
 
-    #[doc = include_str!("text_line.doc/runs_2.md")]
+    /// Returns the glyph runs composing the line, in visual order.
     #[must_use]
     pub fn runs(&self) -> &[GlyphRun] {
         &self.runs
     }
 
-    #[doc = include_str!("text_line.doc/range_2.md")]
+    /// Returns the byte range of the source text this line covers.
     #[must_use]
     pub const fn range(&self) -> TextRange {
         self.range
     }
 
-    #[doc = include_str!("text_line.doc/top_2.md")]
+    /// Returns the y of the line box's top edge within the paragraph.
     #[must_use]
     pub const fn top(&self) -> f32 {
         self.top
     }
 
-    #[doc = include_str!("text_line.doc/width_2.md")]
+    /// Returns the sum of the runs' advance widths, in logical pixels.
     #[must_use]
     pub const fn width(&self) -> f32 {
         self.width
     }
 
-    #[doc = include_str!("text_line.doc/height_2.md")]
+    /// Returns the line box height, in logical pixels.
     #[must_use]
     pub const fn height(&self) -> f32 {
         self.height
     }
 
-    #[doc = include_str!("text_line.doc/baseline_2.md")]
+    /// Returns the baseline offset measured down from [`top`](Self::top).
     #[must_use]
     pub const fn baseline(&self) -> f32 {
         self.baseline
     }
 
-    #[doc = include_str!("text_line.doc/x_offset_2.md")]
+    /// Returns the horizontal start offset from alignment, in logical pixels.
     #[must_use]
     pub const fn x_offset(&self) -> f32 {
         self.x_offset
     }
 
-    #[doc = include_str!("text_line.doc/glyph_count.md")]
+    /// Returns the total number of glyphs across all of the line's runs.
     #[must_use]
     pub fn glyph_count(&self) -> usize {
         self.runs.iter().map(GlyphRun::len).sum()
     }
 
-    #[doc = include_str!("text_line.doc/bounds.md")]
+    /// Returns the line's box as a [`Rect`] positioned at
+    /// `(x_offset, top)` and sized `width` × `height` (spec §5.10).
     #[must_use]
     pub fn bounds(&self) -> Rect {
         Rect::new(
@@ -110,7 +111,7 @@ impl TextLine {
         )
     }
 
-    #[doc = include_str!("text_line.doc/is_empty.md")]
+    /// Returns whether the line contains no glyphs.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.glyph_count() == 0

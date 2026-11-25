@@ -1,46 +1,10 @@
-#![doc = include_str!("unsupported_css_feature.doc/_module.md")]
+//! A CSS feature the kit does not support, surfaced explicitly (spec §4.13).
 
 use crate::source::SourceSpan;
 
-#[doc = include_str!("unsupported_css_feature.doc/UnsupportedFeatureKind.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum UnsupportedFeatureKind {
-    #[doc = include_str!("unsupported_css_feature.doc/AtRule.md")]
-    AtRule,
-    #[doc = include_str!("unsupported_css_feature.doc/Property.md")]
-    Property,
-    #[doc = include_str!("unsupported_css_feature.doc/Selector.md")]
-    Selector,
-    #[doc = include_str!("unsupported_css_feature.doc/Function.md")]
-    Function,
-    #[doc = include_str!("unsupported_css_feature.doc/Unit.md")]
-    Unit,
-    #[doc = include_str!("unsupported_css_feature.doc/PseudoElement.md")]
-    PseudoElement,
-    #[doc = include_str!("unsupported_css_feature.doc/VendorProperty.md")]
-    VendorProperty,
-}
+use super::UnsupportedFeatureKind;
 
-impl UnsupportedFeatureKind {
-    #[doc = include_str!("unsupported_css_feature.doc/label.md")]
-    #[must_use]
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::AtRule => "unsupported at-rule",
-            Self::Property => "unsupported property",
-            Self::Selector => "unsupported selector",
-            Self::Function => "unsupported function",
-            Self::Unit => "unsupported unit",
-            Self::PseudoElement => "unsupported pseudo-element",
-            // Not "unsupported": ignoring another vendor's property is the
-            // correct and complete handling of it, and calling that a fault
-            // would make a portable stylesheet look broken.
-            Self::VendorProperty => "ignored vendor property",
-        }
-    }
-}
-
-#[doc = include_str!("unsupported_css_feature.doc/UnsupportedCssFeature.md")]
+#[doc = include_str!("../../docs/api/error/unsupported_css_feature.doc/UnsupportedCssFeature.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnsupportedCssFeature {
     kind: UnsupportedFeatureKind,
@@ -49,7 +13,8 @@ pub struct UnsupportedCssFeature {
 }
 
 impl UnsupportedCssFeature {
-    #[doc = include_str!("unsupported_css_feature.doc/new.md")]
+    /// Creates a diagnostic for an unsupported feature of `kind` named `name`
+    /// covering `span`.
     #[must_use]
     pub fn new(kind: UnsupportedFeatureKind, name: impl Into<Box<str>>, span: SourceSpan) -> Self {
         Self {
@@ -59,19 +24,19 @@ impl UnsupportedCssFeature {
         }
     }
 
-    #[doc = include_str!("unsupported_css_feature.doc/kind.md")]
+    /// Returns the category of the unsupported feature.
     #[must_use]
     pub const fn kind(&self) -> UnsupportedFeatureKind {
         self.kind
     }
 
-    #[doc = include_str!("unsupported_css_feature.doc/name.md")]
+    /// Returns the offending token (for example `"@supports"`).
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    #[doc = include_str!("unsupported_css_feature.doc/span.md")]
+    /// Returns the span the unsupported feature occupies.
     #[must_use]
     pub const fn span(&self) -> SourceSpan {
         self.span

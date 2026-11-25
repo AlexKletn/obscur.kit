@@ -1,5 +1,6 @@
-#![doc = include_str!("capability_changed.doc/_module.md")]
+//! `CapabilityChanged` (skeleton stub for the spec-defined entity; not yet implemented).
 
-#[doc = include_str!("capability_changed.doc/CapabilityChanged.md")]
+/// Placeholder for the `CapabilityChanged` entity. See the Obscur Kit 2 specs for its
+/// contract; this stub exists to materialise the target source layout.
 #[derive(Debug)]
 pub struct CapabilityChanged;

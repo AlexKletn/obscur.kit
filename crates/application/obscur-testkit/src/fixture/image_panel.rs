@@ -1,4 +1,4 @@
-#![doc = include_str!("image_panel.doc/_module.md")]
+//! The element an image is loaded into.
 
 use obscur_identity::ComponentId;
 use obscur_style::cascade::CascadeOrigin;
@@ -8,15 +8,15 @@ use obscur_view::view::{CLASS, SRC, View, ViewFragment, ViewNode, ViewProperty, 
 
 use crate::fixture::ClassRule;
 
-#[doc = include_str!("image_panel.doc/ImagePanel.md")]
+#[doc = include_str!("../../docs/api/fixture/image_panel.doc/ImagePanel.md")]
 #[derive(Debug)]
 pub struct ImagePanel;
 
 impl ImagePanel {
-    #[doc = include_str!("image_panel.doc/URL.md")]
+    /// The asset url the sheet references, and the key it lands in the cache under.
     pub const URL: &'static str = "x";
 
-    #[doc = include_str!("image_panel.doc/view.md")]
+    /// The lone `.img` element.
     #[must_use]
     pub fn view() -> View {
         View::from_fragment(ViewFragment::from_nodes(vec![
@@ -25,7 +25,7 @@ impl ImagePanel {
         ]))
     }
 
-    #[doc = include_str!("image_panel.doc/sheet.md")]
+    /// `.img { background-image: url("x"); width: 40px; height: 30px }`.
     #[must_use]
     pub fn sheet() -> Stylesheet {
         Stylesheet::new(
@@ -42,7 +42,7 @@ impl ImagePanel {
         )
     }
 
-    #[doc = include_str!("image_panel.doc/src_view.md")]
+    #[doc = include_str!("../../docs/api/fixture/image_panel.doc/src_view.md")]
     #[must_use]
     pub fn src_view(src: &str) -> View {
         View::from_fragment(ViewFragment::from_nodes(vec![

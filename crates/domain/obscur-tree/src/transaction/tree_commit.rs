@@ -1,28 +1,32 @@
-#![doc = include_str!("tree_commit.doc/_module.md")]
+//! `TreeCommit`: the recorded outcome of a successful transaction commit.
 
 use obscur_identity::{NodeId, VersionStamp};
 
-#[doc = include_str!("tree_commit.doc/TreeCommit.md")]
+#[doc = include_str!("../../docs/api/transaction/tree_commit.doc/TreeCommit.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TreeCommit {
-    #[doc = include_str!("tree_commit.doc/base_version.md")]
+    /// The tree version captured at the start of commit, before any change was
+    /// applied.
     base_version: VersionStamp,
-    #[doc = include_str!("tree_commit.doc/committed_version.md")]
+    /// The tree version after the whole batch was applied.
     committed_version: VersionStamp,
-    #[doc = include_str!("tree_commit.doc/created.md")]
+    /// Nodes created, in creation order; index `i` is the concrete id for the
+    /// `i`-th [`StagedRef::New`](super::StagedRef::New).
     created: Vec<NodeId>,
-    #[doc = include_str!("tree_commit.doc/removed.md")]
+    /// Nodes removed (subtree removals), in the order they were removed.
     removed: Vec<NodeId>,
-    #[doc = include_str!("tree_commit.doc/moved.md")]
+    /// Existing children that were repositioned.
     moved: Vec<NodeId>,
-    #[doc = include_str!("tree_commit.doc/updated.md")]
+    /// Text nodes whose content was replaced.
     updated: Vec<NodeId>,
-    #[doc = include_str!("tree_commit.doc/new_root.md")]
+    /// The node designated as the new root, if the batch set one.
     new_root: Option<NodeId>,
 }
 
 impl TreeCommit {
-    #[doc = include_str!("tree_commit.doc/new.md")]
+    /// Builds a commit record. Constructed by
+    /// [`TreeTransaction::commit`](super::TreeTransaction::commit) after a
+    /// successful apply.
     #[must_use]
     pub(crate) fn new(
         base_version: VersionStamp,
@@ -44,49 +48,50 @@ impl TreeCommit {
         }
     }
 
-    #[doc = include_str!("tree_commit.doc/base_version_2.md")]
+    /// The tree version before the batch was applied.
     #[must_use]
     pub fn base_version(&self) -> VersionStamp {
         self.base_version
     }
 
-    #[doc = include_str!("tree_commit.doc/committed_version_2.md")]
+    /// The tree version after the batch was applied.
     #[must_use]
     pub fn committed_version(&self) -> VersionStamp {
         self.committed_version
     }
 
-    #[doc = include_str!("tree_commit.doc/created_2.md")]
+    /// The nodes created by this commit, in creation order.
     #[must_use]
     pub fn created(&self) -> &[NodeId] {
         &self.created
     }
 
-    #[doc = include_str!("tree_commit.doc/removed_2.md")]
+    /// The nodes removed by this commit.
     #[must_use]
     pub fn removed(&self) -> &[NodeId] {
         &self.removed
     }
 
-    #[doc = include_str!("tree_commit.doc/moved_2.md")]
+    /// The existing children repositioned by this commit.
     #[must_use]
     pub fn moved(&self) -> &[NodeId] {
         &self.moved
     }
 
-    #[doc = include_str!("tree_commit.doc/updated_2.md")]
+    /// The text nodes whose content was replaced by this commit.
     #[must_use]
     pub fn updated(&self) -> &[NodeId] {
         &self.updated
     }
 
-    #[doc = include_str!("tree_commit.doc/new_root_2.md")]
+    /// The node designated as the new root by this commit, if any.
     #[must_use]
     pub fn new_root(&self) -> Option<NodeId> {
         self.new_root
     }
 
-    #[doc = include_str!("tree_commit.doc/resolve_new.md")]
+    /// Resolves the `i`-th staged [`StagedRef::New`](super::StagedRef::New) to
+    /// its concrete [`NodeId`], or `None` if no such creation was in the batch.
     #[must_use]
     pub fn resolve_new(&self, index: u32) -> Option<NodeId> {
         self.created.get(index as usize).copied()

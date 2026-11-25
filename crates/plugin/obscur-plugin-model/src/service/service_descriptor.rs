@@ -1,5 +1,6 @@
-#![doc = include_str!("service_descriptor.doc/_module.md")]
+//! `ServiceDescriptor` (skeleton stub for the spec-defined entity; not yet implemented).
 
-#[doc = include_str!("service_descriptor.doc/ServiceDescriptor.md")]
+/// Placeholder for the `ServiceDescriptor` entity. See the Obscur Kit 2 specs for its
+/// contract; this stub exists to materialise the target source layout.
 #[derive(Debug)]
 pub struct ServiceDescriptor;

@@ -1,1 +1,0 @@
-The inclusive upper bound.

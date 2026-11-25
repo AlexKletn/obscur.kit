@@ -1,5 +1,6 @@
-#![doc = include_str!("vector.doc/_module.md")]
+//! Vector (skeleton stub for the spec-defined entity; not yet implemented).
 
-#[doc = include_str!("vector.doc/Vector.md")]
+/// Placeholder for the `Vector` entity. See the Obscur Kit 2 specs for its
+/// contract; this stub exists to materialise the target source layout.
 #[derive(Debug)]
 pub(crate) struct Vector;

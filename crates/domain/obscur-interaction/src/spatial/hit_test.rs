@@ -1,9 +1,9 @@
-#![doc = include_str!("hit_test.doc/_module.md")]
+//! The [`HitTest`] record for a single node hit at a point (spec §4.7).
 
 use obscur_geometry::Point;
 use obscur_identity::NodeId;
 
-#[doc = include_str!("hit_test.doc/HitTest.md")]
+#[doc = include_str!("../../docs/api/spatial/hit_test.doc/HitTest.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HitTest {
     node: NodeId,
@@ -12,7 +12,8 @@ pub struct HitTest {
 }
 
 impl HitTest {
-    #[doc = include_str!("hit_test.doc/new.md")]
+    /// Constructs a hit record for `node` struck at `local_point` (in the
+    /// node's local space) with the given `z_order` (higher = on top).
     #[must_use]
     pub const fn new(node: NodeId, local_point: Point, z_order: i32) -> Self {
         Self {
@@ -22,19 +23,19 @@ impl HitTest {
         }
     }
 
-    #[doc = include_str!("hit_test.doc/node.md")]
+    /// The node that was hit.
     #[must_use]
     pub const fn node(&self) -> NodeId {
         self.node
     }
 
-    #[doc = include_str!("hit_test.doc/local_point.md")]
+    /// The query point translated into the node's local coordinate space.
     #[must_use]
     pub const fn local_point(&self) -> Point {
         self.local_point
     }
 
-    #[doc = include_str!("hit_test.doc/z_order.md")]
+    /// The node's z-order; higher values are drawn on top.
     #[must_use]
     pub const fn z_order(&self) -> i32 {
         self.z_order

@@ -1,4 +1,4 @@
-#![doc = include_str!("button_element.doc/_module.md")]
+//! The `button` a UA sheet and an author sheet argue over.
 
 use obscur_identity::ComponentId;
 use obscur_style::matching::{BlockDeclaration, StyleRule};
@@ -10,22 +10,22 @@ use obscur_view::view::{
     DISABLED, LOCAL_NAME, View, ViewFragment, ViewNode, ViewProperty, ViewValue,
 };
 
-#[doc = include_str!("button_element.doc/ButtonElement.md")]
+#[doc = include_str!("../../docs/api/fixture/button_element.doc/ButtonElement.md")]
 #[derive(Debug)]
 pub struct ButtonElement;
 
 impl ButtonElement {
-    #[doc = include_str!("button_element.doc/UA_FILL.md")]
+    #[doc = include_str!("../../docs/api/fixture/button_element.doc/UA_FILL.md")]
     pub const UA_FILL: StyleColor =
         StyleColor::rgba(244.0 / 255.0, 242.0 / 255.0, 238.0 / 255.0, 1.0);
 
-    #[doc = include_str!("button_element.doc/view.md")]
+    /// The bare `button` element with its text child.
     #[must_use]
     pub fn view() -> View {
         Self::wrap(Self::element())
     }
 
-    #[doc = include_str!("button_element.doc/state_view.md")]
+    #[doc = include_str!("../../docs/api/fixture/button_element.doc/state_view.md")]
     #[must_use]
     pub fn state_view(disabled: bool) -> View {
         let mut node = Self::element();
@@ -35,13 +35,13 @@ impl ButtonElement {
         Self::wrap(node)
     }
 
-    #[doc = include_str!("button_element.doc/filled.md")]
+    /// `button { background-color: <color> }`.
     #[must_use]
     pub fn filled(color: StyleColor) -> StyleRule {
         StyleRule::new(Self::selectors(None), Self::background(color))
     }
 
-    #[doc = include_str!("button_element.doc/disabled_filled.md")]
+    /// `button:disabled { background-color: <color> }`.
     #[must_use]
     pub fn disabled_filled(color: StyleColor) -> StyleRule {
         StyleRule::new(
@@ -50,7 +50,7 @@ impl ButtonElement {
         )
     }
 
-    #[doc = include_str!("button_element.doc/element.md")]
+    /// The `button` element node both views are built from.
     fn element() -> ViewNode {
         ViewNode::element(ComponentId::from_raw(20))
             .with_prop(ViewProperty::new(
@@ -60,12 +60,12 @@ impl ButtonElement {
             .with_children(ViewFragment::from_nodes(vec![ViewNode::text("Save")]))
     }
 
-    #[doc = include_str!("button_element.doc/wrap.md")]
+    /// One element as a whole view.
     fn wrap(node: ViewNode) -> View {
         View::from_fragment(ViewFragment::from_nodes(vec![node]))
     }
 
-    #[doc = include_str!("button_element.doc/selectors.md")]
+    /// The `button` type selector, optionally compounded with a pseudo-class.
     fn selectors(pseudo: Option<PseudoClassSelector>) -> SelectorList {
         let mut compound = vec![SimpleSelector::Type("button".into())];
         if let Some(pseudo) = pseudo {
@@ -77,7 +77,7 @@ impl ButtonElement {
         )])
     }
 
-    #[doc = include_str!("button_element.doc/background.md")]
+    /// A one-declaration block setting `background-color`.
     fn background(color: StyleColor) -> Vec<BlockDeclaration> {
         vec![BlockDeclaration::normal(
             PropertyId::BackgroundColor,

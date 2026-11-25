@@ -1,19 +1,19 @@
-#![doc = include_str!("message_key.doc/_module.md")]
+//! `MessageKey`: the identity of a translatable message (spec §7.2).
 
 use std::fmt;
 
-#[doc = include_str!("message_key.doc/MessageKey.md")]
+#[doc = include_str!("../../docs/api/message/message_key.doc/MessageKey.md")]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct MessageKey(Box<str>);
 
 impl MessageKey {
-    #[doc = include_str!("message_key.doc/new.md")]
+    /// Creates a key from its name.
     #[must_use]
     pub fn new(name: impl Into<Box<str>>) -> Self {
         Self(name.into())
     }
 
-    #[doc = include_str!("message_key.doc/as_str.md")]
+    /// Returns the key's name.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0

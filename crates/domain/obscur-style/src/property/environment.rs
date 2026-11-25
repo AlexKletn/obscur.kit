@@ -1,80 +1,23 @@
-#![doc = include_str!("environment.doc/_module.md")]
+//! The typed environment values a host reports and CSS `env()` reads (spec
+//! §6.15 insets and virtual keyboard).
 
 use obscur_geometry::Insets;
 
-#[doc = include_str!("environment.doc/EnvVar.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum EnvVar {
-    #[doc = include_str!("environment.doc/SafeAreaInsetTop.md")]
-    SafeAreaInsetTop,
-    #[doc = include_str!("environment.doc/SafeAreaInsetRight.md")]
-    SafeAreaInsetRight,
-    #[doc = include_str!("environment.doc/SafeAreaInsetBottom.md")]
-    SafeAreaInsetBottom,
-    #[doc = include_str!("environment.doc/SafeAreaInsetLeft.md")]
-    SafeAreaInsetLeft,
-    #[doc = include_str!("environment.doc/KeyboardInsetTop.md")]
-    KeyboardInsetTop,
-    #[doc = include_str!("environment.doc/KeyboardInsetRight.md")]
-    KeyboardInsetRight,
-    #[doc = include_str!("environment.doc/KeyboardInsetBottom.md")]
-    KeyboardInsetBottom,
-    #[doc = include_str!("environment.doc/KeyboardInsetLeft.md")]
-    KeyboardInsetLeft,
-    #[doc = include_str!("environment.doc/KeyboardInsetWidth.md")]
-    KeyboardInsetWidth,
-    #[doc = include_str!("environment.doc/KeyboardInsetHeight.md")]
-    KeyboardInsetHeight,
-}
+use super::EnvVar;
 
-impl EnvVar {
-    #[doc = include_str!("environment.doc/from_name.md")]
-    #[must_use]
-    pub fn from_name(name: &str) -> Option<Self> {
-        match name {
-            "safe-area-inset-top" => Some(Self::SafeAreaInsetTop),
-            "safe-area-inset-right" => Some(Self::SafeAreaInsetRight),
-            "safe-area-inset-bottom" => Some(Self::SafeAreaInsetBottom),
-            "safe-area-inset-left" => Some(Self::SafeAreaInsetLeft),
-            "keyboard-inset-top" => Some(Self::KeyboardInsetTop),
-            "keyboard-inset-right" => Some(Self::KeyboardInsetRight),
-            "keyboard-inset-bottom" => Some(Self::KeyboardInsetBottom),
-            "keyboard-inset-left" => Some(Self::KeyboardInsetLeft),
-            "keyboard-inset-width" => Some(Self::KeyboardInsetWidth),
-            "keyboard-inset-height" => Some(Self::KeyboardInsetHeight),
-            _ => None,
-        }
-    }
-
-    #[doc = include_str!("environment.doc/name.md")]
-    #[must_use]
-    pub const fn name(self) -> &'static str {
-        match self {
-            Self::SafeAreaInsetTop => "safe-area-inset-top",
-            Self::SafeAreaInsetRight => "safe-area-inset-right",
-            Self::SafeAreaInsetBottom => "safe-area-inset-bottom",
-            Self::SafeAreaInsetLeft => "safe-area-inset-left",
-            Self::KeyboardInsetTop => "keyboard-inset-top",
-            Self::KeyboardInsetRight => "keyboard-inset-right",
-            Self::KeyboardInsetBottom => "keyboard-inset-bottom",
-            Self::KeyboardInsetLeft => "keyboard-inset-left",
-            Self::KeyboardInsetWidth => "keyboard-inset-width",
-            Self::KeyboardInsetHeight => "keyboard-inset-height",
-        }
-    }
-}
-
-#[doc = include_str!("environment.doc/EnvironmentValues.md")]
+#[doc = include_str!("../../docs/api/property/environment.doc/EnvironmentValues.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct EnvironmentValues {
-    #[doc = include_str!("environment.doc/safe_area.md")]
+    /// The safe-area insets: how far in from each viewport edge content must stay
+    /// to clear cutouts, rounded corners and system bars.
     pub safe_area: Insets,
-    #[doc = include_str!("environment.doc/keyboard.md")]
+    /// The on-screen keyboard's occluded region, as insets from each viewport
+    /// edge. A hidden keyboard is all zeroes.
     pub keyboard: Insets,
 }
 
 impl EnvironmentValues {
-    #[doc = include_str!("environment.doc/none.md")]
+    /// The environment of a host that reports nothing: no cutouts, no keyboard.
     #[must_use]
     pub const fn none() -> Self {
         Self {
@@ -83,21 +26,21 @@ impl EnvironmentValues {
         }
     }
 
-    #[doc = include_str!("environment.doc/with_safe_area.md")]
+    /// Returns these values with `safe_area` replaced.
     #[must_use]
     pub const fn with_safe_area(mut self, insets: Insets) -> Self {
         self.safe_area = insets;
         self
     }
 
-    #[doc = include_str!("environment.doc/with_keyboard.md")]
+    /// Returns these values with the keyboard's occluded region replaced.
     #[must_use]
     pub const fn with_keyboard(mut self, insets: Insets) -> Self {
         self.keyboard = insets;
         self
     }
 
-    #[doc = include_str!("environment.doc/get.md")]
+    #[doc = include_str!("../../docs/api/property/environment.doc/get.md")]
     #[must_use]
     pub fn get(self, var: EnvVar) -> f32 {
         match var {
@@ -164,32 +107,5 @@ mod tests {
         assert_eq!(env.get(EnvVar::SafeAreaInsetBottom), 10.0);
         assert_eq!(env.get(EnvVar::KeyboardInsetBottom), 300.0);
         assert_eq!(env.get(EnvVar::KeyboardInsetHeight), 300.0);
-    }
-
-    #[test]
-    fn names_round_trip() {
-        for var in [
-            EnvVar::SafeAreaInsetTop,
-            EnvVar::SafeAreaInsetRight,
-            EnvVar::SafeAreaInsetBottom,
-            EnvVar::SafeAreaInsetLeft,
-            EnvVar::KeyboardInsetTop,
-            EnvVar::KeyboardInsetRight,
-            EnvVar::KeyboardInsetBottom,
-            EnvVar::KeyboardInsetLeft,
-            EnvVar::KeyboardInsetWidth,
-            EnvVar::KeyboardInsetHeight,
-        ] {
-            assert_eq!(EnvVar::from_name(var.name()), Some(var), "{}", var.name());
-        }
-    }
-
-    #[test]
-    fn an_unmodelled_name_is_not_an_environment_value() {
-        // Dropped as invalid, not resolved to zero: a typo must not look like an
-        // inset that happens to be absent.
-        assert_eq!(EnvVar::from_name("safe-area-inset-topp"), None);
-        assert_eq!(EnvVar::from_name("titlebar-area-height"), None);
-        assert_eq!(EnvVar::from_name(""), None);
     }
 }

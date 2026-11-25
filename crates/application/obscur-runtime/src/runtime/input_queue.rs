@@ -1,4 +1,4 @@
-#![doc = include_str!("input_queue.doc/_module.md")]
+//! [`InputQueue`]: the events awaiting phase 3, and what that phase coalesces.
 
 use std::collections::VecDeque;
 
@@ -6,41 +6,45 @@ use crate::frame::FrameReason;
 
 use super::{FramePlan, InputDispatch, InputEvent};
 
-#[doc = include_str!("input_queue.doc/InputQueue.md")]
+#[doc = include_str!("../../docs/api/runtime/input_queue.doc/InputQueue.md")]
 #[derive(Debug, Default)]
 pub(crate) struct InputQueue {
-    #[doc = include_str!("input_queue.doc/queued.md")]
+    /// Events received (phase 1) and waiting for dispatch (phase 3), in arrival
+    /// order.
     queued: VecDeque<InputEvent>,
-    #[doc = include_str!("input_queue.doc/dispatches.md")]
+    /// What the last frame's dispatch phase produced, awaiting
+    /// [`take_dispatches`](Self::take_dispatches).
     dispatches: Vec<InputDispatch>,
-    #[doc = include_str!("input_queue.doc/in_dispatch.md")]
+    /// Whether the dispatch phase is running, which is what redirects a handler's
+    /// own frame request into [`coalesced`](Self::coalesced).
     in_dispatch: bool,
-    #[doc = include_str!("input_queue.doc/coalesced.md")]
+    /// The plan accumulated from frame requests made *during* dispatch, for the
+    /// running frame to merge into its own.
     coalesced: Option<FramePlan>,
 }
 
 impl InputQueue {
-    #[doc = include_str!("input_queue.doc/new.md")]
+    /// An empty queue with the dispatch phase not running.
     pub(crate) fn new() -> Self {
         Self::default()
     }
 
-    #[doc = include_str!("input_queue.doc/push.md")]
+    /// Queues `event` for the next frame's dispatch phase.
     pub(crate) fn push(&mut self, event: InputEvent) {
         self.queued.push_back(event);
     }
 
-    #[doc = include_str!("input_queue.doc/pending.md")]
+    /// How many events are waiting for dispatch.
     pub(crate) fn pending(&self) -> usize {
         self.queued.len()
     }
 
-    #[doc = include_str!("input_queue.doc/take_dispatches.md")]
+    #[doc = include_str!("../../docs/api/runtime/input_queue.doc/take_dispatches.md")]
     pub(crate) fn take_dispatches(&mut self) -> Vec<InputDispatch> {
         std::mem::take(&mut self.dispatches)
     }
 
-    #[doc = include_str!("input_queue.doc/begin_dispatch.md")]
+    #[doc = include_str!("../../docs/api/runtime/input_queue.doc/begin_dispatch.md")]
     pub(crate) fn begin_dispatch(&mut self) -> Option<VecDeque<InputEvent>> {
         debug_assert!(!self.in_dispatch, "the dispatch phase is not re-entrant");
         if self.queued.is_empty() {
@@ -51,13 +55,13 @@ impl InputQueue {
         Some(std::mem::take(&mut self.queued))
     }
 
-    #[doc = include_str!("input_queue.doc/end_dispatch.md")]
+    /// Closes the dispatch phase, recording what its events produced.
     pub(crate) fn end_dispatch(&mut self, dispatches: Vec<InputDispatch>) {
         self.in_dispatch = false;
         self.dispatches = dispatches;
     }
 
-    #[doc = include_str!("input_queue.doc/coalesce.md")]
+    #[doc = include_str!("../../docs/api/runtime/input_queue.doc/coalesce.md")]
     pub(crate) fn coalesce(&mut self, reason: FrameReason) -> bool {
         if !self.in_dispatch {
             return false;
@@ -70,7 +74,8 @@ impl InputQueue {
         true
     }
 
-    #[doc = include_str!("input_queue.doc/take_coalesced.md")]
+    /// Takes the plan the dispatch phase accumulated, for the running frame to
+    /// merge. Empties it, so the same invalidation cannot be merged twice.
     pub(crate) const fn take_coalesced(&mut self) -> Option<FramePlan> {
         self.coalesced.take()
     }

@@ -1,19 +1,23 @@
-#![doc = include_str!("align_items.doc/_module.md")]
+//! Cross-axis / grid default alignment of items in a container.
 
-#[doc = include_str!("align_items.doc/AlignItems.md")]
+#[doc = include_str!("../../docs/api/model/align_items.doc/AlignItems.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum AlignItems {
-    #[doc = include_str!("align_items.doc/FlexStart.md")]
+    /// Align items toward the cross-axis start (flexbox spelling).
     FlexStart,
-    #[doc = include_str!("align_items.doc/FlexEnd.md")]
+    /// Align items toward the cross-axis end (flexbox spelling).
     FlexEnd,
-    #[doc = include_str!("align_items.doc/Start.md")]
+    /// Align items toward the start of the axis (grid / CSS-align spelling).
     Start,
-    #[doc = include_str!("align_items.doc/End.md")]
+    /// Align items toward the end of the axis (grid / CSS-align spelling).
     End,
-    #[doc = include_str!("align_items.doc/Center.md")]
+    /// Center items along the axis.
     Center,
-    #[doc = include_str!("align_items.doc/Stretch.md")]
+    /// Aligns the first baseline with the other items in its baseline-sharing group.
+    Baseline,
+    /// Aligns the last baseline with its baseline-sharing group.
+    LastBaseline,
+    /// Stretch items to fill the axis (the default).
     #[default]
     Stretch,
 }

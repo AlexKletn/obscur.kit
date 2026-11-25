@@ -1,44 +1,44 @@
-#![doc = include_str!("script_tag.doc/_module.md")]
+//! An ISO-15924 four-letter script identifier (spec §5.10).
 
-#[doc = include_str!("script_tag.doc/ScriptTag.md")]
+#[doc = include_str!("../../docs/api/shaping/script_tag.doc/ScriptTag.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ScriptTag([u8; 4]);
 
 impl ScriptTag {
-    #[doc = include_str!("script_tag.doc/LATIN.md")]
+    /// Latin script (`Latn`).
     pub const LATIN: ScriptTag = ScriptTag(*b"Latn");
-    #[doc = include_str!("script_tag.doc/CYRILLIC.md")]
+    /// Cyrillic script (`Cyrl`).
     pub const CYRILLIC: ScriptTag = ScriptTag(*b"Cyrl");
-    #[doc = include_str!("script_tag.doc/HAN.md")]
+    /// Han (CJK ideographic) script (`Hani`).
     pub const HAN: ScriptTag = ScriptTag(*b"Hani");
-    #[doc = include_str!("script_tag.doc/ARABIC.md")]
+    /// Arabic script (`Arab`).
     pub const ARABIC: ScriptTag = ScriptTag(*b"Arab");
-    #[doc = include_str!("script_tag.doc/HEBREW.md")]
+    /// Hebrew script (`Hebr`).
     pub const HEBREW: ScriptTag = ScriptTag(*b"Hebr");
-    #[doc = include_str!("script_tag.doc/GREEK.md")]
+    /// Greek script (`Grek`).
     pub const GREEK: ScriptTag = ScriptTag(*b"Grek");
-    #[doc = include_str!("script_tag.doc/HIRAGANA.md")]
+    /// Hiragana script (`Hira`).
     pub const HIRAGANA: ScriptTag = ScriptTag(*b"Hira");
-    #[doc = include_str!("script_tag.doc/KATAKANA.md")]
+    /// Katakana script (`Kana`).
     pub const KATAKANA: ScriptTag = ScriptTag(*b"Kana");
-    #[doc = include_str!("script_tag.doc/COMMON.md")]
+    /// The common / script-neutral pseudo-script (`Zyyy`).
     pub const COMMON: ScriptTag = ScriptTag(*b"Zyyy");
-    #[doc = include_str!("script_tag.doc/UNKNOWN.md")]
+    /// The unknown / unassigned pseudo-script (`Zzzz`).
     pub const UNKNOWN: ScriptTag = ScriptTag(*b"Zzzz");
 
-    #[doc = include_str!("script_tag.doc/from_bytes.md")]
+    /// Creates a tag from its four raw ISO-15924 bytes.
     #[must_use]
     pub const fn from_bytes(bytes: [u8; 4]) -> Self {
         Self(bytes)
     }
 
-    #[doc = include_str!("script_tag.doc/as_bytes.md")]
+    /// Returns the tag's four raw bytes.
     #[must_use]
     pub const fn as_bytes(&self) -> [u8; 4] {
         self.0
     }
 
-    #[doc = include_str!("script_tag.doc/as_str.md")]
+    #[doc = include_str!("../../docs/api/shaping/script_tag.doc/as_str.md")]
     #[must_use]
     pub fn as_str(&self) -> &str {
         core::str::from_utf8(&self.0).unwrap_or("Zzzz")

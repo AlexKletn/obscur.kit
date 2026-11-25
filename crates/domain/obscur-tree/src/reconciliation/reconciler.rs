@@ -1,4 +1,8 @@
-#![doc = include_str!("reconciler.doc/_module.md")]
+//! `Reconciler`: the engine that updates the retained tree from a desired tree.
+
+mod sibling_reconciliation;
+
+use sibling_reconciliation::SiblingReconciliation;
 
 use std::collections::HashMap;
 
@@ -9,18 +13,18 @@ use obscur_view::view::{
 };
 
 use crate::node::{LogicalParent, NodeFlags, NodeKind, VisualParent};
-use crate::tree::{RetainedTree, Subtree};
+use crate::tree::RetainedTree;
 
 use super::{ChildMatcher, IdentityMatch, ReconciliationOp, ReconciliationPlan};
 
-#[doc = include_str!("reconciler.doc/Reconciler.md")]
+#[doc = include_str!("../../docs/api/reconciliation/reconciler.doc/Reconciler.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Reconciler {
     matcher: ChildMatcher,
 }
 
 impl Reconciler {
-    #[doc = include_str!("reconciler.doc/new.md")]
+    /// Creates a reconciler.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -28,7 +32,7 @@ impl Reconciler {
         }
     }
 
-    #[doc = include_str!("reconciler.doc/reconcile_root.md")]
+    #[doc = include_str!("../../docs/api/reconciliation/reconciler.doc/reconcile_root.md")]
     #[must_use]
     pub fn reconcile_root(&self, tree: &mut RetainedTree, desired: &View) -> ReconciliationPlan {
         let mut plan = ReconciliationPlan::new();
@@ -49,7 +53,7 @@ impl Reconciler {
         plan
     }
 
-    #[doc = include_str!("reconciler.doc/reconcile.md")]
+    #[doc = include_str!("../../docs/api/reconciliation/reconciler.doc/reconcile.md")]
     #[must_use]
     pub fn reconcile(
         &self,
@@ -62,7 +66,8 @@ impl Reconciler {
         plan
     }
 
-    #[doc = include_str!("reconciler.doc/reconcile_into.md")]
+    /// Reconciles each sibling group in depth-first order with an explicit work stack.
+    /// A stale parent is ignored.
     fn reconcile_into(
         self,
         tree: &mut RetainedTree,
@@ -70,53 +75,24 @@ impl Reconciler {
         desired: &[ViewNode],
         plan: &mut ReconciliationPlan,
     ) {
-        // Read the parent's current children; bail out defensively if stale.
-        let Some(existing) = tree.get(parent).map(|node| node.child_nodes().to_vec()) else {
+        let Some(root) = self.siblings(tree, parent, desired, plan) else {
             return;
         };
-
-        // §2.12: an outlet is a *position* inside a component's output, and
-        // `project_slots` substitutes every one of them away before that output
-        // ever reaches here. So an outlet arriving at this pass is one no
-        // projection will ever run over — a stray, in a view that is nobody's
-        // render. It is refused rather than materialized: it would otherwise
-        // become an ordinary element carrying the reserved id, laying out and
-        // painting as an empty box that nothing can ever fill.
-        //
-        // This is the whole reason "an outlet never becomes a retained node" is a
-        // property of the tree rather than a claim about one code path — every
-        // production caller of `reconcile_root`/`reconcile` goes through here.
-        // The filter is one `ComponentId` compare per desired child, on the walk
-        // that was happening anyway, and it clones only the level that actually
-        // holds a stray.
-        let stripped: Vec<ViewNode>;
-        let desired = if desired.iter().any(is_outlet) {
-            stripped = desired.iter().filter(|n| !is_outlet(n)).cloned().collect();
-            &stripped
-        } else {
-            desired
-        };
-
-        // §2.4: a key names one child. Two children claiming the same one cannot
-        // both be matched — the key index keeps the first, the rest are inserted as
-        // new while their predecessors are removed, and the group churns every
-        // frame. Nothing else surfaces it, so record it for the runtime to report.
-        report_duplicate_keys(parent, desired, plan);
-
-        let matching = self.matcher.match_children(tree, &existing, desired);
-        let (matches, removed) = matching.into_parts();
-
-        // Old relative order of the reused nodes, for reorder detection.
-        let old_rank: FastMap<NodeId, usize> = existing
-            .iter()
-            .enumerate()
-            .map(|(rank, &id)| (id, rank))
-            .collect();
-
-        let mut new_children: Vec<NodeId> = Vec::with_capacity(desired.len());
-        let mut reused_order: Vec<NodeId> = Vec::new();
-
-        for (index, (node, decision)) in desired.iter().zip(matches).enumerate() {
+        let mut pending = vec![root];
+        while let Some(frame) = pending.last_mut() {
+            let Some(decision) = frame.matches.next() else {
+                pending
+                    .pop()
+                    .expect("active sibling group")
+                    .finish(tree, plan);
+                continue;
+            };
+            let node = frame
+                .desired
+                .find(|node| !is_outlet(node))
+                .expect("each desired child has a match");
+            let index = frame.new_children.len();
+            let parent = frame.parent;
             let id = match decision {
                 IdentityMatch::Reuse(id) => {
                     // In-place content updates: text content for text nodes, and
@@ -153,7 +129,7 @@ impl Reconciler {
                             }
                         }
                     }
-                    reused_order.push(id);
+                    frame.reused_order.push(id);
                     id
                 }
                 IdentityMatch::Create => {
@@ -186,76 +162,61 @@ impl Reconciler {
 
             apply_identity(tree, id, parent, desired_key(node));
 
-            // Recurse into element children (created nodes start empty, so all
-            // of their desired children become inserts).
-            //
-            // A COMPONENT_HOST is the exception: its children belong to the
-            // mounted component's `render`, not to the desired tree. The desired
-            // node names the component and carries its props but says nothing
-            // about its output, so recursing here would delete that output every
-            // frame — and take any nested component instance (and its local
-            // state) with it. Authored children under a component are §2.12 slot
-            // content: they are not the component's output, and are never
-            // reconciled *as* it. `apply_slot_content` above has already kept
-            // them, and the runtime projects them into the outlets the
-            // component's own render declares before committing that render here.
+            frame.new_children.push(id);
+
+            // A component host owns its rendered children. Authored children
+            // are kept as slot content by apply_slot_content instead.
             if let ViewNode::Element { children, .. } = node
                 && !hosts_component(tree, id)
+                && let Some(child_frame) = self.siblings(tree, id, children.nodes(), plan)
             {
-                self.reconcile_into(tree, id, children.nodes(), plan);
-            }
-
-            new_children.push(id);
-        }
-
-        // Record moves for reused nodes whose relative order changed. Nodes that
-        // stay in increasing old-rank order are left in place (no-op); the rest
-        // are repositioned to their final index.
-        let mut last_rank: Option<usize> = None;
-        for &id in &reused_order {
-            let Some(&rank) = old_rank.get(&id) else {
-                continue;
-            };
-            let in_order = last_rank.is_none_or(|last| rank > last);
-            if in_order {
-                last_rank = Some(rank);
-            } else if let Some(index) = new_children.iter().position(|&c| c == id) {
-                plan.push(ReconciliationOp::Move { id, index });
-            }
-        }
-
-        // Commit the parent's child order to the desired order, then refresh the
-        // element-only projection the component tree exposes.
-        if let Some(parent_node) = tree.get_mut(parent) {
-            parent_node.children = new_children;
-        }
-        tree.sync_element_children(parent);
-
-        // Remove every unmatched existing child together with its subtree,
-        // leaves before parents so a parent is never removed before its children.
-        for &root in &removed {
-            let mut ids = Subtree::new(root).descendants(tree);
-            ids.reverse();
-            for id in ids {
-                // Captured before the removal: afterwards the node is gone and its
-                // parent is unreachable, which is exactly what forced consumers to
-                // widen to a full restyle.
-                let parent = tree.get(id).and_then(|node| node.logical_parent().parent());
-                if tree.remove(id).is_some() {
-                    plan.push(ReconciliationOp::Remove { id, parent });
-                }
+                pending.push(child_frame);
             }
         }
     }
+
+    /// Prepares a sibling group for matching before traversing its children.
+    fn siblings<'a>(
+        self,
+        tree: &RetainedTree,
+        parent: NodeId,
+        desired: &'a [ViewNode],
+        plan: &mut ReconciliationPlan,
+    ) -> Option<SiblingReconciliation<'a>> {
+        let existing = tree.get(parent)?.child_nodes();
+        // Stray slot outlets never materialize in the retained tree.
+        let authored = || desired.iter().filter(|node| !is_outlet(node));
+        report_duplicate_keys(parent, authored(), plan);
+        let (matches, removed) = self
+            .matcher
+            .match_desired(tree, existing, authored())
+            .into_parts();
+        let new_children = Vec::with_capacity(matches.len());
+        let old_rank = existing
+            .iter()
+            .enumerate()
+            .map(|(rank, &id)| (id, rank))
+            .collect();
+        Some(SiblingReconciliation {
+            parent,
+            desired: desired.iter(),
+            matches: matches.into_iter(),
+            removed,
+            old_rank,
+            new_children,
+            reused_order: Vec::new(),
+        })
+    }
 }
 
-#[doc = include_str!("reconciler.doc/hosts_component.md")]
+/// Whether `id` is a live node flagged as hosting a mounted component, whose
+/// children are therefore owned by that component rather than by the desired tree.
 fn hosts_component(tree: &RetainedTree, id: NodeId) -> bool {
     tree.get(id)
         .is_some_and(|node| node.flags().contains(NodeFlags::COMPONENT_HOST))
 }
 
-#[doc = include_str!("reconciler.doc/node_kind_of.md")]
+/// Maps a desired node to the retained [`NodeKind`] it materializes as.
 fn node_kind_of(node: &ViewNode) -> NodeKind {
     match node {
         ViewNode::Element { component, .. } => NodeKind::Element {
@@ -267,8 +228,12 @@ fn node_kind_of(node: &ViewNode) -> NodeKind {
     }
 }
 
-#[doc = include_str!("reconciler.doc/report_duplicate_keys.md")]
-fn report_duplicate_keys(parent: NodeId, desired: &[ViewNode], plan: &mut ReconciliationPlan) {
+/// Records any key that more than one desired child claims (spec §2.4).
+fn report_duplicate_keys<'a>(
+    parent: NodeId,
+    desired: impl Iterator<Item = &'a ViewNode>,
+    plan: &mut ReconciliationPlan,
+) {
     let mut counts: FastMap<StableKey, usize> = HashMap::default();
     for node in desired {
         if let Some(key) = desired_key(node) {
@@ -282,12 +247,13 @@ fn report_duplicate_keys(parent: NodeId, desired: &[ViewNode], plan: &mut Reconc
     }
 }
 
-#[doc = include_str!("reconciler.doc/desired_key.md")]
+/// Extracts the retained key (a [`StableKey`]) a desired node carries, if any.
 fn desired_key(node: &ViewNode) -> Option<StableKey> {
     node.key().map(|key| key.stable_key().clone())
 }
 
-#[doc = include_str!("reconciler.doc/apply_identity.md")]
+/// Sets a node's logical and visual parent to `parent` and its reconciliation
+/// key. A no-op if `id` is stale.
 fn apply_identity(tree: &mut RetainedTree, id: NodeId, parent: NodeId, key: Option<StableKey>) {
     if let Some(node) = tree.get_mut(id) {
         node.set_logical_parent(LogicalParent::of(parent));
@@ -296,7 +262,9 @@ fn apply_identity(tree: &mut RetainedTree, id: NodeId, parent: NodeId, key: Opti
     }
 }
 
-#[doc = include_str!("reconciler.doc/apply_text_content.md")]
+/// Updates a reused text node's content in place, returning `true` if the
+/// content actually changed. A no-op (returning `false`) if `id` is stale or is
+/// not a text node.
 fn apply_text_content(tree: &mut RetainedTree, id: NodeId, content: &str) -> bool {
     let Some(node) = tree.get_mut(id) else {
         return false;
@@ -315,7 +283,9 @@ fn apply_text_content(tree: &mut RetainedTree, id: NodeId, content: &str) -> boo
     changed
 }
 
-#[doc = include_str!("reconciler.doc/apply_props.md")]
+/// Refreshes a node's CSS-relevant style attributes from a desired element's
+/// props, returning `true` if they actually changed. A no-op (returning
+/// `false`) if `id` is stale or the extracted attributes equal the current ones.
 fn apply_props(tree: &mut RetainedTree, id: NodeId, props: &[ViewProperty]) -> bool {
     let Some(node) = tree.get_mut(id) else {
         return false;
@@ -335,7 +305,7 @@ fn apply_props(tree: &mut RetainedTree, id: NodeId, props: &[ViewProperty]) -> b
     true
 }
 
-#[doc = include_str!("reconciler.doc/apply_slot_content.md")]
+#[doc = include_str!("../../docs/api/reconciliation/reconciler.doc/apply_slot_content.md")]
 fn apply_slot_content(
     tree: &mut RetainedTree,
     id: NodeId,
@@ -364,7 +334,9 @@ fn apply_slot_content(
     true
 }
 
-#[doc = include_str!("reconciler.doc/apply_events.md")]
+/// Refreshes a node's event bindings from a desired element's events, returning
+/// `true` if they actually changed. A no-op (returning `false`) if `id` is stale
+/// or the events equal the current bindings.
 fn apply_events(tree: &mut RetainedTree, id: NodeId, events: &[ViewEventBinding]) -> bool {
     let Some(node) = tree.get_mut(id) else {
         return false;
@@ -402,6 +374,36 @@ mod tests {
         let root = tree.alloc(NodeKind::Root);
         tree.set_root(root);
         (tree, root)
+    }
+
+    #[test]
+    fn deeply_nested_view_reconciles_and_reuses_every_node() {
+        const DEPTH: usize = 20_000;
+        let mut fragment = ViewFragment::new();
+        for _ in 0..DEPTH {
+            fragment = ViewFragment::from_nodes(vec![el(1).with_children(fragment)]);
+        }
+        let view = View::from_fragment(fragment);
+        let mut tree = RetainedTree::new();
+        let reconciler = Reconciler::new();
+        let first = reconciler.reconcile_root(&mut tree, &view);
+        assert_eq!(first.len(), DEPTH + 1);
+        assert_eq!(tree.len(), DEPTH + 1);
+        assert!(reconciler.reconcile_root(&mut tree, &view).is_empty());
+
+        // Dismantle the fixture independently of the tree walk under test.
+        let mut fragments = vec![view.into_fragment()];
+        while let Some(fragment) = fragments.pop() {
+            fragments.extend(
+                fragment
+                    .into_nodes()
+                    .into_iter()
+                    .filter_map(|node| match node {
+                        ViewNode::Element { children, .. } => Some(children),
+                        ViewNode::Text { .. } => None,
+                    }),
+            );
+        }
     }
 
     #[test]

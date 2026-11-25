@@ -1,25 +1,27 @@
-#![doc = include_str!("edit_transaction.doc/_module.md")]
+//! An atomic, invertible record of one text change (spec §5.11).
 
 use crate::selection::TextSelection;
 use crate::span::TextRange;
 
-#[doc = include_str!("edit_transaction.doc/EditTransaction.md")]
+#[doc = include_str!("../../docs/api/editing/edit_transaction.doc/EditTransaction.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct EditTransaction {
-    #[doc = include_str!("edit_transaction.doc/range.md")]
+    /// The pre-edit byte range that was replaced.
     range: TextRange,
-    #[doc = include_str!("edit_transaction.doc/removed.md")]
+    /// The exact text that occupied `range` before the edit.
     removed: Box<str>,
-    #[doc = include_str!("edit_transaction.doc/inserted.md")]
+    /// The text that replaced `removed`.
     inserted: Box<str>,
-    #[doc = include_str!("edit_transaction.doc/selection_before.md")]
+    /// The selection immediately before the edit was applied.
     selection_before: TextSelection,
-    #[doc = include_str!("edit_transaction.doc/selection_after.md")]
+    /// The selection immediately after the edit was applied.
     selection_after: TextSelection,
 }
 
 impl EditTransaction {
-    #[doc = include_str!("edit_transaction.doc/new.md")]
+    /// Creates a transaction recording that `range` (in the pre-edit text), which
+    /// held `removed`, was replaced by `inserted`, moving the selection from
+    /// `selection_before` to `selection_after`.
     #[must_use]
     pub fn new(
         range: TextRange,
@@ -37,43 +39,43 @@ impl EditTransaction {
         }
     }
 
-    #[doc = include_str!("edit_transaction.doc/range_2.md")]
+    /// Returns the pre-edit byte range that was replaced.
     #[must_use]
     pub const fn range(&self) -> TextRange {
         self.range
     }
 
-    #[doc = include_str!("edit_transaction.doc/removed_2.md")]
+    /// Returns the text that was removed by the edit.
     #[must_use]
     pub fn removed(&self) -> &str {
         &self.removed
     }
 
-    #[doc = include_str!("edit_transaction.doc/inserted_2.md")]
+    /// Returns the text that was inserted by the edit.
     #[must_use]
     pub fn inserted(&self) -> &str {
         &self.inserted
     }
 
-    #[doc = include_str!("edit_transaction.doc/selection_before_2.md")]
+    /// Returns the selection recorded before the edit.
     #[must_use]
     pub const fn selection_before(&self) -> TextSelection {
         self.selection_before
     }
 
-    #[doc = include_str!("edit_transaction.doc/selection_after_2.md")]
+    /// Returns the selection recorded after the edit.
     #[must_use]
     pub const fn selection_after(&self) -> TextSelection {
         self.selection_after
     }
 
-    #[doc = include_str!("edit_transaction.doc/inserted_range.md")]
+    #[doc = include_str!("../../docs/api/editing/edit_transaction.doc/inserted_range.md")]
     #[must_use]
     pub const fn inserted_range(&self) -> TextRange {
         TextRange::new(self.range.start, self.range.start + self.inserted.len())
     }
 
-    #[doc = include_str!("edit_transaction.doc/invert.md")]
+    #[doc = include_str!("../../docs/api/editing/edit_transaction.doc/invert.md")]
     #[must_use]
     pub fn invert(&self) -> EditTransaction {
         EditTransaction {
@@ -85,7 +87,8 @@ impl EditTransaction {
         }
     }
 
-    #[doc = include_str!("edit_transaction.doc/is_noop.md")]
+    /// Returns whether the edit changes no text (`removed == inserted`), so
+    /// applying or inverting it leaves the buffer untouched.
     #[must_use]
     pub fn is_noop(&self) -> bool {
         self.removed == self.inserted

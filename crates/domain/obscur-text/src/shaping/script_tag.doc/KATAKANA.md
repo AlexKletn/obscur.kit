@@ -1,1 +1,0 @@
-Katakana script (`Kana`).

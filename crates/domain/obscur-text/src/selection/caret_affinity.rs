@@ -1,23 +1,25 @@
-#![doc = include_str!("caret_affinity.doc/_module.md")]
+//! Which side of a soft line-wrap boundary a caret binds to (spec §5.11).
 
-#[doc = include_str!("caret_affinity.doc/CaretAffinity.md")]
+#[doc = include_str!("../../docs/api/selection/caret_affinity.doc/CaretAffinity.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub enum CaretAffinity {
-    #[doc = include_str!("caret_affinity.doc/Upstream.md")]
+    /// The offset binds to the trailing edge of the preceding line (end of the
+    /// earlier line at a wrap boundary).
     Upstream,
-    #[doc = include_str!("caret_affinity.doc/Downstream.md")]
+    /// The offset binds to the leading edge of the following line (start of the
+    /// later line at a wrap boundary). The default.
     #[default]
     Downstream,
 }
 
 impl CaretAffinity {
-    #[doc = include_str!("caret_affinity.doc/is_upstream.md")]
+    /// Returns whether this affinity is [`Upstream`](Self::Upstream).
     #[must_use]
     pub const fn is_upstream(self) -> bool {
         matches!(self, Self::Upstream)
     }
 
-    #[doc = include_str!("caret_affinity.doc/is_downstream.md")]
+    /// Returns whether this affinity is [`Downstream`](Self::Downstream).
     #[must_use]
     pub const fn is_downstream(self) -> bool {
         matches!(self, Self::Downstream)

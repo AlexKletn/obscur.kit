@@ -1,1 +1,0 @@
-Spans recorded, in order.

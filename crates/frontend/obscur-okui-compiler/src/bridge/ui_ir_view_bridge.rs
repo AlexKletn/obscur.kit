@@ -1,17 +1,21 @@
-#![doc = include_str!("ui_ir_view_bridge.doc/_module.md")]
+//! `UiIrViewBridge`: lowers compiled UI IR into a desired-view [`View`]
+//! (spec §2.15, §2.11).
 
-use obscur_ui_ir::document::{UiIrDocument, UiIrExpression, UiIrNode, UiIrNodeKind, UiIrValue};
+use obscur_identity::InternedSymbol;
+use obscur_ui_ir::document::{
+    UiIrDocument, UiIrEvent, UiIrExpression, UiIrNode, UiIrNodeKind, UiIrValue,
+};
 use obscur_ui_ir::name_binding::{self, TagPosition};
 use obscur_view::view::{
     View, ViewEventBinding, ViewFragment, ViewKey, ViewNode, ViewProperty, ViewValue,
 };
 
-#[doc = include_str!("ui_ir_view_bridge.doc/UiIrViewBridge.md")]
+#[doc = include_str!("../../docs/api/bridge/ui_ir_view_bridge.doc/UiIrViewBridge.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct UiIrViewBridge;
 
 impl UiIrViewBridge {
-    #[doc = include_str!("ui_ir_view_bridge.doc/document_to_view.md")]
+    /// Lowers a whole [`UiIrDocument`] into a [`View`].
     #[must_use]
     pub fn document_to_view(document: &UiIrDocument) -> View {
         View::from_fragment(ViewFragment::from_nodes(Self::node_to_view_nodes(
@@ -19,37 +23,57 @@ impl UiIrViewBridge {
         )))
     }
 
-    #[doc = include_str!("ui_ir_view_bridge.doc/node_to_view_nodes.md")]
+    /// Lowers UI IR with a host-assigned command symbol for each event.
+    pub fn document_with_commands(
+        document: &UiIrDocument,
+        mut command: impl FnMut(&UiIrNode, &UiIrEvent) -> InternedSymbol,
+    ) -> View {
+        View::from_fragment(ViewFragment::from_nodes(lower_nodes(
+            document.root(),
+            &mut command,
+        )))
+    }
+
+    #[doc = include_str!("../../docs/api/bridge/ui_ir_view_bridge.doc/node_to_view_nodes.md")]
     #[must_use]
     pub fn node_to_view_nodes(node: &UiIrNode) -> Vec<ViewNode> {
-        match node.kind() {
-            UiIrNodeKind::Text => {
-                let mut view = ViewNode::text(node.content());
-                if let Some(key) = node.key() {
-                    view = view.with_key(lower_key(key));
-                }
-                vec![view]
-            }
-            UiIrNodeKind::Element => vec![lower_element(node, TagPosition::Element)],
-            UiIrNodeKind::Component => vec![lower_element(node, TagPosition::Component)],
-            // A `<VirtualFor>` is *not* a `<For>`: it lowers to a single
-            // virtual-collection marker carrying its row template, which the
-            // runtime realizes into a viewport-bounded window (spec §4.9) rather
-            // than materializing one node per item.
-            UiIrNodeKind::Loop if node.tag() == "VirtualFor" => {
-                vec![lower_virtual_collection(node)]
-            }
-            UiIrNodeKind::Fragment | UiIrNodeKind::Conditional | UiIrNodeKind::Loop => node
-                .children()
-                .iter()
-                .flat_map(Self::node_to_view_nodes)
-                .collect(),
-        }
+        lower_nodes(node, &mut |_, event| {
+            name_binding::fallback_symbol(event.handler())
+        })
     }
 }
 
-#[doc = include_str!("ui_ir_view_bridge.doc/lower_element.md")]
-fn lower_element(node: &UiIrNode, position: TagPosition) -> ViewNode {
+fn lower_nodes(
+    node: &UiIrNode,
+    command: &mut impl FnMut(&UiIrNode, &UiIrEvent) -> InternedSymbol,
+) -> Vec<ViewNode> {
+    match node.kind() {
+        UiIrNodeKind::Text => {
+            let mut view = ViewNode::text(node.content());
+            if let Some(key) = node.key() {
+                view = view.with_key(lower_key(key));
+            }
+            vec![view]
+        }
+        UiIrNodeKind::Element => vec![lower_element(node, TagPosition::Element, command)],
+        UiIrNodeKind::Component => vec![lower_element(node, TagPosition::Component, command)],
+        UiIrNodeKind::Loop if node.tag() == "VirtualFor" => {
+            vec![lower_virtual_collection(node, command)]
+        }
+        UiIrNodeKind::Fragment | UiIrNodeKind::Conditional | UiIrNodeKind::Loop => node
+            .children()
+            .iter()
+            .flat_map(|child| lower_nodes(child, command))
+            .collect(),
+    }
+}
+
+#[doc = include_str!("../../docs/api/bridge/ui_ir_view_bridge.doc/lower_element.md")]
+fn lower_element(
+    node: &UiIrNode,
+    position: TagPosition,
+    command: &mut impl FnMut(&UiIrNode, &UiIrEvent) -> InternedSymbol,
+) -> ViewNode {
     let mut view = ViewNode::element(name_binding::component_id_for(node.tag(), position));
     for property in node.properties() {
         view = view.with_prop(ViewProperty::new(
@@ -84,13 +108,13 @@ fn lower_element(node: &UiIrNode, position: TagPosition) -> ViewNode {
     for event in node.events() {
         view = view.with_event(ViewEventBinding::new(
             name_binding::event_symbol(event.event()),
-            name_binding::fallback_symbol(event.handler()),
+            command(node, event),
         ));
     }
     let children: ViewFragment = node
         .children()
         .iter()
-        .flat_map(UiIrViewBridge::node_to_view_nodes)
+        .flat_map(|child| lower_nodes(child, command))
         .collect();
     view = view.with_children(children);
     if let Some(key) = node.key() {
@@ -99,17 +123,21 @@ fn lower_element(node: &UiIrNode, position: TagPosition) -> ViewNode {
     view
 }
 
-#[doc = include_str!("ui_ir_view_bridge.doc/lower_virtual_collection.md")]
-fn lower_virtual_collection(node: &UiIrNode) -> ViewNode {
+#[doc = include_str!("../../docs/api/bridge/ui_ir_view_bridge.doc/lower_virtual_collection.md")]
+fn lower_virtual_collection(
+    node: &UiIrNode,
+    command: &mut impl FnMut(&UiIrNode, &UiIrEvent) -> InternedSymbol,
+) -> ViewNode {
     let template: ViewFragment = node
         .children()
         .iter()
-        .flat_map(UiIrViewBridge::node_to_view_nodes)
+        .filter(|child| !matches!(child.tag(), "Empty" | "Loading" | "Separator"))
+        .flat_map(|child| lower_nodes(child, command))
         .collect();
     ViewNode::virtual_collection(obscur_view::view::DEFAULT_VIRTUAL_ROW_EXTENT, template)
 }
 
-#[doc = include_str!("ui_ir_view_bridge.doc/lower_value.md")]
+/// Lowers an IR value expression into a concrete [`ViewValue`].
 fn lower_value(expression: &UiIrExpression) -> ViewValue {
     match expression {
         UiIrExpression::Literal(value) => lower_literal(value),
@@ -120,7 +148,7 @@ fn lower_value(expression: &UiIrExpression) -> ViewValue {
     }
 }
 
-#[doc = include_str!("ui_ir_view_bridge.doc/lower_literal.md")]
+/// Lowers an IR literal into the matching [`ViewValue`].
 fn lower_literal(value: &UiIrValue) -> ViewValue {
     match value {
         UiIrValue::Null => ViewValue::Null,
@@ -131,7 +159,8 @@ fn lower_literal(value: &UiIrValue) -> ViewValue {
     }
 }
 
-#[doc = include_str!("ui_ir_view_bridge.doc/lower_key.md")]
+/// Lowers an IR key expression into a [`ViewKey`]. Literal ints become index
+/// keys; every other shape becomes a name key over its textual form.
 fn lower_key(expression: &UiIrExpression) -> ViewKey {
     match expression {
         UiIrExpression::Literal(UiIrValue::Int(number)) => ViewKey::from(number.cast_unsigned()),
@@ -152,7 +181,7 @@ fn lower_key(expression: &UiIrExpression) -> ViewKey {
 mod tests {
     use super::*;
     use obscur_identity::ComponentId;
-    use obscur_ui_ir::document::{UiIrEvent, UiIrProperty};
+    use obscur_ui_ir::document::UiIrProperty;
     use obscur_view::view::{CLASS, EVENT_CLICK, ID, LOCAL_NAME, SRC, TYPE};
 
     #[test]

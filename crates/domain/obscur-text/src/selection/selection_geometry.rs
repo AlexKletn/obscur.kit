@@ -1,59 +1,59 @@
-#![doc = include_str!("selection_geometry.doc/_module.md")]
+//! The visual highlight rectangles of a selection (spec §5.11).
 
 use obscur_geometry::{Point, Rect, Size};
 
 use crate::layout::{ParagraphLayout, ParagraphLine};
 
-#[doc = include_str!("selection_geometry.doc/SelectionGeometry.md")]
+#[doc = include_str!("../../docs/api/selection/selection_geometry.doc/SelectionGeometry.md")]
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct SelectionGeometry {
-    #[doc = include_str!("selection_geometry.doc/rects.md")]
+    /// The highlight rectangles, one partial rect per covered line.
     rects: Vec<Rect>,
 }
 
 impl SelectionGeometry {
-    #[doc = include_str!("selection_geometry.doc/new.md")]
+    /// Creates an empty geometry with no rectangles.
     #[must_use]
     pub const fn new() -> Self {
         Self { rects: Vec::new() }
     }
 
-    #[doc = include_str!("selection_geometry.doc/from_rects.md")]
+    /// Creates a geometry from an existing list of rectangles.
     #[must_use]
     pub const fn from_rects(rects: Vec<Rect>) -> Self {
         Self { rects }
     }
 
-    #[doc = include_str!("selection_geometry.doc/single.md")]
+    /// Creates a geometry holding a single rectangle (a one-line selection).
     #[must_use]
     pub fn single(rect: Rect) -> Self {
         Self { rects: vec![rect] }
     }
 
-    #[doc = include_str!("selection_geometry.doc/push.md")]
+    /// Appends a rectangle to the highlight.
     pub fn push(&mut self, rect: Rect) {
         self.rects.push(rect);
     }
 
-    #[doc = include_str!("selection_geometry.doc/rects_2.md")]
+    /// Returns the highlight rectangles in the order they were added.
     #[must_use]
     pub fn rects(&self) -> &[Rect] {
         &self.rects
     }
 
-    #[doc = include_str!("selection_geometry.doc/is_empty.md")]
+    /// Returns whether the geometry holds no rectangles.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.rects.is_empty()
     }
 
-    #[doc = include_str!("selection_geometry.doc/len.md")]
+    /// Returns the number of rectangles.
     #[must_use]
     pub fn len(&self) -> usize {
         self.rects.len()
     }
 
-    #[doc = include_str!("selection_geometry.doc/bounds.md")]
+    #[doc = include_str!("../../docs/api/selection/selection_geometry.doc/bounds.md")]
     #[must_use]
     pub fn bounds(&self) -> Option<Rect> {
         let (first, rest) = self.rects.split_first()?;
@@ -73,13 +73,13 @@ impl SelectionGeometry {
         ))
     }
 
-    #[doc = include_str!("selection_geometry.doc/contains_point.md")]
+    /// Returns whether any rectangle contains `point`.
     #[must_use]
     pub fn contains_point(&self, point: Point) -> bool {
         self.rects.iter().any(|rect| rect.contains(point))
     }
 
-    #[doc = include_str!("selection_geometry.doc/from_paragraph.md")]
+    #[doc = include_str!("../../docs/api/selection/selection_geometry.doc/from_paragraph.md")]
     #[must_use]
     pub fn from_paragraph(layout: &ParagraphLayout, start: usize, end: usize) -> Self {
         let (lo, hi) = (start.min(end), start.max(end));
@@ -118,7 +118,10 @@ impl SelectionGeometry {
         Self { rects }
     }
 
-    #[doc = include_str!("selection_geometry.doc/push_extent.md")]
+    /// Pushes one within-line highlight rectangle spanning pen x `[x_from, x_to)`
+    /// onto `rects`, translated by the line's alignment offset and boxed at the
+    /// line's top/height. A zero/negative extent (a boundary sliver) paints nothing
+    /// and is dropped.
     fn push_extent(rects: &mut Vec<Rect>, line: &ParagraphLine, x_from: f32, x_to: f32) {
         let width = x_to - x_from;
         if width > 0.0 {

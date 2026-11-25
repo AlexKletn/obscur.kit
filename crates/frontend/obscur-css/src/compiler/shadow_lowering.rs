@@ -1,11 +1,11 @@
-#![doc = include_str!("shadow_lowering.doc/_module.md")]
+#![doc = include_str!("../../docs/api/compiler/shadow_lowering.doc/_module.md")]
 
 use super::color_lowering::parse_stop_color;
 use super::value_lowering::dimension_length;
 use crate::parser::ParsedValue;
 use obscur_style::property::{BoxShadow, Length, PropertyValue, StyleColor};
 
-#[doc = include_str!("shadow_lowering.doc/lower_box_shadow.md")]
+#[doc = include_str!("../../docs/api/compiler/shadow_lowering.doc/lower_box_shadow.md")]
 pub(super) fn lower_box_shadow(values: &[ParsedValue]) -> Option<PropertyValue> {
     // `none` → an empty shadow list.
     if let [ParsedValue::Keyword(keyword)] = values
@@ -27,7 +27,7 @@ pub(super) fn lower_box_shadow(values: &[ParsedValue]) -> Option<PropertyValue> 
     Some(PropertyValue::BoxShadow(shadows.into_boxed_slice()))
 }
 
-#[doc = include_str!("shadow_lowering.doc/lower_one_shadow.md")]
+#[doc = include_str!("../../docs/api/compiler/shadow_lowering.doc/lower_one_shadow.md")]
 fn lower_one_shadow(layer: &[ParsedValue]) -> Option<BoxShadow> {
     let mut lengths: Vec<Length> = Vec::new();
     let mut color: Option<StyleColor> = None;
@@ -73,7 +73,9 @@ fn lower_one_shadow(layer: &[ParsedValue]) -> Option<BoxShadow> {
     ))
 }
 
-#[doc = include_str!("shadow_lowering.doc/shadow_length.md")]
+/// Lowers one `box-shadow` length component: a `<length>` (`px`, `em` / `rem`,
+/// the viewport units) or a unitless `0` (`0px`). Percentages and keywords are not
+/// `box-shadow` lengths and yield [`None`].
 pub(super) fn shadow_length(value: &ParsedValue) -> Option<Length> {
     match value {
         ParsedValue::Number(n) if *n == 0.0 => Some(Length::px(0.0)),

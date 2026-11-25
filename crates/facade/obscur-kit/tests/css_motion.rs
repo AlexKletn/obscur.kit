@@ -133,3 +133,159 @@ fn the_pipeline_parses_each_source_once_per_revision() {
     assert_eq!(box_width(&runtime, node), 999.0, "a new revision re-parsed");
     assert_eq!(css.cached_sources(), 1, "and replaced the entry, not grew");
 }
+
+#[doc = include_str!("css_motion.doc/non_finite_ticks_leave_an_infinite_css_animation_unchanged.md")]
+#[test]
+fn non_finite_ticks_leave_an_infinite_css_animation_unchanged() {
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(300.0, 300.0));
+    let mut css = CssPipeline::new();
+    css.install(
+        &mut runtime,
+        &[CssSource::anonymous(
+            ".box { animation: resize 1s linear infinite }
+             @keyframes resize { from { width: 0px } to { width: 100px } }",
+        )],
+    );
+    let view = view();
+    let _ = runtime.render_now(&view, css.sheets());
+    let node = box_node(&runtime);
+    runtime.advance_motion(0.25);
+    let _ = runtime.render_now(&view, css.sheets());
+    assert_eq!(box_width(&runtime, node), 25.0);
+    for delta in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        runtime.advance_motion(delta);
+        let _ = runtime.render_now(&view, css.sheets());
+        assert_eq!(box_width(&runtime, node), 25.0);
+        assert_eq!(runtime.active_animations(), 1);
+    }
+    runtime.advance_motion(0.25);
+    let _ = runtime.render_now(&view, css.sheets());
+    assert_eq!(box_width(&runtime, node), 50.0);
+}
+
+#[doc = include_str!("css_motion.doc/media_conditions_gate_css_motion.md")]
+#[test]
+fn media_conditions_gate_css_motion() {
+    use obscur_kit::style::matching::MediaPreferences;
+
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(300.0, 300.0));
+    let mut css = CssPipeline::new();
+    css.install(
+        &mut runtime,
+        &[CssSource::anonymous(
+            ".box { width: 100px; height: 10px; }
+         .box:hover { width: 200px; }
+         .spinner { animation: fade 1s linear both; }
+         @media (prefers-color-scheme: dark) {
+             @media (prefers-reduced-motion: no-preference) {
+                 .box { transition: width 1s linear; }
+                 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+             }
+         }",
+        )],
+    );
+    let view = view();
+    let sheets = css.sheets();
+    runtime.render_now(&view, sheets);
+    let node = box_node(&runtime);
+    runtime.set_pseudo_state(node, PseudoState::HOVER);
+    runtime.render_now(&view, sheets);
+    assert_eq!(runtime.active_animations(), 0);
+    assert_eq!(box_width(&runtime, node), 200.0);
+
+    runtime.set_media_preferences(MediaPreferences {
+        dark: true,
+        ..MediaPreferences::default()
+    });
+    runtime.render_now(&view, sheets);
+    assert_eq!(runtime.active_animations(), 1);
+    runtime.set_pseudo_state(node, PseudoState::empty());
+    runtime.render_now(&view, sheets);
+    assert_eq!(runtime.active_animations(), 2);
+    assert_eq!(box_width(&runtime, node), 200.0);
+
+    runtime.set_media_preferences(MediaPreferences {
+        dark: true,
+        reduced_motion: true,
+        ..MediaPreferences::default()
+    });
+    runtime.render_now(&view, sheets);
+    assert_eq!(runtime.active_animations(), 0);
+    assert_eq!(box_width(&runtime, node), 100.0);
+}
+
+#[doc = include_str!("css_motion.doc/conditional_keyframes_replace_the_whole_definition.md")]
+#[test]
+fn conditional_keyframes_replace_the_whole_definition() {
+    use obscur_kit::style::matching::MediaPreferences;
+
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(300.0, 300.0));
+    let mut css = CssPipeline::new();
+    css.install(
+        &mut runtime,
+        &[CssSource::anonymous(
+            ".box { width: 100px; height: 10px; animation: demo 1s linear both; }
+             @keyframes demo { from { width: 20px; } to { width: 40px; } }
+             @media (prefers-color-scheme: dark) {
+                 @keyframes demo { from { height: 30px; } to { height: 50px; } }
+             }",
+        )],
+    );
+    let view = view();
+    let sheets = css.sheets();
+    runtime.render_now(&view, sheets);
+    let node = box_node(&runtime);
+    assert_eq!(runtime.layout_boxes()[&node].size(), Size::new(20.0, 10.0));
+
+    runtime.set_media_preferences(MediaPreferences {
+        dark: true,
+        ..MediaPreferences::default()
+    });
+    runtime.render_now(&view, sheets);
+    assert_eq!(runtime.active_animations(), 1);
+    assert_eq!(runtime.layout_boxes()[&node].size(), Size::new(100.0, 30.0));
+
+    runtime.set_media_preferences(MediaPreferences::default());
+    runtime.render_now(&view, sheets);
+    assert_eq!(runtime.active_animations(), 1);
+    assert_eq!(runtime.layout_boxes()[&node].size(), Size::new(20.0, 10.0));
+}
+
+#[doc = include_str!("css_motion.doc/transition_none_wins_the_shorthand_cascade.md")]
+#[test]
+fn transition_none_wins_the_shorthand_cascade() {
+    use obscur_kit::style::matching::MediaPreferences;
+
+    let mut runtime = UiRuntime::new(RuntimeId::from_raw(1), Size::new(300.0, 300.0));
+    let mut css = CssPipeline::new();
+    css.install(
+        &mut runtime,
+        &[CssSource::anonymous(
+            ".box { width: 100px; height: 10px; transition: none; transition: width 1s linear; }
+             .box:hover { width: 200px; }
+             * { transition: none; }
+             @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }",
+        )],
+    );
+    let view = view();
+    let sheets = css.sheets();
+    runtime.render_now(&view, sheets);
+    let node = box_node(&runtime);
+    runtime.set_pseudo_state(node, PseudoState::HOVER);
+    runtime.render_now(&view, sheets);
+    assert_eq!(runtime.active_animations(), 1);
+    assert_eq!(box_width(&runtime, node), 100.0);
+
+    runtime.set_media_preferences(MediaPreferences {
+        reduced_motion: true,
+        ..MediaPreferences::default()
+    });
+    runtime.render_now(&view, sheets);
+    assert_eq!(runtime.active_animations(), 0);
+    assert_eq!(box_width(&runtime, node), 200.0);
+
+    runtime.set_pseudo_state(node, PseudoState::empty());
+    runtime.render_now(&view, sheets);
+    assert_eq!(runtime.active_animations(), 0);
+    assert_eq!(box_width(&runtime, node), 100.0);
+}

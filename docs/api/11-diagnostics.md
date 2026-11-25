@@ -121,5 +121,7 @@ window takes, which is what makes it an oracle rather than a mock.
 ## Accessibility as a diagnostic surface
 
 `semantic_snapshot()` is an immutable, versioned projection of the tree — useful
-for assertions even when no AT is attached. See
+for assertions even when no AT is attached. Arranged nodes carry window-relative
+physical bounds. Those bounds account for scrolling, the camera, and authored
+CSS transforms. See
 [03 — The runtime](03-runtime.md#accessibility).

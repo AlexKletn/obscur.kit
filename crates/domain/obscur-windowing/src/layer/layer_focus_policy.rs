@@ -1,19 +1,19 @@
-#![doc = include_str!("layer_focus_policy.doc/_module.md")]
+//! How much of the keyboard a layer surface asks for.
 
-#[doc = include_str!("layer_focus_policy.doc/LayerFocusPolicy.md")]
+#[doc = include_str!("../../docs/api/layer/layer_focus_policy.doc/LayerFocusPolicy.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum LayerFocusPolicy {
-    #[doc = include_str!("layer_focus_policy.doc/Never.md")]
+    #[doc = include_str!("../../docs/api/layer/layer_focus_policy.doc/Never.md")]
     #[default]
     Never,
-    #[doc = include_str!("layer_focus_policy.doc/OnDemand.md")]
+    #[doc = include_str!("../../docs/api/layer/layer_focus_policy.doc/OnDemand.md")]
     OnDemand,
-    #[doc = include_str!("layer_focus_policy.doc/Exclusive.md")]
+    #[doc = include_str!("../../docs/api/layer/layer_focus_policy.doc/Exclusive.md")]
     Exclusive,
 }
 
 impl LayerFocusPolicy {
-    #[doc = include_str!("layer_focus_policy.doc/takes_keys.md")]
+    /// Whether this policy routes any key to the surface at all.
     #[must_use]
     pub const fn takes_keys(self) -> bool {
         !matches!(self, Self::Never)

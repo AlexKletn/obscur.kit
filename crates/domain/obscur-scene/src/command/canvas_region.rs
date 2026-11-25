@@ -1,27 +1,28 @@
-#![doc = include_str!("canvas_region.doc/_module.md")]
+#![doc = include_str!("../../docs/api/command/canvas_region.doc/_module.md")]
 
 use obscur_geometry::{AffineTransform, Point, Rect, Size};
 
-use super::DisplayListBuilder;
+use super::{DisplayListBuilder, canvas_boundary::CanvasBoundary};
 use crate::clip::Clip;
 use crate::paint::{BufferFit, ExternalBuffer, SceneImage};
 use crate::path::Path;
 
-#[doc = include_str!("canvas_region.doc/CanvasRegion.md")]
+/// A bounded region of a display list that an application paints into.
 #[derive(Debug)]
 pub struct CanvasRegion<'a> {
-    #[doc = include_str!("canvas_region.doc/builder.md")]
+    /// The shared list. Not a private one: a canvas paints in document order with everything else, which is what makes it participate in composition.
     builder: &'a mut DisplayListBuilder,
-    #[doc = include_str!("canvas_region.doc/bounds.md")]
+    /// The laid-out box, in the coordinates of the list this region was opened on.
     bounds: Rect,
-    #[doc = include_str!("canvas_region.doc/entry_depth.md")]
-    entry_depth: u32,
-    #[doc = include_str!("canvas_region.doc/hit.md")]
+    /// The list's bracket depth before this region opened — what `close` unwinds back to.
+    entry_depth: Option<u32>,
+    previous_boundary: Option<CanvasBoundary>,
+    /// The shape a pointer must be inside to have hit this canvas, if the painter declared one.
     hit: Option<Path>,
 }
 
 impl<'a> CanvasRegion<'a> {
-    #[doc = include_str!("canvas_region.doc/open.md")]
+    /// Opens a region over `bounds`, bracketing the list with a translation and a clip.
     pub fn open(builder: &'a mut DisplayListBuilder, bounds: Rect) -> Self {
         let entry_depth = builder.depth();
         // Two brackets, in this order, and the order is not arbitrary: the clip
@@ -29,32 +30,35 @@ impl<'a> CanvasRegion<'a> {
         // the translation that establishes them.
         builder.push_transform(AffineTransform::translate(bounds.origin.x, bounds.origin.y));
         builder.push_clip(Clip::rect(Rect::new(Point::new(0.0, 0.0), bounds.size)));
+        let previous_boundary = builder.protect_canvas_scopes();
         Self {
             builder,
             bounds,
-            entry_depth,
+            entry_depth: Some(entry_depth),
+            previous_boundary,
             hit: None,
         }
     }
 
-    #[doc = include_str!("canvas_region.doc/size.md")]
+    /// The region's size in logical pixels — the laid-out box's size.
     #[must_use]
     pub const fn size(&self) -> Size {
         self.bounds.size
     }
 
-    #[doc = include_str!("canvas_region.doc/at.md")]
+    #[doc = include_str!("../../docs/api/command/canvas_region.doc/at.md")]
     #[must_use]
     pub fn at(&self, x: f32, y: f32) -> Point {
         Point::new(x * self.bounds.size.width, y * self.bounds.size.height)
     }
 
-    #[doc = include_str!("canvas_region.doc/painter.md")]
+    /// Accesses the shared display list. Pop commands can close only scopes
+    /// opened after this region's translation and clip.
     pub fn painter(&mut self) -> &mut DisplayListBuilder {
         self.builder
     }
 
-    #[doc = include_str!("canvas_region.doc/draw_buffer.md")]
+    #[doc = include_str!("../../docs/api/command/canvas_region.doc/draw_buffer.md")]
     pub fn draw_buffer(&mut self, buffer: &ExternalBuffer<'_>, fit: BufferFit) -> bool {
         if buffer.is_empty() {
             // A camera that has not produced a frame yet is a real state, and
@@ -67,7 +71,7 @@ impl<'a> CanvasRegion<'a> {
         self.draw_image_into(buffer.to_scene_image(), fit.place(source, self.bounds.size))
     }
 
-    #[doc = include_str!("canvas_region.doc/draw_image_into.md")]
+    #[doc = include_str!("../../docs/api/command/canvas_region.doc/draw_image_into.md")]
     pub fn draw_image_into(&mut self, image: SceneImage, dest: Rect) -> bool {
         if dest.size.width <= 0.0 || dest.size.height <= 0.0 {
             return false;
@@ -86,35 +90,33 @@ impl<'a> CanvasRegion<'a> {
         true
     }
 
-    #[doc = include_str!("canvas_region.doc/hit_region.md")]
+    #[doc = include_str!("../../docs/api/command/canvas_region.doc/hit_region.md")]
     pub fn hit_region(&mut self, path: Path) {
         self.hit = Some(path);
     }
 
-    #[doc = include_str!("canvas_region.doc/take_hit_region.md")]
+    /// Takes the declared hit region, leaving none.
     pub fn take_hit_region(&mut self) -> Option<Path> {
         self.hit.take()
     }
 
-    #[doc = include_str!("canvas_region.doc/close.md")]
+    #[doc = include_str!("../../docs/api/command/canvas_region.doc/close.md")]
     #[must_use]
-    pub fn close(self) -> bool {
-        // What the application left open, this closes — innermost first, which
-        // is the only order that can close anything at all. A painter is
-        // ordinary application code running inside a shared display list, and an
-        // unbalanced one would not corrupt itself: it would swallow every node
-        // painted after it into a clip or a transform that was never meant for
-        // them. So the region is responsible for its own depth, and reports
-        // whether it had to do the closing.
-        let balanced = self.builder.depth() == self.entry_depth + 2;
-        while self.builder.depth() > self.entry_depth {
-            // `pop_clip` and `pop_transform` both emit their own command, and
-            // the builder tracks one depth across all three bracket kinds, so
-            // unwinding needs to close the right KIND at each level rather than
-            // guessing. `pop_any` is what knows which.
-            self.builder.pop_any();
-        }
-        balanced
+    pub fn close(mut self) -> bool {
+        self.finish()
+    }
+
+    fn finish(&mut self) -> bool {
+        self.entry_depth.take().is_none_or(|entry_depth| {
+            self.builder
+                .restore_canvas_scopes(self.previous_boundary.take(), entry_depth)
+        })
+    }
+}
+
+impl Drop for CanvasRegion<'_> {
+    fn drop(&mut self) {
+        self.finish();
     }
 }
 
@@ -223,6 +225,40 @@ mod tests {
             list.is_balanced(),
             "and the list it leaves behind is balanced regardless"
         );
+    }
+
+    #[test]
+    fn a_painter_cannot_remove_the_regions_clip() {
+        let mut builder = DisplayListBuilder::new();
+        let mut region = CanvasRegion::open(&mut builder, bounds());
+
+        region.painter().pop_clip().fill_rect(bounds(), red());
+        assert!(!region.close());
+
+        assert!(matches!(
+            builder.build().commands(),
+            [
+                PaintCommand::PushTransform(_),
+                PaintCommand::PushClip(_),
+                PaintCommand::DrawPath { .. },
+                PaintCommand::PopClip,
+                PaintCommand::PopTransform,
+            ]
+        ));
+    }
+
+    #[test]
+    fn dropping_a_nested_region_restores_the_parent_scope() {
+        let mut builder = DisplayListBuilder::new();
+        let mut parent = CanvasRegion::open(&mut builder, bounds());
+        {
+            let mut child = CanvasRegion::open(parent.painter(), bounds());
+            child.painter().push_clip(crate::clip::Clip::rect(bounds()));
+        }
+
+        assert_eq!(parent.painter().depth(), 2);
+        assert!(!parent.close());
+        assert!(builder.build().is_balanced());
     }
 
     #[test]

@@ -1,8 +1,8 @@
-#![doc = include_str!("memory_source.doc/_module.md")]
+//! A runtime in-memory resource source (spec §5.15 memory, §5.16 bytes).
 
 use std::sync::Arc;
 
-#[doc = include_str!("memory_source.doc/MemorySource.md")]
+#[doc = include_str!("../../docs/api/source/memory_source.doc/MemorySource.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MemorySource {
     bytes: Arc<[u8]>,
@@ -10,7 +10,7 @@ pub struct MemorySource {
 }
 
 impl MemorySource {
-    #[doc = include_str!("memory_source.doc/new.md")]
+    /// Creates a memory source from runtime bytes, with no MIME hint.
     #[must_use]
     pub fn new(bytes: impl Into<Arc<[u8]>>) -> Self {
         Self {
@@ -19,32 +19,32 @@ impl MemorySource {
         }
     }
 
-    #[doc = include_str!("memory_source.doc/with_mime_type.md")]
+    /// Returns this source with its MIME content-type hint set (spec §5.16).
     #[must_use]
     pub fn with_mime_type(mut self, mime_type: impl Into<Box<str>>) -> Self {
         self.mime_type = Some(mime_type.into());
         self
     }
 
-    #[doc = include_str!("memory_source.doc/bytes.md")]
+    /// Returns the runtime bytes (spec §5.16).
     #[must_use]
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
     }
 
-    #[doc = include_str!("memory_source.doc/mime_type.md")]
+    /// Returns the MIME content-type hint, if any (spec §5.16).
     #[must_use]
     pub fn mime_type(&self) -> Option<&str> {
         self.mime_type.as_deref()
     }
 
-    #[doc = include_str!("memory_source.doc/len.md")]
+    /// Returns the number of bytes.
     #[must_use]
     pub fn len(&self) -> usize {
         self.bytes.len()
     }
 
-    #[doc = include_str!("memory_source.doc/is_empty.md")]
+    /// Returns whether there are no bytes.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.bytes.is_empty()

@@ -1,11 +1,11 @@
-#![doc = include_str!("subscription_manager.doc/_module.md")]
+//! Per-topic subscription registry and event fan-out (spec §7.6/§7.7).
 
 use obscur_devtools_protocol::error::ProtocolError;
 use obscur_devtools_protocol::message::{
     EventKind, ProtocolEvent, SUBSCRIPTION_LIMIT, SubscriptionId, Topic,
 };
 
-#[doc = include_str!("subscription_manager.doc/SubscriptionManager.md")]
+#[doc = include_str!("../../docs/api/subscription/subscription_manager.doc/SubscriptionManager.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct SubscriptionManager {
     entries: Vec<(SubscriptionId, Topic)>,
@@ -13,7 +13,7 @@ pub struct SubscriptionManager {
 }
 
 impl SubscriptionManager {
-    #[doc = include_str!("subscription_manager.doc/new.md")]
+    /// Creates an empty subscription manager.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -22,7 +22,7 @@ impl SubscriptionManager {
         }
     }
 
-    #[doc = include_str!("subscription_manager.doc/subscribe.md")]
+    #[doc = include_str!("../../docs/api/subscription/subscription_manager.doc/subscribe.md")]
     pub fn subscribe(&mut self, topic: Topic) -> Result<SubscriptionId, ProtocolError> {
         if self.entries.len() >= SUBSCRIPTION_LIMIT {
             return Err(ProtocolError::LimitExceeded {
@@ -35,14 +35,14 @@ impl SubscriptionManager {
         Ok(id)
     }
 
-    #[doc = include_str!("subscription_manager.doc/unsubscribe.md")]
+    /// Cancels the subscription `id`, returning whether it was active.
     pub fn unsubscribe(&mut self, id: SubscriptionId) -> bool {
         let before = self.entries.len();
         self.entries.retain(|(existing, _)| *existing != id);
         self.entries.len() != before
     }
 
-    #[doc = include_str!("subscription_manager.doc/subscribers_of.md")]
+    /// Returns the ids of every subscription to `topic`, in insertion order.
     #[must_use]
     pub fn subscribers_of(&self, topic: Topic) -> Vec<SubscriptionId> {
         self.entries
@@ -52,7 +52,7 @@ impl SubscriptionManager {
             .collect()
     }
 
-    #[doc = include_str!("subscription_manager.doc/fan_out.md")]
+    #[doc = include_str!("../../docs/api/subscription/subscription_manager.doc/fan_out.md")]
     #[must_use]
     pub fn fan_out(&self, topic: Topic, kind: &EventKind) -> Vec<ProtocolEvent> {
         self.entries
@@ -62,13 +62,13 @@ impl SubscriptionManager {
             .collect()
     }
 
-    #[doc = include_str!("subscription_manager.doc/len.md")]
+    /// Returns the number of active subscriptions.
     #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
-    #[doc = include_str!("subscription_manager.doc/is_empty.md")]
+    /// Returns whether there are no active subscriptions.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()

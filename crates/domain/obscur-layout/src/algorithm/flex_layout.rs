@@ -1,16 +1,19 @@
-#![doc = include_str!("flex_layout.doc/_module.md")]
+//! `FlexLayout`: single-line flex layout for the `Flex` formatting context.
 
 use obscur_geometry::{BoxConstraints, Size};
 
-use crate::model::{JustifyContent, LayoutBox, LayoutStyle, Margin};
+use crate::model::{Dimension, JustifyContent, LayoutBox, LayoutStyle, Margin};
 
+use super::content_distribution::content_distribution;
 use super::flex_axis_bounds::{axis_bp, clamp_floor, main_bounds};
 use super::flex_line_placement::{LineArgs, place_line};
 use super::flex_main_margins::reserved;
 use super::flex_main_probe::{content_max_main, intrinsic_main};
+use super::layout_child::ordered_child_indices;
+use super::size_containment::contained_style;
 use super::{ChildMeasurer, LayoutAlgorithm, LayoutChild, LayoutOutput, clamp_content};
 
-#[doc = include_str!("flex_layout.doc/FlexLayout.md")]
+#[doc = include_str!("../../docs/api/algorithm/flex_layout.doc/FlexLayout.md")]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct FlexLayout;
 
@@ -22,9 +25,10 @@ impl LayoutAlgorithm for FlexLayout {
         constraints: BoxConstraints,
         measurer: &mut dyn ChildMeasurer,
     ) -> LayoutOutput {
+        let contained = contained_style(style.clone(), constraints);
+        let style = contained.as_ref().unwrap_or(style);
         let is_row = style.flex_direction.is_row();
         let is_reverse = style.flex_direction.is_reverse();
-        let gap = style.gap;
 
         let border = style.border;
         let padding = style.padding;
@@ -63,6 +67,31 @@ impl LayoutAlgorithm for FlexLayout {
                 style.box_sizing.content_extent(h, bp_y)
             })
             .max(0.0);
+        let resolve_gap = |axis: &Option<Dimension>, basis| {
+            axis.as_ref()
+                .or(style.gap_dimension.as_ref())
+                .map_or(style.gap, |gap| gap.resolve(basis).unwrap_or(0.0).max(0.0))
+        };
+        let horizontal_gap = resolve_gap(
+            &style.column_gap,
+            if content_width.is_finite() {
+                content_width
+            } else {
+                0.0
+            },
+        );
+        let height_definite = style.height.resolve(constraints.percent_height()).is_some()
+            || (constraints.max.height.is_finite()
+                && constraints.min.height >= constraints.max.height);
+        let vertical_gap = resolve_gap(
+            &style.row_gap,
+            if height_definite { content_height } else { 0.0 },
+        );
+        let (gap, cross_gap) = if is_row {
+            (horizontal_gap, vertical_gap)
+        } else {
+            (vertical_gap, horizontal_gap)
+        };
         // An **unbounded** main axis is the max-content *question*, and the honest
         // answer is what the items need — not the infinity they were offered.
         // `content_width` is `constraints.max.width - bp` for a `width: auto`
@@ -77,8 +106,10 @@ impl LayoutAlgorithm for FlexLayout {
         // line, so the rightmost edge is infinity too.
         let main_unbounded = if is_row {
             constraints.max.width.is_infinite()
+                && !style.size_containment.contains_width(style.writing_mode)
         } else {
             constraints.max.height.is_infinite()
+                && !style.size_containment.contains_height(style.writing_mode)
         };
         let (container_main, container_cross) = if is_row {
             (content_width, content_height)
@@ -103,6 +134,26 @@ impl LayoutAlgorithm for FlexLayout {
             && (!constraints.max.height.is_finite()
                 || (constraints.max.height - constraints.min.height).abs() > f32::EPSILON);
 
+        // The flex base size uses border-box extents before asking the child
+        // measurer. Resolve these edges with the same basis as that measurer.
+        let resolved_children = if children
+            .iter()
+            .any(|child| child.style.padding_lengths.is_some())
+        {
+            let mut resolved = children.to_vec();
+            for child in &mut resolved {
+                let basis = if child.style.writing_mode.is_vertical() {
+                    content_height
+                } else {
+                    content_width
+                };
+                child.style.resolve_padding(basis);
+            }
+            Some(resolved)
+        } else {
+            None
+        };
+        let children = resolved_children.as_deref().unwrap_or(children);
         let count = children.len();
 
         // Per-item margins split into main-leading / main-trailing (which consume
@@ -124,25 +175,25 @@ impl LayoutAlgorithm for FlexLayout {
             // — this container's content width — regardless of which way the flex
             // axis runs. It is known, it cannot change, and resolving it once leaves
             // only `Px` and `Auto` for the rest of the algorithm to think about.
-            let fix = |edge: Margin| match edge {
-                Margin::Percent(_) => Margin::Px(edge.resolve(content_width)),
-                px_or_auto => px_or_auto,
+            let fix = |edge: &Margin| match edge {
+                Margin::Percent(_) | Margin::Math(_) => Margin::Px(edge.resolve(content_width)),
+                px_or_auto => px_or_auto.clone(),
             };
-            let m = child.style.margin;
+            let m = &child.style.margin;
             let (lead, trail) = if is_row {
                 if is_reverse {
-                    (m.right, m.left)
+                    (&m.right, &m.left)
                 } else {
-                    (m.left, m.right)
+                    (&m.left, &m.right)
                 }
             } else if is_reverse {
-                (m.bottom, m.top)
+                (&m.bottom, &m.top)
             } else {
-                (m.top, m.bottom)
+                (&m.top, &m.bottom)
             };
             main_lead.push(fix(lead));
             main_trail.push(fix(trail));
-            cross_lead.push(fix(if is_row { m.top } else { m.left }));
+            cross_lead.push(fix(if is_row { &m.top } else { &m.left }));
         }
 
         // Step 2: per item, the **flex base size** (`flex_basis`/`width`/measured,
@@ -169,9 +220,9 @@ impl LayoutAlgorithm for FlexLayout {
         let mut deferred_floor = vec![false; count];
         for (index, child) in children.iter().enumerate() {
             let main_dim = if is_row {
-                child.style.width
+                &child.style.width
             } else {
-                child.style.height
+                &child.style.height
             };
             // An explicit main size (from `flex-basis` or `width`/`height`) is
             // authored against the item's box-sizing, so it is expanded to the
@@ -192,7 +243,7 @@ impl LayoutAlgorithm for FlexLayout {
                     .box_sizing
                     .border_extent(explicit, axis_bp(&child.style, is_row))
             };
-            let basis = child.style.flex_basis;
+            let basis = &child.style.flex_basis;
             let base = if let Some(px) = intrinsic_main(
                 &mut *measurer,
                 index,
@@ -305,9 +356,10 @@ impl LayoutAlgorithm for FlexLayout {
         // (`stretch_target = Some(container_cross)` reproduces the old
         // fill-the-container stretch and container-relative alignment).
         let mut child_boxes = vec![LayoutBox::default(); count];
+        let order = ordered_child_indices(children);
 
         if !style.flex_wrap.is_multi_line() {
-            let line: Vec<usize> = (0..count).collect();
+            let line = order.unwrap_or_else(|| (0..count).collect());
 
             // The main-axis extent the single line's items occupy: their base main
             // sizes, the inter-item gaps, and their main-axis margins. This is the
@@ -317,7 +369,7 @@ impl LayoutAlgorithm for FlexLayout {
             let sum_margin_main: f32 = main_lead
                 .iter()
                 .zip(main_trail.iter())
-                .map(|(l, t)| reserved(*l) + reserved(*t))
+                .map(|(l, t)| reserved(l) + reserved(t))
                 .sum();
             let content_main = sum_base + gap_span + sum_margin_main;
 
@@ -332,7 +384,11 @@ impl LayoutAlgorithm for FlexLayout {
                 style,
                 is_row,
                 is_reverse,
-                line_main: container_main,
+                line_main: if is_reverse && !is_row && height_indefinite {
+                    content_main.max(0.0)
+                } else {
+                    container_main
+                },
                 gap,
                 main_lead: &main_lead,
                 main_trail: &main_trail,
@@ -379,8 +435,8 @@ impl LayoutAlgorithm for FlexLayout {
             };
             let own_w = clamp_content(
                 if is_row { own_main } else { content_width },
-                style.min_width,
-                style.max_width,
+                style.min_width.clone(),
+                style.max_width.clone(),
                 constraints.max.width,
                 bp_x,
                 style.box_sizing,
@@ -391,8 +447,8 @@ impl LayoutAlgorithm for FlexLayout {
                 } else {
                     own_main
                 },
-                style.min_height,
-                style.max_height,
+                style.min_height.clone(),
+                style.max_height.clone(),
                 constraints.max.height,
                 bp_y,
                 style.box_sizing,
@@ -407,9 +463,10 @@ impl LayoutAlgorithm for FlexLayout {
         let mut lines: Vec<Vec<usize>> = Vec::new();
         let mut current: Vec<usize> = Vec::new();
         let mut current_main = 0.0_f32;
-        for index in 0..count {
+        for position in 0..count {
+            let index = order.as_ref().map_or(position, |indices| indices[position]);
             let item_main =
-                base_main[index] + reserved(main_lead[index]) + reserved(main_trail[index]);
+                base_main[index] + reserved(&main_lead[index]) + reserved(&main_trail[index]);
             let with_item = if current.is_empty() {
                 item_main
             } else {
@@ -443,12 +500,11 @@ impl LayoutAlgorithm for FlexLayout {
             style.width.resolve(constraints.max.width).is_none()
         };
 
-        // The default (`flex-start`) packs the lines at the cross start with no
-        // growth — the historical single-pass behaviour. Any other `align-content`
-        // on a definite cross needs the natural line crosses up front (to size the
-        // leftover space), so it takes a cheap measurement pass first.
+        // Explicit start alignment packs without growing the lines. Normal
+        // alignment behaves like stretch in flex, so it needs the natural
+        // line sizes to distribute the leftover cross space.
         let needs_align_content =
-            !cross_is_auto && !matches!(style.align_content, JustifyContent::FlexStart);
+            !cross_is_auto && style.align_content != JustifyContent::FlexStart;
 
         // A place-one-line closure so the packing and the align-content pass share
         // exactly one call shape (only the cross offset and the stretch target differ).
@@ -499,29 +555,19 @@ impl LayoutAlgorithm for FlexLayout {
             }
             let n = lines.len();
             let total_natural: f32 = natural.iter().sum();
-            let total_gap = gap * (n.saturating_sub(1) as f32);
+            let total_gap = cross_gap * (n.saturating_sub(1) as f32);
             let free = container_cross - total_natural - total_gap;
-            let (lead, between, grow) = if free <= 0.0 || n == 0 {
-                (0.0, 0.0, 0.0)
+            let (lead, between) = content_distribution(n, free, style.align_content);
+            let grow = if free.is_finite()
+                && free > 0.0
+                && n > 0
+                && matches!(
+                    style.align_content,
+                    JustifyContent::Normal | JustifyContent::Stretch
+                ) {
+                free / n as f32
             } else {
-                let nf = n as f32;
-                match style.align_content {
-                    JustifyContent::FlexEnd => (free, 0.0, 0.0),
-                    JustifyContent::Center => (free / 2.0, 0.0, 0.0),
-                    JustifyContent::SpaceBetween if n > 1 => (0.0, free / (nf - 1.0), 0.0),
-                    JustifyContent::SpaceAround => {
-                        let s = free / nf;
-                        (s / 2.0, s, 0.0)
-                    }
-                    JustifyContent::SpaceEvenly => {
-                        let s = free / (nf + 1.0);
-                        (s, s, 0.0)
-                    }
-                    // `stretch` grows every line by an equal share of the leftover.
-                    JustifyContent::Stretch => (0.0, 0.0, free / nf),
-                    // `flex-start` (and `space-between` with a single line): pack.
-                    _ => (0.0, 0.0, 0.0),
-                }
+                0.0
             };
             (lead, between, grow, natural)
         } else {
@@ -535,8 +581,8 @@ impl LayoutAlgorithm for FlexLayout {
         let mut total_cross = 0.0_f32;
         for (i, line) in lines.iter().enumerate() {
             if i > 0 {
-                cross_offset += gap + ac_between;
-                total_cross += gap;
+                cross_offset += cross_gap + ac_between;
+                total_cross += cross_gap;
             }
             let stretch = if ac_grow > 0.0 {
                 Some(natural[i] + ac_grow)
@@ -561,7 +607,7 @@ impl LayoutAlgorithm for FlexLayout {
             let sum_margin_main: f32 = main_lead
                 .iter()
                 .zip(main_trail.iter())
-                .map(|(l, t)| reserved(*l) + reserved(*t))
+                .map(|(l, t)| reserved(l) + reserved(t))
                 .sum();
             (sum_base + gap_span + sum_margin_main).max(0.0)
         } else {
@@ -587,16 +633,16 @@ impl LayoutAlgorithm for FlexLayout {
         // Clamp the container's OWN box into its authored min/max (spec §4.2).
         let own_w = clamp_content(
             final_content_width,
-            style.min_width,
-            style.max_width,
+            style.min_width.clone(),
+            style.max_width.clone(),
             constraints.max.width,
             bp_x,
             style.box_sizing,
         );
         let own_h = clamp_content(
             final_content_height,
-            style.min_height,
-            style.max_height,
+            style.min_height.clone(),
+            style.max_height.clone(),
             constraints.max.height,
             bp_y,
             style.box_sizing,
@@ -1078,9 +1124,9 @@ mod tests {
             &mut FixedChildMeasurer::default(),
         );
         let boxes = out.child_boxes();
-        // Last child takes the leading slot; first child follows.
-        approx(boxes[1].origin().x, 0.0);
-        approx(boxes[0].origin().x, 50.0);
+        // The first child starts at the right edge; the group leaves space on the left.
+        approx(boxes[0].origin().x, 150.0);
+        approx(boxes[1].origin().x, 100.0);
     }
 
     #[test]
@@ -2119,7 +2165,7 @@ mod tests {
                 ..LayoutStyle::default()
             };
             let kids = [
-                LayoutChild::new(NodeId::from_raw(11), box_style),
+                LayoutChild::new(NodeId::from_raw(11), box_style.clone()),
                 LayoutChild::new(NodeId::from_raw(12), box_style),
             ];
             let mut inner =
@@ -2148,7 +2194,7 @@ mod tests {
             flex_shrink: 0.0,
             ..LayoutStyle::default()
         };
-        let children = [LayoutChild::new(NodeId::from_raw(1), item_style)];
+        let children = [LayoutChild::new(NodeId::from_raw(1), item_style.clone())];
         let out = FlexLayout.layout(
             &style,
             &children,

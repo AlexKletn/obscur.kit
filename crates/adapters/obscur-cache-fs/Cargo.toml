@@ -10,6 +10,7 @@ publish = false
 [dependencies]
 obscur-resources = { workspace = true }
 obscur-identity = { workspace = true }
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

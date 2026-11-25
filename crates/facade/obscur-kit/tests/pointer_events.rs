@@ -772,3 +772,41 @@ fn an_unbound_crossing_name_is_never_dispatched() {
     // blanket off switch: sixteen sweeps, fifteen boundaries left.
     assert_eq!(leaves.get(), 15, "the bound name fired on every crossing");
 }
+
+#[test]
+fn selection_autoscrolls_with_the_pointer_held_at_the_viewport_edge() {
+    let view = View::single(
+        ViewNode::element(CONTAINER)
+            .with_prop(ViewProperty::new(CLASS, ViewValue::Text("panel".into())))
+            .with_children(ViewFragment::from_nodes(vec![field(
+                "a",
+                "abcdefghijklmnopqrstuvwxyz",
+            )])),
+    );
+    let sheet = compile(
+        ".panel { width: 60px; height: 60px; overflow: auto }
+         .a { width: 280px; height: 40px }",
+    );
+    let mut rt = UiRuntime::new(RuntimeId::from_raw(1), Size::new(300.0, 300.0));
+    let _ = rt.render_now(&view, &[sheet]);
+    let root = rt.tree().root().unwrap();
+    let panel = rt.tree().get(root).unwrap().children()[0];
+
+    rt.handle_pointer(at(PointerEventKind::Down, 10.0, 20.0));
+    assert!(rt.scroll_to(panel, Point::ORIGIN));
+    rt.handle_pointer(at(PointerEventKind::Move, 55.0, 20.0));
+    let selected = rt.editing_selection().unwrap();
+    rt.advance_motion(0.03);
+    assert!(rt.scroll_left(panel) > 0.0);
+    let extended = rt.editing_selection().unwrap();
+    assert!(
+        extended.focus() > selected.focus(),
+        "selection {selected:?} to {extended:?}, scroll {}",
+        rt.scroll_left(panel)
+    );
+
+    rt.handle_pointer(at(PointerEventKind::Up, 55.0, 20.0));
+    let released_at = rt.scroll_left(panel);
+    rt.advance_motion(0.03);
+    assert_eq!(rt.scroll_left(panel), released_at);
+}

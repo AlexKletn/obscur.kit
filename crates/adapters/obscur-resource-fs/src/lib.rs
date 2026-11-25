@@ -1,4 +1,4 @@
-#![doc = include_str!("lib.doc/_module.md")]
+//! Filesystem resource loader adapter.
 #![forbid(unsafe_code)]
 
 pub mod loader;

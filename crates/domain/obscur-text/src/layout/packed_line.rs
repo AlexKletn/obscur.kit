@@ -1,4 +1,5 @@
-#![doc = include_str!("packed_line.doc/_module.md")]
+//! One greedily packed line of a paragraph, before it becomes a
+//! [`ParagraphLine`](super::ParagraphLine) (spec §5.10).
 
 use std::collections::VecDeque;
 
@@ -9,18 +10,18 @@ use super::paragraph_word::ParagraphWord;
 use super::tagged_glyph::TaggedGlyph;
 use super::{LineBreak, OverflowWrap, WordBreak};
 
-#[doc = include_str!("packed_line.doc/PackedLine.md")]
+#[doc = include_str!("../../docs/api/layout/packed_line.doc/PackedLine.md")]
 pub(super) struct PackedLine {
     pub(super) glyphs: Vec<TaggedGlyph>,
     pub(super) word_count: usize,
     pub(super) mandatory_break_after: bool,
 }
 
-#[doc = include_str!("packed_line.doc/FIT_EPSILON.md")]
+#[doc = include_str!("../../docs/api/layout/packed_line.doc/FIT_EPSILON.md")]
 const FIT_EPSILON: f32 = 1e-5;
 
 impl PackedLine {
-    #[doc = include_str!("packed_line.doc/pack.md")]
+    #[doc = include_str!("../../docs/api/layout/packed_line.doc/pack.md")]
     pub(super) fn pack(
         stream: &[TaggedGlyph],
         max_width: f32,
@@ -167,7 +168,7 @@ impl PackedLine {
         lines
     }
 
-    #[doc = include_str!("packed_line.doc/empty.md")]
+    #[doc = include_str!("../../docs/api/layout/packed_line.doc/empty.md")]
     pub(super) const fn empty() -> Self {
         Self {
             glyphs: Vec::new(),
@@ -176,7 +177,7 @@ impl PackedLine {
         }
     }
 
-    #[doc = include_str!("packed_line.doc/whole.md")]
+    #[doc = include_str!("../../docs/api/layout/packed_line.doc/whole.md")]
     pub(super) const fn whole(glyphs: Vec<TaggedGlyph>) -> Self {
         Self {
             glyphs,
@@ -185,12 +186,13 @@ impl PackedLine {
         }
     }
 
-    #[doc = include_str!("packed_line.doc/width.md")]
+    /// The line's used width: the sum of its glyph advances, after whatever has
+    /// been hung off its end was zeroed.
     pub(super) fn width(&self) -> f32 {
         self.glyphs.iter().map(|t| t.glyph.x_advance()).sum()
     }
 
-    #[doc = include_str!("packed_line.doc/retab.md")]
+    #[doc = include_str!("../../docs/api/layout/packed_line.doc/retab.md")]
     pub(super) fn retab(lines: &mut [Self], text: &str, tab_width: f32) {
         for line in lines {
             let mut pen = 0.0_f32;
@@ -209,7 +211,7 @@ impl PackedLine {
         }
     }
 
-    #[doc = include_str!("packed_line.doc/hang_trailing.md")]
+    #[doc = include_str!("../../docs/api/layout/packed_line.doc/hang_trailing.md")]
     pub(super) fn hang_trailing(
         &mut self,
         text: &str,
@@ -250,7 +252,7 @@ fn trim_trailing_tracking(
     }
 }
 
-#[doc = include_str!("packed_line.doc/overflows.md")]
+#[doc = include_str!("../../docs/api/layout/packed_line.doc/overflows.md")]
 fn overflows(width: f32, max_width: f32) -> bool {
     width > max_width + max_width.abs().max(1.0) * FIT_EPSILON
 }

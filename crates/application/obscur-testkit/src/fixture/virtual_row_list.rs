@@ -1,17 +1,17 @@
-#![doc = include_str!("virtual_row_list.doc/_module.md")]
+//! The virtual collection a window is realized from.
 
 use obscur_identity::ComponentId;
 use obscur_view::view::{CLASS, View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-#[doc = include_str!("virtual_row_list.doc/VirtualRowList.md")]
+#[doc = include_str!("../../docs/api/fixture/virtual_row_list.doc/VirtualRowList.md")]
 #[derive(Debug)]
 pub struct VirtualRowList;
 
 impl VirtualRowList {
-    #[doc = include_str!("virtual_row_list.doc/ROW_HEIGHT.md")]
+    /// The row extent the window is sized against, in logical pixels.
     pub const ROW_HEIGHT: f32 = 24.0;
 
-    #[doc = include_str!("virtual_row_list.doc/view.md")]
+    /// The div, its virtual marker, and the row template.
     #[must_use]
     pub fn view() -> View {
         let template = ViewFragment::from_nodes(vec![

@@ -1,34 +1,10 @@
-#![doc = include_str!("resource_handle.doc/_module.md")]
+//! A generic typed resource handle (spec §5.15).
 
 use obscur_identity::ResourceId;
 
-use crate::handle::{FontHandle, ImageHandle, ShaderHandle, StylesheetHandle};
+use crate::handle::{FontHandle, ImageHandle, ResourceKind, ShaderHandle, StylesheetHandle};
 
-#[doc = include_str!("resource_handle.doc/ResourceKind.md")]
-//
-// Note: only `Image`, `Font`, `Stylesheet`, and `Shader` have a dedicated
-// typed-handle newtype in this module's layout. `Svg`, `Atlas`, and
-// `EmbeddedAsset` are represented only via the generic [`ResourceHandle`] plus
-// their `ResourceKind`; that omission is intentional.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum ResourceKind {
-    #[doc = include_str!("resource_handle.doc/Image.md")]
-    Image,
-    #[doc = include_str!("resource_handle.doc/Font.md")]
-    Font,
-    #[doc = include_str!("resource_handle.doc/Stylesheet.md")]
-    Stylesheet,
-    #[doc = include_str!("resource_handle.doc/Shader.md")]
-    Shader,
-    #[doc = include_str!("resource_handle.doc/Svg.md")]
-    Svg,
-    #[doc = include_str!("resource_handle.doc/Atlas.md")]
-    Atlas,
-    #[doc = include_str!("resource_handle.doc/EmbeddedAsset.md")]
-    EmbeddedAsset,
-}
-
-#[doc = include_str!("resource_handle.doc/ResourceHandle.md")]
+#[doc = include_str!("../../docs/api/handle/resource_handle.doc/ResourceHandle.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ResourceHandle {
     id: ResourceId,
@@ -36,43 +12,44 @@ pub struct ResourceHandle {
 }
 
 impl ResourceHandle {
-    #[doc = include_str!("resource_handle.doc/new.md")]
+    /// Creates a handle for the given resource id and kind.
     #[must_use]
     pub const fn new(id: ResourceId, kind: ResourceKind) -> Self {
         Self { id, kind }
     }
 
-    #[doc = include_str!("resource_handle.doc/id.md")]
+    /// Returns the resource identity this handle refers to.
     #[must_use]
     pub const fn id(self) -> ResourceId {
         self.id
     }
 
-    #[doc = include_str!("resource_handle.doc/kind.md")]
+    /// Returns the kind of resource this handle refers to.
     #[must_use]
     pub const fn kind(self) -> ResourceKind {
         self.kind
     }
 
-    #[doc = include_str!("resource_handle.doc/as_image.md")]
+    /// Downcasts to an [`ImageHandle`], or `None` if this is not an image.
     #[must_use]
     pub const fn as_image(self) -> Option<ImageHandle> {
         ImageHandle::from_handle(self)
     }
 
-    #[doc = include_str!("resource_handle.doc/as_font.md")]
+    /// Downcasts to a [`FontHandle`], or `None` if this is not a font.
     #[must_use]
     pub const fn as_font(self) -> Option<FontHandle> {
         FontHandle::from_handle(self)
     }
 
-    #[doc = include_str!("resource_handle.doc/as_stylesheet.md")]
+    /// Downcasts to a [`StylesheetHandle`], or `None` if this is not a
+    /// stylesheet.
     #[must_use]
     pub const fn as_stylesheet(self) -> Option<StylesheetHandle> {
         StylesheetHandle::from_handle(self)
     }
 
-    #[doc = include_str!("resource_handle.doc/as_shader.md")]
+    /// Downcasts to a [`ShaderHandle`], or `None` if this is not a shader.
     #[must_use]
     pub const fn as_shader(self) -> Option<ShaderHandle> {
         ShaderHandle::from_handle(self)

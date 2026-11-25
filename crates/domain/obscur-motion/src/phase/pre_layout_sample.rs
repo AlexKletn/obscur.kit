@@ -1,21 +1,23 @@
-#![doc = include_str!("pre_layout_sample.doc/_module.md")]
+//! The [`PreLayoutSample`] pre-layout phase sample (spec §4.17 "motion engine",
+//! pre-layout phase / before-layout geometry).
 
 use crate::timeline::TimelineId;
 use crate::value::MotionValue;
 
-#[doc = include_str!("pre_layout_sample.doc/PreLayoutSample.md")]
+#[doc = include_str!("../../docs/api/phase/pre_layout_sample.doc/PreLayoutSample.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PreLayoutSample {
-    #[doc = include_str!("pre_layout_sample.doc/timeline.md")]
+    /// The timeline that produced this sample.
     timeline: TimelineId,
-    #[doc = include_str!("pre_layout_sample.doc/progress.md")]
+    /// The timeline progress at the moment of sampling (normalized `0..=1`).
     progress: f32,
-    #[doc = include_str!("pre_layout_sample.doc/value.md")]
+    /// The sampled layout-affecting value (e.g. an animated `Size` width).
     value: MotionValue,
 }
 
 impl PreLayoutSample {
-    #[doc = include_str!("pre_layout_sample.doc/new.md")]
+    /// Creates a pre-layout sample tagging `value` (sampled at `progress`) to the
+    /// `timeline` that produced it.
     #[must_use]
     pub const fn new(timeline: TimelineId, progress: f32, value: MotionValue) -> Self {
         Self {
@@ -25,25 +27,25 @@ impl PreLayoutSample {
         }
     }
 
-    #[doc = include_str!("pre_layout_sample.doc/timeline_2.md")]
+    /// Returns the timeline that produced this sample.
     #[must_use]
     pub const fn timeline(&self) -> TimelineId {
         self.timeline
     }
 
-    #[doc = include_str!("pre_layout_sample.doc/progress_2.md")]
+    /// Returns the timeline progress at the moment of sampling.
     #[must_use]
     pub const fn progress(&self) -> f32 {
         self.progress
     }
 
-    #[doc = include_str!("pre_layout_sample.doc/value_2.md")]
+    /// Returns the sampled layout-affecting value.
     #[must_use]
     pub const fn value(&self) -> MotionValue {
         self.value
     }
 
-    #[doc = include_str!("pre_layout_sample.doc/affects_layout.md")]
+    #[doc = include_str!("../../docs/api/phase/pre_layout_sample.doc/affects_layout.md")]
     #[must_use]
     pub const fn affects_layout(&self) -> bool {
         true

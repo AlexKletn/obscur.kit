@@ -1,23 +1,24 @@
-#![doc = include_str!("frame_reason.doc/_module.md")]
+//! Why a frame is being produced: [`FrameReason`].
 
-#[doc = include_str!("frame_reason.doc/FrameReason.md")]
+#[doc = include_str!("../../docs/api/frame/frame_reason.doc/FrameReason.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FrameReason {
-    #[doc = include_str!("frame_reason.doc/Input.md")]
+    /// User input was received and must be dispatched (pointer, key, etc.).
     Input,
-    #[doc = include_str!("frame_reason.doc/TextEdit.md")]
+    #[doc = include_str!("../../docs/api/frame/frame_reason.doc/TextEdit.md")]
     TextEdit,
-    #[doc = include_str!("frame_reason.doc/UiCommit.md")]
+    /// Application state committed, invalidating the tree and requiring a
+    /// re-render.
     UiCommit,
-    #[doc = include_str!("frame_reason.doc/Animation.md")]
+    /// An animation or motion timeline advanced and needs a new sample.
     Animation,
-    #[doc = include_str!("frame_reason.doc/ResourceCompletion.md")]
+    /// An asynchronous resource (image, font, data) completed loading.
     ResourceCompletion,
-    #[doc = include_str!("frame_reason.doc/WindowChange.md")]
+    /// The window or surface changed (resize, scale factor, visibility).
     WindowChange,
-    #[doc = include_str!("frame_reason.doc/ExternalRender.md")]
+    /// An external driver requested a render (e.g. an embedding host).
     ExternalRender,
-    #[doc = include_str!("frame_reason.doc/DiagnosticsCapture.md")]
+    /// A diagnostics or debugging capture requested a frame.
     DiagnosticsCapture,
 }
 

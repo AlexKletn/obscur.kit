@@ -1,11 +1,13 @@
-#![doc = include_str!("clip_mask.doc/_module.md")]
+#![doc = include_str!("../../docs/api/renderer/clip_mask.doc/_module.md")]
 
 use obscur_scene::clip::{Clip, ClipShape};
 use obscur_scene::path::Path;
 
 use crate::renderer::skia_lowering::{to_sk_fill_rule, to_sk_path};
 
-#[doc = include_str!("clip_mask.doc/clip_shape_to_domain_path.md")]
+/// Lowers a geometric [`ClipShape`] to a domain [`Path`] this backend can
+/// rasterize into a clip mask. Rectangles and rounded rectangles are expanded to
+/// their outline; a path shape is used directly.
 fn clip_shape_to_domain_path(shape: &ClipShape) -> Path {
     match shape {
         ClipShape::Rect(rect) => Path::rect(*rect),
@@ -14,12 +16,12 @@ fn clip_shape_to_domain_path(shape: &ClipShape) -> Path {
     }
 }
 
-#[doc = include_str!("clip_mask.doc/empty_clip_mask.md")]
+#[doc = include_str!("../../docs/api/renderer/clip_mask.doc/empty_clip_mask.md")]
 fn empty_clip_mask(width: u32, height: u32) -> Option<tiny_skia::Mask> {
     tiny_skia::Mask::new(width, height)
 }
 
-#[doc = include_str!("clip_mask.doc/resolve_clip_entry.md")]
+#[doc = include_str!("../../docs/api/renderer/clip_mask.doc/resolve_clip_entry.md")]
 pub(crate) fn resolve_clip_entry(
     clip: &Clip,
     parent: Option<&tiny_skia::Mask>,
@@ -49,18 +51,13 @@ pub(crate) fn resolve_clip_entry(
                 None => empty_clip_mask(width, height).or_else(|| parent.cloned()),
             }
         }
-        // A mask carries only *how* to read coverage, never the source it comes
-        // from, so a mask clip states no extent at all (`Clip::bounds()` is `None`
-        // for exactly this reason). Unknown extent is not empty extent: inherit the
-        // enclosing clip, which asserts nothing the domain has not stated, and
-        // matches Vello. This is the §5.8 fallback, not mask support — coverage is
-        // not applied on either backend, and neither raises the diagnostic §5.8
-        // asks an explicit fallback to carry.
-        Clip::Mask(_) => parent.cloned(),
+        // The renderer applies image masks when it composites isolated groups.
+        // This path inherits the enclosing clip for an unavailable coverage mask.
+        Clip::Mask(_) | Clip::ImageMask { .. } => parent.cloned(),
     }
 }
 
-#[doc = include_str!("clip_mask.doc/build_clip_mask.md")]
+#[doc = include_str!("../../docs/api/renderer/clip_mask.doc/build_clip_mask.md")]
 pub(crate) fn build_clip_mask(
     width: u32,
     height: u32,
@@ -78,6 +75,79 @@ pub(crate) fn build_clip_mask(
         mask.fill_path(sk_path, fill_rule, true, transform);
         Some(mask)
     }
+}
+
+/// Rasterizes image coverage in device space for an isolated group composite.
+pub(super) fn image_mask(
+    clip: &Clip,
+    parent: Option<&tiny_skia::Mask>,
+    width: u32,
+    height: u32,
+    transform: tiny_skia::Transform,
+) -> Option<tiny_skia::Mask> {
+    use obscur_scene::color::{AlphaMode, convert::srgb_decode};
+
+    let Clip::ImageMask {
+        kind,
+        image,
+        bounds,
+    } = clip
+    else {
+        return None;
+    };
+    let mut raster = tiny_skia::Pixmap::new(width, height)?;
+    if bounds.size.width > 0.0
+        && bounds.size.height > 0.0
+        && image.width() > 0
+        && image.height() > 0
+    {
+        let mut source = tiny_skia::Pixmap::new(image.width(), image.height())?;
+        for (pixel, coverage) in image
+            .pixels()
+            .chunks_exact(4)
+            .zip(source.data_mut().chunks_exact_mut(4))
+        {
+            let alpha = pixel[3];
+            let amount = if kind.kind().is_luminance() && alpha > 0 {
+                let divisor = match image.alpha_mode() {
+                    AlphaMode::Straight => 255.0,
+                    AlphaMode::Premultiplied => f64::from(alpha),
+                };
+                let luminance: f64 = pixel[..3]
+                    .iter()
+                    .zip([0.2126, 0.7152, 0.0722])
+                    .map(|(&channel, weight)| {
+                        weight * srgb_decode((f64::from(channel) / divisor).min(1.0))
+                    })
+                    .sum();
+                (luminance * f64::from(alpha)).round() as u8
+            } else {
+                alpha
+            };
+            coverage.fill(amount);
+        }
+        let placement = transform
+            .pre_concat(tiny_skia::Transform::from_translate(
+                bounds.origin.x,
+                bounds.origin.y,
+            ))
+            .pre_concat(tiny_skia::Transform::from_scale(
+                bounds.size.width / image.width() as f32,
+                bounds.size.height / image.height() as f32,
+            ));
+        let paint = tiny_skia::PixmapPaint {
+            quality: tiny_skia::FilterQuality::Bilinear,
+            ..Default::default()
+        };
+        raster.draw_pixmap(0, 0, source.as_ref(), &paint, placement, None);
+    }
+    let mut mask = tiny_skia::Mask::from_pixmap(raster.as_ref(), tiny_skia::MaskType::Alpha);
+    if let Some(parent) = parent {
+        for (amount, &limit) in mask.data_mut().iter_mut().zip(parent.data()) {
+            *amount = ((u16::from(*amount) * u16::from(limit) + 127) / 255) as u8;
+        }
+    }
+    Some(mask)
 }
 
 #[cfg(test)]

@@ -105,9 +105,152 @@ implement either.
 The domain tier also has `GestureArena`, `GestureContender`, `GestureRecognizer`,
 `PanRecognizer`, `LongPressRecognizer` and `Fling` as reusable pieces.
 
-> **partial** — the arena is built and the runtime resolves pan / long-press /
-> fling through its own state rather than through the arena. A custom recognizer
-> has no registration point on `UiRuntime`.
+The runtime uses the arena for touch surfaces that opt in with
+`on:touchgesture`. Fling follows a completed scroll pan.
+
+### Application gesture recognizers
+
+`obscur_kit::interaction::gesture` exports recognizers that an application
+keeps per interaction surface. Feed them the dispatched `UiEvent` stream:
+
+- `BackGesture::update(event, scale)` recognizes semantic Back by a touch at
+  the left edge, a native touchpad swipe, or phased pixel scroll.
+- `SwipeGesture::update(event, scale)` reports a locked `SwipeDirection`,
+  logical displacement, and `finger_count` when known.
+  `.with_finger_count(count)` filters both touchscreen and native touchpad
+  swipes. The default for touchscreen input is one finger.
+- `TransformGesture::update(event)` reports scale ratio and clockwise
+  rotation in radians, with the touchscreen midpoint or the touchpad's
+  initial cursor anchor.
+
+Every update exposes a `GestureSource` of `Touchscreen`, `Touchpad`, or
+`PhasedScroll`. `PhasedScroll` indicates a swipe inferred from pixel scroll
+events with a phase. It does not carry a verified source device or contact
+count and cannot satisfy a finger-count filter.
+
+Bind `on:touchpadgesture` to receive a native event at its initial cursor
+anchor. The same recognizer can consume that event along with
+`on:pointerdown` / `on:pointermove` / `on:pointerup` / `on:pointercancel`
+for raw touchscreen input and `on:scrollgesture` for fallback swipe recognition.
+Wayland supplies native swipe and transform when the compositor exposes
+`zwp_pointer_gestures_v1` and delivers the sequence to the window.
+macOS supplies native pinch and rotation via winit. Other winit backends
+can use the phased-scroll fallback where available.
+
+The recognizers report `Started`, `Updated`, `Completed` and `Cancelled`.
+They return no update before recognition. The application supplies gesture
+semantics and decides when to consume the input. Pointer positions in
+dispatched events are logical. Pass the device scale for physical wheel deltas.
+
+### Touch gesture arbitration
+
+Bind `on:touchgesture` on the surface that owns an application recognizer.
+The nearest binding at contact start receives trusted touch samples in logical
+window coordinates and remains the receiver as the finger moves. Feed
+`event.pointer()` to the recognizer and call `event.prevent_default()` when
+it claims the gesture. Active contacts attached to that same binding are
+claimed together, so a pinch can take both fingers.
+
+While the binding is waiting, a built-in scroll pan or long press can win.
+The binding receives one `Cancel` for the losing contact, and receives no
+further candidate samples for it. A successful claim suppresses the built-in
+pan, hold and activation. Raw pointer bindings still receive their normal
+reports. Use `EventOrigin::Gesture` if the same command also handles raw input.
+Native touchpad input is delivered separately through `on:touchpadgesture`.
+
+### Phased scroll and native touchpad sequences
+
+Bind `on:scrollgesture` to let a swipe recognizer compete with vertical
+scrolling. It receives a trusted phased pixel-scroll payload through
+`event.wheel()`. Call `prevent_default()` when the recognizer claims it.
+The binding and scroll container are selected at the initial position.
+While the result is pending, the runtime buffers the scroll displacement.
+Vertical movement beyond the threshold awards the sequence to the scroll
+container and sends one `WheelPhase::Cancelled` to the losing binding.
+The winner owns the sequence through its terminal phase.
+
+The raw `on:wheel` binding still observes wheel reports and can suppress
+their default action. Ordinary wheel input and surfaces outside an opted-in
+binding retain their existing behavior. Phased scroll still reports
+`GestureSource::PhasedScroll`.
+
+Native events delivered to `on:touchpadgesture` retain their initial binding,
+anchor and reported finger count. The window host cancels both indirect
+gesture streams on focus loss.
+
+### System Back and gesture regions
+
+Hosts can call `UiRuntime::handle_system_back` with a `SystemBackEvent`.
+In application markup, bind `on:systemback="preview_back"` and read
+`event.system_back()` in the command handler. The window host supplies the
+focused surface at start, and that binding receives normalized progress and
+the terminal phase. The host forwards cancellation on focus loss and cancels
+raw contacts taken over by the system.
+
+An application can call `app.control().reserved_gesture_regions()` to read
+reserved rectangles and `request_gesture_exclusions(&rects)` to submit its
+complete exclusion set. Coordinates are logical window pixels. An empty
+slice clears exclusions. A host installs its `SystemGestureRegions` adapter
+through `AppControl::set_system_gesture_regions`. Without an adapter the
+query returns `None` and the request returns `false`.
+
+### Motion and zoom driven by gestures
+
+`UiRuntime::set_animation_progress` pauses a live timeline and samples it
+at a normalized position. The timeline keeps that sample until the next
+update, without requesting continuous time ticks. Use `resume_animation`
+to return it to elapsed-time playback or `cancel_animation` to remove it.
+An `App` command can call these through `AppControl::with_runtime`.
+
+`ZoomPan` consumes `TransformGestureUpdate` from either source, clamps the
+scale, pans with the midpoint and restores its initial pose on cancellation.
+It also supports cursor-anchored zoom, panning, and fitting to the viewport.
+Use its forward transform for rendering and its inverse point mapping for
+hit testing.
+
+### Gesture feedback
+
+Use `AppControl::play_haptic` and `AppControl::play_sound` in an application
+command handler. For example, call `control.play_haptic(FeedbackEffect::Tick)`
+when the gesture crosses its commit threshold. The application chooses the cue
+and timing.
+
+The host installs a `Feedback` handle through `AppControl::set_feedback`.
+It can supply either or both of the `HapticFeedback` and `SoundFeedback`
+adapters. Adapters receive semantic effects and apply platform settings and
+device capabilities. Requests do not wait for playback. A channel without
+an adapter is silent. An embedded UI can also use `Feedback` directly.
+
+### Moving and resizing a desktop window
+
+Use `App::with_resize(true)` to enable user resizing. Decorated windows use the
+system frame. Undecorated windows get automatic grips along the visible window
+outline, including rounded corners, where the backend supports native resizing.
+
+Bind `pointerdown` on the part of the title bar used for dragging. Custom
+resize handles may also bind this event. Request a native operation through the window's `AppControl`.
+For example, bind `on:pointerdown="moveWindow"` on the drag region and register
+its command handler with `App::on_command`:
+
+```rust,ignore
+let control = app.control();
+let app = app.on_command(move_window, move |event: &mut UiEvent| {
+    if event.pointer().is_some_and(|pointer| {
+        pointer.device == PointerDevice::Mouse
+            && pointer.button == Some(PointerButton::Primary)
+    }) {
+        event.prevent_default();
+        control.request_window_action(WindowAction::BeginMove);
+    }
+});
+```
+
+For a resize handle, request
+`WindowAction::BeginResize(WindowResizeDirection::SouthEast)` or the direction
+matching that edge or corner. `WindowAction` and `WindowResizeDirection` are
+exported at the crate root. The app defines the hit regions and can opt into
+drawing its own title bar with `App::with_decorations(false)`. The window
+backend performs the operation, with support depending on the platform.
 
 ### The raw pointer events
 
@@ -335,14 +478,28 @@ rt.focus_node(Some(node));   // programmatic; `None` clears
 rt.is_focus_visible();       // whether `:focus-visible` currently matches
 ```
 
-**`:focus-visible` means keyboard.** A Tab shows the ring; a press does not; a
+**`:focus-visible` follows keyboard and gamepad navigation.** A Tab shows the ring; a press does not; a
 programmatic move does not, because it is not the user navigating. The selector
 was modelled and set by nothing before this, so the rule matched nothing.
 
-> **Still not built:** spatial (arrow-key) navigation. `SpatialNavigation` and
-> `NavigationDirection` remain domain types with no runtime caller — arrow keys
-> belong to the editing session, and taking them for navigation needs a rule
-> about when a control is a *grid* that does not exist yet.
+### Directional focus and gamepad
+
+Enable directional focus with `app.control().set_spatial_navigation(true)`
+or `UiRuntime::set_spatial_navigation(true)` for an embedded UI. Unmodified
+arrows use laid-out geometry within the current focus trap. Editable fields,
+sliders, and application shortcuts retain priority. Directional focus does
+not wrap. It scrolls the new target into view and shows the focus indicator.
+
+The same option enables D-pad navigation and activation with the south face
+button. Bind `on:gamepad` on a focused node or its ancestor, or register an
+application command for `EVENT_GAMEPAD`. Read `event.gamepad()` for the
+device ID, button, axis or connection change. A handler can refuse default
+navigation with `prevent_default()`.
+
+On Linux, enable the optional `gamepad` Cargo feature on `obscur-kit` to
+receive input through the desktop window runner. This adapter uses libudev.
+Embedded and other platform hosts may feed normalized reports with
+`UiRuntime::handle_gamepad`.
 
 ## Focus
 
@@ -397,9 +554,50 @@ is no separate `focusin` / `focusout`, because that is what these already are.
 
 ## Scrolling
 
-`handle_wheel(WheelEvent)` routes a wheel notch to the innermost
-`overflow: scroll` container under the point and returns which node took it, or
-`None`. An app that windows its own list registers `App::on_scroll` for the
+The scrollport is the padding box. The container paints its border outside
+the descendant overflow clip.
+
+`scroll_metrics(node)` reports the current offset, viewport size, and content
+extent in logical pixels for a container with a nonzero scroll range.
+`scroll_velocity(node)` reports the last positive motion tick’s average
+displacement in logical pixels per second. An idle tick or an immediate
+offset jump clears the sample. `scroll_to(node, offset)` sets both axes in one
+update and clamps them to the current scroll range. In a right-to-left
+container, horizontal offsets are nonpositive.
+
+`scroll_to_smooth(node, offset, duration)` animates the same two-axis offset
+on the runtime motion clock. The duration is in seconds. Use zero for an
+immediate jump. A later request starts from the current offset, and manual
+scrolling that moves the container interrupts the animation.
+
+`snap_scroll_to_nearest(node, candidates, duration)` applies an application-owned
+set of snap positions. It chooses the nearest reachable position on both axes.
+`set_scroll_snap_points(node, candidates)` uses the same positions automatically
+after user scrolling settles, including after touch inertia. An empty list clears
+the configuration. A programmatic `scroll_to` or `scroll_to_smooth` cancels a
+pending snap.
+`capture_scroll_anchor(container, node)` records a descendant’s layout position
+relative to the scrollport. After a reflow, `restore_scroll_anchor(anchor)`
+scrolls to preserve that position within the current limits.
+Use `set_scroll_anchor(container, Some(node))` to keep following that
+descendant across subsequent reflows in the same frame. Pass `None` to clear
+the tracked anchor.
+
+During a data drag or text selection, holding the pointer near the scrollport
+edge continues scrolling on the runtime motion clock. The drop target or
+selection is refreshed as content moves under the pointer.
+
+`handle_wheel(WheelEvent)` starts at the innermost eligible scroll container
+under the point. Any unconsumed movement on either axis passes to visual
+ancestor scroll containers. The call returns the first container that moved,
+or the initial target if the chain reached its limits. Touch drags and their
+kinetic continuation also pass unused movement along the visual ancestry.
+
+Set `overscroll-behavior` on an overflowing container to control this handoff.
+The shorthand accepts one value for both axes or two values in x/y order.
+`overscroll-behavior-x` and `overscroll-behavior-y` configure each axis.
+`auto` passes the remainder to ancestors. `contain` and `none` stop it at the
+boundary. The runtime currently gives both stopping modes the same behavior. An app that windows its own list registers `App::on_scroll` for the
 leftovers — so "which node took it" includes a node that took it by *refusing*
 it; see below.
 
@@ -465,18 +663,16 @@ The binding is resolved by walking the hit node's ancestors, so a listener on th
 scrolling list hears a notch aimed at any row inside it without binding every
 row.
 
-Two limits, both deliberate:
+Wheel and gesture behavior:
 
 - ~~**The event is untrusted and unstamped.**~~ **Closed.**
   `handle_wheel(WheelEvent)` is the door, and `PointerConverter::wheel` is the
   converter that confers trust the way it does for a pointer.
   `handle_scroll(delta_y, position)` remains, meaning exactly what two floats
   can say — pixels, no horizontal, untrusted, unstamped.
-- **Nothing scrolls horizontally.** `delta_x` reaches a handler and goes no
-  further: `ScrollOffsets` holds one axis. That is a limit of the scroll model,
-  not of the event, and dropping the number at the door — which the winit runner
-  used to do with a `_` pattern — is what left a sideways swipe reaching nothing
-  at all.
+- Horizontal wheel and trackpad deltas scroll eligible `overflow-x: auto`
+  and `overflow-x: scroll` containers. The default touch pan locks to its
+  initial dominant axis and continues on that axis during a fling.
 - **A fling or a pan is not a wheel.** Both move containers through the gesture
   recognizers and neither is dispatched here, so neither is refusable this way.
 
@@ -502,10 +698,64 @@ covers half the screen. `App` does this after every window event.
 [03 — The runtime](03-runtime.md#drag-and-drop). Data transfer types live in
 `obscur_kit::data_transfer`.
 
+## Surface zoom and pan
+
+Install an application-managed `ZoomPan` using `UiRuntime::set_view_camera`.
+The camera uses logical window coordinates. Rendering, window coordinate
+maps, hit testing, and scroll deltas use the camera while the retained layout
+and device scale keep their own geometry. Use `visible_content_rect()` to
+query the visible region in content coordinates. Visibility observers use
+the same region. Pass `None` to clear the camera.
+
+`observe_visible_content` reports the initial region after a frame and then
+once per frame when it changes. Return `true` from the callback to schedule
+a UI commit, for example after changing which items the application
+materializes. `unobserve_visible_content` removes the subscription. For application-managed
+scenes, pass the reported rectangle to `SpatialIndex::entries_intersecting`
+to find objects whose bounds overlap the visible region. The same query can
+filter candidates in a marquee selection. For typed coordinates, use
+`world_to_window()` and its inverse to map `PointIn` or `RectIn` between the
+scene and window. `visible_world_rect()` returns the same visible bounds as
+`visible_content_rect()`, tagged as `WorldSpace`.
+
+`SpatialMaterialization::update` compares a world region against the current
+spatial index and returns entered and exited IDs. Keep the same tracker as
+the camera and index change to retain objects that stay visible. The caller
+owns object creation and release. Pass a larger region to keep objects
+materialized beyond the window edges.
+
+For level of detail, pass a `DetailLevels` policy to
+`SpatialMaterialization::update_with_detail`. Use
+`world_to_window().then(&window_to_physical())` as the projection. Each
+threshold is the minimum length in physical pixels of the longer side
+needed for the next level. A level change is reported separately from
+materialization so the app can update the existing object.
+
+For marquee selection, map the window rectangle back to world coordinates.
+Use `entries_intersecting` to select overlapping objects and
+`entries_contained_by` to select fully enclosed objects. `WorldGrid` supplies
+the origin and spacing for a scene grid. `snap_world_point` chooses the nearest
+grid line or guide within the tolerance on each axis. Convert a window-pixel
+tolerance to world units with the inverse mapper’s `map_extent`.
+
+When shifting the origin of an application-managed scene, subtract the same
+delta from the content coordinates and call `ZoomPan::rebase_origin(delta)`
+before installing the updated camera. `SpatialIndex::rebase_origin(delta)`
+shifts the indexed bounds and rebuilds their grid membership. The camera
+compensates for the coordinate shift, including during an active pinch.
+
+## Hit testing
+
+`UiRuntime::hit_test(position)` uses the same surface coordinates and geometric
+target selection as pointer input. The returned `HitChain` starts at the visual
+target and follows its logical ancestors, including through a portal. Each
+node with a layout box reports the point relative to its own box. The query
+leaves pointer capture and hover state untouched.
+
 ## `pointer-events: none`
 
 An element whose computed `pointer-events` is `none` is transparent to the
-pointer: it never appears in a hit chain, and a pointer over its box reaches
+pointer: it cannot be the geometric target, and a pointer over its box reaches
 whatever is painted behind it.
 
 The property **inherits**, which is what makes the subtree rule free — every
@@ -532,18 +782,10 @@ inside, which is what a fill does and therefore what a hit region means.
 
 ## Not built
 
-- **Gamepad.** `GamepadEvent`, `GamepadButton`, `GamepadAxis`, `GamepadId` are
-  modelled; nothing produces one.
-- **Haptics.** `HapticRequest` and `HapticPattern` are modelled; nothing consumes
-  one.
-- **Spatial navigation.** Arrow keys do not move focus. `SpatialNavigation` and
-  `NavigationDirection` are modelled with no runtime caller: arrows belong to the
-  editing session, and taking them for navigation needs a rule about when a
-  control is a *grid* that this toolkit does not have.
-- **`FocusTree` and `FocusRestore`.** Still no runtime caller. The Tab ring is
-  computed from the retained tree on demand rather than from a registered focus
-  tree, so `FocusTree`'s registration model answers a question nothing asks; and
-  nothing saves or restores a focus position across a dialog yet.
+- **Gamepad rumble.** The gamepad haptic types exist. The Linux input source
+  currently handles input only.
+- **`FocusTree`.** Tab and directional focus derive their candidate order
+  from the retained tree. Closing a focus scope restores its saved focus.
 - **The rest of the raw vocabulary.** The DOM's bubbling `pointerover` /
   `pointerout` are not reserved names, because a command routes either way here
   and they would be a second name for `pointerenter` / `pointerleave`. A

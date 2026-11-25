@@ -1,28 +1,28 @@
-#![doc = include_str!("semantic_relation.doc/_module.md")]
+//! A typed relation from one accessibility node to another (spec §7.1).
 
 use obscur_identity::NodeId;
 
-#[doc = include_str!("semantic_relation.doc/SemanticRelation.md")]
+#[doc = include_str!("../../docs/api/semantic/semantic_relation.doc/SemanticRelation.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SemanticRelation {
-    #[doc = include_str!("semantic_relation.doc/LabelledBy.md")]
+    /// The node is labelled by the target node.
     LabelledBy(NodeId),
-    #[doc = include_str!("semantic_relation.doc/DescribedBy.md")]
+    /// The node is described by the target node.
     DescribedBy(NodeId),
-    #[doc = include_str!("semantic_relation.doc/Controls.md")]
+    /// The node controls the target node.
     Controls(NodeId),
-    #[doc = include_str!("semantic_relation.doc/Owns.md")]
+    /// The node owns the target node as a logical child.
     Owns(NodeId),
-    #[doc = include_str!("semantic_relation.doc/FlowsTo.md")]
+    /// Reading flow continues to the target node.
     FlowsTo(NodeId),
-    #[doc = include_str!("semantic_relation.doc/MemberOf.md")]
+    /// The node is a member of the group identified by the target.
     MemberOf(NodeId),
-    #[doc = include_str!("semantic_relation.doc/ActiveDescendant.md")]
+    /// The target is the active descendant within this node.
     ActiveDescendant(NodeId),
 }
 
 impl SemanticRelation {
-    #[doc = include_str!("semantic_relation.doc/target.md")]
+    /// Returns the [`NodeId`] this relation points at.
     #[must_use]
     pub const fn target(&self) -> NodeId {
         match self {
@@ -36,7 +36,8 @@ impl SemanticRelation {
         }
     }
 
-    #[doc = include_str!("semantic_relation.doc/kind_name.md")]
+    /// Returns a stable, kebab-free name for the relation kind, suitable for
+    /// diagnostics and adapter mapping.
     #[must_use]
     pub const fn kind_name(&self) -> &'static str {
         match self {

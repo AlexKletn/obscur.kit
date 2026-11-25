@@ -1,1 +1,0 @@
-Designate the tree root.

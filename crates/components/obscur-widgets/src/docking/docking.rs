@@ -1,4 +1,8 @@
-#![doc = include_str!("docking.doc/_module.md")]
+//! `Docking`: a headless dock host arranging panels against edges (spec §2.6).
+
+use super::DockPanel;
+
+use std::collections::{HashMap, HashSet};
 
 use obscur_accessibility::semantic::SemanticRole;
 use obscur_identity::{ComponentId, InternedSymbol};
@@ -6,78 +10,99 @@ use obscur_layout::algorithm::DockSide;
 use obscur_primitives::Text;
 use obscur_view::view::{View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-#[doc = include_str!("docking.doc/DockPanel.md")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DockPanel {
-    id: Box<str>,
-    title: Box<str>,
-    side: DockSide,
-}
+use super::DockingState;
 
-impl DockPanel {
-    #[doc = include_str!("docking.doc/new.md")]
-    #[must_use]
-    pub fn new(id: impl Into<Box<str>>, title: impl Into<Box<str>>, side: DockSide) -> Self {
-        Self {
-            id: id.into(),
-            title: title.into(),
-            side,
-        }
-    }
-
-    #[doc = include_str!("docking.doc/id.md")]
-    #[must_use]
-    pub fn id(&self) -> &str {
-        &self.id
-    }
-
-    #[doc = include_str!("docking.doc/title.md")]
-    #[must_use]
-    pub fn title(&self) -> &str {
-        &self.title
-    }
-
-    #[doc = include_str!("docking.doc/side.md")]
-    #[must_use]
-    pub const fn side(&self) -> DockSide {
-        self.side
-    }
-}
-
-#[doc = include_str!("docking.doc/Docking.md")]
+#[doc = include_str!("../../docs/api/docking/docking.doc/Docking.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Docking {
     panels: Vec<DockPanel>,
 }
 
 impl Docking {
-    #[doc = include_str!("docking.doc/COMPONENT_ID.md")]
+    /// Captures panel order and docking sides when every panel has a unique ID.
+    #[must_use]
+    pub fn capture_layout_state(&self) -> Option<DockingState> {
+        if !self.has_unique_panel_ids() {
+            return None;
+        }
+        Some(DockingState::capture(
+            self.panels
+                .iter()
+                .map(|panel| (panel.id.clone(), Self::side_name(panel.side).into()))
+                .collect(),
+        ))
+    }
+
+    /// Restores known panels by ID. Removed panels are skipped and new panels
+    /// keep their sides and relative order after the restored panels.
+    /// Invalid snapshots or ambiguous panel IDs leave the workspace intact.
+    pub fn restore_layout_state(&mut self, state: &DockingState) -> bool {
+        let Some(panels) = state.panels().filter(|_| self.has_unique_panel_ids()) else {
+            return false;
+        };
+        let mut saved = HashMap::with_capacity(panels.len());
+        for (index, (id, side)) in panels.iter().enumerate() {
+            let side = match side.as_ref() {
+                "top" => DockSide::Top,
+                "bottom" => DockSide::Bottom,
+                "left" => DockSide::Left,
+                "right" => DockSide::Right,
+                "fill" => DockSide::Fill,
+                _ => return false,
+            };
+            if id.trim().is_empty() || saved.insert(id.as_ref(), (index, side)).is_some() {
+                return false;
+            }
+        }
+        for panel in &mut self.panels {
+            if let Some(&(_, side)) = saved.get(panel.id()) {
+                panel.side = side;
+            }
+        }
+        self.panels.sort_by_key(|panel| {
+            saved
+                .get(panel.id())
+                .map_or(usize::MAX, |(index, _)| *index)
+        });
+        true
+    }
+
+    fn has_unique_panel_ids(&self) -> bool {
+        let mut seen = HashSet::with_capacity(self.panels.len());
+        self.panels
+            .iter()
+            .all(|panel| !panel.id.trim().is_empty() && seen.insert(panel.id()))
+    }
+
+    #[doc = include_str!("../../docs/api/docking/docking.doc/COMPONENT_ID.md")]
     pub const COMPONENT_ID: ComponentId = ComponentId::from_raw(0x00D0_000B);
 
-    #[doc = include_str!("docking.doc/DOCK_PANEL_ID.md")]
+    /// Stable component id for the per-panel child element.
     const DOCK_PANEL_ID: ComponentId = ComponentId::from_raw(0x00D0_001B);
 
-    #[doc = include_str!("docking.doc/PROP_ROLE.md")]
+    /// Interned name of the semantic-role property (`role`); shares the
+    /// `0x00D1_NNXX` scheme with `NN = 0B` (docking): role=`00`, dock-side=`01`,
+    /// title=`02` (on panel children).
     const PROP_ROLE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0B00);
-    #[doc = include_str!("docking.doc/PROP_DOCK_SIDE.md")]
+    /// Interned name of the per-panel `dock-side` property.
     const PROP_DOCK_SIDE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0B01);
-    #[doc = include_str!("docking.doc/PROP_TITLE.md")]
+    /// Interned name of the per-panel `title` property.
     const PROP_TITLE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0B02);
 
-    #[doc = include_str!("docking.doc/new_2.md")]
+    /// Creates an empty dock host with no panels.
     #[must_use]
     pub fn new() -> Self {
         Self { panels: Vec::new() }
     }
 
-    #[doc = include_str!("docking.doc/panel.md")]
+    /// Appends a single panel, returning the updated host (fluent builder).
     #[must_use]
     pub fn panel(mut self, panel: DockPanel) -> Self {
         self.panels.push(panel);
         self
     }
 
-    #[doc = include_str!("docking.doc/with_panels.md")]
+    /// Appends every panel from `panels`, returning the updated host.
     #[must_use]
     pub fn with_panels<I>(mut self, panels: I) -> Self
     where
@@ -87,12 +112,13 @@ impl Docking {
         self
     }
 
-    #[doc = include_str!("docking.doc/add_panel.md")]
+    /// Adds a panel to the host.
     pub fn add_panel(&mut self, panel: DockPanel) {
         self.panels.push(panel);
     }
 
-    #[doc = include_str!("docking.doc/remove_panel.md")]
+    /// Removes the first panel whose id matches `id`, returning `true` when a
+    /// panel was removed.
     pub fn remove_panel(&mut self, id: &str) -> bool {
         if let Some(index) = self.panels.iter().position(|p| &*p.id == id) {
             self.panels.remove(index);
@@ -102,7 +128,8 @@ impl Docking {
         }
     }
 
-    #[doc = include_str!("docking.doc/dock.md")]
+    /// Re-docks the panel with id `id` to `side`, returning `true` on success.
+    /// Returns `false` (leaving state untouched) when no panel has that id.
     pub fn dock(&mut self, id: &str, side: DockSide) -> bool {
         if let Some(panel) = self.panels.iter_mut().find(|p| &*p.id == id) {
             panel.side = side;
@@ -112,37 +139,37 @@ impl Docking {
         }
     }
 
-    #[doc = include_str!("docking.doc/panel_by_id.md")]
+    /// Returns the panel with id `id`, if any.
     #[must_use]
     pub fn panel_by_id(&self, id: &str) -> Option<&DockPanel> {
         self.panels.iter().find(|p| &*p.id == id)
     }
 
-    #[doc = include_str!("docking.doc/panels.md")]
+    /// Returns all panels in dock order.
     #[must_use]
     pub fn panels(&self) -> &[DockPanel] {
         &self.panels
     }
 
-    #[doc = include_str!("docking.doc/len.md")]
+    /// Returns the number of panels.
     #[must_use]
     pub fn len(&self) -> usize {
         self.panels.len()
     }
 
-    #[doc = include_str!("docking.doc/is_empty.md")]
+    /// Returns whether the host has no panels.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.panels.is_empty()
     }
 
-    #[doc = include_str!("docking.doc/semantic_role.md")]
+    /// Returns the accessible role of this host ([`SemanticRole::Group`]).
     #[must_use]
     pub const fn semantic_role(&self) -> SemanticRole {
         SemanticRole::Group
     }
 
-    #[doc = include_str!("docking.doc/side_name.md")]
+    /// Maps a [`DockSide`] to its lowercase view-property name.
     const fn side_name(side: DockSide) -> &'static str {
         match side {
             DockSide::Top => "top",
@@ -153,7 +180,7 @@ impl Docking {
         }
     }
 
-    #[doc = include_str!("docking.doc/view.md")]
+    #[doc = include_str!("../../docs/api/docking/docking.doc/view.md")]
     #[must_use]
     pub fn view(&self) -> View {
         let children: Vec<ViewNode> = self

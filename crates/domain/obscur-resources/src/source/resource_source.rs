@@ -1,104 +1,106 @@
-#![doc = include_str!("resource_source.doc/_module.md")]
+//! The umbrella enum of every resource source kind (spec §5.15).
 
 use crate::source::{DocumentSource, EmbeddedSource, GeneratedSource, MemorySource};
 
-#[doc = include_str!("resource_source.doc/ResourceSource.md")]
+#[doc = include_str!("../../docs/api/source/resource_source.doc/ResourceSource.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ResourceSource {
-    #[doc = include_str!("resource_source.doc/Embedded.md")]
+    /// A compile-time-baked asset (spec §5.15 embedded).
     Embedded(EmbeddedSource),
-    #[doc = include_str!("resource_source.doc/Memory.md")]
+    /// Runtime in-memory bytes (spec §5.15 memory).
     Memory(MemorySource),
-    #[doc = include_str!("resource_source.doc/Document.md")]
+    /// A host document handle, for example a picked file (spec §5.16, §6.10).
     Document(DocumentSource),
-    #[doc = include_str!("resource_source.doc/Generated.md")]
+    /// Procedurally generated content (spec §5.16).
     Generated(GeneratedSource),
-    #[doc = include_str!("resource_source.doc/File.md")]
+    /// A path resolved by the loader port (spec §5.15 file). The payload is an
+    /// opaque path string the host interprets; the kit does not open it here.
     File(Box<str>),
-    #[doc = include_str!("resource_source.doc/Url.md")]
+    /// A URL resolved *through* a user/host loader (spec §5.15). The kit performs
+    /// no network access by itself; the payload is only the requested URL string.
     Url(Box<str>),
 }
 
 impl ResourceSource {
-    #[doc = include_str!("resource_source.doc/embedded.md")]
+    /// Wraps an [`EmbeddedSource`] (spec §5.15 embedded).
     #[must_use]
     pub const fn embedded(source: EmbeddedSource) -> Self {
         Self::Embedded(source)
     }
 
-    #[doc = include_str!("resource_source.doc/memory.md")]
+    /// Wraps a [`MemorySource`] (spec §5.15 memory).
     #[must_use]
     pub const fn memory(source: MemorySource) -> Self {
         Self::Memory(source)
     }
 
-    #[doc = include_str!("resource_source.doc/document.md")]
+    /// Wraps a [`DocumentSource`] (spec §5.16, §6.10).
     #[must_use]
     pub const fn document(source: DocumentSource) -> Self {
         Self::Document(source)
     }
 
-    #[doc = include_str!("resource_source.doc/generated.md")]
+    /// Wraps a [`GeneratedSource`] (spec §5.16).
     #[must_use]
     pub const fn generated(source: GeneratedSource) -> Self {
         Self::Generated(source)
     }
 
-    #[doc = include_str!("resource_source.doc/file.md")]
+    /// Builds a file source from an opaque path string (spec §5.15 file).
     #[must_use]
     pub fn file(path: impl Into<Box<str>>) -> Self {
         Self::File(path.into())
     }
 
-    #[doc = include_str!("resource_source.doc/url.md")]
+    /// Builds a URL source, resolved through a user/host loader (spec §5.15).
     #[must_use]
     pub fn url(url: impl Into<Box<str>>) -> Self {
         Self::Url(url.into())
     }
 
-    #[doc = include_str!("resource_source.doc/is_embedded.md")]
+    /// Returns whether this is an [`ResourceSource::Embedded`] source.
     #[must_use]
     pub const fn is_embedded(&self) -> bool {
         matches!(self, Self::Embedded(_))
     }
 
-    #[doc = include_str!("resource_source.doc/is_memory.md")]
+    /// Returns whether this is a [`ResourceSource::Memory`] source.
     #[must_use]
     pub const fn is_memory(&self) -> bool {
         matches!(self, Self::Memory(_))
     }
 
-    #[doc = include_str!("resource_source.doc/is_document.md")]
+    /// Returns whether this is a [`ResourceSource::Document`] source.
     #[must_use]
     pub const fn is_document(&self) -> bool {
         matches!(self, Self::Document(_))
     }
 
-    #[doc = include_str!("resource_source.doc/is_generated.md")]
+    /// Returns whether this is a [`ResourceSource::Generated`] source.
     #[must_use]
     pub const fn is_generated(&self) -> bool {
         matches!(self, Self::Generated(_))
     }
 
-    #[doc = include_str!("resource_source.doc/is_file.md")]
+    /// Returns whether this is a [`ResourceSource::File`] source.
     #[must_use]
     pub const fn is_file(&self) -> bool {
         matches!(self, Self::File(_))
     }
 
-    #[doc = include_str!("resource_source.doc/is_url.md")]
+    /// Returns whether this is a [`ResourceSource::Url`] source.
     #[must_use]
     pub const fn is_url(&self) -> bool {
         matches!(self, Self::Url(_))
     }
 
-    #[doc = include_str!("resource_source.doc/requires_host_loader.md")]
+    #[doc = include_str!("../../docs/api/source/resource_source.doc/requires_host_loader.md")]
     #[must_use]
     pub const fn requires_host_loader(&self) -> bool {
         matches!(self, Self::Url(_) | Self::Document(_))
     }
 
-    #[doc = include_str!("resource_source.doc/inline_bytes.md")]
+    #[doc = include_str!("../../docs/api/source/resource_source.doc/inline_bytes.md")]
     #[must_use]
     pub fn inline_bytes(&self) -> Option<&[u8]> {
         match self {

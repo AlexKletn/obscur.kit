@@ -1,17 +1,17 @@
-#![doc = include_str!("signal_id.doc/_module.md")]
+//! Typed identifier: `SignalId`.
 
-#[doc = include_str!("signal_id.doc/SignalId.md")]
+#[doc = include_str!("../../docs/api/id/signal_id.doc/SignalId.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SignalId(u64);
 
 impl SignalId {
-    #[doc = include_str!("signal_id.doc/from_raw.md")]
+    /// Wraps a raw handle value into a `SignalId`.
     #[must_use]
     pub const fn from_raw(raw: u64) -> Self {
         Self(raw)
     }
 
-    #[doc = include_str!("signal_id.doc/raw.md")]
+    /// Returns the raw handle value backing this identifier.
     #[must_use]
     pub const fn raw(self) -> u64 {
         self.0

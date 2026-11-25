@@ -1,26 +1,40 @@
-#![doc = include_str!("scene_image.doc/_module.md")]
+//! A decoded raster image, ready to be drawn by a renderer.
 
 use crate::color::AlphaMode;
 
 use super::SharedPixels;
 
-#[doc = include_str!("scene_image.doc/SceneImage.md")]
+#[doc = include_str!("../../docs/api/paint/scene_image.doc/SceneImage.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct SceneImage {
-    #[doc = include_str!("scene_image.doc/width.md")]
+    /// The image width in pixels (its intrinsic width).
     width: u32,
-    #[doc = include_str!("scene_image.doc/height.md")]
+    /// The image height in pixels (its intrinsic height).
     height: u32,
-    #[doc = include_str!("scene_image.doc/pixels.md")]
+    /// `width × height × 4` RGBA8 bytes, row-major, top-to-bottom. Shared so a
+    /// clone is cheap.
     pixels: SharedPixels,
-    #[doc = include_str!("scene_image.doc/alpha.md")]
+    /// Whether the RGBA channels are premultiplied by alpha.
     alpha: AlphaMode,
-    #[doc = include_str!("scene_image.doc/scale.md")]
+    /// The asset's device-pixel density (spec §5.16 DPI variants): how many of
+    /// this image's pixels span one logical CSS pixel. `1.0` for a plain asset;
+    /// `2.0` for an `@2x` variant, whose pixel dimensions are twice its logical
+    /// size.
     scale: f32,
 }
 
 impl SceneImage {
-    #[doc = include_str!("scene_image.doc/new.md")]
+    /// Returns the RGBA8 payload size in bytes when it fits in one allocation.
+    #[must_use]
+    pub fn rgba8_byte_size(width_px: u32, height_px: u32) -> Option<u64> {
+        const BYTES_PER_PIXEL: u64 = 4;
+        let bytes = u64::from(width_px)
+            .checked_mul(u64::from(height_px))?
+            .checked_mul(BYTES_PER_PIXEL)?;
+        isize::try_from(bytes).ok().map(|_| bytes)
+    }
+
+    #[doc = include_str!("../../docs/api/paint/scene_image.doc/new.md")]
     #[must_use]
     pub fn new(
         width: u32,
@@ -28,11 +42,9 @@ impl SceneImage {
         pixels: impl Into<SharedPixels>,
         alpha: AlphaMode,
     ) -> Option<Self> {
+        let expected = Self::rgba8_byte_size(width, height)?;
         let pixels = pixels.into();
-        let expected = (width as usize)
-            .checked_mul(height as usize)
-            .and_then(|px| px.checked_mul(4))?;
-        if pixels.len() != expected {
+        if u64::try_from(pixels.len()).ok()? != expected {
             return None;
         }
         Some(Self {
@@ -44,7 +56,7 @@ impl SceneImage {
         })
     }
 
-    #[doc = include_str!("scene_image.doc/with_scale.md")]
+    #[doc = include_str!("../../docs/api/paint/scene_image.doc/with_scale.md")]
     #[must_use]
     pub fn with_scale(mut self, scale: f32) -> Self {
         if scale.is_finite() && scale > 0.0 {
@@ -53,43 +65,45 @@ impl SceneImage {
         self
     }
 
-    #[doc = include_str!("scene_image.doc/width_2.md")]
+    /// The image's intrinsic width in pixels.
     #[must_use]
     pub const fn width(&self) -> u32 {
         self.width
     }
 
-    #[doc = include_str!("scene_image.doc/height_2.md")]
+    /// The image's intrinsic height in pixels.
     #[must_use]
     pub const fn height(&self) -> u32 {
         self.height
     }
 
-    #[doc = include_str!("scene_image.doc/pixels_2.md")]
+    /// The RGBA8 pixel bytes, row-major and top-to-bottom (`width × height × 4`).
     #[must_use]
     pub fn pixels(&self) -> &[u8] {
         self.pixels.as_bytes()
     }
 
-    #[doc = include_str!("scene_image.doc/shared_pixels.md")]
+    #[doc = include_str!("../../docs/api/paint/scene_image.doc/shared_pixels.md")]
     #[must_use]
     pub fn shared_pixels(&self) -> SharedPixels {
         self.pixels.clone()
     }
 
-    #[doc = include_str!("scene_image.doc/alpha_mode.md")]
+    /// Whether the RGBA channels are premultiplied by alpha.
     #[must_use]
     pub const fn alpha_mode(&self) -> AlphaMode {
         self.alpha
     }
 
-    #[doc = include_str!("scene_image.doc/scale_2.md")]
+    /// The asset's device-pixel density: how many of this image's pixels span one
+    /// logical CSS pixel (spec §5.16 DPI variants). `1.0` unless
+    /// [`with_scale`](Self::with_scale) tagged it.
     #[must_use]
     pub const fn scale(&self) -> f32 {
         self.scale
     }
 
-    #[doc = include_str!("scene_image.doc/logical_size.md")]
+    #[doc = include_str!("../../docs/api/paint/scene_image.doc/logical_size.md")]
     #[must_use]
     #[allow(clippy::cast_precision_loss)]
     pub fn logical_size(&self) -> (f32, f32) {
@@ -125,6 +139,13 @@ mod tests {
         assert_eq!(img.pixels().len(), 16);
         // First pixel is opaque red.
         assert_eq!(&img.pixels()[0..4], &[255, 0, 0, 255]);
+    }
+
+    #[test]
+    fn rgba_size_rejects_overflow_and_sizes_outside_allocation_range() {
+        assert_eq!(SceneImage::rgba8_byte_size(3, 2), Some(24));
+        assert_eq!(SceneImage::rgba8_byte_size(u32::MAX, u32::MAX), None);
+        assert_eq!(SceneImage::rgba8_byte_size(u32::MAX, 1 << 30), None);
     }
 
     #[test]

@@ -1,22 +1,22 @@
-#![doc = include_str!("create_window.doc/_module.md")]
+//! Intent to create a new window (spec §6.1, §6.2).
 
 use obscur_identity::WindowId;
 
 use crate::window::{Window, WindowConstraints, WindowProperties, WindowRelation};
 
-#[doc = include_str!("create_window.doc/CreateWindow.md")]
+#[doc = include_str!("../../docs/api/request/create_window.doc/CreateWindow.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct CreateWindow {
-    #[doc = include_str!("create_window.doc/properties.md")]
+    /// The desired presentation properties of the new window.
     properties: WindowProperties,
-    #[doc = include_str!("create_window.doc/constraints.md")]
+    /// The size constraints to apply to the new window.
     constraints: WindowConstraints,
-    #[doc = include_str!("create_window.doc/relation.md")]
+    /// The owner/modality relationship of the new window to others.
     relation: WindowRelation,
 }
 
 impl CreateWindow {
-    #[doc = include_str!("create_window.doc/new.md")]
+    #[doc = include_str!("../../docs/api/request/create_window.doc/new.md")]
     #[must_use]
     pub fn new(properties: WindowProperties) -> Self {
         Self {
@@ -26,39 +26,39 @@ impl CreateWindow {
         }
     }
 
-    #[doc = include_str!("create_window.doc/with_constraints.md")]
+    /// Sets the size constraints, returning the updated request.
     #[must_use]
     pub fn with_constraints(mut self, constraints: WindowConstraints) -> Self {
         self.constraints = constraints;
         self
     }
 
-    #[doc = include_str!("create_window.doc/with_relation.md")]
+    /// Sets the owner/modality relation, returning the updated request.
     #[must_use]
     pub fn with_relation(mut self, relation: WindowRelation) -> Self {
         self.relation = relation;
         self
     }
 
-    #[doc = include_str!("create_window.doc/properties_2.md")]
+    /// Returns a shared reference to the requested properties.
     #[must_use]
     pub const fn properties(&self) -> &WindowProperties {
         &self.properties
     }
 
-    #[doc = include_str!("create_window.doc/constraints_2.md")]
+    /// Returns the requested size constraints.
     #[must_use]
     pub const fn constraints(&self) -> WindowConstraints {
         self.constraints
     }
 
-    #[doc = include_str!("create_window.doc/relation_2.md")]
+    /// Returns the requested owner/modality relation.
     #[must_use]
     pub const fn relation(&self) -> WindowRelation {
         self.relation
     }
 
-    #[doc = include_str!("create_window.doc/into_window.md")]
+    #[doc = include_str!("../../docs/api/request/create_window.doc/into_window.md")]
     #[must_use]
     pub fn into_window(self, id: WindowId) -> Window {
         let mut window = Window::new(id, self.properties);

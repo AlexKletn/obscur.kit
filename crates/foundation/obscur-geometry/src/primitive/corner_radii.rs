@@ -1,90 +1,36 @@
-#![doc = include_str!("corner_radii.doc/_module.md")]
+//! Per-corner border radii in logical pixels.
 
 use super::Rect;
 
-#[doc = include_str!("corner_radii.doc/CornerRadius.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub struct CornerRadius {
-    #[doc = include_str!("corner_radii.doc/x.md")]
-    pub x: f32,
-    #[doc = include_str!("corner_radii.doc/y.md")]
-    pub y: f32,
-}
+use super::CornerRadius;
 
-impl CornerRadius {
-    #[doc = include_str!("corner_radii.doc/circular.md")]
-    #[must_use]
-    pub const fn circular(radius: f32) -> Self {
-        Self {
-            x: radius,
-            y: radius,
-        }
-    }
-
-    #[doc = include_str!("corner_radii.doc/new.md")]
-    #[must_use]
-    pub const fn new(x: f32, y: f32) -> Self {
-        Self { x, y }
-    }
-
-    #[doc = include_str!("corner_radii.doc/is_rounded.md")]
-    #[must_use]
-    pub fn is_rounded(self) -> bool {
-        self.x > 0.0 && self.y > 0.0
-    }
-
-    #[doc = include_str!("corner_radii.doc/non_negative.md")]
-    #[must_use]
-    pub fn non_negative(self) -> Self {
-        Self {
-            x: self.x.max(0.0),
-            y: self.y.max(0.0),
-        }
-    }
-
-    #[doc = include_str!("corner_radii.doc/scaled.md")]
-    #[must_use]
-    pub fn scaled(self, f: f32) -> Self {
-        Self {
-            x: self.x * f,
-            y: self.y * f,
-        }
-    }
-
-    #[doc = include_str!("corner_radii.doc/circular_approximation.md")]
-    #[must_use]
-    pub fn circular_approximation(self) -> f32 {
-        (self.x + self.y) / 2.0
-    }
-}
-
-#[doc = include_str!("corner_radii.doc/CornerRadii.md")]
+#[doc = include_str!("../../docs/api/primitive/corner_radii.doc/CornerRadii.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct CornerRadii {
-    #[doc = include_str!("corner_radii.doc/top_left.md")]
+    /// Top-left radii.
     pub top_left: CornerRadius,
-    #[doc = include_str!("corner_radii.doc/top_right.md")]
+    /// Top-right radii.
     pub top_right: CornerRadius,
-    #[doc = include_str!("corner_radii.doc/bottom_right.md")]
+    /// Bottom-right radii.
     pub bottom_right: CornerRadius,
-    #[doc = include_str!("corner_radii.doc/bottom_left.md")]
+    /// Bottom-left radii.
     pub bottom_left: CornerRadius,
 }
 
 impl CornerRadii {
-    #[doc = include_str!("corner_radii.doc/uniform.md")]
+    /// The same **circular** radius on every corner.
     #[must_use]
     pub const fn uniform(radius: f32) -> Self {
         Self::all(CornerRadius::circular(radius))
     }
 
-    #[doc = include_str!("corner_radii.doc/elliptical.md")]
+    /// The same **elliptical** radii on every corner: `x` horizontal, `y` vertical.
     #[must_use]
     pub const fn elliptical(x: f32, y: f32) -> Self {
         Self::all(CornerRadius::new(x, y))
     }
 
-    #[doc = include_str!("corner_radii.doc/all.md")]
+    /// The same `corner` on every corner.
     #[must_use]
     pub const fn all(corner: CornerRadius) -> Self {
         Self {
@@ -95,7 +41,7 @@ impl CornerRadii {
         }
     }
 
-    #[doc = include_str!("corner_radii.doc/corners.md")]
+    /// The four corners in CSS order: top-left, top-right, bottom-right, bottom-left.
     #[must_use]
     pub const fn corners(self) -> [CornerRadius; 4] {
         [
@@ -106,19 +52,19 @@ impl CornerRadii {
         ]
     }
 
-    #[doc = include_str!("corner_radii.doc/any_positive.md")]
+    #[doc = include_str!("../../docs/api/primitive/corner_radii.doc/any_positive.md")]
     #[must_use]
     pub fn any_positive(self) -> bool {
         self.corners().iter().any(|c| c.is_rounded())
     }
 
-    #[doc = include_str!("corner_radii.doc/non_negative_2.md")]
+    /// Every corner floored at zero on both axes.
     #[must_use]
     pub fn non_negative(self) -> Self {
         self.map(CornerRadius::non_negative)
     }
 
-    #[doc = include_str!("corner_radii.doc/map.md")]
+    /// Applies `f` to every corner.
     #[must_use]
     pub fn map(self, f: impl Fn(CornerRadius) -> CornerRadius) -> Self {
         Self {
@@ -129,7 +75,7 @@ impl CornerRadii {
         }
     }
 
-    #[doc = include_str!("corner_radii.doc/offset.md")]
+    #[doc = include_str!("../../docs/api/primitive/corner_radii.doc/offset.md")]
     #[must_use]
     pub fn offset(self, delta: f32) -> Self {
         self.map(|c| {
@@ -141,7 +87,7 @@ impl CornerRadii {
         })
     }
 
-    #[doc = include_str!("corner_radii.doc/spread_offset.md")]
+    #[doc = include_str!("../../docs/api/primitive/corner_radii.doc/spread_offset.md")]
     #[must_use]
     pub fn spread_offset(self, delta: f32) -> Self {
         self.map(|c| {
@@ -153,7 +99,7 @@ impl CornerRadii {
         })
     }
 
-    #[doc = include_str!("corner_radii.doc/normalized.md")]
+    #[doc = include_str!("../../docs/api/primitive/corner_radii.doc/normalized.md")]
     #[must_use]
     pub fn normalized(self, rect: Rect) -> Self {
         let w = rect.size.width.max(0.0);
@@ -178,7 +124,7 @@ impl CornerRadii {
     }
 }
 
-#[doc = include_str!("corner_radii.doc/spread_axis.md")]
+#[doc = include_str!("../../docs/api/primitive/corner_radii.doc/spread_axis.md")]
 fn spread_axis(radius: f32, delta: f32) -> f32 {
     // Shrinking (§8.3 Issue 1900), or a corner already at least as round as the
     // distance it grows by (`r ≥ 1`, outside the rule's "border radius is less

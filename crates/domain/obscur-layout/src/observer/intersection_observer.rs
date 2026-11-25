@@ -1,32 +1,12 @@
-#![doc = include_str!("intersection_observer.doc/_module.md")]
+#![doc = include_str!("../../docs/api/observer/intersection_observer.doc/_module.md")]
 
 use obscur_geometry::Rect;
 use obscur_identity::NodeId;
 
-#[doc = include_str!("intersection_observer.doc/IntersectionChange.md")]
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct IntersectionChange {
-    #[doc = include_str!("intersection_observer.doc/node.md")]
-    pub node: NodeId,
-    #[doc = include_str!("intersection_observer.doc/ratio.md")]
-    pub ratio: f32,
-    #[doc = include_str!("intersection_observer.doc/intersecting.md")]
-    pub intersecting: bool,
-}
+use super::IntersectionChange;
 
-impl IntersectionChange {
-    #[doc = include_str!("intersection_observer.doc/new.md")]
-    #[must_use]
-    pub const fn new(node: NodeId, ratio: f32, intersecting: bool) -> Self {
-        Self {
-            node,
-            ratio,
-            intersecting,
-        }
-    }
-}
-
-#[doc = include_str!("intersection_observer.doc/IntersectionObserver.md")]
+/// Watches the overlap ratio of a node's rectangle against a root rectangle,
+/// firing when the target crosses the `threshold` (spec §4.4).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct IntersectionObserver {
     node: NodeId,
@@ -35,7 +15,9 @@ pub struct IntersectionObserver {
 }
 
 impl IntersectionObserver {
-    #[doc = include_str!("intersection_observer.doc/new_2.md")]
+    /// Creates an observer for `node` with the given `threshold`, clamped to
+    /// `0.0..=1.0`. It has not yet observed intersection, so the first
+    /// [`observe`](Self::observe) fires with the initial value.
     #[must_use]
     pub fn new(node: NodeId, threshold: f32) -> Self {
         Self {
@@ -45,25 +27,26 @@ impl IntersectionObserver {
         }
     }
 
-    #[doc = include_str!("intersection_observer.doc/node_2.md")]
+    /// The observed node.
     #[must_use]
     pub const fn node(self) -> NodeId {
         self.node
     }
 
-    #[doc = include_str!("intersection_observer.doc/threshold.md")]
+    /// The (clamped) intersection threshold.
     #[must_use]
     pub const fn threshold(self) -> f32 {
         self.threshold
     }
 
-    #[doc = include_str!("intersection_observer.doc/last_intersecting.md")]
+    /// The last observed intersecting state, or `None` before the first
+    /// observation.
     #[must_use]
     pub const fn last_intersecting(self) -> Option<bool> {
         self.last_intersecting
     }
 
-    #[doc = include_str!("intersection_observer.doc/observe.md")]
+    #[doc = include_str!("../../docs/api/observer/intersection_observer.doc/observe.md")]
     #[must_use]
     pub fn observe(&mut self, target: Rect, root: Rect) -> Option<IntersectionChange> {
         let overlap = overlap_area(target, root);
@@ -86,13 +69,15 @@ impl IntersectionObserver {
         Some(IntersectionChange::new(self.node, ratio, intersecting))
     }
 
-    #[doc = include_str!("intersection_observer.doc/reset.md")]
+    /// Forgets the last observed intersecting state, so the next observation
+    /// fires afresh.
     pub const fn reset(&mut self) {
         self.last_intersecting = None;
     }
 }
 
-#[doc = include_str!("intersection_observer.doc/overlap_area.md")]
+/// The area of the axis-aligned overlap of two rectangles (`0.0` when they do
+/// not overlap).
 fn overlap_area(a: Rect, b: Rect) -> f32 {
     let width = (a.right().min(b.right()) - a.origin.x.max(b.origin.x)).max(0.0);
     let height = (a.bottom().min(b.bottom()) - a.origin.y.max(b.origin.y)).max(0.0);

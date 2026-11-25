@@ -3,7 +3,7 @@
 This example drives the *real* `.okui` frontend pipeline end-to-end and
 rasterizes the result with the software backend — no display, no GPU:
 
-1. **Parse** an authored [`showcase.okui`](./showcase.okui) document with the
+1. **Parse** an authored [`showcase.okui`](../showcase.okui) document with the
    lossless [`Parser`](obscur_kit::okui_syntax::parser::Parser).
 2. **Compile** it through the [`Compiler`](obscur_kit::okui_compiler::compile::Compiler)
    (name resolution → validation against the built-in contracts → lowering to

@@ -1,24 +1,24 @@
-#![doc = include_str!("input_event.doc/_module.md")]
+//! [`InputEvent`]: one platform event queued for the frame's dispatch phase.
 
 use obscur_geometry::Point;
 use obscur_interaction::command::KeyEvent;
 use obscur_interaction::pointer::PointerEvent;
 use obscur_text::ime::CompositionEvent;
 
-#[doc = include_str!("input_event.doc/InputEvent.md")]
+#[doc = include_str!("../../docs/api/runtime/input_event.doc/InputEvent.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum InputEvent {
-    #[doc = include_str!("input_event.doc/Pointer.md")]
+    /// A pointer moved, pressed, released, entered, left or was cancelled.
     Pointer(PointerEvent),
-    #[doc = include_str!("input_event.doc/Key.md")]
+    /// A key was pressed or released.
     Key(KeyEvent),
-    #[doc = include_str!("input_event.doc/Composition.md")]
+    /// An IME composition was updated or committed.
     Composition(CompositionEvent),
-    #[doc = include_str!("input_event.doc/Scroll.md")]
+    /// A scroll wheel/gesture moved by `delta` at `position`.
     Scroll {
-        #[doc = include_str!("input_event.doc/delta.md")]
+        /// The vertical scroll delta, in logical pixels.
         delta: f32,
-        #[doc = include_str!("input_event.doc/position.md")]
+        /// Where the scroll happened, in viewport coordinates.
         position: Point,
     },
 }

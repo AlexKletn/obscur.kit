@@ -1,4 +1,4 @@
-#![doc = include_str!("display_list_builder.doc/_module.md")]
+//! An incremental builder for [`DisplayList`]s.
 
 use obscur_geometry::{AffineTransform, CornerRadii, Point, Rect};
 
@@ -9,78 +9,64 @@ use crate::paint::{Brush, Paint, SceneImage, Stroke};
 use crate::path::Path;
 use crate::text::GlyphRun;
 
-use super::{DisplayList, PaintCommand};
+use super::{
+    DisplayList, PaintCommand, canvas_boundary::CanvasBoundary, command_scope::CommandScope,
+};
 
-#[doc = include_str!("display_list_builder.doc/DisplayListBuilder.md")]
+#[doc = include_str!("../../docs/api/command/display_list_builder.doc/DisplayListBuilder.md")]
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct DisplayListBuilder {
     commands: Vec<PaintCommand>,
-    depth: u32,
-    #[doc = include_str!("display_list_builder.doc/open.md")]
-    open: Vec<BracketKind>,
-}
-
-#[doc = include_str!("display_list_builder.doc/balanced.md")]
-fn balanced(commands: &[PaintCommand]) -> bool {
-    let mut depth: i32 = 0;
-    for command in commands {
-        depth += match command {
-            PaintCommand::PushTransform(_)
-            | PaintCommand::PushClip(_)
-            | PaintCommand::PushLayer(_) => 1,
-            PaintCommand::PopTransform | PaintCommand::PopClip | PaintCommand::PopLayer => -1,
-            _ => 0,
-        };
-        if depth < 0 {
-            return false;
-        }
-    }
-    depth == 0
-}
-
-#[doc = include_str!("display_list_builder.doc/BracketKind.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BracketKind {
-    Transform,
-    Clip,
-    Layer,
+    #[doc = include_str!("../../docs/api/command/display_list_builder.doc/open.md")]
+    open: Vec<CommandScope>,
+    canvas_boundary: Option<CanvasBoundary>,
 }
 
 impl DisplayListBuilder {
-    #[doc = include_str!("display_list_builder.doc/new.md")]
+    /// Creates an empty builder with a nesting depth of zero.
     #[must_use]
     pub fn new() -> Self {
         Self {
             commands: Vec::new(),
-            depth: 0,
             open: Vec::new(),
+            canvas_boundary: None,
         }
     }
 
-    #[doc = include_str!("display_list_builder.doc/draw.md")]
+    /// Appends a [`PaintCommand::DrawPath`] painting `path` with `paint`.
+    /// Returns `&mut Self` for chaining.
     pub fn draw(&mut self, path: Path, paint: Paint) -> &mut Self {
         self.commands.push(PaintCommand::DrawPath { path, paint });
         self
     }
 
-    #[doc = include_str!("display_list_builder.doc/fill.md")]
+    /// Appends a fill: a [`PaintCommand::DrawPath`] with `Paint::fill(brush)`.
+    /// Returns `&mut Self` for chaining.
     pub fn fill(&mut self, path: Path, brush: Brush) -> &mut Self {
         self.draw(path, Paint::fill(brush))
     }
 
-    #[doc = include_str!("display_list_builder.doc/fill_rect.md")]
+    /// Appends a filled rectangle, building the path with [`Path::rect`] and
+    /// filling it with `brush`. Returns `&mut Self` for chaining.
     pub fn fill_rect(&mut self, rect: Rect, brush: Brush) -> &mut Self {
         self.fill(Path::rect(rect), brush)
     }
 
-    #[doc = include_str!("display_list_builder.doc/draw_text.md")]
+    /// Appends a [`PaintCommand::DrawText`] drawing the pre-shaped `run` at
+    /// `origin` (its top-left in absolute scene coordinates), painted with
+    /// `brush`. This is a leaf command; the run's glyphs were shaped once in the
+    /// `obscur-text` domain. Returns `&mut Self` for chaining.
     pub fn draw_text(&mut self, origin: Point, run: GlyphRun, brush: Brush) -> &mut Self {
         self.commands
             .push(PaintCommand::DrawText { origin, run, brush });
         self
     }
 
-    #[doc = include_str!("display_list_builder.doc/draw_image.md")]
+    /// Appends a [`PaintCommand::DrawImage`] drawing the decoded `image` as one
+    /// copy scaled to `tile`, clipped to `region`, and tiled along the `repeat_x` /
+    /// `repeat_y` axes to fill `region`. This is a leaf command (no nesting effect).
+    /// A full-box stretch is `tile == region` with both repeat flags `false`.
+    /// Returns `&mut Self` for chaining.
     pub fn draw_image(
         &mut self,
         image: SceneImage,
@@ -99,7 +85,10 @@ impl DisplayListBuilder {
         self
     }
 
-    #[doc = include_str!("display_list_builder.doc/draw_shadow.md")]
+    /// Appends a [`PaintCommand::DrawShadow`] painting a CSS `box-shadow` for the
+    /// border box `rect` with corner `radii`, the resolved `color`, blur radius
+    /// `blur`, `spread`, `offset`, and the `inset` flag. This is a leaf command
+    /// (no nesting effect). Returns `&mut Self` for chaining.
     #[allow(clippy::too_many_arguments)]
     pub fn draw_shadow(
         &mut self,
@@ -123,7 +112,7 @@ impl DisplayListBuilder {
         self
     }
 
-    #[doc = include_str!("display_list_builder.doc/backdrop_filter.md")]
+    #[doc = include_str!("../../docs/api/command/display_list_builder.doc/backdrop_filter.md")]
     pub fn backdrop_filter(&mut self, bounds: Rect, radii: CornerRadii, blur: f32) -> &mut Self {
         self.commands.push(PaintCommand::BackdropFilter {
             bounds,
@@ -133,60 +122,69 @@ impl DisplayListBuilder {
         self
     }
 
-    #[doc = include_str!("display_list_builder.doc/stroke.md")]
+    /// Appends a stroke: a [`PaintCommand::DrawPath`] with
+    /// `Paint::stroke(stroke)`. Returns `&mut Self` for chaining.
     pub fn stroke(&mut self, path: Path, stroke: Stroke) -> &mut Self {
         self.draw(path, Paint::stroke(stroke))
     }
 
-    #[doc = include_str!("display_list_builder.doc/push_transform.md")]
+    /// Appends a [`PaintCommand::PushTransform`] and increments the nesting depth.
+    /// Everything drawn until the matching [`pop_transform`](Self::pop_transform)
+    /// is mapped by `transform`. Returns `&mut Self` for chaining.
     pub fn push_transform(&mut self, transform: AffineTransform) -> &mut Self {
         self.commands.push(PaintCommand::PushTransform(transform));
-        self.depth = self.depth.saturating_add(1);
-        self.open.push(BracketKind::Transform);
+        self.open.push(CommandScope::Transform);
         self
     }
 
-    #[doc = include_str!("display_list_builder.doc/pop_transform.md")]
+    /// Records a [`PaintCommand::PopTransform`] and closes a matching open transform.
     pub fn pop_transform(&mut self) -> &mut Self {
-        self.commands.push(PaintCommand::PopTransform);
-        self.depth = self.depth.saturating_sub(1);
-        self.open.pop();
-        self
+        self.record_pop(CommandScope::Transform)
     }
 
-    #[doc = include_str!("display_list_builder.doc/push_clip.md")]
+    /// Appends a [`PaintCommand::PushClip`] and increments the nesting depth.
+    /// Returns `&mut Self` for chaining.
     pub fn push_clip(&mut self, clip: Clip) -> &mut Self {
         self.commands.push(PaintCommand::PushClip(clip));
-        self.depth = self.depth.saturating_add(1);
-        self.open.push(BracketKind::Clip);
+        self.open.push(CommandScope::Clip);
         self
     }
 
-    #[doc = include_str!("display_list_builder.doc/pop_clip.md")]
+    /// Records a [`PaintCommand::PopClip`] and closes a matching open clip.
     pub fn pop_clip(&mut self) -> &mut Self {
-        self.commands.push(PaintCommand::PopClip);
-        self.depth = self.depth.saturating_sub(1);
-        self.open.pop();
-        self
+        self.record_pop(CommandScope::Clip)
     }
 
-    #[doc = include_str!("display_list_builder.doc/push_layer.md")]
+    /// Appends a [`PaintCommand::PushLayer`] and increments the nesting depth.
+    /// Returns `&mut Self` for chaining.
     pub fn push_layer(&mut self, layer: SceneLayer) -> &mut Self {
         self.commands.push(PaintCommand::PushLayer(layer));
-        self.depth = self.depth.saturating_add(1);
-        self.open.push(BracketKind::Layer);
+        self.open.push(CommandScope::Layer);
         self
     }
 
-    #[doc = include_str!("display_list_builder.doc/pop_layer.md")]
+    /// Records a [`PaintCommand::PopLayer`] and closes a matching open layer.
     pub fn pop_layer(&mut self) -> &mut Self {
-        self.commands.push(PaintCommand::PopLayer);
-        self.depth = self.depth.saturating_sub(1);
-        self.open.pop();
+        self.record_pop(CommandScope::Layer)
+    }
+
+    fn record_pop(&mut self, kind: CommandScope) -> &mut Self {
+        let matches = self.open.last() == Some(&kind);
+        let depth = self.depth();
+        if let Some(boundary) = &mut self.canvas_boundary
+            && (!matches || depth <= boundary.depth)
+        {
+            boundary.rejected_pop = true;
+            return self;
+        }
+        self.commands.push(kind.close());
+        if matches {
+            self.open.pop();
+        }
         self
     }
 
-    #[doc = include_str!("display_list_builder.doc/splice_balanced.md")]
+    #[doc = include_str!("../../docs/api/command/display_list_builder.doc/splice_balanced.md")]
     pub fn splice_balanced(&mut self, commands: Vec<PaintCommand>) -> &mut Self {
         // Depth and the open-bracket stack are deliberately untouched, and the
         // name is the precondition that makes that correct: a balanced group
@@ -194,36 +192,59 @@ impl DisplayListBuilder {
         // that is NOT balanced would desync both — which is why this is not
         // called `extend`.
         debug_assert!(
-            balanced(&commands),
-            "splice_balanced was handed a group that opens more than it closes"
+            DisplayList::commands_are_balanced(&commands),
+            "splice_balanced requires matching scope commands"
         );
         self.commands.extend(commands);
         self
     }
 
-    #[doc = include_str!("display_list_builder.doc/pop_any.md")]
+    #[doc = include_str!("../../docs/api/command/display_list_builder.doc/pop_any.md")]
     pub fn pop_any(&mut self) -> &mut Self {
-        match self.open.last() {
-            Some(BracketKind::Transform) => self.pop_transform(),
-            Some(BracketKind::Clip) => self.pop_clip(),
-            Some(BracketKind::Layer) => self.pop_layer(),
-            None => self,
+        if let Some(kind) = self.open.last().copied() {
+            self.record_pop(kind);
         }
+        self
     }
 
-    #[doc = include_str!("display_list_builder.doc/depth.md")]
+    pub(super) fn protect_canvas_scopes(&mut self) -> Option<CanvasBoundary> {
+        let depth = self.depth();
+        self.canvas_boundary.replace(CanvasBoundary {
+            depth,
+            rejected_pop: false,
+        })
+    }
+
+    pub(super) fn restore_canvas_scopes(
+        &mut self,
+        previous: Option<CanvasBoundary>,
+        entry_depth: u32,
+    ) -> bool {
+        let boundary = core::mem::replace(&mut self.canvas_boundary, previous);
+        let balanced = boundary
+            .is_some_and(|boundary| !boundary.rejected_pop && self.depth() == boundary.depth);
+        while self.depth() > entry_depth {
+            self.pop_any();
+        }
+        if let Some(parent) = &mut self.canvas_boundary {
+            parent.rejected_pop |= !balanced;
+        }
+        balanced
+    }
+
+    /// The number of open transforms, clips and layers, capped at `u32::MAX`.
     #[must_use]
     pub fn depth(&self) -> u32 {
-        self.depth
+        u32::try_from(self.open.len()).unwrap_or(u32::MAX)
     }
 
-    #[doc = include_str!("display_list_builder.doc/is_balanced.md")]
+    #[doc = include_str!("../../docs/api/command/display_list_builder.doc/is_balanced.md")]
     #[must_use]
     pub fn is_balanced(&self) -> bool {
-        self.depth == 0
+        DisplayList::commands_are_balanced(&self.commands)
     }
 
-    #[doc = include_str!("display_list_builder.doc/build.md")]
+    #[doc = include_str!("../../docs/api/command/display_list_builder.doc/build.md")]
     #[must_use]
     pub fn build(self) -> DisplayList {
         DisplayList::from_commands(self.commands)
@@ -276,6 +297,21 @@ mod tests {
 
         let list = builder.build();
         assert!(!list.is_balanced());
+    }
+
+    #[test]
+    fn pop_any_still_closes_the_layer_after_a_mismatched_pop() {
+        let mut builder = DisplayListBuilder::new();
+        builder.push_layer(SceneLayer::new()).pop_clip();
+        assert_eq!(builder.depth(), 1);
+        assert!(!builder.is_balanced());
+        builder.pop_any();
+        assert_eq!(builder.depth(), 0);
+        assert!(!builder.is_balanced());
+        assert!(matches!(
+            builder.build().commands().last(),
+            Some(PaintCommand::PopLayer)
+        ));
     }
 
     #[test]

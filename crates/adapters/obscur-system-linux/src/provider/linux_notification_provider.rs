@@ -1,21 +1,22 @@
-#![doc = include_str!("linux_notification_provider.doc/_module.md")]
+#![doc = include_str!("../../docs/api/provider/linux_notification_provider.doc/_module.md")]
 
 use std::process::Command;
 
 use obscur_capability::SupportLevel;
 use obscur_system::notification::{Notification, NotificationProvider, NotificationResult};
 
-#[doc = include_str!("linux_notification_provider.doc/LinuxNotificationProvider.md")]
+#[doc = include_str!("../../docs/api/provider/linux_notification_provider.doc/LinuxNotificationProvider.md")]
 #[derive(Debug, Clone)]
 pub struct LinuxNotificationProvider {
-    #[doc = include_str!("linux_notification_provider.doc/tool.md")]
+    /// The notification tool to invoke, e.g. `"notify-send"`.
     tool: Box<str>,
-    #[doc = include_str!("linux_notification_provider.doc/badge.md")]
+    /// The last app-icon badge count set; recorded but not surfaced on Linux.
     badge: Option<u32>,
 }
 
 impl LinuxNotificationProvider {
-    #[doc = include_str!("linux_notification_provider.doc/new.md")]
+    /// Creates a provider that posts notifications with `notify-send`
+    /// (spec §6.12).
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -24,7 +25,8 @@ impl LinuxNotificationProvider {
         }
     }
 
-    #[doc = include_str!("linux_notification_provider.doc/with_tool.md")]
+    /// Creates a provider that posts notifications with a custom `tool` command
+    /// (spec §6.12).
     #[must_use]
     pub fn with_tool(tool: impl Into<Box<str>>) -> Self {
         Self {
@@ -33,13 +35,13 @@ impl LinuxNotificationProvider {
         }
     }
 
-    #[doc = include_str!("linux_notification_provider.doc/tool_2.md")]
+    /// Returns the notification tool this provider invokes (spec §6.12).
     #[must_use]
     pub fn tool(&self) -> &str {
         &self.tool
     }
 
-    #[doc = include_str!("linux_notification_provider.doc/badge_2.md")]
+    #[doc = include_str!("../../docs/api/provider/linux_notification_provider.doc/badge_2.md")]
     #[must_use]
     pub const fn badge(&self) -> Option<u32> {
         self.badge
@@ -47,7 +49,7 @@ impl LinuxNotificationProvider {
 }
 
 impl Default for LinuxNotificationProvider {
-    #[doc = include_str!("linux_notification_provider.doc/default.md")]
+    /// The default provider posts notifications with `notify-send`.
     fn default() -> Self {
         Self::new()
     }
@@ -84,7 +86,7 @@ impl NotificationProvider for LinuxNotificationProvider {
     }
 }
 
-#[doc = include_str!("linux_notification_provider.doc/build_args.md")]
+#[doc = include_str!("../../docs/api/provider/linux_notification_provider.doc/build_args.md")]
 #[must_use]
 fn build_args(notification: &Notification) -> Vec<String> {
     let mut args = Vec::new();
@@ -96,7 +98,7 @@ fn build_args(notification: &Notification) -> Vec<String> {
     args
 }
 
-#[doc = include_str!("linux_notification_provider.doc/tool_available.md")]
+#[doc = include_str!("../../docs/api/provider/linux_notification_provider.doc/tool_available.md")]
 fn tool_available(cmd: &str) -> bool {
     let Some(path) = std::env::var_os("PATH") else {
         return false;

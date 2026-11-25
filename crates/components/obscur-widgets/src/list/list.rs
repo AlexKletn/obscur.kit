@@ -1,4 +1,4 @@
-#![doc = include_str!("list.doc/_module.md")]
+//! `List`: a headless selectable list (spec §2.6, §4.9).
 
 use std::collections::BTreeSet;
 
@@ -7,7 +7,7 @@ use obscur_identity::{ComponentId, InternedSymbol};
 use obscur_primitives::Text;
 use obscur_view::view::{View, ViewFragment, ViewNode, ViewProperty, ViewValue};
 
-#[doc = include_str!("list.doc/List.md")]
+#[doc = include_str!("../../docs/api/list/list.doc/List.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct List {
     items: Vec<Box<str>>,
@@ -16,20 +16,22 @@ pub struct List {
 }
 
 impl List {
-    #[doc = include_str!("list.doc/COMPONENT_ID.md")]
+    #[doc = include_str!("../../docs/api/list/list.doc/COMPONENT_ID.md")]
     pub const COMPONENT_ID: ComponentId = ComponentId::from_raw(0x00D0_0008);
 
-    #[doc = include_str!("list.doc/LIST_ITEM_ID.md")]
+    /// Stable component id for the per-item child element.
     const LIST_ITEM_ID: ComponentId = ComponentId::from_raw(0x00D0_0018);
 
-    #[doc = include_str!("list.doc/PROP_ROLE.md")]
+    /// Interned name of the semantic-role property (`role`); shares the
+    /// `0x00D1_NNXX` scheme with `NN = 08` (list): role=`00`, multi=`01`,
+    /// selected=`02` (on item children).
     const PROP_ROLE: InternedSymbol = InternedSymbol::from_raw(0x00D1_0800);
-    #[doc = include_str!("list.doc/PROP_MULTI.md")]
+    /// Interned name of the `multi` (multi-select) state property.
     const PROP_MULTI: InternedSymbol = InternedSymbol::from_raw(0x00D1_0801);
-    #[doc = include_str!("list.doc/PROP_SELECTED.md")]
+    /// Interned name of the per-item `selected` state property.
     const PROP_SELECTED: InternedSymbol = InternedSymbol::from_raw(0x00D1_0802);
 
-    #[doc = include_str!("list.doc/new.md")]
+    /// Creates an empty, single-select list with nothing selected.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -39,14 +41,14 @@ impl List {
         }
     }
 
-    #[doc = include_str!("list.doc/item.md")]
+    /// Appends a single item, returning the updated list (fluent builder).
     #[must_use]
     pub fn item(mut self, label: impl Into<Box<str>>) -> Self {
         self.items.push(label.into());
         self
     }
 
-    #[doc = include_str!("list.doc/with_items.md")]
+    /// Appends every item from `labels`, returning the updated list.
     #[must_use]
     pub fn with_items<I, S>(mut self, labels: I) -> Self
     where
@@ -57,14 +59,17 @@ impl List {
         self
     }
 
-    #[doc = include_str!("list.doc/multi.md")]
+    /// Sets the multi-select flag, returning the updated list (fluent builder).
     #[must_use]
     pub fn multi(mut self, multi: bool) -> Self {
         self.multi = multi;
         self
     }
 
-    #[doc = include_str!("list.doc/select.md")]
+    /// Selects the item at `index`, returning `true` on success. In
+    /// single-select mode this replaces the selection with just `index`; in
+    /// multi-select mode it adds `index` to the selection. Returns `false`
+    /// (leaving state untouched) when `index` is out of range.
     pub fn select(&mut self, index: usize) -> bool {
         if index < self.items.len() {
             if !self.multi {
@@ -77,7 +82,10 @@ impl List {
         }
     }
 
-    #[doc = include_str!("list.doc/toggle.md")]
+    /// Toggles the selected membership of the item at `index`, returning the new
+    /// membership (`true` if now selected). In single-select mode toggling an
+    /// item on still replaces any prior selection. Out-of-range indices leave
+    /// state untouched and return `false`.
     pub fn toggle(&mut self, index: usize) -> bool {
         if index >= self.items.len() {
             return false;
@@ -94,58 +102,59 @@ impl List {
         }
     }
 
-    #[doc = include_str!("list.doc/deselect.md")]
+    /// Deselects the item at `index`, returning `true` when it was previously
+    /// selected. Out-of-range (or unselected) indices return `false`.
     pub fn deselect(&mut self, index: usize) -> bool {
         self.selected.remove(&index)
     }
 
-    #[doc = include_str!("list.doc/clear_selection.md")]
+    /// Clears the entire selection.
     pub fn clear_selection(&mut self) {
         self.selected.clear();
     }
 
-    #[doc = include_str!("list.doc/is_selected.md")]
+    /// Returns whether the item at `index` is selected.
     #[must_use]
     pub fn is_selected(&self, index: usize) -> bool {
         self.selected.contains(&index)
     }
 
-    #[doc = include_str!("list.doc/selected_indices.md")]
+    /// Returns the selected item indices in ascending, deterministic order.
     pub fn selected_indices(&self) -> impl Iterator<Item = usize> + '_ {
         self.selected.iter().copied()
     }
 
-    #[doc = include_str!("list.doc/selection_count.md")]
+    /// Returns the number of selected items.
     #[must_use]
     pub fn selection_count(&self) -> usize {
         self.selected.len()
     }
 
-    #[doc = include_str!("list.doc/is_multi.md")]
+    /// Returns whether the list is in multi-select mode.
     #[must_use]
     pub const fn is_multi(&self) -> bool {
         self.multi
     }
 
-    #[doc = include_str!("list.doc/len.md")]
+    /// Returns the number of items.
     #[must_use]
     pub fn len(&self) -> usize {
         self.items.len()
     }
 
-    #[doc = include_str!("list.doc/is_empty.md")]
+    /// Returns whether the list has no items.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
 
-    #[doc = include_str!("list.doc/semantic_role.md")]
+    /// Returns the accessible role of this control ([`SemanticRole::List`]).
     #[must_use]
     pub const fn semantic_role(&self) -> SemanticRole {
         SemanticRole::List
     }
 
-    #[doc = include_str!("list.doc/view.md")]
+    #[doc = include_str!("../../docs/api/list/list.doc/view.md")]
     #[must_use]
     pub fn view(&self) -> View {
         let children: Vec<ViewNode> = self

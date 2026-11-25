@@ -1,7 +1,9 @@
-#![doc = include_str!("composition.doc/_module.md")]
+#![doc = include_str!("../../../docs/api/runtime/ui_runtime/composition.doc/_module.md")]
 
+use obscur_identity::NodeId;
 use obscur_text::editing::EditCommand;
-use obscur_text::ime::CompositionEvent;
+use obscur_text::ime::{CompositionEvent, TextInputUpdate};
+use obscur_text::span::TextRange;
 
 use crate::frame::FrameReason;
 use crate::runtime::{StructuralStates, TextEditSession};
@@ -9,17 +11,17 @@ use crate::runtime::{StructuralStates, TextEditSession};
 use super::UiRuntime;
 
 impl UiRuntime {
-    #[doc = include_str!("composition.doc/handle_ime.md")]
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/composition.doc/handle_ime.md")]
     pub fn handle_ime(&mut self, event: CompositionEvent) -> bool {
         // The follow-up the runtime owes after mutating the session — resolved
         // while the `session` borrow is live, then acted on below so the
         // `&mut self` calls (`request_frame`/`apply_edit`) do not overlap it.
         enum ImeFollowUp {
-            #[doc = include_str!("composition.doc/Frame.md")]
+            /// Applied a preedit/state change: just request a paint frame.
             Frame,
-            #[doc = include_str!("composition.doc/Commit.md")]
+            /// Committed: replace the anchor span with the text as one edit.
             Commit(obscur_text::span::TextRange, Box<str>),
-            #[doc = include_str!("composition.doc/None.md")]
+            /// Out-of-order or no-op: nothing applied.
             None,
         }
 
@@ -68,6 +70,7 @@ impl UiRuntime {
         };
         match follow_up {
             ImeFollowUp::Frame => {
+                self.update_caret_scroll();
                 self.request_frame(FrameReason::Input);
                 true
             }
@@ -85,7 +88,68 @@ impl UiRuntime {
         }
     }
 
-    #[doc = include_str!("composition.doc/composition_preedit.md")]
+    /// The currently editable, writable node for native text input.
+    #[must_use]
+    pub fn text_input_target(&self) -> Option<NodeId> {
+        let node = self.editing.as_ref()?.node();
+        (!StructuralStates::of(&self.tree).is_within_readonly(node)).then_some(node)
+    }
+
+    /// Apply a native text-input batch to the same field that requested it.
+    pub fn apply_text_input_update(&mut self, target: NodeId, update: TextInputUpdate) {
+        if self.text_input_target() != Some(target) {
+            return;
+        }
+
+        let Some(session) = self.editing.as_mut() else {
+            return;
+        };
+        let directional = session.selection();
+        let previous_composition = session.commit_composition();
+        let selection = previous_composition.unwrap_or_else(|| directional.range());
+        let text = session.text();
+        let start = selection.start.saturating_sub(update.before as usize);
+        let end = selection
+            .end
+            .saturating_add(update.after as usize)
+            .min(text.len());
+        if text.is_char_boundary(start) && text.is_char_boundary(end) {
+            if let Some(commit) = update.commit {
+                self.apply_edit(EditCommand::Replace {
+                    range: TextRange::new(start, end),
+                    text: commit,
+                });
+            } else if start != selection.start || end != selection.end {
+                let preserved = text[selection.start..selection.end].into();
+                self.apply_edit(EditCommand::Replace {
+                    range: TextRange::new(start, end),
+                    text: preserved,
+                });
+                if self.text_input_target() == Some(target) && !selection.is_empty() {
+                    let (a, b) = (start, start + selection.len());
+                    let (anchor, focus) = if directional.is_forward() {
+                        (a, b)
+                    } else {
+                        (b, a)
+                    };
+                    self.apply_edit(EditCommand::SetSelection(
+                        obscur_text::selection::TextSelection::new(anchor, focus),
+                    ));
+                }
+            }
+        }
+        if self.text_input_target() == Some(target)
+            && let Some(preedit) = update.preedit
+        {
+            self.handle_ime(CompositionEvent::Start);
+            self.handle_ime(CompositionEvent::Update(preedit));
+        } else if previous_composition.is_some() {
+            self.update_caret_scroll();
+            self.request_frame(FrameReason::Input);
+        }
+    }
+
+    #[doc = include_str!("../../../docs/api/runtime/ui_runtime/composition.doc/composition_preedit.md")]
     #[must_use]
     pub fn composition_preedit(&self) -> Option<&str> {
         self.editing

@@ -1,23 +1,27 @@
-#![doc = include_str!("command_surface.doc/_module.md")]
+//! `CommandSurface`: the set of command names a document is allowed to reference
+//! from an `on:<event>` binding (spec §2.13).
 
-#[doc = include_str!("command_surface.doc/CommandSurface.md")]
+#[doc = include_str!("../../docs/api/validation/command_surface.doc/CommandSurface.md")]
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum CommandSurface {
-    #[doc = include_str!("command_surface.doc/Unchecked.md")]
+    /// No command names were declared, so no handler reference can be judged. The
+    /// default: silence about the surface must not read as a claim about it.
     #[default]
     Unchecked,
-    #[doc = include_str!("command_surface.doc/Declared.md")]
+    /// Exactly these command names are claimed. A handler naming anything else is
+    /// a compile error — including when the list is empty, which claims that the
+    /// document binds no handler at all.
     Declared(Vec<Box<str>>),
 }
 
 impl CommandSurface {
-    #[doc = include_str!("command_surface.doc/declared.md")]
+    /// A closed surface claiming exactly `names`.
     #[must_use]
     pub fn declared<N: Into<Box<str>>>(names: impl IntoIterator<Item = N>) -> Self {
         Self::Declared(names.into_iter().map(Into::into).collect())
     }
 
-    #[doc = include_str!("command_surface.doc/claim.md")]
+    #[doc = include_str!("../../docs/api/validation/command_surface.doc/claim.md")]
     pub fn claim(&mut self, name: impl Into<Box<str>>) {
         match self {
             Self::Declared(names) => names.push(name.into()),
@@ -25,13 +29,15 @@ impl CommandSurface {
         }
     }
 
-    #[doc = include_str!("command_surface.doc/is_checked.md")]
+    /// Returns whether this surface can judge a handler reference at all.
     #[must_use]
     pub const fn is_checked(&self) -> bool {
         matches!(self, Self::Declared(_))
     }
 
-    #[doc = include_str!("command_surface.doc/names.md")]
+    /// Returns the declared command names — empty for
+    /// [`Unchecked`](Self::Unchecked), which is *not* a claim that no command
+    /// exists. Ask [`is_checked`](Self::is_checked) before reading emptiness.
     #[must_use]
     pub fn names(&self) -> &[Box<str>] {
         match self {
@@ -40,7 +46,7 @@ impl CommandSurface {
         }
     }
 
-    #[doc = include_str!("command_surface.doc/claims.md")]
+    #[doc = include_str!("../../docs/api/validation/command_surface.doc/claims.md")]
     #[must_use]
     pub fn claims(&self, name: &str) -> bool {
         match self {
@@ -49,7 +55,7 @@ impl CommandSurface {
         }
     }
 
-    #[doc = include_str!("command_surface.doc/nearest.md")]
+    #[doc = include_str!("../../docs/api/validation/command_surface.doc/nearest.md")]
     #[must_use]
     pub fn nearest(&self, name: &str) -> Option<&str> {
         let limit = if name.chars().count() <= 3 { 1 } else { 2 };
@@ -62,7 +68,7 @@ impl CommandSurface {
     }
 }
 
-#[doc = include_str!("command_surface.doc/edit_distance.md")]
+#[doc = include_str!("../../docs/api/validation/command_surface.doc/edit_distance.md")]
 fn edit_distance(left: &str, right: &str) -> usize {
     let right: Vec<char> = right.chars().collect();
     let mut previous: Vec<usize> = (0..=right.len()).collect();

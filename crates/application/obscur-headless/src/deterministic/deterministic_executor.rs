@@ -1,51 +1,55 @@
-#![doc = include_str!("deterministic_executor.doc/_module.md")]
+//! A fully deterministic, single-threaded job runner (spec §7.4).
 
-use std::collections::VecDeque;
 use std::sync::Mutex;
 
 use obscur_task::BlockingExecutor;
 
-#[doc = include_str!("deterministic_executor.doc/DeterministicExecutor.md")]
+use super::job_queue::JobQueue;
+
+#[doc = include_str!("../../docs/api/deterministic/deterministic_executor.doc/DeterministicExecutor.md")]
 #[derive(Default)]
 pub struct DeterministicExecutor {
-    #[doc = include_str!("deterministic_executor.doc/queue.md")]
-    queue: Mutex<VecDeque<Box<dyn FnOnce() + Send>>>,
+    /// Pending jobs, drained front-to-back to guarantee FIFO ordering.
+    queue: Mutex<JobQueue>,
 }
 
 impl DeterministicExecutor {
-    #[doc = include_str!("deterministic_executor.doc/new.md")]
+    /// Creates an executor with an empty job queue.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    #[doc = include_str!("deterministic_executor.doc/spawn.md")]
+    #[doc = include_str!("../../docs/api/deterministic/deterministic_executor.doc/spawn.md")]
     pub fn spawn(&self, job: impl FnOnce() + Send + 'static) {
         self.enqueue(Box::new(job));
     }
 
-    #[doc = include_str!("deterministic_executor.doc/enqueue.md")]
+    /// Pushes an already-boxed job onto the tail of the queue.
     fn enqueue(&self, job: Box<dyn FnOnce() + Send>) {
-        self.lock().push_back(job);
+        let mut queue = self.lock();
+        let id = queue.next_id;
+        queue.next_id += 1;
+        queue.jobs.push_back((id, job));
     }
 
-    #[doc = include_str!("deterministic_executor.doc/lock.md")]
-    fn lock(&self) -> std::sync::MutexGuard<'_, VecDeque<Box<dyn FnOnce() + Send>>> {
+    #[doc = include_str!("../../docs/api/deterministic/deterministic_executor.doc/lock.md")]
+    fn lock(&self) -> std::sync::MutexGuard<'_, JobQueue> {
         self.queue
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    #[doc = include_str!("deterministic_executor.doc/run.md")]
+    #[doc = include_str!("../../docs/api/deterministic/deterministic_executor.doc/run.md")]
     pub fn run(&self) {
         while self.run_next() {}
     }
 
-    #[doc = include_str!("deterministic_executor.doc/run_next.md")]
+    #[doc = include_str!("../../docs/api/deterministic/deterministic_executor.doc/run_next.md")]
     pub fn run_next(&self) -> bool {
-        let job = self.lock().pop_front();
+        let job = self.lock().jobs.pop_front();
         match job {
-            Some(job) => {
+            Some((_, job)) => {
                 job();
                 true
             }
@@ -53,28 +57,52 @@ impl DeterministicExecutor {
         }
     }
 
-    #[doc = include_str!("deterministic_executor.doc/pending.md")]
+    /// Lists queued operation IDs in submission order.
     #[must_use]
-    pub fn pending(&self) -> usize {
-        self.lock().len()
+    pub fn pending_operations(&self) -> Vec<u64> {
+        self.lock().jobs.iter().map(|(id, _)| *id).collect()
     }
 
-    #[doc = include_str!("deterministic_executor.doc/is_idle.md")]
+    /// Runs one pending operation by ID.
+    pub fn run_operation(&self, operation: u64) -> bool {
+        let job = {
+            let mut queue = self.lock();
+            queue
+                .jobs
+                .iter()
+                .position(|(id, _)| *id == operation)
+                .and_then(|index| queue.jobs.remove(index))
+        };
+        if let Some((_, job)) = job {
+            job();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Returns the number of jobs waiting to run.
+    #[must_use]
+    pub fn pending(&self) -> usize {
+        self.lock().jobs.len()
+    }
+
+    /// Returns `true` when no jobs are waiting to run.
     #[must_use]
     pub fn is_idle(&self) -> bool {
-        self.lock().is_empty()
+        self.lock().jobs.is_empty()
     }
 }
 
 impl BlockingExecutor for DeterministicExecutor {
-    #[doc = include_str!("deterministic_executor.doc/run_blocking.md")]
+    #[doc = include_str!("../../docs/api/deterministic/deterministic_executor.doc/run_blocking.md")]
     fn run_blocking(&self, job: Box<dyn FnOnce() + Send + 'static>) {
         self.enqueue(job);
     }
 }
 
 impl std::fmt::Debug for DeterministicExecutor {
-    #[doc = include_str!("deterministic_executor.doc/fmt.md")]
+    /// Reports the pending job count; the boxed closures themselves are opaque.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DeterministicExecutor")
             .field("pending", &self.pending())

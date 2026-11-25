@@ -1,64 +1,20 @@
-#![doc = include_str!("snapshot_message.doc/_module.md")]
+//! Server→client snapshot response to an `Inspect` command (§7.6/§7.8).
 
-use super::{CommandId, Inspectable};
+use super::{CommandId, Inspectable, SnapshotPayload};
 
-#[doc = include_str!("snapshot_message.doc/SnapshotPayload.md")]
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct SnapshotPayload {
-    #[doc = include_str!("snapshot_message.doc/description.md")]
-    pub description: Box<str>,
-    #[doc = include_str!("snapshot_message.doc/entity_count.md")]
-    pub entity_count: u64,
-    #[doc = include_str!("snapshot_message.doc/entity_ids.md")]
-    pub entity_ids: Vec<u64>,
-    #[doc = include_str!("snapshot_message.doc/detail.md")]
-    pub detail: Box<str>,
-}
-
-impl SnapshotPayload {
-    #[doc = include_str!("snapshot_message.doc/new.md")]
-    #[must_use]
-    pub fn new(description: impl Into<Box<str>>, entity_count: u64, entity_ids: Vec<u64>) -> Self {
-        Self {
-            description: description.into(),
-            entity_count,
-            entity_ids,
-            detail: Box::default(),
-        }
-    }
-
-    #[doc = include_str!("snapshot_message.doc/summary.md")]
-    #[must_use]
-    pub fn summary(description: impl Into<Box<str>>) -> Self {
-        Self {
-            description: description.into(),
-            entity_count: 0,
-            entity_ids: Vec::new(),
-            detail: Box::default(),
-        }
-    }
-
-    #[doc = include_str!("snapshot_message.doc/with_detail.md")]
-    #[must_use]
-    pub fn with_detail(mut self, detail: impl Into<Box<str>>) -> Self {
-        self.detail = detail.into();
-        self
-    }
-}
-
-#[doc = include_str!("snapshot_message.doc/SnapshotMessage.md")]
+/// A server→client response carrying a snapshot of an inspected target.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SnapshotMessage {
-    #[doc = include_str!("snapshot_message.doc/command.md")]
+    /// The [`CommandId`] of the `Inspect` command this answers.
     pub command: CommandId,
-    #[doc = include_str!("snapshot_message.doc/target.md")]
+    /// Which target was inspected.
     pub target: Inspectable,
-    #[doc = include_str!("snapshot_message.doc/payload.md")]
+    /// The structured snapshot payload.
     pub payload: SnapshotPayload,
 }
 
 impl SnapshotMessage {
-    #[doc = include_str!("snapshot_message.doc/new_2.md")]
+    /// Creates a snapshot message.
     #[must_use]
     pub fn new(command: CommandId, target: Inspectable, payload: SnapshotPayload) -> Self {
         Self {

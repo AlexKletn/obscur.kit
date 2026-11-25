@@ -1,24 +1,25 @@
-#![doc = include_str!("plural_operands.doc/_module.md")]
+//! `PluralOperands`: the numeric features a CLDR plural rule is written against
+//! (spec §7.2).
 
-#[doc = include_str!("plural_operands.doc/PluralOperands.md")]
+#[doc = include_str!("../../docs/api/plural/plural_operands.doc/PluralOperands.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PluralOperands {
-    #[doc = include_str!("plural_operands.doc/n.md")]
+    /// `n`: the absolute value of the source number.
     pub n: f64,
-    #[doc = include_str!("plural_operands.doc/i.md")]
+    /// `i`: the integer digits of the source number.
     pub i: u64,
-    #[doc = include_str!("plural_operands.doc/v.md")]
+    /// `v`: the count of visible fraction digits, with trailing zeros.
     pub v: u32,
-    #[doc = include_str!("plural_operands.doc/w.md")]
+    /// `w`: the count of visible fraction digits, without trailing zeros.
     pub w: u32,
-    #[doc = include_str!("plural_operands.doc/f.md")]
+    /// `f`: the visible fraction digits with trailing zeros, as an integer.
     pub f: u64,
-    #[doc = include_str!("plural_operands.doc/t.md")]
+    /// `t`: the visible fraction digits without trailing zeros, as an integer.
     pub t: u64,
 }
 
 impl PluralOperands {
-    #[doc = include_str!("plural_operands.doc/from_integer.md")]
+    #[doc = include_str!("../../docs/api/plural/plural_operands.doc/from_integer.md")]
     #[must_use]
     pub fn from_integer(count: i64) -> Self {
         let i = count.unsigned_abs();
@@ -36,7 +37,7 @@ impl PluralOperands {
         }
     }
 
-    #[doc = include_str!("plural_operands.doc/from_decimal.md")]
+    #[doc = include_str!("../../docs/api/plural/plural_operands.doc/from_decimal.md")]
     #[must_use]
     pub fn from_decimal(text: &str) -> Option<Self> {
         let digits = text.strip_prefix(['-', '+']).unwrap_or(text);

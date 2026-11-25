@@ -1,1 +1,0 @@
-Begin a composition session.

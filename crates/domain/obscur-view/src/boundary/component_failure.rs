@@ -1,22 +1,24 @@
-#![doc = include_str!("component_failure.doc/_module.md")]
+//! `ComponentFailure`: the structured record of a contained component failure.
 
 use obscur_diagnostics::{Diagnostic, DiagnosticCode, DiagnosticSeverity, DiagnosticSubsystem};
 
 use crate::lifecycle::LifecycleState;
 
-#[doc = include_str!("component_failure.doc/ComponentFailure.md")]
+#[doc = include_str!("../../docs/api/boundary/component_failure.doc/ComponentFailure.md")]
 #[derive(Debug, Clone)]
 pub struct ComponentFailure {
-    #[doc = include_str!("component_failure.doc/phase.md")]
+    /// The lifecycle phase the failure occurred in.
     phase: LifecycleState,
-    #[doc = include_str!("component_failure.doc/attempt.md")]
+    /// Which retry attempt produced this failure (0 for the first occurrence).
     attempt: u32,
-    #[doc = include_str!("component_failure.doc/diagnostic.md")]
+    /// The structured diagnostic describing the failure.
     diagnostic: Diagnostic,
 }
 
 impl ComponentFailure {
-    #[doc = include_str!("component_failure.doc/new.md")]
+    /// Records a failure in `phase` on retry `attempt`, building an `Error`
+    /// [`Diagnostic`] in the [`View`](DiagnosticSubsystem::View) subsystem from
+    /// `code` and `message`.
     #[must_use]
     pub fn new(
         phase: LifecycleState,
@@ -37,7 +39,8 @@ impl ComponentFailure {
         }
     }
 
-    #[doc = include_str!("component_failure.doc/from_diagnostic.md")]
+    /// Records a failure in `phase` on retry `attempt` from an already-built
+    /// [`Diagnostic`].
     #[must_use]
     pub fn from_diagnostic(phase: LifecycleState, attempt: u32, diagnostic: Diagnostic) -> Self {
         Self {
@@ -47,19 +50,19 @@ impl ComponentFailure {
         }
     }
 
-    #[doc = include_str!("component_failure.doc/phase_2.md")]
+    /// The lifecycle phase the failure occurred in.
     #[must_use]
     pub const fn phase(&self) -> LifecycleState {
         self.phase
     }
 
-    #[doc = include_str!("component_failure.doc/attempt_2.md")]
+    /// The retry attempt that produced this failure.
     #[must_use]
     pub const fn attempt(&self) -> u32 {
         self.attempt
     }
 
-    #[doc = include_str!("component_failure.doc/diagnostic_2.md")]
+    /// The structured diagnostic describing the failure.
     #[must_use]
     pub const fn diagnostic(&self) -> &Diagnostic {
         &self.diagnostic

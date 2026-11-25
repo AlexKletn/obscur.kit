@@ -1,36 +1,44 @@
-#![doc = include_str!("blend_mode.doc/_module.md")]
+//! How a shape's color composites with the content beneath it.
 
-#[doc = include_str!("blend_mode.doc/BlendMode.md")]
+#[doc = include_str!("../../docs/api/paint/blend_mode.doc/BlendMode.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BlendMode {
-    #[doc = include_str!("blend_mode.doc/Normal.md")]
+    /// Source-over compositing: the source replaces the backdrop where opaque.
     Normal,
-    #[doc = include_str!("blend_mode.doc/Multiply.md")]
+    /// Multiplies source and backdrop channels; the result is always darker.
     Multiply,
-    #[doc = include_str!("blend_mode.doc/Screen.md")]
+    /// Inverse-multiplies source and backdrop; the result is always lighter.
     Screen,
-    #[doc = include_str!("blend_mode.doc/Overlay.md")]
+    /// Multiplies or screens depending on the backdrop, increasing contrast.
     Overlay,
-    #[doc = include_str!("blend_mode.doc/Darken.md")]
+    /// Keeps the darker of source and backdrop per channel.
     Darken,
-    #[doc = include_str!("blend_mode.doc/Lighten.md")]
+    /// Keeps the lighter of source and backdrop per channel.
     Lighten,
-    #[doc = include_str!("blend_mode.doc/ColorDodge.md")]
+    /// Brightens the backdrop to reflect the source.
     ColorDodge,
-    #[doc = include_str!("blend_mode.doc/ColorBurn.md")]
+    /// Darkens the backdrop to reflect the source.
     ColorBurn,
-    #[doc = include_str!("blend_mode.doc/HardLight.md")]
+    #[doc = include_str!("../../docs/api/paint/blend_mode.doc/HardLight.md")]
     HardLight,
-    #[doc = include_str!("blend_mode.doc/SoftLight.md")]
+    #[doc = include_str!("../../docs/api/paint/blend_mode.doc/SoftLight.md")]
     SoftLight,
-    #[doc = include_str!("blend_mode.doc/Difference.md")]
+    /// Subtracts the darker from the lighter per channel.
     Difference,
-    #[doc = include_str!("blend_mode.doc/Exclusion.md")]
+    #[doc = include_str!("../../docs/api/paint/blend_mode.doc/Exclusion.md")]
     Exclusion,
+    /// Uses the source hue and the backdrop saturation and luminosity.
+    Hue,
+    /// Uses the source saturation and the backdrop hue and luminosity.
+    Saturation,
+    /// Uses source hue and saturation with backdrop luminosity.
+    Color,
+    /// Uses source luminosity with backdrop hue and saturation.
+    Luminosity,
 }
 
 impl BlendMode {
-    #[doc = include_str!("blend_mode.doc/is_normal.md")]
+    /// Returns whether this is the [`BlendMode::Normal`] (source-over) mode.
     #[must_use]
     pub const fn is_normal(self) -> bool {
         matches!(self, Self::Normal)
@@ -38,7 +46,7 @@ impl BlendMode {
 }
 
 impl Default for BlendMode {
-    #[doc = include_str!("blend_mode.doc/default.md")]
+    /// The default blend mode is [`BlendMode::Normal`].
     fn default() -> Self {
         Self::Normal
     }

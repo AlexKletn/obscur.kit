@@ -1,1 +1,0 @@
-The focused element changed.

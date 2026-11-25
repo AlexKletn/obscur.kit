@@ -1,4 +1,4 @@
-#![doc = include_str!("style_dependency.doc/_module.md")]
+#![doc = include_str!("../../docs/api/invalidation/style_dependency.doc/_module.md")]
 
 use crate::computed::StyleDiff;
 use crate::invalidation::StyleInvalidationReason;
@@ -7,7 +7,7 @@ use crate::selector::PseudoState;
 use obscur_identity::{FastSet, InternedSymbol};
 use std::collections::HashSet;
 
-#[doc = include_str!("style_dependency.doc/StyleDependency.md")]
+#[doc = include_str!("../../docs/api/invalidation/style_dependency.doc/StyleDependency.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StyleDependency {
     inherits_from_parent: bool,
@@ -16,7 +16,7 @@ pub struct StyleDependency {
 }
 
 impl StyleDependency {
-    #[doc = include_str!("style_dependency.doc/new.md")]
+    #[doc = include_str!("../../docs/api/invalidation/style_dependency.doc/new.md")]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -26,67 +26,71 @@ impl StyleDependency {
         }
     }
 
-    #[doc = include_str!("style_dependency.doc/with_inherits_from_parent.md")]
+    /// Sets whether the node computed at least one inherited/default-inherited
+    /// value from its parent, returning `self` for builder-style chaining.
     #[must_use]
     pub fn with_inherits_from_parent(mut self, inherits: bool) -> Self {
         self.inherits_from_parent = inherits;
         self
     }
 
-    #[doc = include_str!("style_dependency.doc/with_pseudo_states.md")]
+    /// Sets the interaction states the node's matching depends on, returning
+    /// `self` for builder-style chaining.
     #[must_use]
     pub fn with_pseudo_states(mut self, states: PseudoState) -> Self {
         self.pseudo_states = states;
         self
     }
 
-    #[doc = include_str!("style_dependency.doc/with_custom_property.md")]
+    /// Records that the node read the custom property `name` (e.g. via `var()`),
+    /// returning `self` for builder-style chaining.
     #[must_use]
     pub fn with_custom_property(mut self, name: InternedSymbol) -> Self {
         self.custom_properties.insert(name);
         self
     }
 
-    #[doc = include_str!("style_dependency.doc/add_custom_property.md")]
+    /// Records that the node read the custom property `name` (e.g. via `var()`).
     pub fn add_custom_property(&mut self, name: InternedSymbol) {
         self.custom_properties.insert(name);
     }
 
-    #[doc = include_str!("style_dependency.doc/set_inherits_from_parent.md")]
+    /// Records that the node computed at least one value inherited from its
+    /// parent.
     pub fn set_inherits_from_parent(&mut self, inherits: bool) {
         self.inherits_from_parent = inherits;
     }
 
-    #[doc = include_str!("style_dependency.doc/set_pseudo_states.md")]
+    /// Records the interaction states the node's matching depends on.
     pub fn set_pseudo_states(&mut self, states: PseudoState) {
         self.pseudo_states = states;
     }
 
-    #[doc = include_str!("style_dependency.doc/inherits_from_parent.md")]
+    /// Returns whether the node inherited any value from its parent.
     #[must_use]
     pub fn inherits_from_parent(&self) -> bool {
         self.inherits_from_parent
     }
 
-    #[doc = include_str!("style_dependency.doc/custom_properties.md")]
+    /// Returns the set of custom properties the node read.
     #[must_use]
     pub fn custom_properties(&self) -> &FastSet<InternedSymbol> {
         &self.custom_properties
     }
 
-    #[doc = include_str!("style_dependency.doc/reads_custom_properties.md")]
+    /// Returns whether the node read any custom property.
     #[must_use]
     pub fn reads_custom_properties(&self) -> bool {
         !self.custom_properties.is_empty()
     }
 
-    #[doc = include_str!("style_dependency.doc/pseudo_states.md")]
+    /// Returns the interaction states the node's matching depends on.
     #[must_use]
     pub fn pseudo_states(&self) -> PseudoState {
         self.pseudo_states
     }
 
-    #[doc = include_str!("style_dependency.doc/affected_by_parent_change.md")]
+    #[doc = include_str!("../../docs/api/invalidation/style_dependency.doc/affected_by_parent_change.md")]
     #[must_use]
     pub fn affected_by_parent_change(
         &self,
@@ -106,7 +110,7 @@ impl StyleDependency {
         None
     }
 
-    #[doc = include_str!("style_dependency.doc/affected_by_pseudo_change.md")]
+    #[doc = include_str!("../../docs/api/invalidation/style_dependency.doc/affected_by_pseudo_change.md")]
     #[must_use]
     pub fn affected_by_pseudo_change(&self, changed: PseudoState) -> bool {
         (self.pseudo_states.bits() & changed.bits()) != 0

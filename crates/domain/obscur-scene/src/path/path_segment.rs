@@ -1,36 +1,36 @@
-#![doc = include_str!("path_segment.doc/_module.md")]
+//! One command in a path outline.
 
 use obscur_geometry::Point;
 
-#[doc = include_str!("path_segment.doc/PathSegment.md")]
+#[doc = include_str!("../../docs/api/path/path_segment.doc/PathSegment.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PathSegment {
-    #[doc = include_str!("path_segment.doc/MoveTo.md")]
+    /// Start a new subpath at the given point, moving the pen without drawing.
     MoveTo(Point),
-    #[doc = include_str!("path_segment.doc/LineTo.md")]
+    /// Draw a straight line from the current point to the given point.
     LineTo(Point),
-    #[doc = include_str!("path_segment.doc/QuadTo.md")]
+    /// Draw a quadratic Bézier curve to `end` using a single `control` point.
     QuadTo {
-        #[doc = include_str!("path_segment.doc/control.md")]
+        /// The off-curve control point.
         control: Point,
-        #[doc = include_str!("path_segment.doc/end.md")]
+        /// The on-curve end point.
         end: Point,
     },
-    #[doc = include_str!("path_segment.doc/CubicTo.md")]
+    /// Draw a cubic Bézier curve to `end` using `control1` and `control2`.
     CubicTo {
-        #[doc = include_str!("path_segment.doc/control1.md")]
+        /// The first off-curve control point (leaves the start point).
         control1: Point,
-        #[doc = include_str!("path_segment.doc/control2.md")]
+        /// The second off-curve control point (arrives at the end point).
         control2: Point,
-        #[doc = include_str!("path_segment.doc/end_2.md")]
+        /// The on-curve end point.
         end: Point,
     },
-    #[doc = include_str!("path_segment.doc/Close.md")]
+    /// Close the current subpath with a straight line back to its start.
     Close,
 }
 
 impl PathSegment {
-    #[doc = include_str!("path_segment.doc/end_point.md")]
+    #[doc = include_str!("../../docs/api/path/path_segment.doc/end_point.md")]
     #[must_use]
     pub fn end_point(&self) -> Option<Point> {
         match self {

@@ -1,62 +1,34 @@
-#![doc = include_str!("animation_binding.doc/_module.md")]
+//! Binds a timeline to the computed-style property it animates:
+//! [`AnimationBinding`] and its [`AnimatedKind`].
 
 use obscur_identity::NodeId;
 use obscur_motion::timeline::{FillMode, TimelineId};
 use obscur_motion::track::KeyframeTrack;
-use obscur_motion::value::MotionValue;
-use obscur_style::property::{Length, PropertyId, PropertyValue, StyleColor, Transform};
+use obscur_style::property::PropertyId;
 
-#[doc = include_str!("animation_binding.doc/AnimatedKind.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AnimatedKind {
-    #[doc = include_str!("animation_binding.doc/Number.md")]
-    Number,
-    #[doc = include_str!("animation_binding.doc/LengthPx.md")]
-    LengthPx,
-    #[doc = include_str!("animation_binding.doc/Transform.md")]
-    Transform,
-    #[doc = include_str!("animation_binding.doc/Color.md")]
-    Color,
-}
+use super::AnimatedKind;
 
-impl AnimatedKind {
-    #[doc = include_str!("animation_binding.doc/lower.md")]
-    #[must_use]
-    pub fn lower(self, value: MotionValue) -> Option<PropertyValue> {
-        match self {
-            Self::Number => value.as_scalar().map(PropertyValue::Number),
-            Self::LengthPx => value
-                .as_scalar()
-                .map(|s| PropertyValue::Length(Length::px(s))),
-            Self::Transform => value
-                .as_transform()
-                .map(|matrix| PropertyValue::Transform(Transform::new(matrix))),
-            Self::Color => value
-                .as_color()
-                .map(|[r, g, b, a]| PropertyValue::Color(StyleColor::rgba(r, g, b, a))),
-        }
-    }
-}
-
-#[doc = include_str!("animation_binding.doc/AnimationBinding.md")]
+#[doc = include_str!("../../docs/api/orchestration/animation_binding.doc/AnimationBinding.md")]
 #[derive(Debug, Clone)]
 pub struct AnimationBinding {
-    #[doc = include_str!("animation_binding.doc/timeline.md")]
+    /// The timeline (in the scheduler) whose progress drives this animation.
     timeline: TimelineId,
-    #[doc = include_str!("animation_binding.doc/node.md")]
+    /// The node whose computed style is overridden.
     node: NodeId,
-    #[doc = include_str!("animation_binding.doc/property.md")]
+    /// The property overridden on that node.
     property: PropertyId,
-    #[doc = include_str!("animation_binding.doc/track.md")]
+    /// The keyframe track sampled by the timeline's progress.
     track: KeyframeTrack,
-    #[doc = include_str!("animation_binding.doc/kind.md")]
+    /// How a sampled scalar becomes a [`PropertyValue`].
     kind: AnimatedKind,
-    #[doc = include_str!("animation_binding.doc/fill.md")]
+    /// Whether the value applies during the timeline's start delay
+    /// (css-animations-1 §3.9 `animation-fill-mode`).
     fill: FillMode,
 }
 
 impl AnimationBinding {
-    #[doc = include_str!("animation_binding.doc/new.md")]
+    /// Creates a binding of `timeline` to `property` on `node`, sampling `track`
+    /// and lowering samples per `kind`.
     #[must_use]
     pub fn new(
         timeline: TimelineId,
@@ -75,44 +47,44 @@ impl AnimationBinding {
         }
     }
 
-    #[doc = include_str!("animation_binding.doc/with_fill.md")]
+    /// Sets the fill mode, returning the updated binding.
     #[must_use]
     pub fn with_fill(mut self, fill: FillMode) -> Self {
         self.fill = fill;
         self
     }
 
-    #[doc = include_str!("animation_binding.doc/fill_2.md")]
+    /// Returns the fill mode.
     #[must_use]
     pub fn fill(&self) -> FillMode {
         self.fill
     }
 
-    #[doc = include_str!("animation_binding.doc/timeline_2.md")]
+    /// Returns the driving timeline's id.
     #[must_use]
     pub fn timeline(&self) -> TimelineId {
         self.timeline
     }
 
-    #[doc = include_str!("animation_binding.doc/node_2.md")]
+    /// Returns the animated node.
     #[must_use]
     pub fn node(&self) -> NodeId {
         self.node
     }
 
-    #[doc = include_str!("animation_binding.doc/property_2.md")]
+    /// Returns the animated property.
     #[must_use]
     pub fn property(&self) -> PropertyId {
         self.property
     }
 
-    #[doc = include_str!("animation_binding.doc/track_2.md")]
+    /// Returns the keyframe track this binding samples.
     #[must_use]
     pub fn track(&self) -> &KeyframeTrack {
         &self.track
     }
 
-    #[doc = include_str!("animation_binding.doc/kind_2.md")]
+    /// Returns how sampled scalars are lowered into property values.
     #[must_use]
     pub fn kind(&self) -> AnimatedKind {
         self.kind

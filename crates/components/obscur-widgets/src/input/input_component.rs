@@ -1,19 +1,19 @@
-#![doc = include_str!("input_component.doc/_module.md")]
+#![doc = include_str!("../../docs/api/input/input_component.doc/_module.md")]
 
 use obscur_view::component::{Component, ComponentContext};
 use obscur_view::view::View;
 
 use super::{Input, InputProps};
 
-#[doc = include_str!("input_component.doc/InputComponent.md")]
+#[doc = include_str!("../../docs/api/input/input_component.doc/InputComponent.md")]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct InputComponent;
 
 impl Component for InputComponent {
-    #[doc = include_str!("input_component.doc/Props.md")]
+    /// The authored surface: [`InputProps`](super::InputProps).
     type Props = InputProps;
 
-    #[doc = include_str!("input_component.doc/render.md")]
+    #[doc = include_str!("../../docs/api/input/input_component.doc/render.md")]
     fn render(&mut self, _ctx: &mut ComponentContext<'_>, props: &Self::Props) -> View {
         View::from_fragment(Input::contents(&props.value))
     }

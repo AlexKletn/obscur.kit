@@ -1,37 +1,31 @@
-#![doc = include_str!("keyframe_compiler.doc/_module.md")]
+#![doc = include_str!("../../docs/api/compiler/keyframe_compiler.doc/_module.md")]
 
 use crate::parser::{KeyframeSelector, ParsedKeyframesRule, ParsedValue};
 
-use obscur_identity::InternedSymbol;
+use obscur_geometry::AffineTransform;
 use obscur_motion::track::{Keyframe, KeyframeTrack};
 use obscur_motion::value::MotionValue;
-use obscur_style::property::PropertyId;
+use obscur_style::property::{Length, LengthExpr, PropertyId, PropertyValue, TransformFunction};
 
+use super::CssSymbolInterner;
 use super::longhand_catalog::property_id_from_name;
 use super::property_compiler::narrow_f32;
-use super::stylesheet_compiler::CssSymbolInterner;
+use super::transform_lowering::lower_transform;
 
-#[doc = include_str!("keyframe_compiler.doc/CompiledKeyframes.md")]
-#[derive(Debug, Clone, PartialEq)]
-pub struct CompiledKeyframes {
-    #[doc = include_str!("keyframe_compiler.doc/name.md")]
-    pub name: InternedSymbol,
-    #[doc = include_str!("keyframe_compiler.doc/tracks.md")]
-    pub tracks: Vec<(PropertyId, KeyframeTrack)>,
-}
+use super::CompiledKeyframes;
 
-#[doc = include_str!("keyframe_compiler.doc/KeyframeCompiler.md")]
+/// Lowers `@keyframes` rules into [`CompiledKeyframes`].
 #[derive(Debug, Clone, Copy, Default)]
 pub struct KeyframeCompiler;
 
 impl KeyframeCompiler {
-    #[doc = include_str!("keyframe_compiler.doc/new.md")]
+    /// Creates a keyframe compiler.
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    #[doc = include_str!("keyframe_compiler.doc/compile.md")]
+    #[doc = include_str!("../../docs/api/compiler/keyframe_compiler.doc/compile.md")]
     #[must_use]
     pub fn compile(
         &self,
@@ -48,7 +42,26 @@ impl KeyframeCompiler {
                     let Some(property) = property_id_from_name(&declaration.name) else {
                         continue;
                     };
-                    let Some(value) = lower_motion(&declaration.value) else {
+                    if property == PropertyId::Gap {
+                        if let [row] | [row, _] = declaration.value.as_slice() {
+                            let column = declaration.value.get(1).unwrap_or(row);
+                            for (axis, component) in
+                                [(PropertyId::RowGap, row), (PropertyId::ColumnGap, column)]
+                            {
+                                if let Some(value) =
+                                    lower_motion(axis, std::slice::from_ref(component))
+                                {
+                                    push_keyframe(
+                                        &mut builders,
+                                        axis,
+                                        Keyframe::new(offset, value),
+                                    );
+                                }
+                            }
+                        }
+                        continue;
+                    }
+                    let Some(value) = lower_motion(property, &declaration.value) else {
                         continue;
                     };
                     push_keyframe(&mut builders, property, Keyframe::new(offset, value));
@@ -59,11 +72,15 @@ impl KeyframeCompiler {
             .into_iter()
             .map(|(property, keyframes)| (property, KeyframeTrack::from_keyframes(keyframes)))
             .collect();
-        CompiledKeyframes { name, tracks }
+        CompiledKeyframes {
+            condition: None,
+            name,
+            tracks,
+        }
     }
 }
 
-#[doc = include_str!("keyframe_compiler.doc/offset_of.md")]
+/// Maps a keyframe selector to its normalized `[0, 1]` offset.
 fn offset_of(selector: KeyframeSelector) -> f32 {
     match selector {
         KeyframeSelector::From => 0.0,
@@ -72,8 +89,18 @@ fn offset_of(selector: KeyframeSelector) -> f32 {
     }
 }
 
-#[doc = include_str!("keyframe_compiler.doc/lower_motion.md")]
-fn lower_motion(values: &[ParsedValue]) -> Option<MotionValue> {
+/// Lowers a keyframe declaration to a scalar or a fixed transform matrix. A
+/// transform that needs layout-dependent units is deferred by the property
+/// compiler and cannot be sampled as a keyframe matrix here.
+fn lower_motion(property: PropertyId, values: &[ParsedValue]) -> Option<MotionValue> {
+    if property == PropertyId::Transform {
+        return match lower_transform(values)? {
+            PropertyValue::Transform(transform) => Some(MotionValue::transform(transform.matrix())),
+            PropertyValue::TransformFunctions(functions) => lower_box_transform(&functions),
+            _ => None,
+        };
+    }
+
     match values.first()? {
         ParsedValue::Number(n) => Some(MotionValue::scalar(narrow_f32(*n))),
         ParsedValue::Percentage(p) => Some(MotionValue::scalar(narrow_f32(p / 100.0))),
@@ -84,7 +111,61 @@ fn lower_motion(values: &[ParsedValue]) -> Option<MotionValue> {
     }
 }
 
-#[doc = include_str!("keyframe_compiler.doc/push_keyframe.md")]
+/// Composes a transform list while retaining width and height dependent translation coefficients.
+fn lower_box_transform(functions: &[TransformFunction]) -> Option<MotionValue> {
+    let mut matrix = AffineTransform::IDENTITY;
+    let mut relative = [0.0; 4];
+    for function in functions {
+        match function {
+            TransformFunction::Matrix(coeffs) => {
+                matrix = matrix.multiply(AffineTransform { coeffs: *coeffs });
+            }
+            TransformFunction::Translate(x, y) => {
+                let (x_px, x_ratio) = affine_length(x)?;
+                let (y_px, y_ratio) = affine_length(y)?;
+                let [a, b, c, d, _, _] = matrix.coeffs;
+                relative[0] += a * x_ratio;
+                relative[1] += b * x_ratio;
+                relative[2] += c * y_ratio;
+                relative[3] += d * y_ratio;
+                matrix = matrix.multiply(AffineTransform::translate(x_px, y_px));
+            }
+        }
+    }
+    Some(MotionValue::box_transform(matrix.coeffs, relative))
+}
+
+/// Lowers a linear length-percentage expression into pixel and percentage terms.
+fn affine_length(expression: &LengthExpr) -> Option<(f32, f32)> {
+    let (pixels, ratio) = match expression {
+        LengthExpr::Leaf(Length::Px(px)) => (px.0, 0.0),
+        LengthExpr::Leaf(Length::Percent(percent)) => (0.0, percent / 100.0),
+        LengthExpr::Sum(a, b) | LengthExpr::Diff(a, b) => {
+            let (a_px, a_ratio) = affine_length(a)?;
+            let (b_px, b_ratio) = affine_length(b)?;
+            let sign = if matches!(expression, LengthExpr::Sum(..)) {
+                1.0
+            } else {
+                -1.0
+            };
+            (a_px + sign * b_px, a_ratio + sign * b_ratio)
+        }
+        LengthExpr::Product(term, scalar) | LengthExpr::Quotient(term, scalar) => {
+            let (px, ratio) = affine_length(term)?;
+            let factor = if matches!(expression, LengthExpr::Product(..)) {
+                *scalar
+            } else {
+                scalar.recip()
+            };
+            (px * factor, ratio * factor)
+        }
+        _ => return None,
+    };
+    (pixels.is_finite() && ratio.is_finite()).then_some((pixels, ratio))
+}
+
+/// Appends `keyframe` to the track builder for `property`, creating it on first
+/// use so property order matches first appearance.
 fn push_keyframe(
     builders: &mut Vec<(PropertyId, Vec<Keyframe>)>,
     property: PropertyId,
@@ -122,6 +203,18 @@ mod tests {
             .find(|(id, _)| *id == property)
             .expect("expected a track for the property")
             .1
+    }
+
+    #[test]
+    fn fixed_transform_keyframes_interpolate() {
+        let (compiled, _) = keyframes(
+            "@keyframes move { from { transform: none; } to { transform: translateX(10px); } }",
+        );
+        let sample = track_for(&compiled, PropertyId::Transform).sample(0.5);
+        assert_eq!(
+            sample,
+            MotionValue::transform([1.0, 0.0, 0.0, 1.0, 5.0, 0.0])
+        );
     }
 
     #[test]

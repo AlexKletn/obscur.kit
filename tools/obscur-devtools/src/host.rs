@@ -1,4 +1,4 @@
-#![doc = include_str!("host.doc/_module.md")]
+#![doc = include_str!("../docs/api/host.doc/_module.md")]
 
 use std::io;
 
@@ -8,7 +8,8 @@ use obscur_devtools_server::bridge::{RuntimeBridge, SnapshotInspectSource};
 use obscur_devtools_server::endpoint::DevToolsEndpoint;
 use obscur_devtools_server::transport::{SocketListener, SocketTransport};
 
-#[doc = include_str!("host.doc/demo_source.md")]
+/// Builds an inspect source seeded with representative live-state for every
+/// target, so a connected client sees non-empty snapshots.
 #[must_use]
 pub fn demo_source() -> SnapshotInspectSource {
     SnapshotInspectSource::new()
@@ -62,7 +63,7 @@ pub fn demo_source() -> SnapshotInspectSource {
         )
 }
 
-#[doc = include_str!("host.doc/serve_one.md")]
+#[doc = include_str!("../docs/api/host.doc/serve_one.md")]
 pub fn serve_one(
     listener: &SocketListener,
     source: SnapshotInspectSource,
@@ -77,7 +78,7 @@ pub fn serve_one(
     SocketTransport::new(stream).serve(&mut endpoint)
 }
 
-#[doc = include_str!("host.doc/serve_forever.md")]
+#[doc = include_str!("../docs/api/host.doc/serve_forever.md")]
 pub fn serve_forever(listener: &SocketListener, token: &str, scopes: ScopeSet) -> io::Result<()> {
     loop {
         serve_one(listener, demo_source(), token, scopes)?;

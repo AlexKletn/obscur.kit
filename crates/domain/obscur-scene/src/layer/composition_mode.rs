@@ -1,20 +1,22 @@
-#![doc = include_str!("composition_mode.doc/_module.md")]
+//! The Porter-Duff compositing operator for a layer.
 
-#[doc = include_str!("composition_mode.doc/CompositionMode.md")]
+#[doc = include_str!("../../docs/api/layer/composition_mode.doc/CompositionMode.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CompositionMode {
-    #[doc = include_str!("composition_mode.doc/SrcOver.md")]
+    /// Source over destination: normal alpha compositing (the default).
     SrcOver,
-    #[doc = include_str!("composition_mode.doc/Src.md")]
+    /// Source replaces destination, ignoring the destination entirely.
     Src,
-    #[doc = include_str!("composition_mode.doc/DstOver.md")]
+    /// Destination over source: the source shows only where the destination is
+    /// transparent.
     DstOver,
-    #[doc = include_str!("composition_mode.doc/Clear.md")]
+    /// Clears the destination to transparent, drawing neither operand's color.
     Clear,
 }
 
 impl CompositionMode {
-    #[doc = include_str!("composition_mode.doc/is_src_over.md")]
+    /// Returns whether this is [`CompositionMode::SrcOver`] (normal alpha
+    /// compositing).
     #[must_use]
     pub const fn is_src_over(self) -> bool {
         matches!(self, Self::SrcOver)
@@ -22,7 +24,7 @@ impl CompositionMode {
 }
 
 impl Default for CompositionMode {
-    #[doc = include_str!("composition_mode.doc/default.md")]
+    /// The default operator is [`CompositionMode::SrcOver`].
     fn default() -> Self {
         Self::SrcOver
     }

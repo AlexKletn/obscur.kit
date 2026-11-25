@@ -1,27 +1,31 @@
-#![doc = include_str!("text_alignment.doc/_module.md")]
+//! How a line's glyphs are positioned horizontally within the paragraph width
+//! (spec §5.10).
 
 use crate::shaping::TextDirection;
 
-#[doc = include_str!("text_alignment.doc/TextAlignment.md")]
+#[doc = include_str!("../../docs/api/layout/text_alignment.doc/TextAlignment.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum TextAlignment {
-    #[doc = include_str!("text_alignment.doc/Start.md")]
+    /// Align to the leading edge: left under left-to-right, right under
+    /// right-to-left. The default.
     #[default]
     Start,
-    #[doc = include_str!("text_alignment.doc/End.md")]
+    /// Align to the trailing edge: right under left-to-right, left under
+    /// right-to-left.
     End,
-    #[doc = include_str!("text_alignment.doc/Left.md")]
+    /// Align to the absolute left edge, regardless of direction.
     Left,
-    #[doc = include_str!("text_alignment.doc/Right.md")]
+    /// Align to the absolute right edge, regardless of direction.
     Right,
-    #[doc = include_str!("text_alignment.doc/Center.md")]
+    /// Centre the line within the available width.
     Center,
-    #[doc = include_str!("text_alignment.doc/Justify.md")]
+    /// Stretch inter-glyph spacing to fill the available width; the line's start
+    /// offset is `0`.
     Justify,
 }
 
 impl TextAlignment {
-    #[doc = include_str!("text_alignment.doc/x_offset.md")]
+    #[doc = include_str!("../../docs/api/layout/text_alignment.doc/x_offset.md")]
     #[must_use]
     pub const fn x_offset(
         self,

@@ -1,37 +1,11 @@
-#![doc = include_str!("syntax_node.doc/_module.md")]
+//! `SyntaxNode`: an interior node of the lossless syntax tree, plus the
+//! [`SyntaxElement`] child enum.
 
 use crate::syntax::{SyntaxKind, SyntaxToken};
 
-#[doc = include_str!("syntax_node.doc/SyntaxElement.md")]
-#[derive(Debug, Clone, PartialEq)]
-pub enum SyntaxElement {
-    #[doc = include_str!("syntax_node.doc/Node.md")]
-    Node(SyntaxNode),
-    #[doc = include_str!("syntax_node.doc/Token.md")]
-    Token(SyntaxToken),
-}
+use super::SyntaxElement;
 
-impl SyntaxElement {
-    #[doc = include_str!("syntax_node.doc/text.md")]
-    #[must_use]
-    pub fn text(&self) -> String {
-        match self {
-            Self::Node(node) => node.text(),
-            Self::Token(token) => token.text().to_owned(),
-        }
-    }
-
-    #[doc = include_str!("syntax_node.doc/offset.md")]
-    #[must_use]
-    pub fn offset(&self) -> Option<u32> {
-        match self {
-            Self::Node(node) => node.offset(),
-            Self::Token(token) => Some(token.offset()),
-        }
-    }
-}
-
-#[doc = include_str!("syntax_node.doc/SyntaxNode.md")]
+#[doc = include_str!("../../docs/api/syntax/syntax_node.doc/SyntaxNode.md")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct SyntaxNode {
     kind: SyntaxKind,
@@ -39,7 +13,7 @@ pub struct SyntaxNode {
 }
 
 impl SyntaxNode {
-    #[doc = include_str!("syntax_node.doc/new.md")]
+    /// Creates an empty node of the given (node-valued) `kind`.
     #[must_use]
     pub fn new(kind: SyntaxKind) -> Self {
         Self {
@@ -48,41 +22,41 @@ impl SyntaxNode {
         }
     }
 
-    #[doc = include_str!("syntax_node.doc/with_child.md")]
+    /// Builder: appends `child` and returns `self`.
     #[must_use]
     pub fn with_child(mut self, child: SyntaxElement) -> Self {
         self.children.push(child);
         self
     }
 
-    #[doc = include_str!("syntax_node.doc/push.md")]
+    /// Appends a child element.
     pub fn push(&mut self, child: SyntaxElement) {
         self.children.push(child);
     }
 
-    #[doc = include_str!("syntax_node.doc/push_node.md")]
+    /// Appends a child node.
     pub fn push_node(&mut self, node: SyntaxNode) {
         self.children.push(SyntaxElement::Node(node));
     }
 
-    #[doc = include_str!("syntax_node.doc/push_token.md")]
+    /// Appends a child token.
     pub fn push_token(&mut self, token: SyntaxToken) {
         self.children.push(SyntaxElement::Token(token));
     }
 
-    #[doc = include_str!("syntax_node.doc/kind.md")]
+    /// Returns the node's kind.
     #[must_use]
     pub const fn kind(&self) -> SyntaxKind {
         self.kind
     }
 
-    #[doc = include_str!("syntax_node.doc/children.md")]
+    /// Returns the node's children in order.
     #[must_use]
     pub fn children(&self) -> &[SyntaxElement] {
         &self.children
     }
 
-    #[doc = include_str!("syntax_node.doc/child_nodes.md")]
+    /// Iterates the node's immediate child nodes.
     pub fn child_nodes(&self) -> impl Iterator<Item = &SyntaxNode> {
         self.children.iter().filter_map(|child| match child {
             SyntaxElement::Node(node) => Some(node),
@@ -90,7 +64,7 @@ impl SyntaxNode {
         })
     }
 
-    #[doc = include_str!("syntax_node.doc/tokens.md")]
+    /// Iterates the node's immediate child tokens.
     pub fn tokens(&self) -> impl Iterator<Item = &SyntaxToken> {
         self.children.iter().filter_map(|child| match child {
             SyntaxElement::Token(token) => Some(token),
@@ -98,7 +72,8 @@ impl SyntaxNode {
         })
     }
 
-    #[doc = include_str!("syntax_node.doc/text_2.md")]
+    /// Reconstructs the source substring this node covers, by concatenating the
+    /// text of every descendant token in order (recursively).
     #[must_use]
     pub fn text(&self) -> String {
         let mut out = String::new();
@@ -115,7 +90,7 @@ impl SyntaxNode {
         }
     }
 
-    #[doc = include_str!("syntax_node.doc/first_token.md")]
+    /// Returns this node's first descendant token, if any.
     #[must_use]
     pub fn first_token(&self) -> Option<&SyntaxToken> {
         for child in &self.children {
@@ -131,7 +106,7 @@ impl SyntaxNode {
         None
     }
 
-    #[doc = include_str!("syntax_node.doc/offset_2.md")]
+    /// Returns the byte offset of this node's first descendant token, if any.
     #[must_use]
     pub fn offset(&self) -> Option<u32> {
         self.first_token().map(SyntaxToken::offset)

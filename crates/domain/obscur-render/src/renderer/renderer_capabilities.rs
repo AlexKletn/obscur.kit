@@ -1,28 +1,29 @@
-#![doc = include_str!("renderer_capabilities.doc/_module.md")]
+//! What a renderer backend supports, for effect/fallback selection (spec §5.2).
 
 use obscur_capability::SupportLevel;
 
 use crate::target::PixelFormat;
 
-#[doc = include_str!("renderer_capabilities.doc/RendererCapabilities.md")]
+#[doc = include_str!("../../docs/api/renderer/renderer_capabilities.doc/RendererCapabilities.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RendererCapabilities {
-    #[doc = include_str!("renderer_capabilities.doc/max_texture_size.md")]
+    /// The maximum texture edge length, in physical pixels, the backend accepts.
     pub max_texture_size: u32,
-    #[doc = include_str!("renderer_capabilities.doc/msaa.md")]
+    /// Whether the backend supports multisample anti-aliasing.
     pub msaa: bool,
-    #[doc = include_str!("renderer_capabilities.doc/hdr.md")]
+    /// Whether the backend supports high-dynamic-range output.
     pub hdr: bool,
-    #[doc = include_str!("renderer_capabilities.doc/custom_shaders.md")]
+    /// Whether the backend permits restricted user shaders — gates the trusted
+    /// shader extensions of spec §5.3.
     pub custom_shaders: bool,
-    #[doc = include_str!("renderer_capabilities.doc/offscreen.md")]
+    /// Whether the backend can render to offscreen targets (spec §5.6).
     pub offscreen: bool,
-    #[doc = include_str!("renderer_capabilities.doc/preferred_format.md")]
+    /// The pixel format the backend prefers to present in.
     pub preferred_format: PixelFormat,
 }
 
 impl RendererCapabilities {
-    #[doc = include_str!("renderer_capabilities.doc/new.md")]
+    #[doc = include_str!("../../docs/api/renderer/renderer_capabilities.doc/new.md")]
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -35,91 +36,94 @@ impl RendererCapabilities {
         }
     }
 
-    #[doc = include_str!("renderer_capabilities.doc/with_max_texture_size.md")]
+    /// Sets the maximum texture edge length, returning the updated profile.
     #[must_use]
     pub const fn with_max_texture_size(mut self, max_texture_size: u32) -> Self {
         self.max_texture_size = max_texture_size;
         self
     }
 
-    #[doc = include_str!("renderer_capabilities.doc/msaa_2.md")]
+    /// Sets whether the backend supports MSAA, returning the updated profile.
     #[must_use]
     pub const fn msaa(mut self, msaa: bool) -> Self {
         self.msaa = msaa;
         self
     }
 
-    #[doc = include_str!("renderer_capabilities.doc/hdr_2.md")]
+    /// Sets whether the backend supports HDR output, returning the updated
+    /// profile.
     #[must_use]
     pub const fn hdr(mut self, hdr: bool) -> Self {
         self.hdr = hdr;
         self
     }
 
-    #[doc = include_str!("renderer_capabilities.doc/custom_shaders_2.md")]
+    /// Sets whether the backend permits custom shaders, returning the updated
+    /// profile (spec §5.3).
     #[must_use]
     pub const fn custom_shaders(mut self, custom_shaders: bool) -> Self {
         self.custom_shaders = custom_shaders;
         self
     }
 
-    #[doc = include_str!("renderer_capabilities.doc/offscreen_2.md")]
+    /// Sets whether the backend can render offscreen, returning the updated
+    /// profile (spec §5.6).
     #[must_use]
     pub const fn offscreen(mut self, offscreen: bool) -> Self {
         self.offscreen = offscreen;
         self
     }
 
-    #[doc = include_str!("renderer_capabilities.doc/with_preferred_format.md")]
+    /// Sets the preferred pixel format, returning the updated profile.
     #[must_use]
     pub const fn with_preferred_format(mut self, preferred_format: PixelFormat) -> Self {
         self.preferred_format = preferred_format;
         self
     }
 
-    #[doc = include_str!("renderer_capabilities.doc/max_texture_size_2.md")]
+    /// The maximum texture edge length, in physical pixels.
     #[must_use]
     pub const fn max_texture_size(&self) -> u32 {
         self.max_texture_size
     }
 
-    #[doc = include_str!("renderer_capabilities.doc/has_msaa.md")]
+    /// Whether the backend supports MSAA.
     #[must_use]
     pub const fn has_msaa(&self) -> bool {
         self.msaa
     }
 
-    #[doc = include_str!("renderer_capabilities.doc/has_hdr.md")]
+    /// Whether the backend supports HDR output.
     #[must_use]
     pub const fn has_hdr(&self) -> bool {
         self.hdr
     }
 
-    #[doc = include_str!("renderer_capabilities.doc/has_custom_shaders.md")]
+    /// Whether the backend permits custom shaders (spec §5.3).
     #[must_use]
     pub const fn has_custom_shaders(&self) -> bool {
         self.custom_shaders
     }
 
-    #[doc = include_str!("renderer_capabilities.doc/has_offscreen.md")]
+    /// Whether the backend can render offscreen (spec §5.6).
     #[must_use]
     pub const fn has_offscreen(&self) -> bool {
         self.offscreen
     }
 
-    #[doc = include_str!("renderer_capabilities.doc/preferred_format_2.md")]
+    /// The preferred pixel format.
     #[must_use]
     pub const fn preferred_format(&self) -> PixelFormat {
         self.preferred_format
     }
 
-    #[doc = include_str!("renderer_capabilities.doc/supports_texture_size.md")]
+    #[doc = include_str!("../../docs/api/renderer/renderer_capabilities.doc/supports_texture_size.md")]
     #[must_use]
     pub const fn supports_texture_size(&self, size: u32) -> bool {
         size <= self.max_texture_size
     }
 
-    #[doc = include_str!("renderer_capabilities.doc/hdr_support.md")]
+    #[doc = include_str!("../../docs/api/renderer/renderer_capabilities.doc/hdr_support.md")]
     #[must_use]
     pub const fn hdr_support(&self) -> SupportLevel {
         if self.hdr {

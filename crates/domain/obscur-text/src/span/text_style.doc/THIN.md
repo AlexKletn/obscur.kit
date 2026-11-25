@@ -1,1 +1,0 @@
-Thin weight (`100`).

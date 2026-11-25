@@ -1,4 +1,4 @@
-#![doc = include_str!("subtree.doc/_module.md")]
+//! A lightweight handle over a node and its descendants for subtree lifecycle.
 
 use std::collections::HashSet;
 
@@ -6,26 +6,26 @@ use obscur_identity::{FastSet, NodeId};
 
 use super::RetainedTree;
 
-#[doc = include_str!("subtree.doc/Subtree.md")]
+#[doc = include_str!("../../docs/api/tree/subtree.doc/Subtree.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Subtree {
     root: NodeId,
 }
 
 impl Subtree {
-    #[doc = include_str!("subtree.doc/new.md")]
+    /// Creates a subtree handle rooted at `root`.
     #[must_use]
     pub const fn new(root: NodeId) -> Self {
         Self { root }
     }
 
-    #[doc = include_str!("subtree.doc/root.md")]
+    /// Returns the root of this subtree.
     #[must_use]
     pub const fn root(&self) -> NodeId {
         self.root
     }
 
-    #[doc = include_str!("subtree.doc/descendants.md")]
+    #[doc = include_str!("../../docs/api/tree/subtree.doc/descendants.md")]
     #[must_use]
     pub fn descendants(&self, tree: &RetainedTree) -> Vec<NodeId> {
         let mut order = Vec::new();
@@ -49,19 +49,21 @@ impl Subtree {
         order
     }
 
-    #[doc = include_str!("subtree.doc/contains.md")]
+    /// Returns `true` if `id` is the root or a transitive descendant of this
+    /// subtree within `tree`.
     #[must_use]
     pub fn contains(&self, tree: &RetainedTree, id: NodeId) -> bool {
         self.descendants(tree).contains(&id)
     }
 
-    #[doc = include_str!("subtree.doc/len.md")]
+    /// Returns the number of live nodes in this subtree (root plus descendants).
     #[must_use]
     pub fn len(&self, tree: &RetainedTree) -> usize {
         self.descendants(tree).len()
     }
 
-    #[doc = include_str!("subtree.doc/is_empty.md")]
+    /// Returns `true` if this subtree contains no live nodes (its root is not
+    /// live in `tree`).
     #[must_use]
     pub fn is_empty(&self, tree: &RetainedTree) -> bool {
         tree.get(self.root).is_none()

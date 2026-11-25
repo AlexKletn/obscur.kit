@@ -1,5 +1,5 @@
-#![doc = include_str!("parent_space.doc/_module.md")]
+//! Logical coordinates in a node’s parent space.
 
-#[doc = include_str!("parent_space.doc/ParentSpace.md")]
-#[derive(Debug)]
+/// Logical coordinates in a node’s parent space.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ParentSpace;

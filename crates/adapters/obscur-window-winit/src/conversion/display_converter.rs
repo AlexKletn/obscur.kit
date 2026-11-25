@@ -1,47 +1,22 @@
-#![doc = include_str!("display_converter.doc/_module.md")]
+//! The [`DisplayConverter`] pure winit→domain monitor converter (spec §6.6
+//! display enumeration; §2.7 "преобразует native events в доменные события").
 
 use obscur_geometry::{Point, Rect, ScaleFactor, Size};
 use obscur_windowing::display::{Display, DisplayId, DisplayMode};
-use winit::dpi::{PhysicalPosition, PhysicalSize};
 
-#[doc = include_str!("display_converter.doc/MonitorSnapshot.md")]
-#[derive(Debug, Clone, PartialEq)]
-pub struct MonitorSnapshot {
-    #[doc = include_str!("display_converter.doc/name.md")]
-    pub name: Option<String>,
-    #[doc = include_str!("display_converter.doc/size.md")]
-    pub size: PhysicalSize<u32>,
-    #[doc = include_str!("display_converter.doc/position.md")]
-    pub position: PhysicalPosition<i32>,
-    #[doc = include_str!("display_converter.doc/scale_factor.md")]
-    pub scale_factor: f64,
-    #[doc = include_str!("display_converter.doc/refresh_rate_millihertz.md")]
-    pub refresh_rate_millihertz: Option<u32>,
-}
+use super::MonitorSnapshot;
 
-impl MonitorSnapshot {
-    #[doc = include_str!("display_converter.doc/read.md")]
-    #[must_use]
-    pub fn read(monitor: &winit::monitor::MonitorHandle) -> Self {
-        Self {
-            name: monitor.name(),
-            size: monitor.size(),
-            position: monitor.position(),
-            scale_factor: monitor.scale_factor(),
-            refresh_rate_millihertz: monitor.refresh_rate_millihertz(),
-        }
-    }
-}
-
-#[doc = include_str!("display_converter.doc/DisplayConverter.md")]
+#[doc = include_str!("../../docs/api/conversion/display_converter.doc/DisplayConverter.md")]
 #[derive(Debug, Clone, Copy)]
 pub struct DisplayConverter {
-    #[doc = include_str!("display_converter.doc/global_coordinates.md")]
+    /// Whether the platform underneath exposes where each monitor sits in a
+    /// global coordinate space.
     global_coordinates: bool,
 }
 
 impl DisplayConverter {
-    #[doc = include_str!("display_converter.doc/new.md")]
+    /// Creates a converter for a platform that exposes global monitor
+    /// coordinates (spec §6.6).
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -49,7 +24,7 @@ impl DisplayConverter {
         }
     }
 
-    #[doc = include_str!("display_converter.doc/without_global_coordinates.md")]
+    #[doc = include_str!("../../docs/api/conversion/display_converter.doc/without_global_coordinates.md")]
     #[must_use]
     pub const fn without_global_coordinates() -> Self {
         Self {
@@ -57,13 +32,14 @@ impl DisplayConverter {
         }
     }
 
-    #[doc = include_str!("display_converter.doc/convert.md")]
+    /// Converts a live winit `monitor` to a domain [`Display`] with the
+    /// caller-supplied `id` (spec §6.6).
     #[must_use]
     pub fn convert(&self, id: DisplayId, monitor: &winit::monitor::MonitorHandle) -> Display {
         self.project(id, &MonitorSnapshot::read(monitor))
     }
 
-    #[doc = include_str!("display_converter.doc/project.md")]
+    #[doc = include_str!("../../docs/api/conversion/display_converter.doc/project.md")]
     #[must_use]
     #[allow(clippy::cast_possible_truncation)]
     pub fn project(&self, id: DisplayId, snapshot: &MonitorSnapshot) -> Display {
@@ -101,7 +77,7 @@ impl Default for DisplayConverter {
     }
 }
 
-#[doc = include_str!("display_converter.doc/to_logical.md")]
+#[doc = include_str!("../../docs/api/conversion/display_converter.doc/to_logical.md")]
 fn to_logical(bounds: Rect, scale_factor: ScaleFactor) -> Rect {
     let scale = scale_factor.get();
     Rect::new(
@@ -113,6 +89,7 @@ fn to_logical(bounds: Rect, scale_factor: ScaleFactor) -> Rect {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use winit::dpi::{PhysicalPosition, PhysicalSize};
 
     /// A 4K panel at 2×, offset to the right of a 1080p primary, at 59.94Hz —
     /// every reading distinct so no field can be satisfied by another's value.

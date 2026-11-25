@@ -1,13 +1,15 @@
-#![doc = include_str!("property_compiler.doc/_module.md")]
+#![doc = include_str!("../../docs/api/compiler/property_compiler.doc/_module.md")]
 
+use super::CssSymbolInterner;
 use super::background_lowering::{
     expand_background, lower_background_image, lower_background_position, lower_background_repeat,
-    lower_background_size, lower_object_fit,
+    lower_background_size, lower_object_fit, lower_object_position,
 };
 use super::border_shorthand::{
     BORDER_SIDES, border_side_shorthand, expand_border, expand_border_color, expand_border_style,
     expand_outline,
 };
+use super::clip_path_lowering::lower_clip_path;
 use super::custom_value::custom_value_text;
 use super::filter_lowering::{lower_backdrop_filter, lower_filter};
 use super::font_lowering::{lower_font_family, lower_font_weight};
@@ -18,11 +20,12 @@ use super::grid_track_lowering::{
 use super::longhand_catalog::{is_length_longhand, layout_keyword_mapper, property_id_from_name};
 use super::shadow_lowering::lower_box_shadow;
 use super::shorthand_expansion::{
-    axis_pair_shorthand_sides, box_shorthand_sides, expand_box_shorthand, expand_flex_shorthand,
-    expand_grid_area_shorthand, expand_grid_line_shorthand, expand_pair_shorthand,
-    grid_line_shorthand_sides, logical_pair_shorthand_sides, place_shorthand_sides,
+    axis_pair_shorthand_sides, box_shorthand_sides, container_reference, contains_var,
+    expand_box_shorthand, expand_container_shorthand, expand_flex_flow_shorthand,
+    expand_flex_shorthand, expand_grid_area_shorthand, expand_grid_line_shorthand,
+    expand_grid_shorthand, expand_pair_shorthand, grid_line_shorthand_sides,
+    logical_pair_shorthand_sides, place_shorthand_sides, shorthand_components,
 };
-use super::stylesheet_compiler::CssSymbolInterner;
 use super::transform_lowering::{lower_transform, lower_transform_origin};
 use super::value_lowering::{css_wide_keyword, lower_value, sole_custom_ref};
 use super::vendor_prefix::{VendorNamespace, vendor_namespace};
@@ -33,29 +36,22 @@ use obscur_style::cascade::{CascadeOrigin, Declaration, ImportantFlag};
 use obscur_style::property::{CustomProperty, Length, PropertyId, PropertyValue, layout_keyword};
 use obscur_style::selector::{SelectorId, SelectorSpecificity};
 
-#[doc = include_str!("property_compiler.doc/CompiledDeclaration.md")]
-#[derive(Debug, Clone, PartialEq)]
-pub enum CompiledDeclaration {
-    #[doc = include_str!("property_compiler.doc/Standard.md")]
-    Standard(Declaration),
-    #[doc = include_str!("property_compiler.doc/Custom.md")]
-    Custom(CustomProperty),
-    #[doc = include_str!("property_compiler.doc/Unsupported.md")]
-    Unsupported(UnsupportedCssFeature),
-}
+use super::CompiledDeclaration;
 
-#[doc = include_str!("property_compiler.doc/PropertyCompiler.md")]
+#[doc = include_str!("../../docs/api/compiler/property_compiler.doc/PropertyCompiler.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PropertyCompiler;
 
 impl PropertyCompiler {
-    #[doc = include_str!("property_compiler.doc/new.md")]
+    /// Creates a property compiler.
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    #[doc = include_str!("property_compiler.doc/compile.md")]
+    /// Lowers `decl` into a [`CompiledDeclaration`], resolving the cascade
+    /// context (`specificity`, `origin`, `source_order`, `selector`) into the
+    /// produced [`Declaration`] when the name is a known longhand.
     #[must_use]
     pub fn compile(
         &self,
@@ -142,7 +138,7 @@ impl PropertyCompiler {
         }
     }
 
-    #[doc = include_str!("property_compiler.doc/compile_all.md")]
+    #[doc = include_str!("../../docs/api/compiler/property_compiler.doc/compile_all.md")]
     #[must_use]
     pub fn compile_all(
         &self,
@@ -216,6 +212,9 @@ impl PropertyCompiler {
                 selector,
             );
         }
+        if decl.name.eq_ignore_ascii_case("flex-flow") {
+            return expand_flex_flow_shorthand(decl, specificity, origin, source_order, selector);
+        }
         if decl.name.eq_ignore_ascii_case("flex") {
             return expand_flex_shorthand(
                 decl,
@@ -225,6 +224,20 @@ impl PropertyCompiler {
                 selector,
                 interner,
             );
+        }
+        if decl.name.eq_ignore_ascii_case("container") {
+            return expand_container_shorthand(
+                decl,
+                specificity,
+                origin,
+                source_order,
+                selector,
+                interner,
+            );
+        }
+        if decl.name.eq_ignore_ascii_case("grid-template") || decl.name.eq_ignore_ascii_case("grid")
+        {
+            return expand_grid_shorthand(decl, specificity, origin, source_order, selector);
         }
         if decl.name.eq_ignore_ascii_case("grid-area") {
             return expand_grid_area_shorthand(decl, specificity, origin, source_order, selector);
@@ -252,14 +265,76 @@ impl PropertyCompiler {
     }
 }
 
-#[doc = include_str!("property_compiler.doc/narrow_f32.md")]
+/// Narrows parsed CSS numbers to f32, saturating values outside its finite range.
 #[must_use]
-#[allow(clippy::cast_possible_truncation)]
 pub(crate) fn narrow_f32(value: f64) -> f32 {
-    value as f32
+    obscur_geometry::saturating_f32(value)
 }
 
-#[doc = include_str!("property_compiler.doc/lower_for_property.md")]
+fn lower_container_names(values: &[ParsedValue]) -> Option<PropertyValue> {
+    if let [ParsedValue::Keyword(name)] = values {
+        if let Some(wide) = css_wide_keyword(name) {
+            return Some(wide);
+        }
+        if name.eq_ignore_ascii_case("none") {
+            return Some(PropertyValue::Name("none".into()));
+        }
+    }
+    let (first, rest) = values.split_first()?;
+    let first = container_ident(first)?;
+    if rest.is_empty() {
+        return Some(PropertyValue::Name(first));
+    }
+    let mut names = Vec::with_capacity(values.len());
+    names.push(first);
+    for value in rest {
+        names.push(container_ident(value)?);
+    }
+    Some(PropertyValue::ContainerNames(names.into()))
+}
+
+fn container_ident(value: &ParsedValue) -> Option<Box<str>> {
+    let ParsedValue::Keyword(name) = value else {
+        return None;
+    };
+    (css_wide_keyword(name).is_none()
+        && ![
+            "none",
+            "and",
+            "or",
+            "not",
+            "default",
+            "revert",
+            "revert-layer",
+        ]
+        .iter()
+        .any(|reserved| name.eq_ignore_ascii_case(reserved)))
+    .then(|| name.clone())
+}
+
+/// Parses a two-keyword baseline preference in either grammar order.
+pub(super) fn baseline_position(values: &[ParsedValue]) -> Option<PropertyValue> {
+    use obscur_style::property::layout_keyword::{ALIGN_BASELINE, ALIGN_LAST_BASELINE};
+
+    let [ParsedValue::Keyword(a), ParsedValue::Keyword(b)] = values else {
+        return None;
+    };
+    let preference = if a.eq_ignore_ascii_case("baseline") {
+        b
+    } else if b.eq_ignore_ascii_case("baseline") {
+        a
+    } else {
+        return None;
+    };
+    let keyword = match preference.to_ascii_lowercase().as_str() {
+        "first" => ALIGN_BASELINE,
+        "last" => ALIGN_LAST_BASELINE,
+        _ => return None,
+    };
+    Some(PropertyValue::Keyword(keyword))
+}
+
+#[doc = include_str!("../../docs/api/compiler/property_compiler.doc/lower_for_property.md")]
 pub(super) fn lower_for_property(
     property: PropertyId,
     values: &[ParsedValue],
@@ -272,18 +347,87 @@ pub(super) fn lower_for_property(
     // down with it. Carrying the reference defers the judgement to the one place
     // that can make it: the computed-value step substitutes, and drops the value
     // there if what came back does not fit this property.
-    if let Some(reference) = sole_custom_ref(values) {
-        return Some(reference);
+    if let [value @ ParsedValue::Function { name, .. }] = values
+        && name.eq_ignore_ascii_case("var")
+    {
+        use obscur_style::property::ContainerComponent;
+        let reference = container_reference(value)?;
+        return Some(match reference {
+            ContainerComponent::Variable {
+                name,
+                fallback: None,
+            } => PropertyValue::CustomRef(name),
+            reference => PropertyValue::VariableTemplate(std::sync::Arc::from([reference])),
+        });
+    }
+    if values.iter().any(contains_var) {
+        return shorthand_components(values).map(PropertyValue::VariableTemplate);
+    }
+    if matches!(
+        property,
+        PropertyId::AlignItems
+            | PropertyId::AlignSelf
+            | PropertyId::JustifyItems
+            | PropertyId::JustifySelf
+    ) && let Some(baseline) = baseline_position(values)
+    {
+        return Some(baseline);
+    }
+    if matches!(
+        property,
+        PropertyId::ContainIntrinsicWidth
+            | PropertyId::ContainIntrinsicHeight
+            | PropertyId::ContainIntrinsicInlineSize
+            | PropertyId::ContainIntrinsicBlockSize
+    ) {
+        let [value] = values else { return None };
+        return match value {
+            ParsedValue::Keyword(keyword) if keyword.eq_ignore_ascii_case("none") => {
+                Some(PropertyValue::Initial)
+            }
+            ParsedValue::Keyword(keyword) => css_wide_keyword(keyword),
+            ParsedValue::Number(value) if *value == 0.0 => {
+                Some(PropertyValue::Length(Length::px(0.0)))
+            }
+            ParsedValue::Dimension { value: number, .. } if *number >= 0.0 => {
+                super::value_lowering::lower_component(value, interner)
+            }
+            ParsedValue::Function { .. } => {
+                match super::value_lowering::lower_component(value, interner) {
+                    Some(PropertyValue::Calc(expr)) if !expr.uses_percent() => {
+                        Some(PropertyValue::Calc(expr))
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
     }
     if property == PropertyId::Content {
-        // `content: "…"` (§4.16 generated content). Only the plain string form is
-        // modelled — the quotes are already stripped by the tokenizer — so a
-        // single string component lowers to a `String` value; anything else
-        // (keywords, `attr()`, counters) is unsupported and dropped.
-        if let [ParsedValue::String(text)] = values {
-            return Some(PropertyValue::String(text.clone()));
+        return match values {
+            [ParsedValue::String(text)] => Some(PropertyValue::String(text.clone())),
+            [ParsedValue::Keyword(keyword)]
+                if keyword.eq_ignore_ascii_case("none")
+                    || keyword.eq_ignore_ascii_case("normal") =>
+            {
+                Some(PropertyValue::Name(keyword.clone()))
+            }
+            _ => None,
+        };
+    }
+    if property == PropertyId::ContainerName {
+        return lower_container_names(values);
+    }
+    if property == PropertyId::ContainerType {
+        let [ParsedValue::Keyword(value)] = values else {
+            return None;
+        };
+        if let Some(wide) = css_wide_keyword(value) {
+            return Some(wide);
         }
-        return None;
+        let name = value.to_ascii_lowercase();
+        return matches!(name.as_str(), "normal" | "inline-size" | "size")
+            .then_some(PropertyValue::Name(name.into_boxed_str()));
     }
     if property == PropertyId::Painter {
         return lower_painter(values, interner);
@@ -327,6 +471,67 @@ pub(super) fn lower_for_property(
         }
         return lower_background_position(values);
     }
+    if property == PropertyId::ClipPath {
+        return lower_clip_path(values);
+    }
+    if property == PropertyId::BackgroundAttachment {
+        if let [ParsedValue::Keyword(keyword)] = values
+            && let Some(wide) = css_wide_keyword(keyword)
+        {
+            return Some(wide);
+        }
+        return values
+            .split(|value| matches!(value, ParsedValue::Comma))
+            .map(|segment| match segment {
+                [ParsedValue::Keyword(keyword)] => {
+                    super::background_lowering::background_attachment(keyword)
+                }
+                _ => None,
+            })
+            .collect::<Option<Box<[_]>>>()
+            .map(PropertyValue::BackgroundAttachments);
+    }
+    if matches!(
+        property,
+        PropertyId::BackgroundClip | PropertyId::BackgroundOrigin
+    ) {
+        if let [ParsedValue::Keyword(keyword)] = values
+            && let Some(wide) = css_wide_keyword(keyword)
+        {
+            return Some(wide);
+        }
+        return values
+            .split(|value| matches!(value, ParsedValue::Comma))
+            .map(|segment| match segment {
+                [ParsedValue::Keyword(keyword)] => {
+                    super::background_lowering::background_box(keyword)
+                }
+                _ => None,
+            })
+            .collect::<Option<Box<[_]>>>()
+            .map(if property == PropertyId::BackgroundClip {
+                PropertyValue::BackgroundClips
+            } else {
+                PropertyValue::BackgroundOrigins
+            });
+    }
+    if property == PropertyId::BackgroundBlendMode {
+        if let [ParsedValue::Keyword(keyword)] = values
+            && let Some(wide) = css_wide_keyword(keyword)
+        {
+            return Some(wide);
+        }
+        return values
+            .split(|value| matches!(value, ParsedValue::Comma))
+            .map(|layer| match layer {
+                [ParsedValue::Keyword(keyword)] => {
+                    obscur_style::property::layout_keyword::mix_blend_mode_from_name(keyword)
+                }
+                _ => None,
+            })
+            .collect::<Option<Box<[_]>>>()
+            .map(PropertyValue::BackgroundBlendModes);
+    }
     if property == PropertyId::BackgroundRepeat {
         if let Some(ParsedValue::Keyword(keyword)) = values.first()
             && let Some(wide) = css_wide_keyword(keyword)
@@ -354,7 +559,7 @@ pub(super) fn lower_for_property(
         }
         // `object-position` is the same `<position>` grammar as
         // `background-position`; reuse its lowering (CSS Images 3 §5.2).
-        return lower_background_position(values);
+        return lower_object_position(values);
     }
     if property == PropertyId::BoxShadow {
         if let Some(ParsedValue::Keyword(keyword)) = values.first()
@@ -400,6 +605,15 @@ pub(super) fn lower_for_property(
             return Some(wide);
         }
         return lower_transform_origin(values);
+    }
+    if property == PropertyId::Order {
+        return match values {
+            [ParsedValue::Number(n)] if n.fract() == 0.0 => {
+                Some(PropertyValue::Number(narrow_f32(*n)))
+            }
+            [ParsedValue::Keyword(keyword)] => css_wide_keyword(keyword),
+            _ => None,
+        };
     }
     if property == PropertyId::ZIndex {
         return lower_z_index(values);
@@ -449,6 +663,35 @@ pub(super) fn lower_for_property(
         }
         return lower_grid_auto_tracks(values);
     }
+    if matches!(property, PropertyId::RowGap | PropertyId::ColumnGap) {
+        return match values {
+            [ParsedValue::Keyword(keyword)] if keyword.eq_ignore_ascii_case("normal") => {
+                Some(PropertyValue::Length(Length::px(0.0)))
+            }
+            [ParsedValue::Keyword(keyword)] => css_wide_keyword(keyword),
+            [ParsedValue::Number(number)] if *number == 0.0 => {
+                Some(PropertyValue::Length(Length::px(0.0)))
+            }
+            [ParsedValue::Dimension { value, .. } | ParsedValue::Percentage(value)]
+                if *value < 0.0 =>
+            {
+                None
+            }
+            [value] => match lower_value(std::slice::from_ref(value), interner)? {
+                value @ (PropertyValue::Calc(_) | PropertyValue::Length(_)) => Some(value),
+                _ => None,
+            },
+            _ => None,
+        };
+    }
+    if matches!(property, PropertyId::MaxWidth | PropertyId::MaxHeight)
+        && let [ParsedValue::Keyword(keyword)] = values
+        && keyword.eq_ignore_ascii_case("none")
+    {
+        return Some(PropertyValue::Keyword(
+            obscur_style::property::layout_keyword::SIZING_NONE,
+        ));
+    }
     if let Some(mapper) = layout_keyword_mapper(property)
         && let Some(ParsedValue::Keyword(keyword)) = values.first()
     {
@@ -468,22 +711,99 @@ pub(super) fn lower_for_property(
         // the same typo answer the same way.
         return mapper(keyword).map(PropertyValue::Keyword);
     }
-    // A unitless `0` is a valid length for any length-typed longhand — `0` means
-    // `0px` (CSS Values §4.5.3, "the unit may be omitted for zero lengths"). The
-    // generic `lower_value` path would otherwise lower it to a `PropertyValue::
-    // Number`, which a length property ignores (so `top: 0` would read as unset
-    // instead of `0px`, unlike `top: 0px` or the `inset: 0` shorthand which the
-    // box-shorthand path already handles via `box_side_length`).
-    if is_length_longhand(property)
-        && let [ParsedValue::Number(n)] = values
-        && *n == 0.0
-    {
-        return Some(PropertyValue::Length(Length::px(0.0)));
+    if is_length_longhand(property) {
+        return lower_length_longhand(property, values, interner);
     }
     lower_value(values, interner)
 }
 
-#[doc = include_str!("property_compiler.doc/lower_painter.md")]
+/// Validates the full declaration and the literal numeric range before lowering a length. Math expressions retain their computed-value semantics.
+fn lower_length_longhand(
+    property: PropertyId,
+    values: &[ParsedValue],
+    interner: &mut CssSymbolInterner,
+) -> Option<PropertyValue> {
+    let [value] = values else {
+        return None;
+    };
+    let sizing = matches!(
+        property,
+        PropertyId::Width
+            | PropertyId::Height
+            | PropertyId::MinWidth
+            | PropertyId::MinHeight
+            | PropertyId::MaxWidth
+            | PropertyId::MaxHeight
+            | PropertyId::FlexBasis
+    );
+    let signed = matches!(
+        property,
+        PropertyId::Top
+            | PropertyId::Right
+            | PropertyId::Bottom
+            | PropertyId::Left
+            | PropertyId::MarginTop
+            | PropertyId::MarginRight
+            | PropertyId::MarginBottom
+            | PropertyId::MarginLeft
+            | PropertyId::MarginInlineStart
+            | PropertyId::MarginInlineEnd
+            | PropertyId::MarginBlockStart
+            | PropertyId::MarginBlockEnd
+            | PropertyId::InsetInlineStart
+            | PropertyId::InsetInlineEnd
+            | PropertyId::InsetBlockStart
+            | PropertyId::InsetBlockEnd
+            | PropertyId::OutlineOffset
+            | PropertyId::LetterSpacing
+            | PropertyId::WordSpacing
+    );
+    match value {
+        ParsedValue::Keyword(word) => {
+            if let Some(wide) = css_wide_keyword(word) {
+                return Some(wide);
+            }
+            if word.eq_ignore_ascii_case("auto")
+                && (sizing
+                    || (signed
+                        && !matches!(
+                            property,
+                            PropertyId::OutlineOffset
+                                | PropertyId::LetterSpacing
+                                | PropertyId::WordSpacing
+                        )))
+            {
+                return Some(PropertyValue::Length(Length::Auto));
+            }
+            if word.eq_ignore_ascii_case("normal")
+                && matches!(
+                    property,
+                    PropertyId::LetterSpacing | PropertyId::WordSpacing | PropertyId::Gap
+                )
+            {
+                return Some(PropertyValue::Length(Length::px(0.0)));
+            }
+            sizing
+                .then(|| layout_keyword::sizing_from_name(word))
+                .flatten()
+                .map(PropertyValue::Keyword)
+        }
+        ParsedValue::Number(number) if *number == 0.0 => {
+            Some(PropertyValue::Length(Length::px(0.0)))
+        }
+        ParsedValue::Dimension { value, .. } | ParsedValue::Percentage(value)
+            if !signed && *value < 0.0 =>
+        {
+            None
+        }
+        _ => match lower_value(values, interner)? {
+            value @ (PropertyValue::Length(_) | PropertyValue::Calc(_)) => Some(value),
+            _ => None,
+        },
+    }
+}
+
+#[doc = include_str!("../../docs/api/compiler/property_compiler.doc/lower_painter.md")]
 fn lower_painter(
     values: &[ParsedValue],
     interner: &mut CssSymbolInterner,
@@ -510,7 +830,7 @@ fn lower_painter(
     }
 }
 
-#[doc = include_str!("property_compiler.doc/lower_z_index.md")]
+#[doc = include_str!("../../docs/api/compiler/property_compiler.doc/lower_z_index.md")]
 fn lower_z_index(values: &[ParsedValue]) -> Option<PropertyValue> {
     match values.first()? {
         ParsedValue::Number(n) if n.fract() == 0.0 => Some(PropertyValue::Number(narrow_f32(*n))),
@@ -524,7 +844,8 @@ fn lower_z_index(values: &[ParsedValue]) -> Option<PropertyValue> {
     }
 }
 
-#[doc = include_str!("property_compiler.doc/value_unsupported_kind.md")]
+/// Picks the unsupported-feature category to report when a value cannot be
+/// lowered, based on the shape of its first component.
 pub(super) fn value_unsupported_kind(values: &[ParsedValue]) -> UnsupportedFeatureKind {
     match values.first() {
         Some(ParsedValue::Function { .. }) => UnsupportedFeatureKind::Function,
@@ -590,7 +911,8 @@ pub(crate) mod tests {
         }
     }
 
-    #[doc = include_str!("property_compiler.doc/pairs.md")]
+    /// Collects the `(PropertyId, PropertyValue)` pairs of a compiled shorthand's
+    /// standard declarations, in emission order.
     pub(crate) fn pairs(compiled: &[CompiledDeclaration]) -> Vec<(PropertyId, PropertyValue)> {
         compiled
             .iter()
@@ -897,7 +1219,17 @@ pub(crate) mod tests {
         let cases: Vec<(&str, Vec<(PropertyId, PropertyValue)>)> = vec![
             (
                 "background: var(--k-face)",
-                vec![(PropertyId::BackgroundColor, re("--k-face"))],
+                vec![
+                    (PropertyId::BackgroundImage, PropertyValue::Initial),
+                    (PropertyId::BackgroundColor, re("--k-face")),
+                    (PropertyId::BackgroundSize, PropertyValue::Initial),
+                    (PropertyId::BackgroundPosition, PropertyValue::Initial),
+                    (PropertyId::BackgroundRepeat, PropertyValue::Initial),
+                    (PropertyId::BackgroundBlendMode, PropertyValue::Initial),
+                    (PropertyId::BackgroundClip, PropertyValue::Initial),
+                    (PropertyId::BackgroundOrigin, PropertyValue::Initial),
+                    (PropertyId::BackgroundAttachment, PropertyValue::Initial),
+                ],
             ),
             (
                 "border-color: var(--k-line)",

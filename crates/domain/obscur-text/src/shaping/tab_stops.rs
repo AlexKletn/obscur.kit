@@ -1,25 +1,28 @@
-#![doc = include_str!("tab_stops.doc/_module.md")]
+#![doc = include_str!("../../docs/api/shaping/tab_stops.doc/_module.md")]
+
+use std::sync::Arc;
 
 use crate::shaping::{GlyphRun, ShapedGlyph, ShapedRun};
 
-#[doc = include_str!("tab_stops.doc/char_at.md")]
+/// Returns the character at byte offset `cluster` in `text`, if any.
 fn char_at(text: &str, cluster: usize) -> Option<char> {
     text.get(cluster..).and_then(|rest| rest.chars().next())
 }
 
-#[doc = include_str!("tab_stops.doc/apply_tab_stops.md")]
+#[doc = include_str!("../../docs/api/shaping/tab_stops.doc/apply_tab_stops.md")]
 #[must_use]
-pub fn apply_tab_stops(runs: Vec<ShapedRun>, text: &str, tab_width: f32) -> Vec<ShapedRun> {
+pub fn apply_tab_stops(runs: Arc<[ShapedRun]>, text: &str, tab_width: f32) -> Arc<[ShapedRun]> {
     if tab_width <= 0.0 || !text.contains('\t') {
         return runs;
     }
     let mut pen = 0.0_f32;
-    runs.into_iter()
-        .map(|run| retab_run(&run, text, tab_width, &mut pen))
+    runs.iter()
+        .map(|run| retab_run(run, text, tab_width, &mut pen))
         .collect()
 }
 
-#[doc = include_str!("tab_stops.doc/retab_run.md")]
+/// Rebuilds one [`ShapedRun`], advancing its tab glyphs to the next stop and
+/// carrying the running `pen` across the run (resetting it after each `\n`).
 fn retab_run(run: &ShapedRun, text: &str, tab_width: f32, pen: &mut f32) -> ShapedRun {
     let source = run.run();
     let retabbed: Vec<ShapedGlyph> = source
@@ -89,15 +92,15 @@ mod tests {
 
     #[test]
     fn no_tab_is_identity() {
-        let runs = vec![run_over("abc", 6.0)];
-        let out = apply_tab_stops(runs.clone(), "abc", 40.0);
+        let runs: Arc<[ShapedRun]> = Arc::from(vec![run_over("abc", 6.0)]);
+        let out = apply_tab_stops(Arc::clone(&runs), "abc", 40.0);
         assert_eq!(out, runs, "text with no tab must return runs byte-for-byte");
     }
 
     #[test]
     fn zero_width_is_identity() {
-        let runs = vec![run_over("a\tb", 6.0)];
-        let out = apply_tab_stops(runs.clone(), "a\tb", 0.0);
+        let runs: Arc<[ShapedRun]> = Arc::from(vec![run_over("a\tb", 6.0)]);
+        let out = apply_tab_stops(Arc::clone(&runs), "a\tb", 0.0);
         assert_eq!(out, runs);
     }
 
@@ -105,7 +108,7 @@ mod tests {
     fn tab_advances_to_next_stop() {
         // "a\tb", pen after "a" = 6; tab_width 40 → next stop 40, so the tab's
         // advance becomes 40 − 6 = 34. "b" keeps its 6.
-        let out = apply_tab_stops(vec![run_over("a\tb", 6.0)], "a\tb", 40.0);
+        let out = apply_tab_stops(Arc::from(vec![run_over("a\tb", 6.0)]), "a\tb", 40.0);
         assert_eq!(advances(&out), vec![6.0, 34.0, 6.0]);
     }
 
@@ -113,7 +116,7 @@ mod tests {
     fn tab_on_a_stop_advances_to_the_next_one() {
         // Pen exactly on a stop (0) still advances a full tab_width (a tab is never
         // zero-width): "\t" at pen 0 with width 32 → 32.
-        let out = apply_tab_stops(vec![run_over("\tx", 8.0)], "\tx", 32.0);
+        let out = apply_tab_stops(Arc::from(vec![run_over("\tx", 8.0)]), "\tx", 32.0);
         assert_eq!(advances(&out), vec![32.0, 8.0]);
     }
 
@@ -121,7 +124,7 @@ mod tests {
     fn pen_resets_after_a_preserved_newline() {
         // "aa\n\tb": pen after "aa" = 20, `\n` resets pen to 0, so the tab at the
         // new line start advances a full stop (32), not 32 − 20.
-        let out = apply_tab_stops(vec![run_over("aa\n\tb", 10.0)], "aa\n\tb", 32.0);
+        let out = apply_tab_stops(Arc::from(vec![run_over("aa\n\tb", 10.0)]), "aa\n\tb", 32.0);
         // glyphs: a(10) a(10) \n(10, unchanged) \t(→32 from pen 0) b(10)
         assert_eq!(advances(&out), vec![10.0, 10.0, 10.0, 32.0, 10.0]);
     }

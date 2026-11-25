@@ -1,1 +1,0 @@
-A literal string value.

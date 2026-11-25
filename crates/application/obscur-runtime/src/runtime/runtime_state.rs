@@ -1,5 +1,6 @@
-#![doc = include_str!("runtime_state.doc/_module.md")]
+//! RuntimeState (skeleton stub for the spec-defined entity; not yet implemented).
 
-#[doc = include_str!("runtime_state.doc/RuntimeState.md")]
+/// Placeholder for the `RuntimeState` entity. See the Obscur Kit 2 specs for its
+/// contract; this stub exists to materialise the target source layout.
 #[derive(Debug)]
 pub(crate) struct RuntimeState;

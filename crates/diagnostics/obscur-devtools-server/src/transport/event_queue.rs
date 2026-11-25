@@ -1,33 +1,27 @@
-#![doc = include_str!("event_queue.doc/_module.md")]
+//! `EventQueue`: what a host hands the serving loop to push to subscribers.
 
-use std::collections::VecDeque;
+mod event_queue_state;
+
+use event_queue_state::EventQueueState;
+
 use std::sync::{Arc, Mutex};
 
 use obscur_devtools_protocol::message::{EventKind, MESSAGE_LIMIT, Topic};
 
-#[doc = include_str!("event_queue.doc/EventQueue.md")]
+#[doc = include_str!("../../docs/api/transport/event_queue.doc/EventQueue.md")]
 #[derive(Debug, Clone, Default)]
 pub struct EventQueue {
-    inner: Arc<Mutex<Inner>>,
-}
-
-#[doc = include_str!("event_queue.doc/Inner.md")]
-#[derive(Debug, Default)]
-struct Inner {
-    #[doc = include_str!("event_queue.doc/pending.md")]
-    pending: VecDeque<(Topic, EventKind)>,
-    #[doc = include_str!("event_queue.doc/dropped.md")]
-    dropped: u64,
+    inner: Arc<Mutex<EventQueueState>>,
 }
 
 impl EventQueue {
-    #[doc = include_str!("event_queue.doc/new.md")]
+    /// Creates an empty queue.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    #[doc = include_str!("event_queue.doc/push.md")]
+    #[doc = include_str!("../../docs/api/transport/event_queue.doc/push.md")]
     #[must_use = "a false return means an event was dropped for backpressure"]
     pub fn push(&self, topic: Topic, kind: EventKind) -> bool {
         let mut inner = self.lock();
@@ -41,33 +35,35 @@ impl EventQueue {
         kept
     }
 
-    #[doc = include_str!("event_queue.doc/drain.md")]
+    #[doc = include_str!("../../docs/api/transport/event_queue.doc/drain.md")]
     #[must_use]
     pub fn drain(&self) -> Vec<(Topic, EventKind)> {
         let mut inner = self.lock();
         inner.pending.drain(..).collect()
     }
 
-    #[doc = include_str!("event_queue.doc/len.md")]
+    /// How many events are waiting.
     #[must_use]
     pub fn len(&self) -> usize {
         self.lock().pending.len()
     }
 
-    #[doc = include_str!("event_queue.doc/is_empty.md")]
+    /// Whether nothing is waiting.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.lock().pending.is_empty()
     }
 
-    #[doc = include_str!("event_queue.doc/dropped_2.md")]
+    /// How many events have been dropped for backpressure since creation.
     #[must_use]
     pub fn dropped(&self) -> u64 {
         self.lock().dropped
     }
 
-    #[doc = include_str!("event_queue.doc/lock.md")]
-    fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
+    /// Locks the shared state, recovering from a poisoned lock rather than
+    /// propagating it: a panicked serving thread must not take the host down with
+    /// it — the queue's invariant is just "these are the pending events".
+    fn lock(&self) -> std::sync::MutexGuard<'_, EventQueueState> {
         self.inner
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)

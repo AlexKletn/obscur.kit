@@ -1,29 +1,38 @@
-#![doc = include_str!("transform_interp.doc/_module.md")]
+#![doc = include_str!("../../docs/api/value/transform_interp.doc/_module.md")]
 
 use core::f32::consts::PI;
 
 use super::lerp_f32;
 
-#[doc = include_str!("transform_interp.doc/DEGENERATE_SCALE.md")]
+/// Below this magnitude a scale factor is treated as degenerate (a collapsed
+/// axis), so normalization substitutes a safe unit basis instead of dividing by
+/// ~zero. Kept generous relative to `f32::EPSILON` so ordinary sub-pixel scales
+/// still decompose exactly.
 const DEGENERATE_SCALE: f32 = 1e-6;
 
-#[doc = include_str!("transform_interp.doc/Matrix2D.md")]
+/// A 2D affine matrix `[a, b, c, d, e, f]` mapping `(x, y)` to
+/// `(a·x + c·y + e, b·x + d·y + f)` — the `matrix(a, b, c, d, e, f)` layout the
+/// style/geometry crates use. Column 0 is `(a, b)`, column 1 is `(c, d)`, and
+/// `(e, f)` is the translation.
 pub type Matrix2D = [f32; 6];
 
-#[doc = include_str!("transform_interp.doc/Decomposed2D.md")]
+#[doc = include_str!("../../docs/api/value/transform_interp.doc/Decomposed2D.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Decomposed2D {
-    #[doc = include_str!("transform_interp.doc/translate.md")]
+    /// The translation `(tx, ty)` (`matrix` coefficients `e`, `f`).
     pub translate: (f32, f32),
-    #[doc = include_str!("transform_interp.doc/scale.md")]
+    /// The scale `(sx, sy)`. `sx` carries the reflection: it is negated when the
+    /// affine's determinant is negative (a flip).
     pub scale: (f32, f32),
-    #[doc = include_str!("transform_interp.doc/skew.md")]
+    /// The normalized XY shear term (the residual of making column 1 orthogonal
+    /// to column 0, divided by `sy`). Used directly as the shear coefficient by
+    /// [`recompose`] so the pair round-trips.
     pub skew: f32,
-    #[doc = include_str!("transform_interp.doc/angle.md")]
+    /// The rotation angle in radians (`atan2` of the normalized first column).
     pub angle: f32,
 }
 
-#[doc = include_str!("transform_interp.doc/decompose.md")]
+#[doc = include_str!("../../docs/api/value/transform_interp.doc/decompose.md")]
 // `a, b, c, d, e, f` are the canonical CSS `matrix()` coefficient names.
 #[allow(clippy::many_single_char_names)]
 #[must_use]
@@ -78,7 +87,7 @@ pub fn decompose(matrix: Matrix2D) -> Decomposed2D {
     }
 }
 
-#[doc = include_str!("transform_interp.doc/interpolate.md")]
+#[doc = include_str!("../../docs/api/value/transform_interp.doc/interpolate.md")]
 #[must_use]
 pub fn interpolate(from: &Decomposed2D, to: &Decomposed2D, t: f32) -> Decomposed2D {
     // Shortest-arc angle blend: bring the endpoints within π of each other.
@@ -106,7 +115,7 @@ pub fn interpolate(from: &Decomposed2D, to: &Decomposed2D, t: f32) -> Decomposed
     }
 }
 
-#[doc = include_str!("transform_interp.doc/recompose.md")]
+#[doc = include_str!("../../docs/api/value/transform_interp.doc/recompose.md")]
 #[must_use]
 pub fn recompose(d: &Decomposed2D) -> Matrix2D {
     let (cos, sin) = (d.angle.cos(), d.angle.sin());
@@ -120,7 +129,7 @@ pub fn recompose(d: &Decomposed2D) -> Matrix2D {
     [a, b, c, dd, d.translate.0, d.translate.1]
 }
 
-#[doc = include_str!("transform_interp.doc/interpolate_matrix.md")]
+#[doc = include_str!("../../docs/api/value/transform_interp.doc/interpolate_matrix.md")]
 #[must_use]
 pub fn interpolate_matrix(from: Matrix2D, to: Matrix2D, t: f32) -> Matrix2D {
     let a = decompose(from);

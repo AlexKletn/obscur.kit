@@ -1,23 +1,31 @@
-#![doc = include_str!("editing_role.doc/_module.md")]
+//! The role a text node plays for the active editing session — whether and how
+//! the live session buffer overrides its text: [`EditingRole`].
 
 use obscur_identity::NodeId;
 use obscur_tree::tree::RetainedTree;
 
 use super::EditingView;
 
-#[doc = include_str!("editing_role.doc/EditingRole.md")]
+/// The role a text `node` plays for the editing session bound to `field` — which
+/// decides *whether* and *how* the live session buffer overrides the node's
+/// painted/measured text (CSS `::placeholder` / `:placeholder-shown` model).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum EditingRole {
-    #[doc = include_str!("editing_role.doc/None.md")]
+    /// `node` is not the editing field's text at all: the session never touches it.
     None,
-    #[doc = include_str!("editing_role.doc/Value.md")]
+    /// `node` is the field's ordinary editable text (the field itself, or a `Text`
+    /// descendant that is *not* under a `.placeholder` overlay): the session
+    /// **always** overrides it, even when the session text is empty (an emptied
+    /// field renders empty, byte-identical to the historical value path).
     Value,
-    #[doc = include_str!("editing_role.doc/Placeholder.md")]
+    #[doc = include_str!("../../docs/api/orchestration/editing_role.doc/Placeholder.md")]
     Placeholder,
 }
 
 impl EditingRole {
-    #[doc = include_str!("editing_role.doc/overrides.md")]
+    /// Whether the editing `view`'s session text overrides a node in this role
+    /// this frame: the field's value text always, its `.placeholder` overlay only
+    /// while the session buffer is non-empty (the `:placeholder-shown` rule).
     #[must_use]
     pub(super) fn overrides(self, view: &EditingView<'_>) -> bool {
         match self {
@@ -36,13 +44,20 @@ impl EditingRole {
     }
 }
 
-#[doc = include_str!("editing_role.doc/editing_role.md")]
+#[doc = include_str!("../../docs/api/orchestration/editing_role.doc/editing_role.md")]
 pub(super) fn editing_role(tree: &RetainedTree, node: NodeId, field: NodeId) -> EditingRole {
     let mut current = node;
     let mut in_placeholder = false;
     // At most `len` hops reach the root from any node in a well-formed tree; the
     // inclusive bound tolerates a self-parent without looping.
     for _ in 0..=tree.len() {
+        if tree
+            .get(current)
+            .and_then(|node| node.kind().synthetic_tag())
+            == Some(super::generated_boxes::DECORATION_TAG)
+        {
+            return EditingRole::None;
+        }
         if let Some(n) = tree.get(current)
             && n.attributes().has_class("placeholder")
         {
@@ -63,7 +78,11 @@ pub(super) fn editing_role(tree: &RetainedTree, node: NodeId, field: NodeId) -> 
     EditingRole::None
 }
 
-#[doc = include_str!("editing_role.doc/editing_override.md")]
+/// The editing session that overrides `node`'s text this frame, if any: the
+/// session view when `node` is the field's value text, or its `.placeholder`
+/// overlay while the session buffer is non-empty; `None` otherwise. Shared by the
+/// compose (scene) and measure/arrange (layout) passes so the box is sized from —
+/// and the glyphs painted from — the *same* string.
 pub(crate) fn editing_override<'a>(
     tree: &RetainedTree,
     node: NodeId,

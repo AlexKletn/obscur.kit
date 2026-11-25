@@ -1,1 +1,0 @@
-Monotonic frame identity: [`FrameId`].

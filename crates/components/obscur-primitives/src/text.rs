@@ -1,15 +1,15 @@
-#![doc = include_str!("text.doc/_module.md")]
+//! `Text`: a literal text-node primitive (spec §2.6).
 
 use obscur_view::view::{View, ViewNode};
 
-#[doc = include_str!("text.doc/Text.md")]
+#[doc = include_str!("../docs/api/text.doc/Text.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Text {
     content: Box<str>,
 }
 
 impl Text {
-    #[doc = include_str!("text.doc/new.md")]
+    /// Creates a text primitive holding `content`.
     #[must_use]
     pub fn new(content: impl Into<Box<str>>) -> Self {
         Self {
@@ -17,19 +17,19 @@ impl Text {
         }
     }
 
-    #[doc = include_str!("text.doc/content.md")]
+    /// Returns the text content.
     #[must_use]
     pub fn content(&self) -> &str {
         &self.content
     }
 
-    #[doc = include_str!("text.doc/into_view_node.md")]
+    /// Lowers this primitive into a [`ViewNode::Text`] node.
     #[must_use]
     pub fn into_view_node(self) -> ViewNode {
         ViewNode::text(self.content)
     }
 
-    #[doc = include_str!("text.doc/view.md")]
+    /// Lowers this primitive into a single-node [`View`].
     #[must_use]
     pub fn view(self) -> View {
         View::single(self.into_view_node())

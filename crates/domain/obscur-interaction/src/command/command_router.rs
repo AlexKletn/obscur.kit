@@ -1,18 +1,18 @@
-#![doc = include_str!("command_router.doc/_module.md")]
+//! The [`CommandRouter`] shortcut-to-command binding table (spec §6.7).
 
 use obscur_identity::InternedSymbol;
 
 use crate::command::{LogicalKey, Modifiers, Shortcut};
 
-#[doc = include_str!("command_router.doc/CommandRouter.md")]
+#[doc = include_str!("../../docs/api/command/command_router.doc/CommandRouter.md")]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CommandRouter {
-    #[doc = include_str!("command_router.doc/bindings.md")]
+    /// Ordered shortcut→command-symbol bindings; index order is priority.
     bindings: Vec<(Shortcut, InternedSymbol)>,
 }
 
 impl CommandRouter {
-    #[doc = include_str!("command_router.doc/new.md")]
+    /// Creates an empty router with no bindings.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -20,12 +20,12 @@ impl CommandRouter {
         }
     }
 
-    #[doc = include_str!("command_router.doc/bind.md")]
+    #[doc = include_str!("../../docs/api/command/command_router.doc/bind.md")]
     pub fn bind(&mut self, shortcut: Shortcut, command: InternedSymbol) {
         self.bindings.push((shortcut, command));
     }
 
-    #[doc = include_str!("command_router.doc/resolve.md")]
+    #[doc = include_str!("../../docs/api/command/command_router.doc/resolve.md")]
     #[must_use]
     pub fn resolve(&self, key: LogicalKey, modifiers: Modifiers) -> Option<InternedSymbol> {
         self.bindings
@@ -34,7 +34,7 @@ impl CommandRouter {
             .map(|(_, command)| *command)
     }
 
-    #[doc = include_str!("command_router.doc/unbind.md")]
+    #[doc = include_str!("../../docs/api/command/command_router.doc/unbind.md")]
     pub fn unbind(&mut self, shortcut: &Shortcut) -> bool {
         if let Some(index) = self.bindings.iter().position(|(sc, _)| sc == shortcut) {
             self.bindings.remove(index);
@@ -44,7 +44,7 @@ impl CommandRouter {
         }
     }
 
-    #[doc = include_str!("command_router.doc/bindings_for.md")]
+    /// Returns every shortcut bound to `command`, in registration order.
     #[must_use]
     pub fn bindings_for(&self, command: InternedSymbol) -> Vec<Shortcut> {
         self.bindings
@@ -54,19 +54,19 @@ impl CommandRouter {
             .collect()
     }
 
-    #[doc = include_str!("command_router.doc/len.md")]
+    /// Returns the number of bindings.
     #[must_use]
     pub fn len(&self) -> usize {
         self.bindings.len()
     }
 
-    #[doc = include_str!("command_router.doc/is_empty.md")]
+    /// Returns whether the router has no bindings.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.bindings.is_empty()
     }
 
-    #[doc = include_str!("command_router.doc/clear.md")]
+    /// Removes every binding.
     pub fn clear(&mut self) {
         self.bindings.clear();
     }

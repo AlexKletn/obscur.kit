@@ -1,23 +1,30 @@
-#![doc = include_str!("background_lowering.doc/_module.md")]
+#![doc = include_str!("../../docs/api/compiler/background_lowering.doc/_module.md")]
 
+mod position_component;
+
+use position_component::{PositionComponent, position_component};
+
+use super::CssSymbolInterner;
 use super::color_lowering::parse_stop_color;
 use super::gradient_lowering::{
     lower_conic_gradient, lower_linear_gradient, lower_radial_gradient,
     lower_repeating_linear_gradient,
 };
-use super::property_compiler::{CompiledDeclaration, narrow_f32, value_unsupported_kind};
-use super::stylesheet_compiler::CssSymbolInterner;
-use super::value_lowering::{dimension_length, sole_custom_ref};
+use super::value_lowering::{css_wide_keyword, dimension_length, sole_custom_ref};
+use super::{
+    CompiledDeclaration,
+    property_compiler::{narrow_f32, value_unsupported_kind},
+};
 use crate::error::UnsupportedCssFeature;
 use crate::parser::{ParsedDeclaration, ParsedValue};
 use obscur_style::cascade::{CascadeOrigin, Declaration, ImportantFlag};
 use obscur_style::property::{
-    BackgroundLayer, BackgroundPosition, BackgroundRepeat, BackgroundSize, Length, ObjectFit,
-    PropertyId, PropertyValue,
+    BackgroundAttachment, BackgroundBox, BackgroundLayer, BackgroundPosition, BackgroundRepeat,
+    BackgroundRepeatAxis, BackgroundSize, Length, ObjectFit, PropertyId, PropertyValue,
 };
 use obscur_style::selector::{SelectorId, SelectorSpecificity};
 
-#[doc = include_str!("background_lowering.doc/expand_background.md")]
+#[doc = include_str!("../../docs/api/compiler/background_lowering.doc/expand_background.md")]
 pub(super) fn expand_background(
     decl: &ParsedDeclaration,
     specificity: SelectorSpecificity,
@@ -32,7 +39,7 @@ pub(super) fn expand_background(
         ImportantFlag::Normal
     };
     let standard = |property, value| {
-        vec![CompiledDeclaration::Standard(Declaration::new(
+        CompiledDeclaration::Standard(Declaration::new(
             property,
             value,
             important,
@@ -40,42 +47,276 @@ pub(super) fn expand_background(
             specificity,
             source_order,
             selector,
-        ))]
+        ))
     };
-    // `background: var(--face)` reaches `background-color`. The shorthand's
-    // other longhands are left alone — this expander never reset them anyway —
-    // and the colour is the only one of them a custom property can carry: a
-    // gradient does not lower into a custom property's value at all. Before
-    // this, the reference matched neither the image grammar nor the colour one
-    // and the declaration was discarded, which is how a keyboard's every hover
-    // and press rule compiled to an empty block.
-    if let Some(reference) = sole_custom_ref(&decl.value) {
-        return standard(PropertyId::BackgroundColor, reference);
-    }
-    if let Some(value) = lower_background_image(&decl.value) {
-        return standard(PropertyId::BackgroundImage, value);
-    }
-    if let [one] = decl.value.as_slice()
-        && let Some(color) = parse_stop_color(one)
+    let longhands = [
+        PropertyId::BackgroundImage,
+        PropertyId::BackgroundColor,
+        PropertyId::BackgroundSize,
+        PropertyId::BackgroundPosition,
+        PropertyId::BackgroundRepeat,
+        PropertyId::BackgroundBlendMode,
+        PropertyId::BackgroundClip,
+        PropertyId::BackgroundOrigin,
+        PropertyId::BackgroundAttachment,
+    ];
+    if let [ParsedValue::Keyword(keyword)] = decl.value.as_slice()
+        && let Some(wide) = css_wide_keyword(keyword)
     {
-        return standard(PropertyId::BackgroundColor, PropertyValue::Color(color));
+        return longhands
+            .into_iter()
+            .map(|id| standard(id, wide.clone()))
+            .collect();
+    }
+
+    let expanded = if let Some(reference) = sole_custom_ref(&decl.value) {
+        // The existing shorthand custom-property path carries a color value.
+        Some([
+            PropertyValue::Initial,
+            reference,
+            PropertyValue::Initial,
+            PropertyValue::Initial,
+            PropertyValue::Initial,
+            PropertyValue::Initial,
+            PropertyValue::Initial,
+            PropertyValue::Initial,
+            PropertyValue::Initial,
+        ])
+    } else {
+        lower_background_shorthand(&decl.value)
+    };
+    if let Some(values) = expanded {
+        return longhands
+            .into_iter()
+            .zip(values)
+            .map(|(id, value)| standard(id, value))
+            .collect();
     }
     vec![CompiledDeclaration::Unsupported(
         UnsupportedCssFeature::new(value_unsupported_kind(&decl.value), &*decl.name, decl.span),
     )]
 }
 
-#[doc = include_str!("background_lowering.doc/lower_background_size.md")]
+#[derive(Default)]
+struct ShorthandLayer {
+    image: Option<BackgroundLayer>,
+    color: Option<PropertyValue>,
+    size: Option<BackgroundSize>,
+    position: Option<BackgroundPosition>,
+    repeat: Option<BackgroundRepeat>,
+    origin: Option<BackgroundBox>,
+    clip: Option<BackgroundBox>,
+    attachment: Option<BackgroundAttachment>,
+}
+
+fn lower_background_shorthand(values: &[ParsedValue]) -> Option<[PropertyValue; 9]> {
+    let mut segments = values
+        .split(|value| matches!(value, ParsedValue::Comma))
+        .peekable();
+    let mut layers = Vec::new();
+    while let Some(segment) = segments.next() {
+        layers.push(lower_shorthand_layer(segment, segments.peek().is_none())?);
+    }
+    let color = layers
+        .last_mut()?
+        .color
+        .take()
+        .unwrap_or(PropertyValue::Initial);
+    let image = if layers.len() == 1 {
+        layers[0]
+            .image
+            .take()
+            .unwrap_or(BackgroundLayer::None)
+            .into_property_value()
+    } else {
+        PropertyValue::BackgroundLayers(
+            layers
+                .iter_mut()
+                .map(|layer| layer.image.take().unwrap_or(BackgroundLayer::None))
+                .collect(),
+        )
+    };
+    Some([
+        image,
+        color,
+        shorthand_placement(
+            layers.iter().map(|layer| layer.size),
+            PropertyValue::BackgroundSize,
+            PropertyValue::BackgroundSizes,
+        ),
+        shorthand_placement(
+            layers.iter().map(|layer| layer.position),
+            PropertyValue::BackgroundPosition,
+            PropertyValue::BackgroundPositions,
+        ),
+        shorthand_placement(
+            layers.iter().map(|layer| layer.repeat),
+            PropertyValue::BackgroundRepeat,
+            PropertyValue::BackgroundRepeats,
+        ),
+        PropertyValue::Initial,
+        if layers.iter().any(|layer| layer.clip.is_some()) {
+            PropertyValue::BackgroundClips(
+                layers
+                    .iter()
+                    .map(|layer| layer.clip.unwrap_or(BackgroundBox::Border))
+                    .collect(),
+            )
+        } else {
+            PropertyValue::Initial
+        },
+        if layers.iter().any(|layer| layer.origin.is_some()) {
+            PropertyValue::BackgroundOrigins(
+                layers
+                    .iter()
+                    .map(|layer| layer.origin.unwrap_or(BackgroundBox::Padding))
+                    .collect(),
+            )
+        } else {
+            PropertyValue::Initial
+        },
+        if layers.iter().any(|layer| layer.attachment.is_some()) {
+            PropertyValue::BackgroundAttachments(
+                layers
+                    .iter()
+                    .map(|layer| layer.attachment.unwrap_or_default())
+                    .collect(),
+            )
+        } else {
+            PropertyValue::Initial
+        },
+    ])
+}
+
+pub(super) fn background_attachment(keyword: &str) -> Option<BackgroundAttachment> {
+    if keyword.eq_ignore_ascii_case("scroll") {
+        Some(BackgroundAttachment::Scroll)
+    } else if keyword.eq_ignore_ascii_case("local") {
+        Some(BackgroundAttachment::Local)
+    } else if keyword.eq_ignore_ascii_case("fixed") {
+        Some(BackgroundAttachment::Fixed)
+    } else {
+        None
+    }
+}
+
+pub(super) fn background_box(keyword: &str) -> Option<BackgroundBox> {
+    if keyword.eq_ignore_ascii_case("border-box") {
+        Some(BackgroundBox::Border)
+    } else if keyword.eq_ignore_ascii_case("padding-box") {
+        Some(BackgroundBox::Padding)
+    } else if keyword.eq_ignore_ascii_case("content-box") {
+        Some(BackgroundBox::Content)
+    } else {
+        None
+    }
+}
+
+fn shorthand_placement<T: Default>(
+    values: impl Iterator<Item = Option<T>>,
+    single: impl FnOnce(T) -> PropertyValue,
+    multiple: impl FnOnce(Box<[T]>) -> PropertyValue,
+) -> PropertyValue {
+    let values: Vec<_> = values.collect();
+    if values.iter().all(Option::is_none) {
+        return PropertyValue::Initial;
+    }
+    if values.len() == 1 {
+        return single(values.into_iter().next().flatten().unwrap_or_default());
+    }
+    multiple(values.into_iter().map(Option::unwrap_or_default).collect())
+}
+
+fn lower_shorthand_layer(mut values: &[ParsedValue], final_layer: bool) -> Option<ShorthandLayer> {
+    if values.is_empty() {
+        return None;
+    }
+    let mut layer = ShorthandLayer::default();
+    while let Some((first, rest)) = values.split_first() {
+        if layer.image.is_none()
+            && let Some(image) = lower_background_layer(std::slice::from_ref(first))
+        {
+            layer.image = Some(image);
+            values = rest;
+        } else if final_layer
+            && layer.color.is_none()
+            && let Some(color) = parse_stop_color(first)
+        {
+            layer.color = Some(PropertyValue::Color(color));
+            values = rest;
+        } else if layer.repeat.is_none()
+            && let Some((repeat, consumed)) = placement_prefix(values, lower_repeat_layer)
+        {
+            layer.repeat = Some(repeat);
+            values = &values[consumed..];
+        } else if layer.attachment.is_none()
+            && let ParsedValue::Keyword(keyword) = first
+            && let Some(attachment) = background_attachment(keyword)
+        {
+            layer.attachment = Some(attachment);
+            values = rest;
+        } else if layer.origin.is_none()
+            && let ParsedValue::Keyword(keyword) = first
+            && let Some(origin) = background_box(keyword)
+        {
+            layer.origin = Some(origin);
+            values = rest;
+            let second = match values.first() {
+                Some(ParsedValue::Keyword(keyword)) => background_box(keyword),
+                _ => None,
+            };
+            layer.clip = Some(second.unwrap_or(origin));
+            if second.is_some() {
+                values = &values[1..];
+            }
+        } else if layer.position.is_none() {
+            let count = values
+                .iter()
+                .take_while(|value| position_component(value, position_length).is_some())
+                .count();
+            layer.position = Some(lower_position_layer(&values[..count])?);
+            values = &values[count..];
+            if let Some(after_slash) = values.strip_prefix(&[ParsedValue::Delimiter('/')]) {
+                let (size, consumed) = placement_prefix(after_slash, lower_size_layer)?;
+                layer.size = Some(size);
+                values = &after_slash[consumed..];
+            }
+        } else {
+            return None;
+        }
+    }
+    Some(layer)
+}
+
+fn placement_prefix<T>(
+    values: &[ParsedValue],
+    lower: impl Fn(&[ParsedValue]) -> Option<T>,
+) -> Option<(T, usize)> {
+    [2, 1]
+        .into_iter()
+        .find_map(|count| lower(values.get(..count)?).map(|value| (value, count)))
+}
+
+#[doc = include_str!("../../docs/api/compiler/background_lowering.doc/lower_background_size.md")]
 pub(super) fn lower_background_size(values: &[ParsedValue]) -> Option<PropertyValue> {
+    lower_layer_values(
+        values,
+        lower_size_layer,
+        PropertyValue::BackgroundSize,
+        PropertyValue::BackgroundSizes,
+    )
+}
+
+fn lower_size_layer(values: &[ParsedValue]) -> Option<BackgroundSize> {
     if let [ParsedValue::Keyword(keyword)] = values {
         if keyword.eq_ignore_ascii_case("cover") {
-            return Some(PropertyValue::BackgroundSize(BackgroundSize::Cover));
+            return Some(BackgroundSize::Cover);
         }
         if keyword.eq_ignore_ascii_case("contain") {
-            return Some(PropertyValue::BackgroundSize(BackgroundSize::Contain));
+            return Some(BackgroundSize::Contain);
         }
         if keyword.eq_ignore_ascii_case("auto") {
-            return Some(PropertyValue::BackgroundSize(BackgroundSize::Auto));
+            return Some(BackgroundSize::Auto);
         }
     }
     // One or two `<length-percentage> | auto` components.
@@ -87,15 +328,15 @@ pub(super) fn lower_background_size(values: &[ParsedValue]) -> Option<PropertyVa
     };
     // Both axes `auto` is exactly the intrinsic-size initial.
     if width.is_auto() && height.is_auto() {
-        return Some(PropertyValue::BackgroundSize(BackgroundSize::Auto));
+        return Some(BackgroundSize::Auto);
     }
-    Some(PropertyValue::BackgroundSize(BackgroundSize::Explicit {
-        width,
-        height,
-    }))
+    Some(BackgroundSize::Explicit { width, height })
 }
 
-#[doc = include_str!("background_lowering.doc/background_size_component.md")]
+/// Lowers one `background-size` component into a [`Length`]: `auto` →
+/// [`Length::Auto`], a percentage / dimension → its length, a unitless `0` →
+/// `0px`. Any other component (including `cover` / `contain`, which are only
+/// valid alone) yields [`None`].
 fn background_size_component(value: &ParsedValue) -> Option<Length> {
     match value {
         ParsedValue::Keyword(keyword) if keyword.eq_ignore_ascii_case("auto") => Some(Length::Auto),
@@ -106,7 +347,7 @@ fn background_size_component(value: &ParsedValue) -> Option<Length> {
     }
 }
 
-#[doc = include_str!("background_lowering.doc/lower_object_fit.md")]
+#[doc = include_str!("../../docs/api/compiler/background_lowering.doc/lower_object_fit.md")]
 pub(super) fn lower_object_fit(values: &[ParsedValue]) -> Option<PropertyValue> {
     let [ParsedValue::Keyword(keyword)] = values else {
         return None;
@@ -127,35 +368,76 @@ pub(super) fn lower_object_fit(values: &[ParsedValue]) -> Option<PropertyValue> 
     Some(PropertyValue::ObjectFit(fit))
 }
 
-#[doc = include_str!("background_lowering.doc/lower_background_position.md")]
+#[doc = include_str!("../../docs/api/compiler/background_lowering.doc/lower_background_position.md")]
 pub(super) fn lower_background_position(values: &[ParsedValue]) -> Option<PropertyValue> {
-    let components: Vec<PositionComponent> = values
+    lower_layer_values(
+        values,
+        lower_position_layer,
+        PropertyValue::BackgroundPosition,
+        PropertyValue::BackgroundPositions,
+    )
+}
+
+pub(super) fn lower_object_position(values: &[ParsedValue]) -> Option<PropertyValue> {
+    if values.len() == 3 {
+        return None;
+    }
+    lower_position_layer(values).map(PropertyValue::BackgroundPosition)
+}
+
+pub(super) fn lower_position_layer(values: &[ParsedValue]) -> Option<BackgroundPosition> {
+    let ([x, y], from_end) = lower_position(values, position_length, |length| length)?;
+    Some(BackgroundPosition::from_edge_offsets(x, y, from_end))
+}
+
+pub(super) fn lower_position<T: Clone>(
+    values: &[ParsedValue],
+    lower: impl Fn(&ParsedValue) -> Option<T>,
+    lift: impl Fn(Length) -> T,
+) -> Option<([T; 2], [bool; 2])> {
+    let components: Vec<PositionComponent<T>> = values
         .iter()
-        .map(position_component)
+        .map(|value| position_component(value, &lower))
         .collect::<Option<Vec<_>>>()?;
     let (x, y) = match components.as_slice() {
         [only] => match only {
-            PositionComponent::Horizontal(p) => (Length::Percent(*p), Length::Percent(50.0)),
-            PositionComponent::Vertical(p) => (Length::Percent(50.0), Length::Percent(*p)),
-            PositionComponent::Center => (Length::Percent(50.0), Length::Percent(50.0)),
-            PositionComponent::Length(l) => (*l, Length::Percent(50.0)),
+            PositionComponent::Horizontal(p) => {
+                (lift(Length::Percent(*p)), lift(Length::Percent(50.0)))
+            }
+            PositionComponent::Vertical(p) => {
+                (lift(Length::Percent(50.0)), lift(Length::Percent(*p)))
+            }
+            PositionComponent::Center => (lift(Length::Percent(50.0)), lift(Length::Percent(50.0))),
+            PositionComponent::Length(l) => (l.clone(), lift(Length::Percent(50.0))),
         },
+        [
+            PositionComponent::Length(_),
+            PositionComponent::Horizontal(_),
+        ]
+        | [PositionComponent::Vertical(_), PositionComponent::Length(_)] => return None,
         [_, _] => {
-            let mut x: Option<Length> = None;
-            let mut y: Option<Length> = None;
+            let mut x: Option<T> = None;
+            let mut y: Option<T> = None;
             // First pass: explicit-axis keywords claim their axis (order-free).
             for comp in &components {
                 match comp {
-                    PositionComponent::Horizontal(p) => x = Some(Length::Percent(*p)),
-                    PositionComponent::Vertical(p) => y = Some(Length::Percent(*p)),
+                    PositionComponent::Horizontal(p) if x.is_none() => {
+                        x = Some(lift(Length::Percent(*p)))
+                    }
+                    PositionComponent::Vertical(p) if y.is_none() => {
+                        y = Some(lift(Length::Percent(*p)))
+                    }
+                    PositionComponent::Horizontal(_) | PositionComponent::Vertical(_) => {
+                        return None;
+                    }
                     PositionComponent::Center | PositionComponent::Length(_) => {}
                 }
             }
             // Second pass: `center` / lengths fill the remaining axes in order.
             for comp in &components {
                 let value = match comp {
-                    PositionComponent::Center => Length::Percent(50.0),
-                    PositionComponent::Length(l) => *l,
+                    PositionComponent::Center => lift(Length::Percent(50.0)),
+                    PositionComponent::Length(l) => l.clone(),
                     // Axis keywords were placed above.
                     PositionComponent::Horizontal(_) | PositionComponent::Vertical(_) => continue,
                 };
@@ -166,109 +448,129 @@ pub(super) fn lower_background_position(values: &[ParsedValue]) -> Option<Proper
                 }
             }
             (
-                x.unwrap_or(Length::Percent(50.0)),
-                y.unwrap_or(Length::Percent(50.0)),
+                x.unwrap_or(lift(Length::Percent(50.0))),
+                y.unwrap_or(lift(Length::Percent(50.0))),
             )
         }
+        [_, _, _] | [_, _, _, _] => return lower_edge_position(&components, lift),
         _ => return None,
     };
-    Some(PropertyValue::BackgroundPosition(BackgroundPosition::new(
-        x, y,
-    )))
+    Some(([x, y], [false; 2]))
 }
 
-#[doc = include_str!("background_lowering.doc/PositionComponent.md")]
-enum PositionComponent {
-    #[doc = include_str!("background_lowering.doc/Horizontal.md")]
-    Horizontal(f32),
-    #[doc = include_str!("background_lowering.doc/Vertical.md")]
-    Vertical(f32),
-    #[doc = include_str!("background_lowering.doc/Center.md")]
-    Center,
-    #[doc = include_str!("background_lowering.doc/Length.md")]
-    Length(Length),
-}
-
-#[doc = include_str!("background_lowering.doc/position_component.md")]
-fn position_component(value: &ParsedValue) -> Option<PositionComponent> {
-    match value {
-        ParsedValue::Keyword(keyword) => {
-            if keyword.eq_ignore_ascii_case("left") {
-                Some(PositionComponent::Horizontal(0.0))
-            } else if keyword.eq_ignore_ascii_case("right") {
-                Some(PositionComponent::Horizontal(100.0))
-            } else if keyword.eq_ignore_ascii_case("top") {
-                Some(PositionComponent::Vertical(0.0))
-            } else if keyword.eq_ignore_ascii_case("bottom") {
-                Some(PositionComponent::Vertical(100.0))
-            } else if keyword.eq_ignore_ascii_case("center") {
-                Some(PositionComponent::Center)
-            } else {
-                None
+fn lower_edge_position<T: Clone>(
+    mut components: &[PositionComponent<T>],
+    lift: impl Fn(Length) -> T,
+) -> Option<([T; 2], [bool; 2])> {
+    let mut x = None;
+    let mut y = None;
+    let mut center = false;
+    while let Some((edge, rest)) = components.split_first() {
+        components = rest;
+        let axis = match edge {
+            PositionComponent::Horizontal(side) if x.is_none() => (&mut x, *side),
+            PositionComponent::Vertical(side) if y.is_none() => (&mut y, *side),
+            PositionComponent::Center if !center => {
+                center = true;
+                continue;
             }
-        }
-        ParsedValue::Percentage(p) => {
-            Some(PositionComponent::Length(Length::Percent(narrow_f32(*p))))
-        }
-        ParsedValue::Dimension { value, unit } => {
-            dimension_length(*value, unit).map(PositionComponent::Length)
-        }
-        ParsedValue::Number(n) if *n == 0.0 => Some(PositionComponent::Length(Length::px(0.0))),
+            _ => return None,
+        };
+        let offset = if let Some((PositionComponent::Length(offset), remaining)) =
+            components.split_first()
+        {
+            components = remaining;
+            offset.clone()
+        } else {
+            lift(Length::px(0.0))
+        };
+        *axis.0 = Some((offset, axis.1 == 100.0));
+    }
+    let (x, y) = match (x, y, center) {
+        (Some(x), Some(y), false) => (x, y),
+        (Some(x), None, true) => (x, (lift(Length::Percent(50.0)), false)),
+        (None, Some(y), true) => ((lift(Length::Percent(50.0)), false), y),
+        _ => return None,
+    };
+    Some(([x.0, y.0], [x.1, y.1]))
+}
+
+fn position_length(value: &ParsedValue) -> Option<Length> {
+    match value {
+        ParsedValue::Percentage(p) => Some(Length::Percent(narrow_f32(*p))),
+        ParsedValue::Dimension { value, unit } => dimension_length(*value, unit),
+        ParsedValue::Number(n) if *n == 0.0 => Some(Length::px(0.0)),
         _ => None,
     }
 }
 
-#[doc = include_str!("background_lowering.doc/lower_background_repeat.md")]
+#[doc = include_str!("../../docs/api/compiler/background_lowering.doc/lower_background_repeat.md")]
 pub(super) fn lower_background_repeat(values: &[ParsedValue]) -> Option<PropertyValue> {
-    match values {
-        [ParsedValue::Keyword(keyword)] => {
-            let repeat = if keyword.eq_ignore_ascii_case("repeat-x") {
-                BackgroundRepeat::RepeatX
-            } else if keyword.eq_ignore_ascii_case("repeat-y") {
-                BackgroundRepeat::RepeatY
-            } else if keyword.eq_ignore_ascii_case("no-repeat") {
-                BackgroundRepeat::NoRepeat
-            } else if keyword.eq_ignore_ascii_case("repeat")
-                // `space` / `round` fold to `repeat` (documented approximation).
-                || keyword.eq_ignore_ascii_case("space")
-                || keyword.eq_ignore_ascii_case("round")
-            {
-                BackgroundRepeat::Repeat
-            } else {
-                return None;
-            };
-            Some(PropertyValue::BackgroundRepeat(repeat))
-        }
-        [ParsedValue::Keyword(x), ParsedValue::Keyword(y)] => {
-            let rx = repeat_axis_tiles(x)?;
-            let ry = repeat_axis_tiles(y)?;
-            let repeat = match (rx, ry) {
-                (true, true) => BackgroundRepeat::Repeat,
-                (false, false) => BackgroundRepeat::NoRepeat,
-                (true, false) => BackgroundRepeat::RepeatX,
-                (false, true) => BackgroundRepeat::RepeatY,
-            };
-            Some(PropertyValue::BackgroundRepeat(repeat))
-        }
-        _ => None,
-    }
+    lower_layer_values(
+        values,
+        lower_repeat_layer,
+        PropertyValue::BackgroundRepeat,
+        PropertyValue::BackgroundRepeats,
+    )
 }
 
-#[doc = include_str!("background_lowering.doc/repeat_axis_tiles.md")]
-fn repeat_axis_tiles(keyword: &str) -> Option<bool> {
-    if keyword.eq_ignore_ascii_case("repeat")
-        || keyword.eq_ignore_ascii_case("space")
-        || keyword.eq_ignore_ascii_case("round")
-    {
-        Some(true)
+fn lower_layer_values<T>(
+    values: &[ParsedValue],
+    lower: impl Fn(&[ParsedValue]) -> Option<T>,
+    single: impl FnOnce(T) -> PropertyValue,
+    list: impl FnOnce(Box<[T]>) -> PropertyValue,
+) -> Option<PropertyValue> {
+    if !values.contains(&ParsedValue::Comma) {
+        return lower(values).map(single);
+    }
+    values
+        .split(|value| matches!(value, ParsedValue::Comma))
+        .map(lower)
+        .collect::<Option<Box<[_]>>>()
+        .map(list)
+}
+
+fn lower_repeat_layer(values: &[ParsedValue]) -> Option<BackgroundRepeat> {
+    use BackgroundRepeatAxis::{NoRepeat, Repeat};
+    let (x, y) = match values {
+        [ParsedValue::Keyword(keyword)] if keyword.eq_ignore_ascii_case("repeat-x") => {
+            (Repeat, NoRepeat)
+        }
+        [ParsedValue::Keyword(keyword)] if keyword.eq_ignore_ascii_case("repeat-y") => {
+            (NoRepeat, Repeat)
+        }
+        [ParsedValue::Keyword(keyword)] => {
+            let axis = repeat_axis(keyword)?;
+            (axis, axis)
+        }
+        [ParsedValue::Keyword(x), ParsedValue::Keyword(y)] => (repeat_axis(x)?, repeat_axis(y)?),
+        _ => return None,
+    };
+    Some(match (x, y) {
+        (Repeat, Repeat) => BackgroundRepeat::Repeat,
+        (NoRepeat, NoRepeat) => BackgroundRepeat::NoRepeat,
+        (Repeat, NoRepeat) => BackgroundRepeat::RepeatX,
+        (NoRepeat, Repeat) => BackgroundRepeat::RepeatY,
+        _ => BackgroundRepeat::Axes(x, y),
+    })
+}
+
+fn repeat_axis(keyword: &str) -> Option<BackgroundRepeatAxis> {
+    use BackgroundRepeatAxis::{NoRepeat, Repeat, Round, Space};
+    if keyword.eq_ignore_ascii_case("repeat") {
+        Some(Repeat)
     } else if keyword.eq_ignore_ascii_case("no-repeat") {
-        Some(false)
+        Some(NoRepeat)
+    } else if keyword.eq_ignore_ascii_case("space") {
+        Some(Space)
+    } else if keyword.eq_ignore_ascii_case("round") {
+        Some(Round)
     } else {
         None
     }
 }
 
-#[doc = include_str!("background_lowering.doc/lower_background_image.md")]
+#[doc = include_str!("../../docs/api/compiler/background_lowering.doc/lower_background_image.md")]
 pub(super) fn lower_background_image(values: &[ParsedValue]) -> Option<PropertyValue> {
     let mut layers: Vec<BackgroundLayer> = Vec::new();
     for segment in values.split(|v| matches!(v, ParsedValue::Comma)) {
@@ -287,9 +589,12 @@ pub(super) fn lower_background_image(values: &[ParsedValue]) -> Option<PropertyV
     }
 }
 
-#[doc = include_str!("background_lowering.doc/lower_background_layer.md")]
+#[doc = include_str!("../../docs/api/compiler/background_lowering.doc/lower_background_layer.md")]
 fn lower_background_layer(values: &[ParsedValue]) -> Option<BackgroundLayer> {
     match values {
+        [ParsedValue::Keyword(keyword)] if keyword.eq_ignore_ascii_case("none") => {
+            Some(BackgroundLayer::None)
+        }
         [ParsedValue::Function { name, args }] if name.eq_ignore_ascii_case("linear-gradient") => {
             lower_linear_gradient(args).map(BackgroundLayer::Linear)
         }
@@ -299,7 +604,12 @@ fn lower_background_layer(values: &[ParsedValue]) -> Option<BackgroundLayer> {
             lower_repeating_linear_gradient(args).map(BackgroundLayer::Linear)
         }
         [ParsedValue::Function { name, args }] if name.eq_ignore_ascii_case("radial-gradient") => {
-            lower_radial_gradient(args).map(BackgroundLayer::Radial)
+            lower_radial_gradient(args, false).map(BackgroundLayer::Radial)
+        }
+        [ParsedValue::Function { name, args }]
+            if name.eq_ignore_ascii_case("repeating-radial-gradient") =>
+        {
+            lower_radial_gradient(args, true).map(BackgroundLayer::Radial)
         }
         [ParsedValue::Function { name, args }] if name.eq_ignore_ascii_case("conic-gradient") => {
             lower_conic_gradient(args).map(BackgroundLayer::Conic)
@@ -311,7 +621,7 @@ fn lower_background_layer(values: &[ParsedValue]) -> Option<BackgroundLayer> {
     }
 }
 
-#[doc = include_str!("background_lowering.doc/lower_url.md")]
+#[doc = include_str!("../../docs/api/compiler/background_lowering.doc/lower_url.md")]
 fn lower_url(args: &[ParsedValue]) -> Option<Box<str>> {
     if let [ParsedValue::String(s)] = args {
         // The clean, quoted form: the string content is the URL verbatim.
@@ -324,7 +634,9 @@ fn lower_url(args: &[ParsedValue]) -> Option<Box<str>> {
     (!url.is_empty()).then(|| url.into_boxed_str())
 }
 
-#[doc = include_str!("background_lowering.doc/append_url_component.md")]
+/// Appends one component of an unquoted `url(...)` body to `out` in its authored
+/// textual form (a best-effort reconstruction, since the tokenizer splits an
+/// unquoted URL into ident/number/delimiter pieces).
 fn append_url_component(out: &mut String, value: &ParsedValue) {
     use std::fmt::Write as _;
     match value {
@@ -368,6 +680,20 @@ mod tests {
         let value = value_of("background-image: linear-gradient(45deg, red, blue)");
         assert!(matches!(value, PropertyValue::LinearGradient(_)));
         assert_eq!(value.as_background_layers(), None);
+    }
+
+    #[test]
+    fn none_consumes_its_slot_in_an_image_list() {
+        let value = value_of(r#"background-image: none, url("x.png"), none"#);
+        assert_eq!(
+            value.as_background_layers().unwrap(),
+            [
+                BackgroundLayer::None,
+                BackgroundLayer::Url("x.png".into()),
+                BackgroundLayer::None
+            ]
+        );
+        assert_eq!(value_of("background-image: none"), PropertyValue::Initial);
     }
 
     #[test]
@@ -533,6 +859,46 @@ mod tests {
     }
 
     #[test]
+    fn background_geometry_lists_preserve_layer_order() {
+        assert_eq!(
+            value_of("background-size: contain, 20px 30%"),
+            PropertyValue::BackgroundSizes(Box::new([
+                BackgroundSize::Contain,
+                BackgroundSize::Explicit {
+                    width: Length::px(20.0),
+                    height: Length::Percent(30.0)
+                },
+            ]))
+        );
+        assert_eq!(
+            value_of("background-position: left top, right bottom"),
+            PropertyValue::BackgroundPositions(Box::new([
+                BackgroundPosition::new(Length::Percent(0.0), Length::Percent(0.0)),
+                BackgroundPosition::new(Length::Percent(100.0), Length::Percent(100.0)),
+            ]))
+        );
+        assert!(
+            super::lower_object_position(&[
+                crate::parser::ParsedValue::Keyword("left".into()),
+                crate::parser::ParsedValue::Comma,
+                crate::parser::ParsedValue::Keyword("right".into()),
+            ])
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn repeat_lists_keep_each_layers_axis_pair() {
+        assert_eq!(
+            value_of("background-repeat: repeat no-repeat, no-repeat repeat"),
+            PropertyValue::BackgroundRepeats(Box::new([
+                BackgroundRepeat::RepeatX,
+                BackgroundRepeat::RepeatY,
+            ]))
+        );
+    }
+
+    #[test]
     fn background_repeat_keywords() {
         assert_eq!(
             value_of("background-repeat: no-repeat"),
@@ -546,10 +912,12 @@ mod tests {
             value_of("background-repeat: repeat"),
             PropertyValue::BackgroundRepeat(BackgroundRepeat::Repeat)
         );
-        // `space` / `round` fold to `repeat` (documented approximation).
         assert_eq!(
-            value_of("background-repeat: space"),
-            PropertyValue::BackgroundRepeat(BackgroundRepeat::Repeat)
+            value_of("background-repeat: space round"),
+            PropertyValue::BackgroundRepeat(BackgroundRepeat::Axes(
+                super::BackgroundRepeatAxis::Space,
+                super::BackgroundRepeatAxis::Round,
+            ))
         );
         // Two-value axis form: `repeat no-repeat` → repeat-x.
         assert_eq!(
@@ -590,7 +958,7 @@ mod tests {
     #[test]
     fn background_shorthand_maps_gradient_to_image() {
         let compiled = compile_all("background: linear-gradient(45deg, red, blue)");
-        assert_eq!(compiled.len(), 1);
+        assert_eq!(compiled.len(), 9);
         let d = standard_of(&compiled[0]);
         assert_eq!(d.property(), PropertyId::BackgroundImage);
         match d.value() {
@@ -600,9 +968,89 @@ mod tests {
     }
 
     #[test]
+    fn background_shorthand_resets_omitted_longhands_and_keeps_the_final_color() {
+        let compiled = compile_all("background: none, blue linear-gradient(red, red)");
+        assert_eq!(compiled.len(), 9);
+        assert_eq!(
+            standard_of(&compiled[0])
+                .value()
+                .as_background_layers()
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(
+            standard_of(&compiled[1]).value(),
+            &PropertyValue::Color(color(0.0, 0.0, 1.0))
+        );
+        assert!(
+            compiled[2..]
+                .iter()
+                .all(|decl| standard_of(decl).value() == &PropertyValue::Initial)
+        );
+        assert_eq!(
+            standard_of(&compiled[5]).property(),
+            PropertyId::BackgroundBlendMode
+        );
+    }
+
+    #[test]
+    fn background_shorthand_accepts_per_layer_position_size_and_repeat() {
+        let compiled =
+            compile_all("background: none, right bottom / 12px 25% space no-repeat blue");
+        assert_eq!(compiled.len(), 9);
+        assert_eq!(
+            standard_of(&compiled[2]).value(),
+            &PropertyValue::BackgroundSizes(Box::new([
+                BackgroundSize::Auto,
+                BackgroundSize::Explicit {
+                    width: Length::px(12.0),
+                    height: Length::Percent(25.0)
+                },
+            ]))
+        );
+        assert_eq!(
+            standard_of(&compiled[3]).value(),
+            &PropertyValue::BackgroundPositions(Box::new([
+                BackgroundPosition::default(),
+                BackgroundPosition::new(Length::Percent(100.0), Length::Percent(100.0)),
+            ]))
+        );
+        assert_eq!(
+            standard_of(&compiled[4]).value(),
+            &PropertyValue::BackgroundRepeats(Box::new([
+                BackgroundRepeat::Repeat,
+                BackgroundRepeat::Axes(
+                    super::BackgroundRepeatAxis::Space,
+                    super::BackgroundRepeatAxis::NoRepeat
+                ),
+            ]))
+        );
+    }
+
+    #[test]
+    fn invalid_background_layer_components_reject_the_whole_shorthand() {
+        for invalid in [
+            "background: blue, none",
+            "background: / 10px none",
+            "background: left / none 10px",
+            "background: left right / 20px",
+            "background: no-repeat none repeat",
+        ] {
+            assert!(
+                matches!(
+                    compile_all(invalid).as_slice(),
+                    [CompiledDeclaration::Unsupported(_)]
+                ),
+                "{invalid}"
+            );
+        }
+    }
+
+    #[test]
     fn background_shorthand_maps_color_to_background_color() {
         let compiled = compile_all("background: #ff0000");
-        let d = standard_of(&compiled[0]);
+        let d = standard_of(&compiled[1]);
         assert_eq!(d.property(), PropertyId::BackgroundColor);
         assert_eq!(d.value(), &PropertyValue::Color(color(1.0, 0.0, 0.0)));
     }

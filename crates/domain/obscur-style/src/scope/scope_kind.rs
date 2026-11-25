@@ -1,20 +1,27 @@
-#![doc = include_str!("scope_kind.doc/_module.md")]
+#![doc = include_str!("../../docs/api/scope/scope_kind.doc/_module.md")]
 
-#[doc = include_str!("scope_kind.doc/ScopeKind.md")]
+#[doc = include_str!("../../docs/api/scope/scope_kind.doc/ScopeKind.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ScopeKind {
-    #[doc = include_str!("scope_kind.doc/Global.md")]
+    /// The global application scope: no isolation. Global stylesheets live here
+    /// and everything is visible (§4.15).
     Global,
-    #[doc = include_str!("scope_kind.doc/Component.md")]
+    /// A component scope: scoped by default, so non-inherited properties are
+    /// contained at the boundary while inherited and custom properties still
+    /// cross (§4.15).
     Component,
-    #[doc = include_str!("scope_kind.doc/Module.md")]
+    /// A component scope in CSS-module mode: like [`ScopeKind::Component`] but
+    /// additionally isolating its local identifiers so internal class names need
+    /// not be globally unique (§4.15).
     Module,
-    #[doc = include_str!("scope_kind.doc/Open.md")]
+    /// A component scope that is explicitly opened / made global despite being a
+    /// component: it performs no isolation, matching [`ScopeKind::Global`]'s
+    /// visibility (§4.15).
     Open,
 }
 
 impl ScopeKind {
-    #[doc = include_str!("scope_kind.doc/is_isolated.md")]
+    #[doc = include_str!("../../docs/api/scope/scope_kind.doc/is_isolated.md")]
     #[must_use]
     pub const fn is_isolated(self) -> bool {
         matches!(self, Self::Component | Self::Module)

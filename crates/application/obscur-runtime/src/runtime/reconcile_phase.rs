@@ -1,4 +1,4 @@
-#![doc = include_str!("reconcile_phase.doc/_module.md")]
+//! The frame's structural phase: [`ReconcilePhase`].
 
 use obscur_diagnostics::{
     Diagnostic, DiagnosticCode, DiagnosticSeverity, DiagnosticSink, DiagnosticSubsystem,
@@ -9,6 +9,7 @@ use obscur_tree::reconciliation::{Reconciler, ReconciliationPlan};
 use obscur_tree::tree::RetainedTree;
 use obscur_view::view::{View, has_outlet, has_virtual_collection};
 
+use super::reconcile_counts::ReconcileCounts;
 use super::{
     ComponentRenderPass, DesiredView, FramePhase, FrameTelemetry, RestylePhase, ScrollOffsets,
     VirtualLists,
@@ -17,28 +18,34 @@ use crate::component::ComponentStore;
 use crate::frame::FrameContext;
 use crate::transaction::ReconcileEnactor;
 
-#[doc = include_str!("reconcile_phase.doc/ReconcilePhase.md")]
+#[doc = include_str!("../../docs/api/runtime/reconcile_phase.doc/ReconcilePhase.md")]
 pub(crate) struct ReconcilePhase<'a> {
-    #[doc = include_str!("reconcile_phase.doc/tree.md")]
+    /// The retained tree this phase commits into.
     tree: &'a mut RetainedTree,
-    #[doc = include_str!("reconcile_phase.doc/reconciler.md")]
+    /// The reconciler the desired tree is diffed with.
     reconciler: &'a Reconciler,
-    #[doc = include_str!("reconcile_phase.doc/enactor.md")]
+    /// The transaction boundary the root reconcile is enacted through (spec §3.2),
+    /// so the live tree mutation is staged, validated and versioned rather than
+    /// applied directly.
     enactor: &'a mut ReconcileEnactor,
-    #[doc = include_str!("reconcile_phase.doc/components.md")]
+    /// The mounted component instances synced against this frame's structural
+    /// deltas and then rendered.
     components: &'a mut ComponentStore,
-    #[doc = include_str!("reconcile_phase.doc/virtual_lists.md")]
+    /// The registered `<VirtualFor>` lists, whose windows are realized against
+    /// this frame's viewport before anything reconciles.
     virtual_lists: &'a mut VirtualLists,
-    #[doc = include_str!("reconcile_phase.doc/scroll.md")]
+    /// The scroll offsets a virtual list whose model was replaced resets, in the
+    /// same call that computes the window from them.
     scroll: &'a mut ScrollOffsets,
-    #[doc = include_str!("reconcile_phase.doc/telemetry.md")]
+    /// Where the reconcile phase's span and node count land (spec §7.9).
     telemetry: &'a mut FrameTelemetry,
-    #[doc = include_str!("reconcile_phase.doc/diagnostics.md")]
+    /// Where a stray `<slot>` outlet and a duplicated sibling key are reported
+    /// (spec §1.6, §7.8).
     diagnostics: &'a dyn DiagnosticSink,
 }
 
 impl<'a> ReconcilePhase<'a> {
-    #[doc = include_str!("reconcile_phase.doc/new.md")]
+    /// Bundles the state one reconcile phase reads and writes.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         tree: &'a mut RetainedTree,
@@ -62,12 +69,14 @@ impl<'a> ReconcilePhase<'a> {
         }
     }
 
-    #[doc = include_str!("reconcile_phase.doc/run.md")]
+    #[doc = include_str!("../../docs/api/runtime/reconcile_phase.doc/run.md")]
     pub(crate) fn run(
         &mut self,
         ctx: &FrameContext,
         desired: DesiredView<'_>,
         viewport_scroll_y: f32,
+        previous_sheets: Option<&[obscur_style::matching::Stylesheet]>,
+        detailed: bool,
     ) -> (bool, Option<Vec<NodeId>>) {
         // Materialize the desired tree HERE — after phase 3's input dispatch,
         // not before it. A reactive frame's builder reads current state, and a
@@ -114,13 +123,17 @@ impl<'a> ReconcilePhase<'a> {
             .commit_root(self.reconciler, self.tree, desired)
             .expect("a root reconcile is a single, structurally-valid ReplaceRoot");
         let changed = !commit.is_empty();
+        let mut counts = detailed.then(ReconcileCounts::default);
+        if let Some(counts) = &mut counts {
+            counts.record(&reconcile_plan);
+        }
         // The restyle roots this reconcile implies, so the style phase can
         // restyle what the tree edit touched instead of everything. `None`
         // means the edit could not be bounded and the full pass is the only
         // correct answer.
         self.emit_duplicate_key_faults(&reconcile_plan);
         self.virtual_lists.track_containers(self.tree);
-        let mut roots = RestylePhase::roots_of(self.tree, &reconcile_plan);
+        let mut roots = RestylePhase::roots_of(self.tree, &reconcile_plan, previous_sheets);
         // 1b. Mount an instance for every inserted component-backed node and
         //     unmount every removed one, from the plan's structural deltas.
         //     A host that registered no component kinds pays nothing here.
@@ -128,7 +141,7 @@ impl<'a> ReconcilePhase<'a> {
         // 1c. Render every mounted component and reconcile its output into
         //     its own children, so a component-backed node's subtree exists
         //     before style/layout read the tree.
-        let component_roots = ComponentRenderPass::new(
+        let (rendered, component_roots) = ComponentRenderPass::new(
             self.tree,
             self.components,
             self.reconciler,
@@ -136,16 +149,13 @@ impl<'a> ReconcilePhase<'a> {
             self.telemetry,
             self.diagnostics,
         )
-        .run();
+        .run(previous_sheets, counts.as_mut());
         // A component sub-reconcile edits the tree through its own plan. That
         // plan used to be invisible from here, so the only correct answer was to
         // widen to the whole tree — and in an application built out of
         // components, a pressed key re-renders one of them and every interactive
         // frame paid a full restyle. The pass hands the roots back now; `None`
         // from either side is still the unbounded case.
-        let rendered = component_roots
-            .as_ref()
-            .is_none_or(|from_components| !from_components.is_empty());
         roots = match (roots, component_roots) {
             (Some(mut from_reconcile), Some(from_components)) => {
                 from_reconcile.extend(from_components);
@@ -154,15 +164,27 @@ impl<'a> ReconcilePhase<'a> {
             _ => None,
         };
         let changed = changed || rendered;
+        if let Some(counts) = counts.filter(|_| changed) {
+            println!(
+                "[reconcile-work] inserted={} removed={} moved={} updated={} restyle_roots={}",
+                counts.inserted,
+                counts.removed,
+                counts.moved,
+                counts.updated,
+                roots
+                    .as_ref()
+                    .map_or_else(|| "full".to_owned(), |roots| roots.len().to_string()),
+            );
+        }
         // Telemetry: mark the reconcile phase and count the resulting nodes,
         // budgeting the retained-tree size (spec §7.9).
         let nodes = self.tree.len() as u64;
         self.telemetry
-            .record_phase(FramePhase::Reconcile, nodes, ctx.id());
+            .record_phase(FramePhase::Reconcile, nodes, ctx.id(), self.diagnostics);
         (changed, roots)
     }
 
-    #[doc = include_str!("reconcile_phase.doc/report_stray_outlets.md")]
+    #[doc = include_str!("../../docs/api/runtime/reconcile_phase.doc/report_stray_outlets.md")]
     fn report_stray_outlets(&self, desired: &View) {
         if !has_outlet(desired.root().nodes()) {
             return;
@@ -180,7 +202,7 @@ impl<'a> ReconcilePhase<'a> {
         ));
     }
 
-    #[doc = include_str!("reconcile_phase.doc/emit_duplicate_key_faults.md")]
+    #[doc = include_str!("../../docs/api/runtime/reconcile_phase.doc/emit_duplicate_key_faults.md")]
     fn emit_duplicate_key_faults(&self, plan: &ReconciliationPlan) {
         for duplicate in plan.duplicate_keys() {
             let mut diagnostic = Diagnostic::new(

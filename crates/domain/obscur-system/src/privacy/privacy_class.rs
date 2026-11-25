@@ -1,33 +1,40 @@
-#![doc = include_str!("privacy_class.doc/_module.md")]
+#![doc = include_str!("../../docs/api/privacy/privacy_class.doc/_module.md")]
 
-#[doc = include_str!("privacy_class.doc/PrivacyClass.md")]
+#[doc = include_str!("../../docs/api/privacy/privacy_class.doc/PrivacyClass.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub enum PrivacyClass {
-    #[doc = include_str!("privacy_class.doc/Public.md")]
+    /// Non-sensitive: safe to capture and to include in diagnostics (§6.17).
     #[default]
     Public,
-    #[doc = include_str!("privacy_class.doc/Sensitive.md")]
+    /// Personally identifying information: redacted from diagnostic snapshots by
+    /// default, but not excluded from capture (spec §7.12).
     Sensitive,
-    #[doc = include_str!("privacy_class.doc/CaptureProtected.md")]
+    /// Must be excluded from screenshots, screen recording, and screen sharing,
+    /// and redacted from diagnostics (spec §6.17).
     CaptureProtected,
-    #[doc = include_str!("privacy_class.doc/Secret.md")]
+    /// Passwords and secrets: never captured and never placed in diagnostics
+    /// (spec §6.17, §7.12).
     Secret,
 }
 
 impl PrivacyClass {
-    #[doc = include_str!("privacy_class.doc/is_public.md")]
+    /// Returns whether this class is [`Public`](Self::Public) — non-sensitive
+    /// data with no capture or diagnostic restrictions (spec §6.17).
     #[must_use]
     pub const fn is_public(&self) -> bool {
         matches!(self, Self::Public)
     }
 
-    #[doc = include_str!("privacy_class.doc/redact_in_diagnostics.md")]
+    /// Returns whether data of this class must be redacted from diagnostic
+    /// snapshots — anything above [`Public`](Self::Public) (spec §7.12).
     #[must_use]
     pub const fn redact_in_diagnostics(&self) -> bool {
         !self.is_public()
     }
 
-    #[doc = include_str!("privacy_class.doc/exclude_from_capture.md")]
+    /// Returns whether data of this class must be excluded from screen capture
+    /// and sharing — [`CaptureProtected`](Self::CaptureProtected) and
+    /// [`Secret`](Self::Secret) (spec §6.17).
     #[must_use]
     pub const fn exclude_from_capture(&self) -> bool {
         matches!(self, Self::CaptureProtected | Self::Secret)

@@ -1,17 +1,8 @@
-#![doc = include_str!("resolution_error.doc/_module.md")]
+//! `ResolutionError`: why name resolution failed for a reference (spec §2.11).
 
-#[doc = include_str!("resolution_error.doc/ResolutionErrorKind.md")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ResolutionErrorKind {
-    #[doc = include_str!("resolution_error.doc/UnknownName.md")]
-    UnknownName,
-    #[doc = include_str!("resolution_error.doc/DuplicateDefinition.md")]
-    DuplicateDefinition,
-    #[doc = include_str!("resolution_error.doc/MissingLoopKey.md")]
-    MissingLoopKey,
-}
+use super::ResolutionErrorKind;
 
-#[doc = include_str!("resolution_error.doc/ResolutionError.md")]
+#[doc = include_str!("../../docs/api/resolution/resolution_error.doc/ResolutionError.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolutionError {
     kind: ResolutionErrorKind,
@@ -20,7 +11,7 @@ pub struct ResolutionError {
 }
 
 impl ResolutionError {
-    #[doc = include_str!("resolution_error.doc/new.md")]
+    /// Creates a resolution error of `kind` for `name` at byte `offset`.
     #[must_use]
     pub fn new(kind: ResolutionErrorKind, name: impl Into<Box<str>>, offset: u32) -> Self {
         Self {
@@ -30,37 +21,39 @@ impl ResolutionError {
         }
     }
 
-    #[doc = include_str!("resolution_error.doc/unknown_name.md")]
+    /// Creates an [`UnknownName`](ResolutionErrorKind::UnknownName) error.
     #[must_use]
     pub fn unknown_name(name: impl Into<Box<str>>, offset: u32) -> Self {
         Self::new(ResolutionErrorKind::UnknownName, name, offset)
     }
 
-    #[doc = include_str!("resolution_error.doc/duplicate.md")]
+    /// Creates a [`DuplicateDefinition`](ResolutionErrorKind::DuplicateDefinition)
+    /// error.
     #[must_use]
     pub fn duplicate(name: impl Into<Box<str>>, offset: u32) -> Self {
         Self::new(ResolutionErrorKind::DuplicateDefinition, name, offset)
     }
 
-    #[doc = include_str!("resolution_error.doc/missing_loop_key.md")]
+    /// Creates a [`MissingLoopKey`](ResolutionErrorKind::MissingLoopKey) error;
+    /// the `key` attribute is the missing name.
     #[must_use]
     pub fn missing_loop_key(offset: u32) -> Self {
         Self::new(ResolutionErrorKind::MissingLoopKey, "key", offset)
     }
 
-    #[doc = include_str!("resolution_error.doc/kind.md")]
+    /// Returns the error's kind.
     #[must_use]
     pub const fn kind(&self) -> &ResolutionErrorKind {
         &self.kind
     }
 
-    #[doc = include_str!("resolution_error.doc/name.md")]
+    /// Returns the offending name.
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    #[doc = include_str!("resolution_error.doc/offset.md")]
+    /// Returns the byte offset into the source where the failure was detected.
     #[must_use]
     pub const fn offset(&self) -> u32 {
         self.offset

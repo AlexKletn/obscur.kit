@@ -1,7 +1,10 @@
-#![doc = include_str!("lib.doc/_module.md")]
+//! Winit `WindowBackend` adapter.
 #![forbid(unsafe_code)]
 
 pub mod backend;
 pub mod conversion;
 pub mod error;
 pub mod wake;
+
+#[cfg(all(feature = "gamepad", target_os = "linux"))]
+pub mod gamepad;

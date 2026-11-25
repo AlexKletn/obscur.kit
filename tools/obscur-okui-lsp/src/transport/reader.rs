@@ -1,4 +1,4 @@
-#![doc = include_str!("reader.doc/_module.md")]
+//! `read_message`: reads one `Content-Length`-framed LSP message from a reader.
 
 use std::io::{self, BufRead};
 
@@ -8,7 +8,7 @@ fn pop_line_terminator(line: &mut Vec<u8>) {
     }
 }
 
-#[doc = include_str!("reader.doc/read_message.md")]
+#[doc = include_str!("../../docs/api/transport/reader.doc/read_message.md")]
 pub fn read_message<R: BufRead>(reader: &mut R) -> io::Result<Option<String>> {
     let mut content_length: Option<usize> = None;
     let mut saw_header = false;

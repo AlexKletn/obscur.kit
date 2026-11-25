@@ -1,1 +1,0 @@
-The `Y` scan position.

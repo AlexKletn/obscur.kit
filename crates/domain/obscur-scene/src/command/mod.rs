@@ -1,5 +1,7 @@
-#![doc = include_str!("mod.doc/_module.md")]
+//! Command module.
+mod canvas_boundary;
 mod canvas_region;
+mod command_scope;
 pub use canvas_region::CanvasRegion;
 mod display_list;
 pub use display_list::DisplayList;

@@ -1,96 +1,43 @@
-#![doc = include_str!("cache_store.doc/_module.md")]
+#![doc = include_str!("../../docs/api/port/cache_store.doc/_module.md")]
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::cache::CacheKey;
 use crate::state::ResourceVersion;
 
-#[doc = include_str!("cache_store.doc/CacheStore.md")]
+#[doc = include_str!("../../docs/api/port/cache_store.doc/CacheStore.md")]
 pub trait CacheStore {
-    #[doc = include_str!("cache_store.doc/get.md")]
+    #[doc = include_str!("../../docs/api/port/cache_store.doc/get.md")]
     #[must_use]
     fn get(&self, key: &CacheKey, version: ResourceVersion) -> Option<Arc<[u8]>>;
 
-    #[doc = include_str!("cache_store.doc/put.md")]
+    #[doc = include_str!("../../docs/api/port/cache_store.doc/put.md")]
     fn put(&mut self, key: CacheKey, version: ResourceVersion, bytes: Arc<[u8]>);
 
-    #[doc = include_str!("cache_store.doc/contains.md")]
+    /// Returns whether an entry is stored under `key`, regardless of its version.
     #[must_use]
     fn contains(&self, key: &CacheKey) -> bool;
 
-    #[doc = include_str!("cache_store.doc/remove.md")]
+    /// Removes the entry stored under `key`, returning whether one was present
+    /// (spec §5.20 disposable).
     fn remove(&mut self, key: &CacheKey) -> bool;
 
-    #[doc = include_str!("cache_store.doc/clear.md")]
+    /// Removes every entry (spec §5.20 disposable / safe-to-delete).
     fn clear(&mut self);
 
-    #[doc = include_str!("cache_store.doc/len.md")]
+    /// Returns the number of stored entries.
     #[must_use]
     fn len(&self) -> usize;
 
-    #[doc = include_str!("cache_store.doc/is_empty.md")]
+    /// Returns whether the store holds no entries.
     #[must_use]
     fn is_empty(&self) -> bool;
 }
 
-#[doc = include_str!("cache_store.doc/InMemoryCacheStore.md")]
-#[derive(Debug, Default, Clone)]
-pub struct InMemoryCacheStore {
-    entries: HashMap<CacheKey, (ResourceVersion, Arc<[u8]>)>,
-}
-
-impl InMemoryCacheStore {
-    #[doc = include_str!("cache_store.doc/new.md")]
-    #[must_use]
-    pub fn new() -> Self {
-        Self::default()
-    }
-}
-
-impl CacheStore for InMemoryCacheStore {
-    fn get(&self, key: &CacheKey, version: ResourceVersion) -> Option<Arc<[u8]>> {
-        match self.entries.get(key) {
-            Some((stored_version, bytes)) if *stored_version == version => Some(Arc::clone(bytes)),
-            // Compatibility-aware (spec §5.20): a version mismatch or a missing
-            // entry both yield None.
-            _ => None,
-        }
-    }
-
-    fn put(&mut self, key: CacheKey, version: ResourceVersion, bytes: Arc<[u8]>) {
-        self.entries.insert(key, (version, bytes));
-    }
-
-    fn contains(&self, key: &CacheKey) -> bool {
-        self.entries.contains_key(key)
-    }
-
-    fn remove(&mut self, key: &CacheKey) -> bool {
-        self.entries.remove(key).is_some()
-    }
-
-    fn clear(&mut self) {
-        self.entries.clear();
-    }
-
-    fn len(&self) -> usize {
-        self.entries.len()
-    }
-
-    fn is_empty(&self) -> bool {
-        self.entries.is_empty()
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use super::super::InMemoryCacheStore;
     use super::*;
-    use obscur_identity::ResourceId;
-
-    fn key(raw: u64) -> CacheKey {
-        CacheKey::for_resource(ResourceId::from_raw(raw))
-    }
 
     /// Compile-time proof the port is object-safe: adapters must be storable as
     /// `Box<dyn CacheStore>`.
@@ -98,84 +45,5 @@ mod tests {
     fn cache_store_is_object_safe() {
         let store: Box<dyn CacheStore> = Box::new(InMemoryCacheStore::new());
         assert!(store.is_empty());
-    }
-
-    #[test]
-    fn get_returns_bytes_for_matching_version() {
-        let mut store = InMemoryCacheStore::new();
-        let version = ResourceVersion::initial();
-        store.put(key(1), version, Arc::from(&b"artifact"[..]));
-
-        let fetched = store.get(&key(1), version).expect("matching version hits");
-        assert_eq!(&*fetched, b"artifact");
-    }
-
-    #[test]
-    fn get_returns_none_for_mismatched_version() {
-        let mut store = InMemoryCacheStore::new();
-        let version = ResourceVersion::initial();
-        store.put(key(1), version, Arc::from(&b"artifact"[..]));
-
-        // A newer version supersedes the stored one: compatibility-aware miss.
-        assert_eq!(store.get(&key(1), version.next()), None);
-    }
-
-    #[test]
-    fn get_returns_none_for_absent_key() {
-        let store = InMemoryCacheStore::new();
-        assert_eq!(store.get(&key(9), ResourceVersion::initial()), None);
-    }
-
-    #[test]
-    fn contains_ignores_version() {
-        let mut store = InMemoryCacheStore::new();
-        store.put(key(2), ResourceVersion::initial(), Arc::from(&[1u8][..]));
-        assert!(store.contains(&key(2)));
-        assert!(!store.contains(&key(3)));
-    }
-
-    #[test]
-    fn remove_reports_whether_present() {
-        let mut store = InMemoryCacheStore::new();
-        store.put(key(4), ResourceVersion::initial(), Arc::from(&[1u8][..]));
-        assert!(store.remove(&key(4)));
-        assert!(!store.remove(&key(4)));
-        assert!(!store.contains(&key(4)));
-    }
-
-    #[test]
-    fn clear_empties_the_store() {
-        let mut store = InMemoryCacheStore::new();
-        store.put(key(5), ResourceVersion::initial(), Arc::from(&[1u8][..]));
-        store.put(key(6), ResourceVersion::initial(), Arc::from(&[2u8][..]));
-        assert_eq!(store.len(), 2);
-        store.clear();
-        assert!(store.is_empty());
-        assert_eq!(store.len(), 0);
-    }
-
-    #[test]
-    fn len_and_is_empty_track_entries() {
-        let mut store = InMemoryCacheStore::new();
-        assert!(store.is_empty());
-        assert_eq!(store.len(), 0);
-        store.put(key(7), ResourceVersion::initial(), Arc::from(&[1u8][..]));
-        assert!(!store.is_empty());
-        assert_eq!(store.len(), 1);
-    }
-
-    #[test]
-    fn put_replaces_existing_entry() {
-        let mut store = InMemoryCacheStore::new();
-        let v1 = ResourceVersion::initial();
-        let v2 = v1.next();
-        store.put(key(8), v1, Arc::from(&b"old"[..]));
-        store.put(key(8), v2, Arc::from(&b"new"[..]));
-        assert_eq!(store.len(), 1);
-        assert_eq!(store.get(&key(8), v1), None);
-        assert_eq!(
-            &*store.get(&key(8), v2).expect("newest version hits"),
-            b"new"
-        );
     }
 }

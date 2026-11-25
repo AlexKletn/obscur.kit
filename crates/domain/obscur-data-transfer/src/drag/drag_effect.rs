@@ -1,33 +1,35 @@
-#![doc = include_str!("drag_effect.doc/_module.md")]
+//! The effect a drop will have on the dragged data (spec §6.21 drag and drop —
+//! effects).
 
-#[doc = include_str!("drag_effect.doc/DragEffect.md")]
+#[doc = include_str!("../../docs/api/drag/drag_effect.doc/DragEffect.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum DragEffect {
-    #[doc = include_str!("drag_effect.doc/None.md")]
+    /// No acceptable effect — a drop is a no-op / cancel (spec §6.21).
     #[default]
     None,
-    #[doc = include_str!("drag_effect.doc/Copy.md")]
+    /// Copy the data, leaving the original in place (spec §6.21).
     Copy,
-    #[doc = include_str!("drag_effect.doc/Move.md")]
+    /// Move the data, consuming the original (spec §6.21).
     Move,
-    #[doc = include_str!("drag_effect.doc/Link.md")]
+    /// Create a link / reference to the data (spec §6.21).
     Link,
 }
 
 impl DragEffect {
-    #[doc = include_str!("drag_effect.doc/is_none.md")]
+    /// Returns whether this is [`None`](DragEffect::None) — no acceptable effect
+    /// (spec §6.21).
     #[must_use]
     pub const fn is_none(self) -> bool {
         matches!(self, Self::None)
     }
 
-    #[doc = include_str!("drag_effect.doc/is_move.md")]
+    /// Returns whether this is [`Move`](DragEffect::Move) (spec §6.21).
     #[must_use]
     pub const fn is_move(self) -> bool {
         matches!(self, Self::Move)
     }
 
-    #[doc = include_str!("drag_effect.doc/first_allowed.md")]
+    #[doc = include_str!("../../docs/api/drag/drag_effect.doc/first_allowed.md")]
     #[must_use]
     pub fn first_allowed(allowed: &[DragEffect], preferred: DragEffect) -> DragEffect {
         if !preferred.is_none() && allowed.contains(&preferred) {

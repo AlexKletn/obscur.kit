@@ -1,20 +1,20 @@
-#![doc = include_str!("navigation_entry.doc/_module.md")]
+//! A single entry in the navigation history stack (spec §6.13).
 
 use crate::route::{Route, RouteState};
 
-#[doc = include_str!("navigation_entry.doc/NavigationEntry.md")]
+#[doc = include_str!("../../docs/api/history/navigation_entry.doc/NavigationEntry.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NavigationEntry {
-    #[doc = include_str!("navigation_entry.doc/route.md")]
+    /// The route this entry navigated to.
     route: Route,
-    #[doc = include_str!("navigation_entry.doc/state.md")]
+    /// The opaque, application-defined state captured for this entry.
     state: RouteState,
-    #[doc = include_str!("navigation_entry.doc/id.md")]
+    /// The monotonic identity assigned by the history provider.
     id: u64,
 }
 
 impl NavigationEntry {
-    #[doc = include_str!("navigation_entry.doc/new.md")]
+    /// Creates an entry for `route` with the given `id` and empty state.
     #[must_use]
     pub fn new(id: u64, route: Route) -> Self {
         Self {
@@ -24,26 +24,26 @@ impl NavigationEntry {
         }
     }
 
-    #[doc = include_str!("navigation_entry.doc/with_state.md")]
+    /// Returns this entry with its state replaced by `state` (builder style).
     #[must_use]
     pub fn with_state(mut self, state: RouteState) -> Self {
         self.state = state;
         self
     }
 
-    #[doc = include_str!("navigation_entry.doc/route_2.md")]
+    /// Returns the route this entry navigated to.
     #[must_use]
     pub fn route(&self) -> &Route {
         &self.route
     }
 
-    #[doc = include_str!("navigation_entry.doc/state_2.md")]
+    /// Returns the opaque state captured for this entry.
     #[must_use]
     pub fn state(&self) -> &RouteState {
         &self.state
     }
 
-    #[doc = include_str!("navigation_entry.doc/id_2.md")]
+    /// Returns the monotonic identity assigned by the history provider.
     #[must_use]
     pub const fn id(&self) -> u64 {
         self.id

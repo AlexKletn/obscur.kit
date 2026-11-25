@@ -1,17 +1,18 @@
-#![doc = include_str!("source_map.doc/_module.md")]
+//! Maps IR node ids to their originating source spans [`SourceMap`] (spec §2.5
+//! source maps).
 
 use std::collections::BTreeMap;
 
 use crate::source::SourceReference;
 
-#[doc = include_str!("source_map.doc/SourceMap.md")]
+#[doc = include_str!("../../docs/api/source/source_map.doc/SourceMap.md")]
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SourceMap {
     entries: BTreeMap<u64, SourceReference>,
 }
 
 impl SourceMap {
-    #[doc = include_str!("source_map.doc/new.md")]
+    /// Creates an empty source map.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -19,46 +20,48 @@ impl SourceMap {
         }
     }
 
-    #[doc = include_str!("source_map.doc/insert.md")]
+    /// Inserts the source `reference` for `node_id`, returning any reference it
+    /// replaced.
     pub fn insert(&mut self, node_id: u64, reference: SourceReference) -> Option<SourceReference> {
         self.entries.insert(node_id, reference)
     }
 
-    #[doc = include_str!("source_map.doc/get.md")]
+    /// Returns the source reference recorded for `node_id`, if any.
     #[must_use]
     pub fn get(&self, node_id: u64) -> Option<&SourceReference> {
         self.entries.get(&node_id)
     }
 
-    #[doc = include_str!("source_map.doc/contains.md")]
+    /// Returns whether a reference is recorded for `node_id`.
     #[must_use]
     pub fn contains(&self, node_id: u64) -> bool {
         self.entries.contains_key(&node_id)
     }
 
-    #[doc = include_str!("source_map.doc/remove.md")]
+    /// Removes the reference for `node_id`, returning whether one was present.
     pub fn remove(&mut self, node_id: u64) -> bool {
         self.entries.remove(&node_id).is_some()
     }
 
-    #[doc = include_str!("source_map.doc/len.md")]
+    /// Returns the number of recorded references.
     #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
-    #[doc = include_str!("source_map.doc/is_empty.md")]
+    /// Returns whether the map is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
-    #[doc = include_str!("source_map.doc/iter.md")]
+    /// Iterates over the `(node_id, reference)` pairs in ascending node-id
+    /// order (deterministic [`BTreeMap`] order).
     pub fn iter(&self) -> impl Iterator<Item = (u64, &SourceReference)> {
         self.entries.iter().map(|(&id, reference)| (id, reference))
     }
 
-    #[doc = include_str!("source_map.doc/clear.md")]
+    /// Removes all recorded references.
     pub fn clear(&mut self) {
         self.entries.clear();
     }

@@ -1,13 +1,13 @@
-#![doc = include_str!("inherited_property.doc/_module.md")]
+#![doc = include_str!("../../docs/api/property/inherited_property.doc/_module.md")]
 
 use crate::property::{Inheritance, PropertyId};
 
-#[doc = include_str!("inherited_property.doc/InheritedProperty.md")]
+#[doc = include_str!("../../docs/api/property/inherited_property.doc/InheritedProperty.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InheritedProperty;
 
 impl InheritedProperty {
-    #[doc = include_str!("inherited_property.doc/of.md")]
+    #[doc = include_str!("../../docs/api/property/inherited_property.doc/of.md")]
     #[must_use]
     pub const fn of(property: PropertyId) -> Inheritance {
         property.default_inheritance()

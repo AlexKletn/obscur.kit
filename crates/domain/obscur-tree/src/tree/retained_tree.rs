@@ -1,24 +1,19 @@
-#![doc = include_str!("retained_tree.doc/_module.md")]
+//! The retained-node arena — the sole owner and minter of UI identity.
+
+mod node_slot;
+
+use node_slot::NodeSlot;
 
 use obscur_identity::{NodeId, VersionStamp};
 
-use crate::node::{NodeGeneration, NodeKind, RetainedNode};
+use crate::node::{NodeFlags, NodeGeneration, NodeKind, RetainedNode, VisualParent};
 
-#[doc = include_str!("retained_tree.doc/Slot.md")]
-#[derive(Debug, Clone)]
-struct Slot {
-    #[doc = include_str!("retained_tree.doc/generation.md")]
-    generation: NodeGeneration,
-    #[doc = include_str!("retained_tree.doc/node.md")]
-    node: Option<RetainedNode>,
-}
-
-#[doc = include_str!("retained_tree.doc/pack_node_id.md")]
+#[doc = include_str!("../../docs/api/tree/retained_tree.doc/pack_node_id.md")]
 fn pack_node_id(index: u32, generation: u32) -> NodeId {
     NodeId::from_raw((u64::from(generation) << 32) | u64::from(index))
 }
 
-#[doc = include_str!("retained_tree.doc/unpack_node_id.md")]
+#[doc = include_str!("../../docs/api/tree/retained_tree.doc/unpack_node_id.md")]
 fn unpack_node_id(id: NodeId) -> (u32, u32) {
     let raw = id.raw();
     let index = u32::try_from(raw & u64::from(u32::MAX)).unwrap_or(0);
@@ -26,29 +21,111 @@ fn unpack_node_id(id: NodeId) -> (u32, u32) {
     (index, generation)
 }
 
-#[doc = include_str!("retained_tree.doc/RetainedTree.md")]
+#[doc = include_str!("../../docs/api/tree/retained_tree.doc/RetainedTree.md")]
 #[derive(Debug, Clone, Default)]
 pub struct RetainedTree {
-    #[doc = include_str!("retained_tree.doc/slots.md")]
-    slots: Vec<Slot>,
-    #[doc = include_str!("retained_tree.doc/free.md")]
+    /// Backing storage; the slot at index `i` is addressed by ids with index `i`.
+    slots: Vec<NodeSlot>,
+    portals: Vec<(NodeId, NodeId)>,
+    /// Indices of vacated slots available for reuse (LIFO).
     free: Vec<u32>,
-    #[doc = include_str!("retained_tree.doc/live.md")]
+    /// Count of currently live (occupied) slots.
     live: usize,
-    #[doc = include_str!("retained_tree.doc/root.md")]
+    /// The tree root, if one has been designated.
     root: Option<NodeId>,
-    #[doc = include_str!("retained_tree.doc/version.md")]
+    /// Monotonically advancing version, bumped on every structural mutation.
     version: VersionStamp,
 }
 
 impl RetainedTree {
-    #[doc = include_str!("retained_tree.doc/new.md")]
+    /// Creates an empty arena with no nodes, no root, and the initial version.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    #[doc = include_str!("retained_tree.doc/alloc.md")]
+    /// Iterates visual children by document order, followed by projected portals in projection order.
+    pub fn visual_children(&self, parent: NodeId) -> impl DoubleEndedIterator<Item = NodeId> + '_ {
+        let children = self.get(parent).map(|node| node.child_nodes());
+        children
+            .into_iter()
+            .flat_map(|children| children.iter().copied())
+            .filter(move |child| !self.portals.iter().any(|(source, _)| source == child))
+            .chain(self.portals.iter().filter_map(move |&(source, host)| {
+                (host == parent && self.contains(source)).then_some(source)
+            }))
+    }
+
+    /// Returns the active visual parent, falling back to the logical parent.
+    pub fn visual_parent_of(&self, node: NodeId) -> Option<NodeId> {
+        self.portals
+            .iter()
+            .find(|(source, _)| *source == node)
+            .map(|(_, host)| *host)
+            .or_else(|| self.get(node)?.logical_parent().parent())
+    }
+
+    /// Clears the visual projections while preserving document ancestry.
+    pub fn clear_portals(&mut self) {
+        for (source, host) in std::mem::take(&mut self.portals) {
+            self.restore_portal_source(source);
+            if let Some(node) = self.get_mut(host) {
+                node.remove_flags(NodeFlags::PORTAL_HOST);
+            }
+        }
+    }
+
+    fn restore_portal_source(&mut self, source: NodeId) {
+        if let Some(node) = self.get_mut(source) {
+            node.set_visual_parent(
+                node.logical_parent()
+                    .parent()
+                    .map_or_else(VisualParent::root, VisualParent::of),
+            );
+        }
+    }
+
+    fn detach_portal(&mut self, source: NodeId) {
+        if let Some(index) = self.portals.iter().position(|(node, _)| *node == source) {
+            let (_, host) = self.portals.remove(index);
+            self.restore_portal_source(source);
+            if !self.portals.iter().any(|(_, other)| *other == host)
+                && let Some(node) = self.get_mut(host)
+            {
+                node.remove_flags(NodeFlags::PORTAL_HOST);
+            }
+        }
+    }
+
+    pub(crate) fn project_portal(&mut self, source: NodeId, host: NodeId) -> bool {
+        if Some(source) == self.root || !self.contains(source) || !self.contains(host) {
+            return false;
+        }
+        let mut ancestor = Some(host);
+        for _ in 0..=self.len() {
+            let Some(node) = ancestor else {
+                break;
+            };
+            if node == source {
+                return false;
+            }
+            ancestor = self.visual_parent_of(node);
+        }
+        if ancestor.is_some() {
+            return false;
+        }
+        self.detach_portal(source);
+        self.portals.push((source, host));
+        self.get_mut(source)
+            .unwrap()
+            .set_visual_parent(VisualParent::of(host));
+        self.get_mut(host)
+            .unwrap()
+            .insert_flags(NodeFlags::PORTAL_HOST);
+        true
+    }
+
+    #[doc = include_str!("../../docs/api/tree/retained_tree.doc/alloc.md")]
     pub fn alloc(&mut self, kind: NodeKind) -> NodeId {
         let id = if let Some(index) = self.free.pop() {
             self.reuse_vacated_slot(index, kind)
@@ -73,19 +150,20 @@ impl RetainedTree {
         }
     }
 
-    #[doc = include_str!("retained_tree.doc/push_fresh_slot.md")]
+    /// Appends a brand-new slot at the initial generation and returns its id.
     fn push_fresh_slot(&mut self, kind: NodeKind) -> NodeId {
         let index = u32::try_from(self.slots.len()).unwrap_or(u32::MAX);
         let generation = NodeGeneration::FIRST;
         let id = pack_node_id(index, generation.raw());
-        self.slots.push(Slot {
+        self.slots.push(NodeSlot {
             generation,
             node: Some(RetainedNode::new(id, kind)),
         });
         id
     }
 
-    #[doc = include_str!("retained_tree.doc/get.md")]
+    /// Returns a shared reference to the node for `id`, or `None` if the id is
+    /// stale (its slot was reused) or was never valid.
     #[must_use]
     pub fn get(&self, id: NodeId) -> Option<&RetainedNode> {
         let (index, generation) = unpack_node_id(id);
@@ -96,7 +174,7 @@ impl RetainedTree {
         slot.node.as_ref()
     }
 
-    #[doc = include_str!("retained_tree.doc/get_mut.md")]
+    #[doc = include_str!("../../docs/api/tree/retained_tree.doc/get_mut.md")]
     #[must_use]
     pub fn get_mut(&mut self, id: NodeId) -> Option<&mut RetainedNode> {
         let (index, generation) = unpack_node_id(id);
@@ -107,7 +185,7 @@ impl RetainedTree {
         slot.node.as_mut()
     }
 
-    #[doc = include_str!("retained_tree.doc/remove.md")]
+    #[doc = include_str!("../../docs/api/tree/retained_tree.doc/remove.md")]
     pub fn remove(&mut self, id: NodeId) -> Option<RetainedNode> {
         let (index, generation) = unpack_node_id(id);
         let slot = self.slots.get_mut(index as usize)?;
@@ -121,11 +199,15 @@ impl RetainedTree {
         if self.root == Some(id) {
             self.root = None;
         }
+        self.detach_portal(id);
+        while let Some(&(source, _)) = self.portals.iter().find(|(_, host)| *host == id) {
+            self.detach_portal(source);
+        }
         self.version = self.version.bump();
         Some(node)
     }
 
-    #[doc = include_str!("retained_tree.doc/sync_element_children.md")]
+    #[doc = include_str!("../../docs/api/tree/retained_tree.doc/sync_element_children.md")]
     pub fn sync_element_children(&mut self, parent: NodeId) {
         let Some(child_ids) = self.get(parent).map(|node| node.children.clone()) else {
             return;
@@ -139,50 +221,51 @@ impl RetainedTree {
         }
     }
 
-    #[doc = include_str!("retained_tree.doc/contains.md")]
+    /// Returns `true` if `id` currently resolves to a live node.
     #[must_use]
     pub fn contains(&self, id: NodeId) -> bool {
         self.get(id).is_some()
     }
 
-    #[doc = include_str!("retained_tree.doc/len.md")]
+    /// Returns the number of live nodes in the arena.
     #[must_use]
     pub fn len(&self) -> usize {
         self.live
     }
 
-    #[doc = include_str!("retained_tree.doc/is_empty.md")]
+    /// Returns `true` if the arena contains no live nodes.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.live == 0
     }
 
-    #[doc = include_str!("retained_tree.doc/root_2.md")]
+    /// Returns the designated tree root, if any.
     #[must_use]
     pub fn root(&self) -> Option<NodeId> {
         self.root
     }
 
-    #[doc = include_str!("retained_tree.doc/set_root.md")]
+    #[doc = include_str!("../../docs/api/tree/retained_tree.doc/set_root.md")]
     pub fn set_root(&mut self, id: NodeId) {
         self.root = Some(id);
         self.version = self.version.bump();
     }
 
-    #[doc = include_str!("retained_tree.doc/version_2.md")]
+    #[doc = include_str!("../../docs/api/tree/retained_tree.doc/version_2.md")]
     #[must_use]
     pub fn version(&self) -> VersionStamp {
         self.version
     }
 
-    #[doc = include_str!("retained_tree.doc/iter.md")]
+    /// Iterates over every live `(NodeId, &RetainedNode)` in slot order.
     pub fn iter(&self) -> impl Iterator<Item = (NodeId, &RetainedNode)> {
         self.slots
             .iter()
             .filter_map(|slot| slot.node.as_ref().map(|node| (node.id(), node)))
     }
 
-    #[doc = include_str!("retained_tree.doc/snapshot.md")]
+    /// Captures an immutable, versioned [`TreeSnapshot`](super::TreeSnapshot) of
+    /// the current live nodes for hand-off to heavy subsystems (spec §1.6).
     #[must_use]
     pub fn snapshot(&self) -> super::TreeSnapshot {
         super::TreeSnapshot::from_tree(self)

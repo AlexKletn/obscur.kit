@@ -1,48 +1,28 @@
-#![doc = include_str!("transition_compiler.doc/_module.md")]
+#![doc = include_str!("../../docs/api/compiler/transition_compiler.doc/_module.md")]
 
 use crate::error::{UnsupportedCssFeature, UnsupportedFeatureKind};
 use crate::parser::{ParsedDeclaration, ParsedValue};
 
-use obscur_motion::track::{Easing, TransitionTrack};
-use obscur_motion::value::MotionValue;
+use obscur_motion::track::Easing;
 use obscur_style::property::PropertyId;
 
 use super::longhand_catalog::property_id_from_name;
 use super::property_compiler::narrow_f32;
 
-#[doc = include_str!("transition_compiler.doc/CompiledTransition.md")]
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct CompiledTransition {
-    #[doc = include_str!("transition_compiler.doc/property.md")]
-    pub property: PropertyId,
-    #[doc = include_str!("transition_compiler.doc/duration_secs.md")]
-    pub duration_secs: f32,
-    #[doc = include_str!("transition_compiler.doc/delay_secs.md")]
-    pub delay_secs: f32,
-    #[doc = include_str!("transition_compiler.doc/easing.md")]
-    pub easing: Easing,
-}
+use super::CompiledTransition;
 
-impl CompiledTransition {
-    #[doc = include_str!("transition_compiler.doc/build_track.md")]
-    #[must_use]
-    pub fn build_track(&self, from: MotionValue, to: MotionValue) -> TransitionTrack {
-        TransitionTrack::new(from, to).with_easing(self.easing)
-    }
-}
-
-#[doc = include_str!("transition_compiler.doc/TransitionCompiler.md")]
+/// Lowers `transition` declarations into [`CompiledTransition`] templates.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct TransitionCompiler;
 
 impl TransitionCompiler {
-    #[doc = include_str!("transition_compiler.doc/new.md")]
+    /// Creates a transition compiler.
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    #[doc = include_str!("transition_compiler.doc/compile.md")]
+    #[doc = include_str!("../../docs/api/compiler/transition_compiler.doc/compile.md")]
     #[must_use]
     pub fn compile(
         &self,
@@ -52,14 +32,23 @@ impl TransitionCompiler {
         let mut transitions = Vec::new();
         for layer in split_layers(&decl.value) {
             if let Some(transition) = compile_layer(layer, decl.span, unsupported) {
-                transitions.push(transition);
+                if transition.property == PropertyId::Gap {
+                    transitions.extend([PropertyId::RowGap, PropertyId::ColumnGap].map(
+                        |property| CompiledTransition {
+                            property,
+                            ..transition
+                        },
+                    ));
+                } else {
+                    transitions.push(transition);
+                }
             }
         }
         transitions
     }
 }
 
-#[doc = include_str!("transition_compiler.doc/split_layers.md")]
+/// Splits a component-value list into comma-separated layers.
 fn split_layers(values: &[ParsedValue]) -> Vec<&[ParsedValue]> {
     values
         .split(|value| matches!(value, ParsedValue::Comma))
@@ -67,7 +56,7 @@ fn split_layers(values: &[ParsedValue]) -> Vec<&[ParsedValue]> {
         .collect()
 }
 
-#[doc = include_str!("transition_compiler.doc/compile_layer.md")]
+/// Compiles one transition layer, or [`None`] when no property resolves.
 fn compile_layer(
     layer: &[ParsedValue],
     span: crate::source::SourceSpan,
@@ -116,7 +105,7 @@ fn compile_layer(
     })
 }
 
-#[doc = include_str!("transition_compiler.doc/easing_from_keyword.md")]
+/// Maps a CSS timing-function keyword to an [`Easing`], or [`None`].
 fn easing_from_keyword(keyword: &str) -> Option<Easing> {
     if keyword.eq_ignore_ascii_case("linear") {
         Some(Easing::Linear)
@@ -137,6 +126,7 @@ mod tests {
     use crate::parser::PropertyParser;
     use crate::source::CssSource;
     use obscur_motion::track::MotionTrack;
+    use obscur_motion::value::MotionValue;
 
     fn compile(text: &str) -> (Vec<CompiledTransition>, Vec<UnsupportedCssFeature>) {
         let src = CssSource::anonymous(text);

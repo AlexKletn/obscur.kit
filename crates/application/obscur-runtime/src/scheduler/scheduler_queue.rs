@@ -1,11 +1,12 @@
-#![doc = include_str!("scheduler_queue.doc/_module.md")]
+//! The pending frame-request queue (spec §3.5 coalescing, §3.6 priority):
+//! [`SchedulerQueue`].
 
 use std::collections::BTreeSet;
 
 use super::SchedulerPriority;
 use crate::frame::{FrameReason, FrameRequest};
 
-#[doc = include_str!("scheduler_queue.doc/REASONS_IN_ORDER.md")]
+#[doc = include_str!("../../docs/api/scheduler/scheduler_queue.doc/REASONS_IN_ORDER.md")]
 const REASONS_IN_ORDER: [FrameReason; 8] = [
     FrameReason::Input,
     FrameReason::UiCommit,
@@ -17,7 +18,7 @@ const REASONS_IN_ORDER: [FrameReason; 8] = [
     FrameReason::TextEdit,
 ];
 
-#[doc = include_str!("scheduler_queue.doc/reason_ord.md")]
+#[doc = include_str!("../../docs/api/scheduler/scheduler_queue.doc/reason_ord.md")]
 const fn reason_ord(reason: FrameReason) -> u8 {
     match reason {
         FrameReason::Input => 0,
@@ -31,19 +32,19 @@ const fn reason_ord(reason: FrameReason) -> u8 {
     }
 }
 
-#[doc = include_str!("scheduler_queue.doc/reason_from_ord.md")]
+/// Recovers the reason from a tie-break ordinal produced by [`reason_ord`].
 fn reason_from_ord(ord: u8) -> FrameReason {
     REASONS_IN_ORDER[ord as usize]
 }
 
-#[doc = include_str!("scheduler_queue.doc/SchedulerQueue.md")]
+#[doc = include_str!("../../docs/api/scheduler/scheduler_queue.doc/SchedulerQueue.md")]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SchedulerQueue {
     entries: BTreeSet<(SchedulerPriority, u8)>,
 }
 
 impl SchedulerQueue {
-    #[doc = include_str!("scheduler_queue.doc/new.md")]
+    /// Creates an empty queue.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -51,21 +52,21 @@ impl SchedulerQueue {
         }
     }
 
-    #[doc = include_str!("scheduler_queue.doc/push.md")]
+    #[doc = include_str!("../../docs/api/scheduler/scheduler_queue.doc/push.md")]
     pub fn push(&mut self, request: FrameRequest) -> bool {
         let reason = request.reason();
         let key = (SchedulerPriority::from_reason(reason), reason_ord(reason));
         self.entries.insert(key)
     }
 
-    #[doc = include_str!("scheduler_queue.doc/pop.md")]
+    /// Removes and returns the most-urgent pending request, if any.
     pub fn pop(&mut self) -> Option<FrameRequest> {
         self.entries
             .pop_first()
             .map(|(_, ord)| FrameRequest::new(reason_from_ord(ord)))
     }
 
-    #[doc = include_str!("scheduler_queue.doc/peek.md")]
+    /// Returns the most-urgent pending request without removing it, if any.
     #[must_use]
     pub fn peek(&self) -> Option<FrameRequest> {
         self.entries
@@ -74,31 +75,31 @@ impl SchedulerQueue {
             .map(|&(_, ord)| FrameRequest::new(reason_from_ord(ord)))
     }
 
-    #[doc = include_str!("scheduler_queue.doc/contains.md")]
+    /// Returns whether a request for `reason` is currently pending.
     #[must_use]
     pub fn contains(&self, reason: FrameReason) -> bool {
         let key = (SchedulerPriority::from_reason(reason), reason_ord(reason));
         self.entries.contains(&key)
     }
 
-    #[doc = include_str!("scheduler_queue.doc/len.md")]
+    /// Returns the number of pending (coalesced) requests.
     #[must_use]
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
-    #[doc = include_str!("scheduler_queue.doc/is_empty.md")]
+    /// Returns whether the queue is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
-    #[doc = include_str!("scheduler_queue.doc/clear.md")]
+    /// Removes all pending requests.
     pub fn clear(&mut self) {
         self.entries.clear();
     }
 
-    #[doc = include_str!("scheduler_queue.doc/drain_all.md")]
+    #[doc = include_str!("../../docs/api/scheduler/scheduler_queue.doc/drain_all.md")]
     #[must_use = "drained requests are removed from the queue and should be handled"]
     pub fn drain_all(&mut self) -> Vec<FrameRequest> {
         std::mem::take(&mut self.entries)

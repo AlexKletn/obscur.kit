@@ -1,44 +1,45 @@
-#![doc = include_str!("task_result.doc/_module.md")]
+//! `TaskResult`: what a finished task hands back to the runtime.
 
 use crate::task::{TaskId, TaskScope};
 
-#[doc = include_str!("task_result.doc/TaskResult.md")]
+#[doc = include_str!("../../docs/api/task/task_result.doc/TaskResult.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TaskResult<T> {
-    #[doc = include_str!("task_result.doc/id.md")]
+    /// The task that produced this result.
     id: TaskId,
-    #[doc = include_str!("task_result.doc/scope.md")]
+    /// What the task was scoped to — a caller drops a result whose scope has since
+    /// been torn down (spec §3.3 "scoped tasks are cancelled automatically").
     scope: TaskScope,
-    #[doc = include_str!("task_result.doc/payload.md")]
+    /// The task's own typed output.
     payload: T,
 }
 
 impl<T> TaskResult<T> {
-    #[doc = include_str!("task_result.doc/new.md")]
+    /// Wraps `payload` as the result of task `id`, scoped to `scope`.
     #[must_use]
     pub const fn new(id: TaskId, scope: TaskScope, payload: T) -> Self {
         Self { id, scope, payload }
     }
 
-    #[doc = include_str!("task_result.doc/id_2.md")]
+    /// The task that produced this result.
     #[must_use]
     pub const fn id(&self) -> TaskId {
         self.id
     }
 
-    #[doc = include_str!("task_result.doc/scope_2.md")]
+    /// What the task was scoped to.
     #[must_use]
     pub const fn scope(&self) -> TaskScope {
         self.scope
     }
 
-    #[doc = include_str!("task_result.doc/payload_2.md")]
+    /// The typed output.
     #[must_use]
     pub const fn payload(&self) -> &T {
         &self.payload
     }
 
-    #[doc = include_str!("task_result.doc/into_payload.md")]
+    /// Takes the typed output, consuming the envelope.
     #[must_use]
     pub fn into_payload(self) -> T {
         self.payload

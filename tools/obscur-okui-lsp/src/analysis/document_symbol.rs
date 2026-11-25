@@ -1,52 +1,25 @@
-#![doc = include_str!("document_symbol.doc/_module.md")]
+//! `DocumentSymbol`: a hierarchical outline entry for one `.okui` element or
+//! component, mirroring the LSP `DocumentSymbol` shape.
 
 use crate::diagnostics::Range;
 
-#[doc = include_str!("document_symbol.doc/SymbolKind.md")]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum SymbolKind {
-    #[doc = include_str!("document_symbol.doc/Element.md")]
-    Element,
-    #[doc = include_str!("document_symbol.doc/Component.md")]
-    Component,
-}
+use super::SymbolKind;
 
-impl SymbolKind {
-    #[doc = include_str!("document_symbol.doc/of_tag.md")]
-    #[must_use]
-    pub fn of_tag(name: &str) -> Self {
-        if name.chars().next().is_some_and(char::is_uppercase) {
-            Self::Component
-        } else {
-            Self::Element
-        }
-    }
-
-    #[doc = include_str!("document_symbol.doc/label.md")]
-    #[must_use]
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Element => "element",
-            Self::Component => "component",
-        }
-    }
-}
-
-#[doc = include_str!("document_symbol.doc/DocumentSymbol.md")]
+#[doc = include_str!("../../docs/api/analysis/document_symbol.doc/DocumentSymbol.md")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocumentSymbol {
-    #[doc = include_str!("document_symbol.doc/name.md")]
+    /// The element/component tag name.
     pub name: Box<str>,
-    #[doc = include_str!("document_symbol.doc/kind.md")]
+    /// Whether the symbol is an element or a component.
     pub kind: SymbolKind,
-    #[doc = include_str!("document_symbol.doc/range.md")]
+    /// The full source span the element covers.
     pub range: Range,
-    #[doc = include_str!("document_symbol.doc/children.md")]
+    /// The nested child symbols (elements/components inside this one).
     pub children: Vec<DocumentSymbol>,
 }
 
 impl DocumentSymbol {
-    #[doc = include_str!("document_symbol.doc/new.md")]
+    /// Creates a leaf symbol (no children) for `name` of `kind` over `range`.
     #[must_use]
     pub fn new(name: impl Into<Box<str>>, kind: SymbolKind, range: Range) -> Self {
         Self {
@@ -57,7 +30,7 @@ impl DocumentSymbol {
         }
     }
 
-    #[doc = include_str!("document_symbol.doc/with_children.md")]
+    /// Builder: sets the symbol's children.
     #[must_use]
     pub fn with_children(mut self, children: Vec<DocumentSymbol>) -> Self {
         self.children = children;

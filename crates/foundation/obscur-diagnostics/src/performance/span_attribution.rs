@@ -1,22 +1,23 @@
-#![doc = include_str!("span_attribution.doc/_module.md")]
+//! `SpanAttribution`: what a performance span is *about* (spec §7.9).
 
 use obscur_identity::{FrameId, NodeId, ResourceId, WindowId};
 
-#[doc = include_str!("span_attribution.doc/SpanAttribution.md")]
+#[doc = include_str!("../../docs/api/performance/span_attribution.doc/SpanAttribution.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct SpanAttribution {
-    #[doc = include_str!("span_attribution.doc/frame.md")]
+    /// The frame this span was recorded during.
     pub frame: Option<FrameId>,
-    #[doc = include_str!("span_attribution.doc/window.md")]
+    /// The window the work belongs to, for a multi-surface host.
     pub window: Option<WindowId>,
-    #[doc = include_str!("span_attribution.doc/node.md")]
+    /// The node the work is about, for a span narrow enough to have one.
     pub node: Option<NodeId>,
-    #[doc = include_str!("span_attribution.doc/resource.md")]
+    /// The resource the work is about, for a load/decode span.
     pub resource: Option<ResourceId>,
 }
 
 impl SpanAttribution {
-    #[doc = include_str!("span_attribution.doc/none.md")]
+    /// Attributed to nothing — the honest default for an emitter that knows no
+    /// more than its subsystem.
     #[must_use]
     pub const fn none() -> Self {
         Self {
@@ -27,7 +28,7 @@ impl SpanAttribution {
         }
     }
 
-    #[doc = include_str!("span_attribution.doc/frame_2.md")]
+    /// Attributed to `frame` — what every frame-phase span can state.
     #[must_use]
     pub const fn frame(frame: FrameId) -> Self {
         Self {
@@ -36,28 +37,28 @@ impl SpanAttribution {
         }
     }
 
-    #[doc = include_str!("span_attribution.doc/with_node.md")]
+    /// Returns this attribution narrowed to `node` (fluent).
     #[must_use]
     pub const fn with_node(mut self, node: NodeId) -> Self {
         self.node = Some(node);
         self
     }
 
-    #[doc = include_str!("span_attribution.doc/with_resource.md")]
+    /// Returns this attribution narrowed to `resource` (fluent).
     #[must_use]
     pub const fn with_resource(mut self, resource: ResourceId) -> Self {
         self.resource = Some(resource);
         self
     }
 
-    #[doc = include_str!("span_attribution.doc/with_window.md")]
+    /// Returns this attribution narrowed to `window` (fluent).
     #[must_use]
     pub const fn with_window(mut self, window: WindowId) -> Self {
         self.window = Some(window);
         self
     }
 
-    #[doc = include_str!("span_attribution.doc/is_empty.md")]
+    /// Whether nothing is attributed.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.frame.is_none()

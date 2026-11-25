@@ -1,15 +1,15 @@
-#![doc = include_str!("touch_contact.doc/_module.md")]
+//! The touchscreen contact a test sends.
 
 use obscur_geometry::Point;
 use obscur_interaction::pointer::{PointerDevice, PointerEvent, PointerEventKind, PointerId};
 
-#[doc = include_str!("touch_contact.doc/finger.md")]
+#[doc = include_str!("../../docs/api/fixture/touch_contact.doc/finger.md")]
 #[must_use]
 pub fn finger(contact: u64, kind: PointerEventKind, x: f32, y: f32) -> PointerEvent {
     untrusted_finger(contact, kind, x, y).as_trusted()
 }
 
-#[doc = include_str!("touch_contact.doc/finger_at.md")]
+#[doc = include_str!("../../docs/api/fixture/touch_contact.doc/finger_at.md")]
 #[must_use]
 pub fn finger_at(
     contact: u64,
@@ -21,7 +21,7 @@ pub fn finger_at(
     finger(contact, kind, x, y).with_timestamp(micros)
 }
 
-#[doc = include_str!("touch_contact.doc/untrusted_finger.md")]
+#[doc = include_str!("../../docs/api/fixture/touch_contact.doc/untrusted_finger.md")]
 #[must_use]
 pub fn untrusted_finger(contact: u64, kind: PointerEventKind, x: f32, y: f32) -> PointerEvent {
     PointerEvent::new(

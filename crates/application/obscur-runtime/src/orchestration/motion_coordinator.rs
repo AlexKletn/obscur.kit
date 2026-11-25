@@ -1,14 +1,14 @@
-#![doc = include_str!("motion_coordinator.doc/_module.md")]
+#![doc = include_str!("../../docs/api/orchestration/motion_coordinator.doc/_module.md")]
 
 use obscur_motion::track::{Keyframe, KeyframeTrack};
 use obscur_motion::value::MotionValue;
 
-#[doc = include_str!("motion_coordinator.doc/MotionCoordinator.md")]
+#[doc = include_str!("../../docs/api/orchestration/motion_coordinator.doc/MotionCoordinator.md")]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MotionCoordinator;
 
 impl MotionCoordinator {
-    #[doc = include_str!("motion_coordinator.doc/sample_keyframes.md")]
+    #[doc = include_str!("../../docs/api/orchestration/motion_coordinator.doc/sample_keyframes.md")]
     #[must_use]
     pub fn sample_keyframes(track: &KeyframeTrack, t: f32) -> Option<MotionValue> {
         let frames = track.keyframes();

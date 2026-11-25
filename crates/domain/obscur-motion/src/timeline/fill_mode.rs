@@ -1,27 +1,31 @@
-#![doc = include_str!("fill_mode.doc/_module.md")]
+//! [`FillMode`] — whether a timeline's value applies outside its active period
+//! (spec §4.17; css-animations-1 §3.9 `animation-fill-mode`).
 
-#[doc = include_str!("fill_mode.doc/FillMode.md")]
+#[doc = include_str!("../../docs/api/timeline/fill_mode.doc/FillMode.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum FillMode {
-    #[doc = include_str!("fill_mode.doc/None.md")]
+    /// No fill: the value applies only while the timeline is running.
     #[default]
     None,
-    #[doc = include_str!("fill_mode.doc/Forwards.md")]
+    /// Fills after the animation ends.
     Forwards,
-    #[doc = include_str!("fill_mode.doc/Backwards.md")]
+    /// Fills during the delay, with the keyframe that starts the first
+    /// iteration.
     Backwards,
-    #[doc = include_str!("fill_mode.doc/Both.md")]
+    /// Both [`Forwards`](Self::Forwards) and [`Backwards`](Self::Backwards).
     Both,
 }
 
 impl FillMode {
-    #[doc = include_str!("fill_mode.doc/fills_backwards.md")]
+    /// Returns whether this mode fills the delay period before the first
+    /// iteration (css-animations-1 §3.9 `backwards`).
     #[must_use]
     pub const fn fills_backwards(self) -> bool {
         matches!(self, Self::Backwards | Self::Both)
     }
 
-    #[doc = include_str!("fill_mode.doc/from_keyword.md")]
+    /// Parses a CSS `<single-animation-fill-mode>` keyword, ASCII
+    /// case-insensitively; [`None`](Option::None) for anything else.
     #[must_use]
     pub fn from_keyword(keyword: &str) -> Option<Self> {
         if keyword.eq_ignore_ascii_case("none") {

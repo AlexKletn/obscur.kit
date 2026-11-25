@@ -1,23 +1,23 @@
-#![doc = include_str!("text_direction.doc/_module.md")]
+//! The base (paragraph) writing direction of a text run (spec §5.10).
 
-#[doc = include_str!("text_direction.doc/TextDirection.md")]
+#[doc = include_str!("../../docs/api/shaping/text_direction.doc/TextDirection.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum TextDirection {
-    #[doc = include_str!("text_direction.doc/LeftToRight.md")]
+    /// Left-to-right base direction (e.g. Latin, Cyrillic); the default.
     #[default]
     LeftToRight,
-    #[doc = include_str!("text_direction.doc/RightToLeft.md")]
+    /// Right-to-left base direction (e.g. Arabic, Hebrew).
     RightToLeft,
 }
 
 impl TextDirection {
-    #[doc = include_str!("text_direction.doc/is_rtl.md")]
+    /// Returns whether this is the [`RightToLeft`](Self::RightToLeft) direction.
     #[must_use]
     pub const fn is_rtl(&self) -> bool {
         matches!(self, Self::RightToLeft)
     }
 
-    #[doc = include_str!("text_direction.doc/is_ltr.md")]
+    /// Returns whether this is the [`LeftToRight`](Self::LeftToRight) direction.
     #[must_use]
     pub const fn is_ltr(&self) -> bool {
         matches!(self, Self::LeftToRight)

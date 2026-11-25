@@ -1,33 +1,36 @@
-#![doc = include_str!("brush_converter.doc/_module.md")]
+#![doc = include_str!("../../docs/api/conversion/brush_converter.doc/_module.md")]
 
-use obscur_scene::color::Color;
-use obscur_scene::color::convert::{linear_srgb_to_oklab, oklab_to_srgb, srgb_decode};
+use obscur_scene::color::convert::{oklab_lerp, premul_oklab};
 use obscur_scene::paint::{Brush, LineCap, LineJoin, Stroke};
 use vello::kurbo;
 use vello::peniko;
 
 use super::color_converter::ColorConverter;
 
-#[doc = include_str!("brush_converter.doc/GRADIENT_INTERPOLATION_CS.md")]
+#[doc = include_str!("../../docs/api/conversion/brush_converter.doc/GRADIENT_INTERPOLATION_CS.md")]
 const GRADIENT_INTERPOLATION_CS: peniko::color::ColorSpaceTag = peniko::color::ColorSpaceTag::Oklab;
 
-#[doc = include_str!("brush_converter.doc/DENSIFY_SEGMENTS.md")]
+/// Number of linear sub-segments each authored stop pair is split into when
+/// densifying in Oklab. `N` segments insert `N - 1` interior Oklab-interpolated
+/// stops between each authored pair; peniko's per-stop sampling (sRGB-linear
+/// between adjacent stops) then closely approximates the true Oklab ramp. 16 keeps
+/// the mid-range hues visually smooth while staying far under any ramp limit.
 const DENSIFY_SEGMENTS: usize = 16;
 
-#[doc = include_str!("brush_converter.doc/BrushConverter.md")]
+#[doc = include_str!("../../docs/api/conversion/brush_converter.doc/BrushConverter.md")]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct BrushConverter {
     color: ColorConverter,
 }
 
 impl BrushConverter {
-    #[doc = include_str!("brush_converter.doc/new.md")]
+    /// Creates a brush converter using the given color converter.
     #[must_use]
     pub const fn new(color: ColorConverter) -> Self {
         Self { color }
     }
 
-    #[doc = include_str!("brush_converter.doc/convert.md")]
+    /// Converts an obscur-scene [`Brush`] into a [`peniko::Brush`].
     #[must_use]
     pub fn convert(&self, brush: &Brush) -> peniko::Brush {
         match brush {
@@ -67,7 +70,7 @@ impl BrushConverter {
         }
     }
 
-    #[doc = include_str!("brush_converter.doc/brush_transform.md")]
+    #[doc = include_str!("../../docs/api/conversion/brush_converter.doc/brush_transform.md")]
     #[must_use]
     pub fn brush_transform(brush: &Brush) -> Option<kurbo::Affine> {
         match brush {
@@ -84,7 +87,7 @@ impl BrushConverter {
         }
     }
 
-    #[doc = include_str!("brush_converter.doc/stroke.md")]
+    #[doc = include_str!("../../docs/api/conversion/brush_converter.doc/stroke.md")]
     #[must_use]
     pub fn stroke(&self, stroke: &Stroke) -> kurbo::Stroke {
         let k = kurbo::Stroke::new(f64::from(stroke.width()))
@@ -101,7 +104,7 @@ impl BrushConverter {
         }
     }
 
-    #[doc = include_str!("brush_converter.doc/stops.md")]
+    #[doc = include_str!("../../docs/api/conversion/brush_converter.doc/stops.md")]
     fn stops(self, stops: &[obscur_scene::paint::GradientStop]) -> Vec<peniko::ColorStop> {
         if stops.len() < 2 {
             return stops
@@ -127,7 +130,10 @@ impl BrushConverter {
                 let t = k as f64 / DENSIFY_SEGMENTS as f64;
                 #[allow(clippy::cast_possible_truncation)]
                 let offset = a.offset() + (b.offset() - a.offset()) * t as f32;
-                out.push(peniko::ColorStop::from((offset, oklab_lerp(from, to, t))));
+                out.push(peniko::ColorStop::from((
+                    offset,
+                    self.color.convert(oklab_lerp(from, to, t)),
+                )));
             }
             // Exact authored end stop of this pair.
             out.push(peniko::ColorStop::from((
@@ -139,35 +145,7 @@ impl BrushConverter {
     }
 }
 
-#[doc = include_str!("brush_converter.doc/premul_oklab.md")]
-fn premul_oklab(color: Color) -> [f64; 4] {
-    let alpha = f64::from(color.a).clamp(0.0, 1.0);
-    let lin = |channel: f32| srgb_decode(f64::from(channel).clamp(0.0, 1.0));
-    let [l, a, b] = linear_srgb_to_oklab(lin(color.r), lin(color.g), lin(color.b));
-    [l * alpha, a * alpha, b * alpha, alpha]
-}
-
-#[doc = include_str!("brush_converter.doc/oklab_lerp.md")]
-// The Oklab component names (L/a/b) are the canonical single-letter names from
-// CSS Color 4 §9; renaming them would obscure the 1:1 mapping to the spec.
-#[allow(clippy::many_single_char_names)]
-fn oklab_lerp(pa: [f64; 4], pb: [f64; 4], t: f64) -> peniko::Color {
-    let lerp = |x: f64, y: f64| x + (y - x) * t;
-    let l = lerp(pa[0], pb[0]);
-    let aa = lerp(pa[1], pb[1]);
-    let bb = lerp(pa[2], pb[2]);
-    let alpha = lerp(pa[3], pb[3]);
-
-    let [r, g, blue] = if alpha > 0.0 {
-        oklab_to_srgb(l / alpha, aa / alpha, bb / alpha)
-    } else {
-        [0.0, 0.0, 0.0]
-    };
-    #[allow(clippy::cast_possible_truncation)]
-    peniko::Color::new([r as f32, g as f32, blue as f32, alpha as f32])
-}
-
-#[doc = include_str!("brush_converter.doc/extend.md")]
+/// Maps an obscur-scene extend mode to a peniko extend mode.
 fn extend(mode: obscur_scene::paint::ExtendMode) -> peniko::Extend {
     match mode {
         obscur_scene::paint::ExtendMode::Pad => peniko::Extend::Pad,
@@ -176,7 +154,7 @@ fn extend(mode: obscur_scene::paint::ExtendMode) -> peniko::Extend {
     }
 }
 
-#[doc = include_str!("brush_converter.doc/join.md")]
+/// Maps an obscur-scene line join to a kurbo join.
 fn join(join: LineJoin) -> kurbo::Join {
     match join {
         LineJoin::Miter => kurbo::Join::Miter,
@@ -185,7 +163,7 @@ fn join(join: LineJoin) -> kurbo::Join {
     }
 }
 
-#[doc = include_str!("brush_converter.doc/cap.md")]
+/// Maps an obscur-scene line cap to a kurbo cap.
 fn cap(cap: LineCap) -> kurbo::Cap {
     match cap {
         LineCap::Butt => kurbo::Cap::Butt,
@@ -350,7 +328,7 @@ mod tests {
             premul_oklab(Color::rgba(0.0, 0.501_960_8, 0.0, 1.0)),
             0.5,
         );
-        let rgba8 = mid.to_rgba8();
+        let rgba8 = ColorConverter::new().convert(mid).to_rgba8();
         // Naive sRGB-gamma midpoint for reference.
         let (srgb_r, srgb_g): (u16, u16) = (127, 64);
         assert!(

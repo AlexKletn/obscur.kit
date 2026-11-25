@@ -1,4 +1,5 @@
-#![doc = include_str!("analyzer.doc/_module.md")]
+//! `Analyzer`: the language-server core that turns open documents into LSP
+//! diagnostics, document symbols and hover results.
 
 use obscur_okui_compiler::compile::{CompileDiagnostic, Compiler, ContractRegistry};
 use obscur_okui_compiler::lowering::LoweringError;
@@ -10,12 +11,12 @@ use crate::analysis::{DocumentSymbol, Hover, SymbolKind};
 use crate::diagnostics::{LspDiagnostic, LspSeverity, Position, Range};
 use crate::document::{DocumentStore, LineIndex};
 
-#[doc = include_str!("analyzer.doc/to_u32.md")]
+/// Converts a `usize` length to `u32`, saturating at [`u32::MAX`].
 fn to_u32(value: usize) -> u32 {
     u32::try_from(value).unwrap_or(u32::MAX)
 }
 
-#[doc = include_str!("analyzer.doc/Analyzer.md")]
+#[doc = include_str!("../../docs/api/analysis/analyzer.doc/Analyzer.md")]
 #[derive(Debug, Clone)]
 pub struct Analyzer {
     store: DocumentStore,
@@ -32,31 +33,34 @@ impl Default for Analyzer {
 }
 
 impl Analyzer {
-    #[doc = include_str!("analyzer.doc/new.md")]
+    /// Creates an analyzer with an empty document store and the built-in
+    /// primitive/widget contracts registered — the same set `Compiler::new`
+    /// seeds, so the editor's verdict matches the build's.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
-    #[doc = include_str!("analyzer.doc/with_registry.md")]
+    #[doc = include_str!("../../docs/api/analysis/analyzer.doc/with_registry.md")]
     #[must_use]
     pub fn with_registry(mut self, registry: ContractRegistry) -> Self {
         self.registry = registry;
         self
     }
 
-    #[doc = include_str!("analyzer.doc/store.md")]
+    /// Returns a shared reference to the document store.
     #[must_use]
     pub const fn store(&self) -> &DocumentStore {
         &self.store
     }
 
-    #[doc = include_str!("analyzer.doc/store_mut.md")]
+    /// Returns a mutable reference to the document store, for driving the
+    /// `didOpen`/`didChange`/`didClose` lifecycle.
     pub const fn store_mut(&mut self) -> &mut DocumentStore {
         &mut self.store
     }
 
-    #[doc = include_str!("analyzer.doc/analyze.md")]
+    #[doc = include_str!("../../docs/api/analysis/analyzer.doc/analyze.md")]
     #[must_use]
     pub fn analyze(&self, uri: &str) -> Vec<LspDiagnostic> {
         let Some(document) = self.store.get(uri) else {
@@ -95,7 +99,8 @@ impl Analyzer {
         diagnostics
     }
 
-    #[doc = include_str!("analyzer.doc/document_symbols.md")]
+    /// Returns the hierarchical outline of elements/components in the document at
+    /// `uri` (empty if no document is open).
     #[must_use]
     pub fn document_symbols(&self, uri: &str) -> Vec<DocumentSymbol> {
         let Some(document) = self.store.get(uri) else {
@@ -111,7 +116,8 @@ impl Analyzer {
             .collect()
     }
 
-    #[doc = include_str!("analyzer.doc/hover.md")]
+    /// Returns hover information for the innermost element/component containing
+    /// `position`, if any.
     #[must_use]
     pub fn hover(&self, uri: &str, position: Position) -> Option<Hover> {
         let symbols = self.document_symbols(uri);
@@ -123,7 +129,7 @@ impl Analyzer {
     }
 }
 
-#[doc = include_str!("analyzer.doc/map_compile_diagnostic.md")]
+#[doc = include_str!("../../docs/api/analysis/analyzer.doc/map_compile_diagnostic.md")]
 fn map_compile_diagnostic(diagnostic: &CompileDiagnostic) -> (u32, String, LspSeverity) {
     match diagnostic {
         CompileDiagnostic::Resolution(error) => {
@@ -148,14 +154,15 @@ fn map_compile_diagnostic(diagnostic: &CompileDiagnostic) -> (u32, String, LspSe
     }
 }
 
-#[doc = include_str!("analyzer.doc/point_range.md")]
+/// Builds a one-character [`Range`] anchored at `offset` (an empty range at the
+/// end of the document), mapping byte offsets through `index`.
 fn point_range(index: &LineIndex, offset: u32) -> Range {
     let start = index.offset_to_position(offset);
     let end = index.offset_to_position(offset.saturating_add(1));
     Range::new(start, end)
 }
 
-#[doc = include_str!("analyzer.doc/node_range.md")]
+/// Builds a [`Range`] covering the full source span of `node`.
 fn node_range(index: &LineIndex, node: &SyntaxNode) -> Range {
     let start_offset = node.offset().unwrap_or(0);
     let end_offset = start_offset.saturating_add(to_u32(node.text().len()));
@@ -165,7 +172,8 @@ fn node_range(index: &LineIndex, node: &SyntaxNode) -> Range {
     )
 }
 
-#[doc = include_str!("analyzer.doc/symbol_of.md")]
+/// Builds a [`DocumentSymbol`] for `element` and its element-shaped children,
+/// or `None` for a nameless element.
 fn symbol_of(index: &LineIndex, element: &Element) -> Option<DocumentSymbol> {
     let name = element.tag_name()?;
     let kind = SymbolKind::of_tag(&name);
@@ -178,7 +186,7 @@ fn symbol_of(index: &LineIndex, element: &Element) -> Option<DocumentSymbol> {
     Some(DocumentSymbol::new(name, kind, range).with_children(children))
 }
 
-#[doc = include_str!("analyzer.doc/deepest_containing.md")]
+/// Finds the deepest symbol whose range contains `position`.
 fn deepest_containing(symbols: &[DocumentSymbol], position: Position) -> Option<&DocumentSymbol> {
     for symbol in symbols {
         if symbol.range.contains(position) {

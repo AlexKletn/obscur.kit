@@ -1,29 +1,30 @@
-#![doc = include_str!("key_event.doc/_module.md")]
+//! The [`KeyEvent`] payload carried by a keyboard key transition (spec §6.7).
 
 use crate::command::{LogicalKey, Modifiers, PhysicalKey};
 use crate::event::EventTrust;
 
-#[doc = include_str!("key_event.doc/KeyEvent.md")]
+#[doc = include_str!("../../docs/api/command/key_event.doc/KeyEvent.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct KeyEvent {
-    #[doc = include_str!("key_event.doc/physical.md")]
+    /// The layout-independent physical key position.
     pub physical: PhysicalKey,
-    #[doc = include_str!("key_event.doc/logical.md")]
+    /// The layout-dependent produced key, if the layout resolves one.
     pub logical: Option<LogicalKey>,
-    #[doc = include_str!("key_event.doc/pressed.md")]
+    /// Whether this is a press (`true`) or a release (`false`).
     pub pressed: bool,
-    #[doc = include_str!("key_event.doc/modifiers.md")]
+    #[doc = include_str!("../../docs/api/command/key_event.doc/modifiers.md")]
     pub modifiers: Modifiers,
-    #[doc = include_str!("key_event.doc/repeat.md")]
+    #[doc = include_str!("../../docs/api/command/key_event.doc/repeat.md")]
     pub repeat: bool,
-    #[doc = include_str!("key_event.doc/timestamp_micros.md")]
+    #[doc = include_str!("../../docs/api/command/key_event.doc/timestamp_micros.md")]
     pub timestamp_micros: u64,
-    #[doc = include_str!("key_event.doc/trust.md")]
+    #[doc = include_str!("../../docs/api/command/key_event.doc/trust.md")]
     pub trust: EventTrust,
 }
 
 impl KeyEvent {
-    #[doc = include_str!("key_event.doc/new.md")]
+    /// Creates a key event for `physical` with an optional produced `logical`
+    /// key and a `pressed` flag.
     #[must_use]
     pub const fn new(physical: PhysicalKey, logical: Option<LogicalKey>, pressed: bool) -> Self {
         Self {
@@ -37,89 +38,89 @@ impl KeyEvent {
         }
     }
 
-    #[doc = include_str!("key_event.doc/press.md")]
+    /// Creates a key **press** event.
     #[must_use]
     pub const fn press(physical: PhysicalKey, logical: Option<LogicalKey>) -> Self {
         Self::new(physical, logical, true)
     }
 
-    #[doc = include_str!("key_event.doc/release.md")]
+    /// Creates a key **release** event.
     #[must_use]
     pub const fn release(physical: PhysicalKey, logical: Option<LogicalKey>) -> Self {
         Self::new(physical, logical, false)
     }
 
-    #[doc = include_str!("key_event.doc/physical_2.md")]
+    /// Returns the layout-independent physical key position.
     #[must_use]
     pub const fn physical(&self) -> PhysicalKey {
         self.physical
     }
 
-    #[doc = include_str!("key_event.doc/logical_2.md")]
+    /// Returns the layout-dependent produced key, if any.
     #[must_use]
     pub const fn logical(&self) -> Option<LogicalKey> {
         self.logical
     }
 
-    #[doc = include_str!("key_event.doc/pressed_2.md")]
+    /// Returns whether this is a press (`true`) or a release (`false`).
     #[must_use]
     pub const fn pressed(&self) -> bool {
         self.pressed
     }
 
-    #[doc = include_str!("key_event.doc/with_modifiers.md")]
+    /// Returns the event with `modifiers` replaced.
     #[must_use]
     pub const fn with_modifiers(mut self, modifiers: Modifiers) -> Self {
         self.modifiers = modifiers;
         self
     }
 
-    #[doc = include_str!("key_event.doc/modifiers_2.md")]
+    /// The chord held when the key transitioned.
     #[must_use]
     pub const fn modifiers(&self) -> Modifiers {
         self.modifiers
     }
 
-    #[doc = include_str!("key_event.doc/as_repeat.md")]
+    /// Returns the event marked as an auto-repeat.
     #[must_use]
     pub const fn as_repeat(mut self) -> Self {
         self.repeat = true;
         self
     }
 
-    #[doc = include_str!("key_event.doc/is_repeat.md")]
+    /// Whether the platform generated this press by auto-repeat.
     #[must_use]
     pub const fn is_repeat(&self) -> bool {
         self.repeat
     }
 
-    #[doc = include_str!("key_event.doc/with_timestamp.md")]
+    /// Returns the event stamped with a host timestamp, in microseconds.
     #[must_use]
     pub const fn with_timestamp(mut self, timestamp_micros: u64) -> Self {
         self.timestamp_micros = timestamp_micros;
         self
     }
 
-    #[doc = include_str!("key_event.doc/timestamp.md")]
+    /// The host timestamp in microseconds, or zero if unstamped.
     #[must_use]
     pub const fn timestamp(&self) -> u64 {
         self.timestamp_micros
     }
 
-    #[doc = include_str!("key_event.doc/as_trusted.md")]
+    #[doc = include_str!("../../docs/api/command/key_event.doc/as_trusted.md")]
     #[must_use]
     pub const fn as_trusted(mut self) -> Self {
         self.trust = EventTrust::Trusted;
         self
     }
 
-    #[doc = include_str!("key_event.doc/trust_2.md")]
+    /// Whether this key came from a real device or was synthesised.
     #[must_use]
     pub const fn trust(&self) -> EventTrust {
         self.trust
     }
 
-    #[doc = include_str!("key_event.doc/is_trusted.md")]
+    /// Whether this key came from a real device.
     #[must_use]
     pub const fn is_trusted(&self) -> bool {
         self.trust.is_trusted()

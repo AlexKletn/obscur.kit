@@ -1,42 +1,45 @@
-#![doc = include_str!("cache_key.doc/_module.md")]
+//! Identity of a cached artifact (spec §5.19 caches, §5.20 content-addressing).
 
 use obscur_identity::ResourceId;
 
-#[doc = include_str!("cache_key.doc/CacheKey.md")]
+#[doc = include_str!("../../docs/api/cache/cache_key.doc/CacheKey.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct CacheKey {
-    #[doc = include_str!("cache_key.doc/resource.md")]
+    /// The resource this artifact was derived from.
     resource: ResourceId,
-    #[doc = include_str!("cache_key.doc/variant.md")]
+    /// A discriminator over the derivation parameters or content (spec §5.20).
     variant: u64,
 }
 
 impl CacheKey {
-    #[doc = include_str!("cache_key.doc/new.md")]
+    /// Creates a key for a specific derivative of `resource`, discriminated by
+    /// `variant` (spec §5.19).
     #[must_use]
     pub const fn new(resource: ResourceId, variant: u64) -> Self {
         Self { resource, variant }
     }
 
-    #[doc = include_str!("cache_key.doc/for_resource.md")]
+    /// Creates a key for the canonical, unparameterised artifact of `resource`
+    /// (variant `0`).
     #[must_use]
     pub const fn for_resource(resource: ResourceId) -> Self {
         Self::new(resource, 0)
     }
 
-    #[doc = include_str!("cache_key.doc/content_addressed.md")]
+    /// Creates a content-addressed key, using a hash of the artifact's content as
+    /// the discriminator (spec §5.20 *content-addressed where useful*).
     #[must_use]
     pub const fn content_addressed(resource: ResourceId, content_hash: u64) -> Self {
         Self::new(resource, content_hash)
     }
 
-    #[doc = include_str!("cache_key.doc/resource_2.md")]
+    /// Returns the resource this artifact was derived from.
     #[must_use]
     pub const fn resource(self) -> ResourceId {
         self.resource
     }
 
-    #[doc = include_str!("cache_key.doc/variant_2.md")]
+    /// Returns the variant discriminator (spec §5.20).
     #[must_use]
     pub const fn variant(self) -> u64 {
         self.variant

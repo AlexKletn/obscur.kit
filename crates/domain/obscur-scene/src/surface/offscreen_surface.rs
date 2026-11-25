@@ -1,42 +1,42 @@
-#![doc = include_str!("offscreen_surface.doc/_module.md")]
+//! `OffscreenSurface`: descriptor for an offscreen render target (§5.6).
 
 use obscur_geometry::{ScaleFactor, Size};
 
-#[doc = include_str!("offscreen_surface.doc/OffscreenSurface.md")]
+#[doc = include_str!("../../docs/api/surface/offscreen_surface.doc/OffscreenSurface.md")]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct OffscreenSurface {
-    #[doc = include_str!("offscreen_surface.doc/size.md")]
+    /// The target size in logical pixels.
     size: Size,
-    #[doc = include_str!("offscreen_surface.doc/scale.md")]
+    /// The DPI scale factor to render at.
     scale: ScaleFactor,
 }
 
 impl OffscreenSurface {
-    #[doc = include_str!("offscreen_surface.doc/new.md")]
+    /// Creates an offscreen render target of `size` logical pixels at `scale`.
     #[must_use]
     pub const fn new(size: Size, scale: ScaleFactor) -> Self {
         Self { size, scale }
     }
 
-    #[doc = include_str!("offscreen_surface.doc/at_scale.md")]
+    #[doc = include_str!("../../docs/api/surface/offscreen_surface.doc/at_scale.md")]
     #[must_use]
     pub const fn at_scale(size: Size, scale: ScaleFactor) -> Self {
         Self::new(size, scale)
     }
 
-    #[doc = include_str!("offscreen_surface.doc/size_2.md")]
+    /// Returns the target size in logical pixels.
     #[must_use]
     pub const fn size(self) -> Size {
         self.size
     }
 
-    #[doc = include_str!("offscreen_surface.doc/scale_2.md")]
+    /// Returns the DPI scale factor the target renders at.
     #[must_use]
     pub const fn scale(self) -> ScaleFactor {
         self.scale
     }
 
-    #[doc = include_str!("offscreen_surface.doc/physical_size.md")]
+    #[doc = include_str!("../../docs/api/surface/offscreen_surface.doc/physical_size.md")]
     #[must_use]
     pub fn physical_size(self) -> Size {
         let factor = self.scale.get();

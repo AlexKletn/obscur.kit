@@ -1,4 +1,4 @@
-#![doc = include_str!("text_leaf_measure.doc/_module.md")]
+#![doc = include_str!("../../docs/api/orchestration/text_leaf_measure.doc/_module.md")]
 
 use obscur_geometry::{BoxConstraints, Size};
 use obscur_layout::model::LayoutStyle;
@@ -16,7 +16,7 @@ use obscur_text::shaping::{
 
 use super::TabSize;
 
-#[doc = include_str!("text_leaf_measure.doc/measure_text_node.md")]
+#[doc = include_str!("../../docs/api/orchestration/text_leaf_measure.doc/measure_text_node.md")]
 // The shaping inputs (fallback chain, attributes, direction, alignment) plus the
 // style/constraints/shaper are cohesive positional arguments of one leaf-measure
 // helper, not a public API surface. `attributes` is kept by reference to match
@@ -40,7 +40,8 @@ pub(super) fn measure_text_node(
     letter_spacing: f32,
     word_spacing: f32,
     tab_size: TabSize,
-) -> Size {
+    last_baseline: bool,
+) -> (Size, Option<f32>) {
     let font_size = style.font_size;
     let metrics = paragraph.line_metrics(font_size);
     // The line box height: the authored `line-height` (a multiple of `font-size`
@@ -68,7 +69,7 @@ pub(super) fn measure_text_node(
     // spacing into the advances through the SAME seam the compose pass uses, so
     // the width measured here matches the width painted later (§8.1 / §8.2).
     let runs = apply_spacing(
-        paragraph.shape_paragraph(
+        paragraph.shape_paragraph_shared(
             content,
             fallback,
             attributes,
@@ -185,10 +186,20 @@ pub(super) fn measure_text_node(
     // *can* fit, so this differs only in the overflow case — where the old answer
     // was wrong. A tight constraint still dictates; see
     // [`BoxConstraints::constrain_allowing_overflow`].
-    constraints.constrain_allowing_overflow(layout.size())
+    let line = if last_baseline {
+        layout.lines().last()
+    } else {
+        layout.lines().first()
+    };
+    let baseline =
+        line.map(|line| style.border.top + style.padding.top + line.top() + line.baseline());
+    (
+        constraints.constrain_allowing_overflow(layout.size()),
+        baseline,
+    )
 }
 
-#[doc = include_str!("text_leaf_measure.doc/measure_hyphen_glyph.md")]
+#[doc = include_str!("../../docs/api/orchestration/text_leaf_measure.doc/measure_hyphen_glyph.md")]
 // `attributes` stays by reference to match this pass's `shape_paragraph` calls.
 #[allow(clippy::trivially_copy_pass_by_ref)]
 fn measure_hyphen_glyph(
@@ -199,7 +210,7 @@ fn measure_hyphen_glyph(
     font_size: f32,
 ) -> Option<ShapedGlyph> {
     paragraph
-        .shape_paragraph(
+        .shape_paragraph_shared(
             "-",
             fallback,
             attributes,
@@ -212,7 +223,7 @@ fn measure_hyphen_glyph(
         .next()
 }
 
-#[doc = include_str!("text_leaf_measure.doc/measure_ellipsis_glyph.md")]
+#[doc = include_str!("../../docs/api/orchestration/text_leaf_measure.doc/measure_ellipsis_glyph.md")]
 // `attributes` stays by reference to match this pass's `shape_paragraph` calls.
 #[allow(clippy::trivially_copy_pass_by_ref)]
 fn measure_ellipsis_glyph(
@@ -223,7 +234,7 @@ fn measure_ellipsis_glyph(
     font_size: f32,
 ) -> Option<ShapedGlyph> {
     paragraph
-        .shape_paragraph(
+        .shape_paragraph_shared(
             "…",
             fallback,
             attributes,
@@ -236,7 +247,7 @@ fn measure_ellipsis_glyph(
         .next()
 }
 
-#[doc = include_str!("text_leaf_measure.doc/tab_stop_width.md")]
+#[doc = include_str!("../../docs/api/orchestration/text_leaf_measure.doc/tab_stop_width.md")]
 #[allow(clippy::too_many_arguments, clippy::trivially_copy_pass_by_ref)]
 fn tab_stop_width(
     tab_size: TabSize,
@@ -259,7 +270,7 @@ fn tab_stop_width(
     tab_size.resolve(space_advance)
 }
 
-#[doc = include_str!("text_leaf_measure.doc/measure_space_advance.md")]
+#[doc = include_str!("../../docs/api/orchestration/text_leaf_measure.doc/measure_space_advance.md")]
 // `attributes` stays by reference to match this pass's `shape_paragraph` calls.
 #[allow(clippy::trivially_copy_pass_by_ref)]
 fn measure_space_advance(
@@ -270,7 +281,7 @@ fn measure_space_advance(
     font_size: f32,
 ) -> f32 {
     paragraph
-        .shape_paragraph(
+        .shape_paragraph_shared(
             " ",
             fallback,
             attributes,
@@ -284,7 +295,7 @@ fn measure_space_advance(
         .sum()
 }
 
-#[doc = include_str!("text_leaf_measure.doc/measure_ch_width.md")]
+#[doc = include_str!("../../docs/api/orchestration/text_leaf_measure.doc/measure_ch_width.md")]
 // `attributes` stays by reference to match this pass's `shape_paragraph` calls.
 #[allow(clippy::trivially_copy_pass_by_ref)]
 pub(super) fn measure_ch_width(
@@ -297,7 +308,7 @@ pub(super) fn measure_ch_width(
     // this probes LTR rather than threading the node's `direction` in: a run of
     // one neutral-width glyph reorders to itself.
     let advance: f32 = paragraph
-        .shape_paragraph(
+        .shape_paragraph_shared(
             "0",
             fallback,
             attributes,
@@ -312,7 +323,7 @@ pub(super) fn measure_ch_width(
     (advance > 0.0).then_some(advance)
 }
 
-#[doc = include_str!("text_leaf_measure.doc/measure_face.md")]
+#[doc = include_str!("../../docs/api/orchestration/text_leaf_measure.doc/measure_face.md")]
 pub(super) fn measure_face() -> FontFace {
     FontFace::new(
         FontFamily::generic(GenericFamily::Monospace),

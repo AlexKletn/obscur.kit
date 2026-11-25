@@ -1,88 +1,16 @@
-#![doc = include_str!("animation_compiler.doc/_module.md")]
+#![doc = include_str!("../../docs/api/compiler/animation_compiler.doc/_module.md")]
 
 use crate::parser::{ParsedDeclaration, ParsedValue};
 
 use obscur_identity::InternedSymbol;
 use obscur_motion::timeline::{FillMode, PlaybackDirection, RepeatCount};
 
+use super::CssSymbolInterner;
 use super::property_compiler::narrow_f32;
-use super::stylesheet_compiler::CssSymbolInterner;
 
-#[doc = include_str!("animation_compiler.doc/AnimationRef.md")]
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct AnimationRef {
-    #[doc = include_str!("animation_compiler.doc/name.md")]
-    pub name: InternedSymbol,
-    #[doc = include_str!("animation_compiler.doc/duration_secs.md")]
-    pub duration_secs: f32,
-    #[doc = include_str!("animation_compiler.doc/delay_secs.md")]
-    pub delay_secs: f32,
-    #[doc = include_str!("animation_compiler.doc/repeat.md")]
-    pub repeat: RepeatCount,
-    #[doc = include_str!("animation_compiler.doc/direction.md")]
-    pub direction: PlaybackDirection,
-    #[doc = include_str!("animation_compiler.doc/alternates.md")]
-    pub alternates: bool,
-    #[doc = include_str!("animation_compiler.doc/fill.md")]
-    pub fill: FillMode,
-}
+use super::{AnimationRef, animation_playback::AnimationPlayback};
 
-impl AnimationRef {
-    #[doc = include_str!("animation_compiler.doc/new.md")]
-    #[must_use]
-    fn new(name: InternedSymbol, duration_secs: f32) -> Self {
-        Self {
-            name,
-            duration_secs,
-            delay_secs: 0.0,
-            repeat: RepeatCount::Finite(1),
-            direction: PlaybackDirection::Forward,
-            alternates: false,
-            fill: FillMode::None,
-        }
-    }
-}
-
-#[doc = include_str!("animation_compiler.doc/Playback.md")]
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct Playback {
-    #[doc = include_str!("animation_compiler.doc/delay_secs_2.md")]
-    delay_secs: f32,
-    #[doc = include_str!("animation_compiler.doc/repeat_2.md")]
-    repeat: RepeatCount,
-    #[doc = include_str!("animation_compiler.doc/direction_2.md")]
-    direction: PlaybackDirection,
-    #[doc = include_str!("animation_compiler.doc/alternates_2.md")]
-    alternates: bool,
-    #[doc = include_str!("animation_compiler.doc/fill_2.md")]
-    fill: FillMode,
-}
-
-impl Default for Playback {
-    fn default() -> Self {
-        Self {
-            delay_secs: 0.0,
-            repeat: RepeatCount::Finite(1),
-            direction: PlaybackDirection::Forward,
-            alternates: false,
-            fill: FillMode::None,
-        }
-    }
-}
-
-impl Playback {
-    #[doc = include_str!("animation_compiler.doc/apply_to.md")]
-    fn apply_to(self, mut reference: AnimationRef) -> AnimationRef {
-        reference.delay_secs = self.delay_secs;
-        reference.repeat = self.repeat;
-        reference.direction = self.direction;
-        reference.alternates = self.alternates;
-        reference.fill = self.fill;
-        reference
-    }
-}
-
-#[doc = include_str!("animation_compiler.doc/direction_from_keyword.md")]
+#[doc = include_str!("../../docs/api/compiler/animation_compiler.doc/direction_from_keyword.md")]
 fn direction_from_keyword(keyword: &str) -> Option<(PlaybackDirection, bool)> {
     if keyword.eq_ignore_ascii_case("normal") {
         Some((PlaybackDirection::Forward, false))
@@ -97,7 +25,10 @@ fn direction_from_keyword(keyword: &str) -> Option<(PlaybackDirection, bool)> {
     }
 }
 
-#[doc = include_str!("animation_compiler.doc/repeat_from_value.md")]
+/// Maps an `<single-animation-iteration-count>` component value to a
+/// [`RepeatCount`]: `infinite`, or a non-negative number rounded to whole
+/// iterations. Fractional counts are not modelled and round to the nearest
+/// whole iteration.
 fn repeat_from_value(value: &ParsedValue) -> Option<RepeatCount> {
     match value {
         ParsedValue::Keyword(keyword) if keyword.eq_ignore_ascii_case("infinite") => {
@@ -108,18 +39,18 @@ fn repeat_from_value(value: &ParsedValue) -> Option<RepeatCount> {
     }
 }
 
-#[doc = include_str!("animation_compiler.doc/AnimationCompiler.md")]
+/// Lowers `animation`/`animation-*` declarations into [`AnimationRef`]s.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct AnimationCompiler;
 
 impl AnimationCompiler {
-    #[doc = include_str!("animation_compiler.doc/new_2.md")]
+    /// Creates an animation compiler.
     #[must_use]
     pub const fn new() -> Self {
         Self
     }
 
-    #[doc = include_str!("animation_compiler.doc/compile.md")]
+    #[doc = include_str!("../../docs/api/compiler/animation_compiler.doc/compile.md")]
     #[must_use]
     pub fn compile(
         &self,
@@ -132,7 +63,7 @@ impl AnimationCompiler {
         // Playback longhands, and the declaration index each was authored at (an
         // unauthored one must not clobber what the shorthand set, and one that
         // precedes the shorthand is reset by it).
-        let mut long_playback = Playback::default();
+        let mut long_playback = AnimationPlayback::default();
         let mut long_delay_at: Option<usize> = None;
         let mut long_repeat_at: Option<usize> = None;
         let mut long_direction_at: Option<usize> = None;
@@ -225,13 +156,15 @@ impl AnimationCompiler {
             }
         }
         for name in long_names {
-            out.push(long_playback.apply_to(AnimationRef::new(name, long_duration)));
+            out.push(long_playback.bind(name, long_duration));
         }
         out
     }
 }
 
-#[doc = include_str!("animation_compiler.doc/whole_iterations.md")]
+/// Rounds a non-negative iteration count to whole iterations, clamped into
+/// `u32`. A count above `u32::MAX` saturates (it is indistinguishable from
+/// `infinite` in practice, but is still finite).
 // The value is rounded to an integer and clamped to `0..=u32::MAX` first, so
 // neither truncation nor sign loss can occur.
 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -240,7 +173,7 @@ fn whole_iterations(count: f64) -> u32 {
     clamped as u32
 }
 
-#[doc = include_str!("animation_compiler.doc/split_layers.md")]
+/// Splits a component-value list into comma-separated layers.
 fn split_layers(values: &[ParsedValue]) -> Vec<&[ParsedValue]> {
     values
         .split(|value| matches!(value, ParsedValue::Comma))
@@ -248,14 +181,14 @@ fn split_layers(values: &[ParsedValue]) -> Vec<&[ParsedValue]> {
         .collect()
 }
 
-#[doc = include_str!("animation_compiler.doc/compile_shorthand_layer.md")]
+#[doc = include_str!("../../docs/api/compiler/animation_compiler.doc/compile_shorthand_layer.md")]
 fn compile_shorthand_layer(
     layer: &[ParsedValue],
     interner: &mut CssSymbolInterner,
 ) -> Option<AnimationRef> {
     let mut name: Option<InternedSymbol> = None;
     let mut times: Vec<f32> = Vec::new();
-    let mut playback = Playback::default();
+    let mut playback = AnimationPlayback::default();
     let mut repeat_seen = false;
     for component in layer {
         match component {
@@ -293,10 +226,10 @@ fn compile_shorthand_layer(
     }
     playback.delay_secs = times.get(1).copied().unwrap_or(0.0);
     let duration = times.first().copied().unwrap_or(0.0);
-    name.map(|name| playback.apply_to(AnimationRef::new(name, duration)))
+    name.map(|name| playback.bind(name, duration))
 }
 
-#[doc = include_str!("animation_compiler.doc/first_time_secs.md")]
+/// Returns the first time dimension in `values`, in seconds.
 fn first_time_secs(values: &[ParsedValue]) -> Option<f32> {
     values.iter().find_map(|value| match value {
         ParsedValue::Dimension { value, unit } => time_secs(*value, unit),
@@ -304,7 +237,7 @@ fn first_time_secs(values: &[ParsedValue]) -> Option<f32> {
     })
 }
 
-#[doc = include_str!("animation_compiler.doc/time_secs.md")]
+/// Converts a `s`/`ms` dimension to seconds, or [`None`] for any other unit.
 fn time_secs(value: f64, unit: &str) -> Option<f32> {
     if unit.eq_ignore_ascii_case("s") {
         Some(narrow_f32(value))
@@ -315,7 +248,8 @@ fn time_secs(value: f64, unit: &str) -> Option<f32> {
     }
 }
 
-#[doc = include_str!("animation_compiler.doc/is_reserved_keyword.md")]
+/// Returns whether `keyword` is a reserved `animation`/timing keyword (so it is
+/// not mistaken for an animation *name* in the shorthand).
 fn is_reserved_keyword(keyword: &str) -> bool {
     const RESERVED: &[&str] = &[
         "none",
