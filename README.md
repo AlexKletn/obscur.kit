@@ -1,83 +1,57 @@
-# Obscur Kit 2
+# Obscur Kit
 
-Rust-native, platform-independent retained-mode UI toolkit.
+[Русская версия](README.ru.md) · [Contributing](CONTRIBUTING.md)
 
-It runs: an application opens a window, styles itself with real CSS, lays out
-flow / flex / grid, shapes and paints text through HarfRust, and renders on the
-GPU through Vello — or on the CPU, with no display, into a PNG.
+Obscur Kit is a Rust toolkit for building retained-mode user interfaces. Build a
+view in Rust or author it in `.okui`, style it with CSS, and render it to a window
+or off-screen. Applications use the [`obscur-kit` facade](crates/facade/obscur-kit/).
 
-- [`docs/api/`](docs/api/) — **the API documentation**: what the kit offers, in
-  the order an application meets it, with an explicit line between what is wired
-  end-to-end and what merely compiles.
-- `cargo doc --no-deps -p obscur-kit --features full` — the exhaustive per-item
-  reference. Every public item is documented; `missing_docs` is clean across the
-  workspace with all features on.
-- [`specs/`](specs/) — the design the implementation is measured against.
-- [`docs/conformance-audit.md`](docs/conformance-audit.md) — a spec-by-spec audit
-  (dated; read it with its own caveat about decay).
+The runtime reconciles views into a retained tree, applies the cascade, computes
+flow, flex and grid layout, and builds a scene for rendering. The toolkit also
+provides controls, HarfRust text shaping, virtual lists, transitions, and
+gestures with touchscreen and touchpad sources.
 
-## Layout (spec §2.1)
+## Run an example
 
-```
-crates/
-  foundation/   (5)  identity, geometry, capability, task, diagnostics
-  domain/      (16)  view, tree, interaction, data-transfer, style, layout,
-                     text, motion, resources, scene, render, accessibility,
-                     windowing, system, routing, localization
-  application/  (3)  runtime, headless, testkit
-  frontend/     (5)  ui-ir, css, okui-syntax, okui-compiler, ui-macros
-  components/   (3)  primitives, widgets, theme-system
-  adapters/    (18)  window-winit, shell-layer, render-vello, render-cpu,
-                     accessibility-accesskit, task-smol, task-tokio,
-                     resource-fs, resource-decode, cache-fs,
-                     text-harfrust, text-unicode, text-hyphenation,
-                     font-fontconfig, system-{linux,windows,macos,web}
-  diagnostics/  (2)  devtools-protocol, devtools-server
-  plugin/       (9)  plugin-{model,api,abi,package,host,sdk,macros,
-                     executor-wasm,executor-process}
-  facade/       (1)  obscur-kit
-tools/          (4)  xtask (architecture checks), devtools, okui-lsp, plugin-cli
+From the workspace root, run the windowed counter or render the capabilities
+demo to PNG using the CPU backend.
+
+```sh
+cargo run -p obscur-kit --features full --example hello_app
+cargo run -p obscur-kit --example capabilities_png
 ```
 
-Source layout follows the spec's rules: one main entity per file; `mod.rs` and
-`lib.rs` hold only declarations and re-exports (spec §3.1).
+The windowed example needs a display and a GPU backend. Linux is the primary
+desktop target. Wayland panels require a compositor that implements
+`wlr-layer-shell`. Availability of native integrations depends on the enabled
+Cargo features and the host platform.
 
-## Commands
+## Application integration
 
-```
-cargo run -p xtask -- check      # architecture rules hold (mod.rs/lib.rs
-                                 # layout, banned file names, unsafe boundary,
-                                 # pure-crate dependency direction)
-cargo run -p xtask -- consumer   # checks/facade-consumer builds: a crate whose
-                                 # only dependency is the facade, which is the
-                                 # only place an emitted-path defect shows up
-cargo build --workspace
-cargo test --workspace           # the suite is the oracle
-cargo fmt --all --check
-cargo clippy --workspace --all-targets
-```
+- [Entry points](docs/api/01-entry-points.md) covers `App`, embedding the runtime,
+  and headless use.
+- [Input and gestures](docs/api/06-input.md) covers gesture sources and handling.
+- [Hosting](docs/api/10-hosting.md) covers the host-facing APIs.
+- The [facade manifest](crates/facade/obscur-kit/Cargo.toml) lists optional
+  backends, including Vello, winit, layer shell, AccessKit, and process and WASM
+  plugin execution. Applications define their own plugin integration points.
 
-## Status
+Build the Rust API reference with
+`cargo doc --no-deps -p obscur-kit --features full`.
 
-Working, and uneven — which is stated here rather than left to be discovered.
+## Repository
 
-**Real end-to-end:** the frame pipeline (component → desired tree → retained tree
-→ style → layout → scene → paint), the CSS cascade over 119 longhands, flow /
-flex / grid layout, the text stack with system-font fallback, pointer and
-**multi-touch** input with pan / fling / long-press, virtual lists the runtime
-windows, CSS motion, `env()` safe-area insets, both render backends, the
-one-call `App` entry point (`examples/hello_app.rs` — 100 lines against
-`windowed_counter.rs`'s 891 for the same behaviour), `wlr-layer-shell` surfaces,
-and `.okui` compiled to ordinary Rust on both front ends.
+- [`crates/`](crates/) contains the domain, runtime, frontend, components, adapters,
+  plugin crates, and public facade.
+- [`tools/`](tools/) contains the architecture checker, DevTools client, `.okui`
+  language server, and plugin CLI.
+- [`specs/`](specs/) contains the design and crate architecture. The dated
+  [conformance audit](docs/conformance-audit.md) records a snapshot of coverage.
 
-Measured at `cff9051` (2026-07-31): **6,013 tests passing, 0 failing**; `xtask
-check`, `xtask consumer` and `cargo fmt --all --check` clean.
+See the [contribution guide](CONTRIBUTING.md) for workspace checks and conventions.
 
-**Not wired:** several crates compile, pass their tests, and are called by
-nothing — routing, the windowing domain types, the testkit, the plugin tier. A
-type existing here is not evidence that anything invokes it. The list is
-[`docs/api/12-reality.md`](docs/api/12-reality.md), with the grep that produced
-each entry.
+## License
 
-The developed platform is **Linux** (X11 and Wayland, including a real tablet
-target); macOS and Windows have honest placeholder providers.
+Project code is licensed under [MIT](LICENSE). The bundled Noto fonts use the
+[SIL Open Font License 1.1](assets/fonts/LICENSE). Third-party material is
+covered by its respective license notices.

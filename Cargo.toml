@@ -17,8 +17,8 @@ default-members = ["crates/application/obscur-runtime"]
 [workspace.package]
 edition = "2024"
 rust-version = "1.90"
-license = "MIT OR Apache-2.0"
-repository = "https://example.invalid/obscur-kit"
+license = "MIT"
+repository = "https://github.com/AlexKletn/obscur.kit"
 
 # All external and internal dependency versions are centralised here (spec §4.1, §5.1).
 [workspace.dependencies]
