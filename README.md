@@ -26,6 +26,18 @@ desktop target. Wayland panels require a compositor that implements
 `wlr-layer-shell`. Availability of native integrations depends on the enabled
 Cargo features and the host platform.
 
+## The `.okui` format
+
+`.okui` is Obscur Kit’s declarative markup for describing a UI tree with
+XML-like tags. Tags name components, attributes set properties or bind events
+to commands, and `{…}` bindings supply data. CSS handles styling, and the
+application supplies the data and command handlers.
+
+A build script can compile a `.okui` file to ordinary Rust. An application can
+also load the file through `App::screen` and supply bindings via `ScreenData`.
+For inline markup in Rust, use the `okui!` macro. See the
+[authoring formats guide](docs/api/09-authoring-formats.md).
+
 ## Application integration
 
 - [Entry points](docs/api/01-entry-points.md) covers `App`, embedding the runtime,
