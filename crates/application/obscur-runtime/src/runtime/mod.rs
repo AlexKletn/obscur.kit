@@ -62,6 +62,7 @@ mod style_phase;
 pub(crate) use style_phase::StylePhase;
 
 mod compose_phase;
+mod viewport_shape;
 
 pub(crate) use compose_phase::ComposePhase;
 

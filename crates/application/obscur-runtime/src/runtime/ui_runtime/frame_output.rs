@@ -44,26 +44,12 @@ impl UiRuntime {
     /// Resolved CSS corners of a root that covers the window viewport.
     #[must_use]
     pub fn viewport_corner_radii(&self) -> CornerRadii {
-        let Some(document) = self.tree.root().and_then(|root| self.tree.get(root)) else {
-            return CornerRadii::default();
-        };
-        let &[root] = document.child_nodes() else {
-            return CornerRadii::default();
-        };
-        let Some(layout) = self.boxes.get(&root) else {
-            return CornerRadii::default();
-        };
-        let bounds = layout.bounds;
-        let viewport = self.viewport();
-        if bounds.origin.x.abs() > 0.01
-            || bounds.origin.y.abs() > 0.01
-            || (bounds.size.width - viewport.width).abs() > 0.01
-            || (bounds.size.height - viewport.height).abs() > 0.01
-        {
-            return CornerRadii::default();
-        }
-        crate::orchestration::corner_radii_of(self.computed.get(&root), Some(bounds))
-            .normalized(bounds)
+        crate::runtime::viewport_shape::radii(
+            &self.tree,
+            &self.boxes,
+            &self.computed,
+            self.viewport(),
+        )
     }
 
     /// Returns this runtime's identity.

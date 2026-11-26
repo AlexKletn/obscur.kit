@@ -3,6 +3,7 @@
 use obscur_diagnostics::DiagnosticSink;
 use obscur_geometry::AffineTransform;
 use obscur_identity::{FastMap, NodeId};
+use obscur_scene::clip::Clip;
 use obscur_scene::command::{DisplayList, PaintCommand};
 use obscur_scene::scene::Scene;
 use obscur_tree::tree::RetainedTree;
@@ -150,6 +151,12 @@ impl<'a> ComposePhase<'a> {
         } else {
             (self.tree, self.boxes, None)
         };
+        let viewport = self.surface.viewport();
+        let window_clip = super::viewport_shape::clip(
+            viewport,
+            self.surface.device_scale(),
+            super::viewport_shape::radii(self.tree, self.boxes, computed, viewport),
+        );
         let display_list = self.scene_composer.compose_at_surface(
             tree,
             computed,
@@ -185,36 +192,37 @@ impl<'a> ComposePhase<'a> {
         let count = display_list.len() as u64;
         self.telemetry
             .record_phase(FramePhase::Compose, count, ctx.id(), self.diagnostics);
-        // Bracket the whole scene in a root device-scale transform so layout
-        // (in logical px) rasterizes at physical resolution. At scale `1.0` this
-        // is a no-op and the list is byte-identical (see `scaled_root`).
         self.scene
-            .set_root(Self::scaled_root(self.surface, display_list));
-        // Compose ends HERE, after the device-scale wrapper and the install —
-        // `scaled_root` moves every command of the frame into a new vector, and
-        // it does so precisely on the HiDPI panels this is being measured on.
-        // The FRAME is not done: `finish()` moved to the end of `run_frame`,
-        // because closing the frame's clock here left the snapshot, the
-        // accessibility publish and the scroll refresh outside every number this
-        // instrument prints (§3.0 M1).
+            .set_root(Self::scaled_root(self.surface, display_list, window_clip));
         phase_clock.mark_compose();
     }
 
     #[doc = include_str!("../../docs/api/runtime/compose_phase.doc/scaled_root.md")]
-    fn scaled_root(surface: &SurfaceGeometry, display_list: DisplayList) -> DisplayList {
-        let Some(root) = surface.root_transform() else {
+    fn scaled_root(
+        surface: &SurfaceGeometry,
+        display_list: DisplayList,
+        window_clip: Option<Clip>,
+    ) -> DisplayList {
+        let transform = surface.root_transform();
+        if transform.is_none() && window_clip.is_none() {
             return display_list;
-        };
-        // The list is owned and about to be dropped, so its commands are MOVED
-        // into the wrapper. `extend_from_slice` deep-cloned every command in the
-        // frame — every path, every glyph run, every image handle — on a machine
-        // whose only crime was having a HiDPI display, since that is exactly when
-        // `root_transform` is `Some`.
+        }
         let inner = display_list.into_commands();
-        let mut commands = Vec::with_capacity(inner.len() + 2);
-        commands.push(PaintCommand::PushTransform(root));
+        let mut commands = Vec::with_capacity(inner.len() + 4);
+        let clipped = window_clip.is_some();
+        if let Some(clip) = window_clip {
+            commands.push(PaintCommand::PushClip(clip));
+        }
+        if let Some(transform) = transform {
+            commands.push(PaintCommand::PushTransform(transform));
+        }
         commands.extend(inner);
-        commands.push(PaintCommand::PopTransform);
+        if transform.is_some() {
+            commands.push(PaintCommand::PopTransform);
+        }
+        if clipped {
+            commands.push(PaintCommand::PopClip);
+        }
         DisplayList::from_commands(commands)
     }
 }
@@ -271,7 +279,7 @@ mod tests {
 
         let source = DisplayList::from_commands(vec![long_path()]);
         let expected = segments_ptr(&source, 0);
-        let wrapped = ComposePhase::scaled_root(&surface, source);
+        let wrapped = ComposePhase::scaled_root(&surface, source, None);
 
         assert!(matches!(
             wrapped.commands().first(),
@@ -299,7 +307,7 @@ mod tests {
             PaintCommand::PopClip,
         ]);
         let expected = segments_ptr(&source, 0);
-        let out = ComposePhase::scaled_root(&surface, source);
+        let out = ComposePhase::scaled_root(&surface, source, None);
         assert_eq!(out.len(), 3);
         assert!(core::ptr::eq(segments_ptr(&out, 0), expected));
     }
