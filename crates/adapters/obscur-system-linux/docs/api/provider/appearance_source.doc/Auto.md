@@ -1,5 +1,5 @@
-Ask every source in turn and merge what they say.
+Use the portal and the settings provider for the active desktop session.
 
-The default. Earlier sources outrank later ones field by field, so a KDE desktop
-running a portal gets the portal's scheme *and* Qt's palette, rather than
-whichever came first.
+The portal takes precedence field by field. GNOME fills missing fields from
+GSettings, while KDE Plasma fills them from `kdeglobals` and `kwinrc`.
+When the session is unknown or unsupported, only the portal is consulted.

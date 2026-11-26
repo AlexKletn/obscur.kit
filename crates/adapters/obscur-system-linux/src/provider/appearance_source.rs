@@ -31,6 +31,21 @@ impl AppearanceSource {
         }
     }
 
+    pub(super) fn session_order(self, desktop: &str) -> &'static [Self] {
+        if !self.is_auto() {
+            return self.order();
+        }
+        for name in desktop.split(':').map(str::trim) {
+            if name.eq_ignore_ascii_case("KDE") || name.eq_ignore_ascii_case("Plasma") {
+                return &[Self::Portal, Self::Qt];
+            }
+            if name.eq_ignore_ascii_case("GNOME") {
+                return &[Self::Portal, Self::Gtk];
+            }
+        }
+        &[Self::Portal]
+    }
+
     /// Whether this asks everything rather than one named store.
     #[must_use]
     pub const fn is_auto(self) -> bool {
@@ -79,3 +94,7 @@ mod tests {
         assert_eq!(order[order.len() - 1], AppearanceSource::Qt);
     }
 }
+
+#[cfg(test)]
+#[path = "appearance_source.tests.rs"]
+mod session_tests;

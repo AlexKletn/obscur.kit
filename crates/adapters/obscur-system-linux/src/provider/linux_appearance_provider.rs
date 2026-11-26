@@ -22,7 +22,7 @@ pub struct LinuxAppearanceProvider {
 }
 
 impl LinuxAppearanceProvider {
-    /// Ask every source, in `Auto` order.
+    /// Ask the portal and the active desktop’s settings provider.
     #[must_use]
     pub fn new() -> Self {
         Self::from_source(AppearanceSource::Auto)
@@ -66,6 +66,14 @@ impl LinuxAppearanceProvider {
         self
     }
 
+    fn providers(&self) -> impl Iterator<Item = &dyn AppearanceProvider> {
+        let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+        self.source
+            .session_order(&desktop)
+            .iter()
+            .filter_map(|source| self.provider_for(*source))
+    }
+
     #[doc = include_str!("../../docs/api/provider/linux_appearance_provider.doc/provider_for.md")]
     fn provider_for(&self, source: AppearanceSource) -> Option<&dyn AppearanceProvider> {
         match source {
@@ -79,41 +87,16 @@ impl LinuxAppearanceProvider {
 
 impl AppearanceProvider for LinuxAppearanceProvider {
     fn appearance(&self) -> SystemAppearance {
-        // Merged rather than first-wins. A KDE desktop running a portal answers
-        // the scheme twice and the palette once, and stopping at the first
-        // source that said anything would drop every colour on the machine.
-        // Earlier sources outrank later ones field by field.
-        let kde_desktop = self.source.is_auto()
-            && std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|desktop| {
-                desktop
-                    .split(':')
-                    .any(|name| name.eq_ignore_ascii_case("KDE"))
-            });
-        self.source
-            .order()
-            .iter()
-            .filter_map(|source| {
-                self.provider_for(*source)
-                    .map(|provider| (source, provider))
-            })
-            .filter(|(_, provider)| provider.answers())
-            .fold(SystemAppearance::default(), |merged, (source, provider)| {
-                let mut next = provider.appearance();
-                // GSettings can return GNOME defaults inside Plasma. KWin owns
-                // the title bar preferences there.
-                if kde_desktop && *source == AppearanceSource::Gtk {
-                    next.window_decoration = None;
-                }
-                merged.merge_under(&next)
+        self.providers()
+            .filter(|provider| provider.answers())
+            .fold(SystemAppearance::default(), |merged, provider| {
+                merged.merge_under(&provider.appearance())
             })
     }
 
     fn support(&self) -> SupportLevel {
         let levels: Vec<SupportLevel> = self
-            .source
-            .order()
-            .iter()
-            .filter_map(|source| self.provider_for(*source))
+            .providers()
             .map(AppearanceProvider::support)
             .filter(|level| !matches!(level, SupportLevel::Unavailable))
             .collect();
@@ -134,10 +117,7 @@ impl AppearanceProvider for LinuxAppearanceProvider {
     #[doc = include_str!("../../docs/api/provider/linux_appearance_provider.doc/watch_support.md")]
     fn watch_support(&self) -> SupportLevel {
         let asked: Vec<&dyn AppearanceProvider> = self
-            .source
-            .order()
-            .iter()
-            .filter_map(|source| self.provider_for(*source))
+            .providers()
             .filter(|provider| provider.answers())
             .collect();
 
@@ -158,10 +138,7 @@ impl AppearanceProvider for LinuxAppearanceProvider {
     #[doc = include_str!("../../docs/api/provider/linux_appearance_provider.doc/watch.md")]
     fn watch(&self, on_change: AppearanceCallback) -> Option<AppearanceWatch> {
         let watches: Vec<AppearanceWatch> = self
-            .source
-            .order()
-            .iter()
-            .filter_map(|source| self.provider_for(*source))
+            .providers()
             .filter(|provider| provider.answers())
             .filter_map(|provider| provider.watch(Arc::clone(&on_change)))
             .collect();

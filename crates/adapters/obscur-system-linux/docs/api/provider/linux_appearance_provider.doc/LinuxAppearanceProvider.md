@@ -1,11 +1,7 @@
-The Linux appearance source, composed.
+Reads desktop appearance settings on Linux.
 
-Holds all three readers and consults whichever
-[`AppearanceSource`](super::AppearanceSource) names. The composition is the
-substance: **merged, not first-wins.** A KDE desktop running a portal answers
-the scheme twice and the palette once, and stopping at the first source that
-said anything would throw away every colour on the machine.
-
-Earlier sources outrank later ones field by field, so the portal — which agrees
-with the rest of the desktop — decides the scheme, and Qt still supplies the
-colours nothing else has.
+An explicit source reads only the selected settings store. In automatic mode,
+the portal takes precedence and the source for the active session fills in
+missing fields. GNOME uses GSettings, KDE Plasma uses its configuration files,
+and other sessions use the portal alone. The same selection applies to
+capability reports and change notifications.

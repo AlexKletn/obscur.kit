@@ -1,3 +1,4 @@
-The sources to ask, in the order they outrank each other.
+The candidate sources in precedence order.
 
-One entry for a named source; three for [`Auto`](Self::Auto).
+A named source has one entry. `Auto` lists all candidates, and the Linux
+appearance provider selects the ones that belong to the current session.
