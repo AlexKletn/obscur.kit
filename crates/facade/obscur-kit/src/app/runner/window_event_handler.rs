@@ -235,11 +235,7 @@ impl ApplicationHandler<WindowWake> for AppRunner {
                         self.now_micros()
                     );
                 }
-                if self.threaded_present {
-                    self.queued_resize = (extent != self.extent).then_some(extent);
-                } else {
-                    self.apply_resize(extent);
-                }
+                self.accept_window_extent(extent);
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
                 self.scale_factor = scale_factor;
@@ -258,7 +254,15 @@ impl ApplicationHandler<WindowWake> for AppRunner {
                     ControlFlow::Break(()) => return,
                 }
             }
-            WindowEvent::Touch(contact) => self.handle_touch_contact(contact),
+            WindowEvent::Touch(contact) => {
+                #[cfg(target_os = "linux")]
+                if winit::platform::wayland::ActiveEventLoopExtWayland::is_wayland(event_loop)
+                    && self.handle_touch_window_resize(contact)
+                {
+                    return;
+                }
+                self.handle_touch_contact(contact);
+            }
             WindowEvent::PinchGesture { delta, phase, .. } if cfg!(target_os = "macos") => {
                 self.native_touchpad_transform(
                     transform_component::TransformComponent::Magnification(delta as f32),

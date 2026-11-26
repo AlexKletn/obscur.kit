@@ -3,6 +3,8 @@
 mod frame_preparation;
 #[cfg(target_os = "linux")]
 mod opaque_scene;
+#[cfg(target_os = "linux")]
+mod touch_window_resize;
 mod touchpad_transform;
 mod transform_component;
 #[cfg(target_os = "linux")]
@@ -158,6 +160,8 @@ fn run_inner(
         resize,
         prefer_opengl,
         resize_cursor: None,
+        #[cfg(target_os = "linux")]
+        touch_window_resize: None,
         size,
         size_limits,
         window_mode,
@@ -297,6 +301,8 @@ struct AppRunner {
     resize: bool,
     prefer_opengl: bool,
     resize_cursor: Option<winit::window::ResizeDirection>,
+    #[cfg(target_os = "linux")]
+    touch_window_resize: Option<touch_window_resize::TouchWindowResize>,
     size: (f32, f32),
     size_limits: WindowSizeLimits,
     window_mode: crate::WindowMode,
@@ -452,6 +458,14 @@ impl AppRunner {
         {
             self.runtime.request_frame(FrameReason::UiCommit);
             self.request_redraw();
+        }
+    }
+
+    fn accept_window_extent(&mut self, extent: (u32, u32)) {
+        if self.threaded_present {
+            self.queued_resize = (extent != self.extent).then_some(extent);
+        } else {
+            self.apply_resize(extent);
         }
     }
 
