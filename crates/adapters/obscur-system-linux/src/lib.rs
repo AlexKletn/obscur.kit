@@ -3,4 +3,3 @@
 
 pub mod icons;
 pub mod provider;
-pub mod window_buttons;
