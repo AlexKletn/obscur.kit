@@ -3177,6 +3177,7 @@ dependencies = [
  "wayland-client",
  "wayland-protocols",
  "wayland-protocols-plasma",
+ "winit",
 ]
 
 [[package]]

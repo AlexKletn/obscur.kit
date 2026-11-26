@@ -27,12 +27,7 @@ pub struct TouchWindowMove<W> {
 }
 
 impl<W: HasDisplayHandle + HasWindowHandle> TouchWindowMove<W> {
-    /// Borrows an existing window and its xdg-toplevel on the window thread.
-    ///
-    /// # Safety
-    ///
-    /// The toplevel must be the live Wayland proxy belonging to `window`.
-    pub unsafe fn new(window: W, toplevel: NonNull<c_void>) -> Result<Option<Self>, String> {
+    unsafe fn new(window: W, toplevel: NonNull<c_void>) -> Result<Option<Self>, String> {
         // SAFETY: the owned window outlives the guest queue and its proxies.
         let Some((connection, surface)) = (unsafe { window_surface(&window) })? else {
             return Ok(None);
@@ -103,6 +98,20 @@ impl<W: HasDisplayHandle + HasWindowHandle> TouchWindowMove<W> {
             .dispatch_pending(&mut self.state)
             .map_err(|error| error.to_string())?;
         self.queue.flush().map_err(|error| error.to_string())
+    }
+}
+
+impl TouchWindowMove<std::sync::Arc<winit::window::Window>> {
+    /// Tracks touch serials for the Wayland toplevel of a winit window.
+    pub fn from_winit(
+        window: std::sync::Arc<winit::window::Window>,
+    ) -> Result<Option<Self>, String> {
+        use winit::platform::wayland::WindowExtWayland;
+        let Some(toplevel) = window.xdg_toplevel() else {
+            return Ok(None);
+        };
+        // SAFETY: winit supplied the toplevel of the window retained by the guest queue.
+        unsafe { Self::new(window, toplevel) }
     }
 }
 

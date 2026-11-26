@@ -158,14 +158,8 @@ impl ApplicationHandler<WindowWake> for AppRunner {
         #[cfg(target_os = "linux")]
         {
             self.init_wayland_feedback(&window);
-            use winit::platform::wayland::WindowExtWayland;
-            if !self.decorated
-                && let Some(toplevel) = window.xdg_toplevel()
-            {
-                // SAFETY: winit supplied the xdg-toplevel of the retained window.
-                match unsafe {
-                    obscur_wayland_effects::TouchWindowMove::new(Arc::clone(&window), toplevel)
-                } {
+            if !self.decorated {
+                match obscur_wayland_effects::TouchWindowMove::from_winit(Arc::clone(&window)) {
                     Ok(touch_move) => self.wayland_touch_move = touch_move,
                     Err(error) => eprintln!("Wayland touch move unavailable: {error}"),
                 }
