@@ -162,8 +162,6 @@ fn run_inner(
         resize,
         prefer_opengl,
         resize_cursor: None,
-        #[cfg(target_os = "linux")]
-        touch_window_resize: None,
         size,
         size_limits,
         window_mode,
@@ -305,8 +303,6 @@ struct AppRunner {
     resize: bool,
     prefer_opengl: bool,
     resize_cursor: Option<winit::window::ResizeDirection>,
-    #[cfg(target_os = "linux")]
-    touch_window_resize: Option<touch_window_resize::TouchWindowResize>,
     size: (f32, f32),
     size_limits: WindowSizeLimits,
     window_mode: crate::WindowMode,

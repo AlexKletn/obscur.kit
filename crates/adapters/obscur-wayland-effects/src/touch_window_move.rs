@@ -11,6 +11,7 @@ use wayland_client::backend::ObjectId;
 use wayland_client::globals::{GlobalList, registry_queue_init};
 use wayland_client::protocol::wl_seat;
 use wayland_client::{EventQueue, Proxy};
+pub use wayland_protocols::xdg::shell::client::xdg_toplevel::ResizeEdge;
 use wayland_protocols::xdg::shell::client::xdg_toplevel::XdgToplevel;
 
 use crate::window_blur::window_surface;
@@ -19,8 +20,8 @@ use touch_move_state::TouchMoveState;
 /// Owns the guest queue that receives the compositor's touch serials.
 pub struct TouchWindowMove<W> {
     globals: Option<GlobalList>,
-    queue: EventQueue<TouchMoveState>,
     state: TouchMoveState,
+    queue: EventQueue<TouchMoveState>,
     toplevel: XdgToplevel,
     _window: W,
 }
@@ -70,11 +71,28 @@ impl<W: HasDisplayHandle + HasWindowHandle> TouchWindowMove<W> {
 
     /// Requests a move for the initial contact delivered to this surface.
     pub fn begin(&mut self, contact: u64) -> Result<bool, String> {
+        self.grab(contact, |toplevel, seat, serial| {
+            toplevel._move(seat, serial)
+        })
+    }
+
+    /// Starts compositor-owned resizing from a live touch contact.
+    pub fn resize(&mut self, contact: u64, edge: ResizeEdge) -> Result<bool, String> {
+        self.grab(contact, |toplevel, seat, serial| {
+            toplevel.resize(seat, serial, edge)
+        })
+    }
+
+    fn grab(
+        &mut self,
+        contact: u64,
+        request: impl FnOnce(&XdgToplevel, &wl_seat::WlSeat, u32),
+    ) -> Result<bool, String> {
         self.refresh()?;
         let Some((seat, serial)) = self.state.take_press(contact as i32) else {
             return Ok(false);
         };
-        self.toplevel._move(&seat, serial);
+        request(&self.toplevel, &seat, serial);
         self.queue.flush().map_err(|error| error.to_string())?;
         Ok(true)
     }

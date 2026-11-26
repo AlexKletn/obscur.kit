@@ -116,3 +116,20 @@ const fn resize_direction(direction: WindowResizeDirection) -> ResizeDirection {
         WindowResizeDirection::NorthWest => ResizeDirection::NorthWest,
     }
 }
+
+#[cfg(target_os = "linux")]
+pub(super) const fn wayland_resize_edge(
+    direction: ResizeDirection,
+) -> obscur_wayland_effects::ResizeEdge {
+    use obscur_wayland_effects::ResizeEdge;
+    match direction {
+        ResizeDirection::North => ResizeEdge::Top,
+        ResizeDirection::NorthEast => ResizeEdge::TopRight,
+        ResizeDirection::East => ResizeEdge::Right,
+        ResizeDirection::SouthEast => ResizeEdge::BottomRight,
+        ResizeDirection::South => ResizeEdge::Bottom,
+        ResizeDirection::SouthWest => ResizeEdge::BottomLeft,
+        ResizeDirection::West => ResizeEdge::Left,
+        ResizeDirection::NorthWest => ResizeEdge::TopLeft,
+    }
+}

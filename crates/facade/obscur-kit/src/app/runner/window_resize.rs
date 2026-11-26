@@ -24,10 +24,12 @@ impl AppRunner {
             (self.cursor.0 / self.scale_factor) as f32,
             (self.cursor.1 / self.scale_factor) as f32,
         );
-        grip_direction(
+        resize_grip(
             self.runtime.viewport(),
             self.runtime.viewport_corner_radii(),
             cursor,
+            EDGE_WIDTH,
+            None,
         )
     }
 
@@ -50,7 +52,13 @@ impl AppRunner {
 }
 
 /// Find the edge or corner on the inside of the visible window outline.
-fn grip_direction(size: Size, radii: CornerRadii, point: Point) -> Option<ResizeDirection> {
+pub(super) fn resize_grip(
+    size: Size,
+    radii: CornerRadii,
+    point: Point,
+    edge: f32,
+    corner: Option<f32>,
+) -> Option<ResizeDirection> {
     use ResizeDirection::{East, North, NorthEast, NorthWest, South, SouthEast, SouthWest, West};
 
     let left = point.x;
@@ -60,7 +68,9 @@ fn grip_direction(size: Size, radii: CornerRadii, point: Point) -> Option<Resize
     if [left, right, top, bottom].into_iter().any(|d| d < 0.0) {
         return None;
     }
-    let grip = EDGE_WIDTH.min(size.width.min(size.height) / 4.0);
+    let limit = size.width.min(size.height) / 4.0;
+    let grip = edge.min(limit);
+    let corner = corner.map(|corner| corner.min(limit));
     if grip <= 0.0 {
         return None;
     }
@@ -84,7 +94,10 @@ fn grip_direction(size: Size, radii: CornerRadii, point: Point) -> Option<Resize
                 corner_grip = Some(direction);
             }
         }
-        if (x < grip && y < grip * 2.0) || (y < grip && x < grip * 2.0) {
+        if corner.is_some_and(|corner| x < corner && y < corner)
+            || (x < grip && y < grip * 2.0)
+            || (y < grip && x < grip * 2.0)
+        {
             corner_grip = Some(direction);
         }
     }
@@ -117,14 +130,20 @@ mod tests {
     fn resizes_on_the_visible_corner_arc_and_not_in_the_cutout() {
         let size = Size::new(120.0, 80.0);
         let radii = CornerRadii::elliptical(24.0, 16.0);
-        assert_eq!(grip_direction(size, radii, Point::new(2.0, 2.0)), None);
         assert_eq!(
-            grip_direction(size, radii, Point::new(8.0, 5.0)),
+            resize_grip(size, radii, Point::new(2.0, 2.0), EDGE_WIDTH, None),
+            None
+        );
+        assert_eq!(
+            resize_grip(size, radii, Point::new(8.0, 5.0), EDGE_WIDTH, None),
             Some(ResizeDirection::NorthWest)
         );
-        assert_eq!(grip_direction(size, radii, Point::new(17.0, 12.0)), None);
         assert_eq!(
-            grip_direction(size, radii, Point::new(60.0, 2.0)),
+            resize_grip(size, radii, Point::new(17.0, 12.0), EDGE_WIDTH, None),
+            None
+        );
+        assert_eq!(
+            resize_grip(size, radii, Point::new(60.0, 2.0), EDGE_WIDTH, None),
             Some(ResizeDirection::North)
         );
     }
@@ -144,10 +163,41 @@ mod tests {
             (2.0, 40.0, ResizeDirection::West),
         ] {
             assert_eq!(
-                grip_direction(size, radii, Point::new(x, y)),
+                resize_grip(size, radii, Point::new(x, y), EDGE_WIDTH, None),
                 Some(direction)
             );
         }
-        assert_eq!(grip_direction(size, radii, Point::new(60.0, 40.0)), None);
+        assert_eq!(
+            resize_grip(size, radii, Point::new(60.0, 40.0), EDGE_WIDTH, None),
+            None
+        );
+    }
+    #[test]
+    fn touch_grips_cover_all_edges_and_corners() {
+        let size = Size::new(120.0, 80.0);
+        let radii = CornerRadii::elliptical(14.0, 14.0);
+        for (x, y, direction) in [
+            (14.0, 14.0, ResizeDirection::NorthWest),
+            (60.0, 8.0, ResizeDirection::North),
+            (106.0, 14.0, ResizeDirection::NorthEast),
+            (112.0, 40.0, ResizeDirection::East),
+            (106.0, 66.0, ResizeDirection::SouthEast),
+            (60.0, 72.0, ResizeDirection::South),
+            (14.0, 66.0, ResizeDirection::SouthWest),
+            (8.0, 40.0, ResizeDirection::West),
+        ] {
+            assert_eq!(
+                resize_grip(size, radii, Point::new(x, y), 10.0, Some(24.0)),
+                Some(direction)
+            );
+        }
+        assert_eq!(
+            resize_grip(size, radii, Point::new(2.0, 2.0), 10.0, Some(24.0)),
+            None
+        );
+        assert_eq!(
+            resize_grip(size, radii, Point::new(60.0, 40.0), 10.0, Some(24.0)),
+            None
+        );
     }
 }
