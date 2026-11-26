@@ -4,6 +4,8 @@
 mod background_blur;
 pub use background_blur::BackgroundBlur;
 mod rounded_region;
+mod touch_window_move;
+pub use touch_window_move::TouchWindowMove;
 mod window_blur;
 pub use window_blur::WindowBlur;
 mod window_presentation;

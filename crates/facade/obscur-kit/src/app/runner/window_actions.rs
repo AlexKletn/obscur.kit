@@ -24,6 +24,7 @@ impl AppRunner {
         &mut self,
         event_loop: &ActiveEventLoop,
         mut primary_press: Option<PointerEvent>,
+        mut touch_press: Option<(u64, PointerEvent)>,
     ) -> bool {
         let Some(window) = &self.window else {
             return false;
@@ -38,6 +39,29 @@ impl AppRunner {
                 }
                 WindowAction::BeginResize(_) if !self.resize => {}
                 WindowAction::BeginMove | WindowAction::BeginResize(_) => {
+                    if action == WindowAction::BeginMove
+                        && let Some((id, press)) = touch_press.take()
+                    {
+                        #[cfg(target_os = "linux")]
+                        if let Some(mover) = self.wayland_touch_move.as_mut() {
+                            match mover.begin(id) {
+                                Ok(true) => {
+                                    self.runtime.handle_pointer(PointerEvent {
+                                        kind: PointerEventKind::Cancel,
+                                        buttons: Default::default(),
+                                        button: None,
+                                        pressure: 0.0,
+                                        ..press
+                                    });
+                                }
+                                Ok(false) => {}
+                                Err(error) => eprintln!("Wayland touch move failed: {error}"),
+                            }
+                        }
+                        #[cfg(not(target_os = "linux"))]
+                        let _ = (id, press);
+                        continue;
+                    }
                     let Some(press) = primary_press else {
                         self.runtime.report_diagnostic(&Diagnostic::new(
                             DiagnosticCode::new("window.interactive-action.no-press"),

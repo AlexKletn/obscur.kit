@@ -158,6 +158,18 @@ impl ApplicationHandler<WindowWake> for AppRunner {
         #[cfg(target_os = "linux")]
         {
             self.init_wayland_feedback(&window);
+            use winit::platform::wayland::WindowExtWayland;
+            if !self.decorated
+                && let Some(toplevel) = window.xdg_toplevel()
+            {
+                // SAFETY: winit supplied the xdg-toplevel of the retained window.
+                match unsafe {
+                    obscur_wayland_effects::TouchWindowMove::new(Arc::clone(&window), toplevel)
+                } {
+                    Ok(touch_move) => self.wayland_touch_move = touch_move,
+                    Err(error) => eprintln!("Wayland touch move unavailable: {error}"),
+                }
+            }
             let gesture_proxy = self.proxy.clone();
             let pointing_proxy = self.proxy.clone();
             match obscur_wayland_effects::WindowGestures::with_pointing_capabilities(
@@ -221,6 +233,7 @@ impl ApplicationHandler<WindowWake> for AppRunner {
             self.sync_window_state();
         }
         let mut primary_press = None;
+        let mut touch_press = None;
         match event {
             WindowEvent::Resized(new_size) => {
                 let extent = (new_size.width, new_size.height);
@@ -261,7 +274,10 @@ impl ApplicationHandler<WindowWake> for AppRunner {
                 {
                     return;
                 }
-                self.handle_touch_contact(contact);
+                let event = self.handle_touch_contact(contact);
+                if event.kind() == crate::interaction::pointer::PointerEventKind::Down {
+                    touch_press = Some((contact.id, event));
+                }
             }
             WindowEvent::PinchGesture { delta, phase, .. } if cfg!(target_os = "macos") => {
                 self.native_touchpad_transform(
@@ -310,7 +326,7 @@ impl ApplicationHandler<WindowWake> for AppRunner {
             }
             _ => {}
         }
-        if !self.apply_window_actions(event_loop, primary_press) {
+        if !self.apply_window_actions(event_loop, primary_press, touch_press) {
             self.sync_ime();
         }
     }
@@ -411,6 +427,13 @@ impl ApplicationHandler<WindowWake> for AppRunner {
     /// a `url()` image a frame later, so an otherwise idle UI repaints when it
     /// arrives (spec §1.5 / §3.3).
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        #[cfg(target_os = "linux")]
+        if let Some(mover) = self.wayland_touch_move.as_mut()
+            && let Err(error) = mover.refresh()
+        {
+            eprintln!("Wayland touch tracking failed: {error}");
+            self.wayland_touch_move = None;
+        }
         if let Some(window) = &self.window
             && let Some(protected) = self.control.take_window_capture_protection()
         {
@@ -425,7 +448,7 @@ impl ApplicationHandler<WindowWake> for AppRunner {
         if self.pending_commit.is_none() {
             self.poll_wayland_presentation();
         }
-        if self.apply_window_actions(event_loop, None) {
+        if self.apply_window_actions(event_loop, None, None) {
             return;
         }
         #[cfg(feature = "accesskit-window")]

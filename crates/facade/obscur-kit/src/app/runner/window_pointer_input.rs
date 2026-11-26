@@ -64,13 +64,14 @@ impl AppRunner {
         ControlFlow::Continue(primary_press.then_some(event))
     }
 
-    pub(super) fn handle_touch_contact(&mut self, contact: Touch) {
+    pub(super) fn handle_touch_contact(&mut self, contact: Touch) -> PointerEvent {
         // Updating the mouse cursor here would change the next wheel target.
         let event = PointerConverter::new()
             .touch(contact)
             .with_timestamp(self.now_micros());
         self.runtime.handle_pointer(event);
         self.request_redraw();
+        event
     }
 
     pub(super) fn handle_mouse_wheel(&mut self, delta: MouseScrollDelta, phase: TouchPhase) {

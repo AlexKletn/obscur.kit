@@ -148,6 +148,8 @@ fn run_inner(
         #[cfg(target_os = "linux")]
         wayland_gestures: None,
         #[cfg(target_os = "linux")]
+        wayland_touch_move: None,
+        #[cfg(target_os = "linux")]
         shown_sample: PresentationStats::default(),
         #[cfg(target_os = "linux")]
         wayland_pacer: None,
@@ -288,6 +290,8 @@ struct AppRunner {
     presentation: Option<obscur_wayland_effects::WindowPresentation<Arc<Window>>>,
     #[cfg(target_os = "linux")]
     wayland_gestures: Option<obscur_wayland_effects::WindowGestures<Arc<Window>>>,
+    #[cfg(target_os = "linux")]
+    wayland_touch_move: Option<obscur_wayland_effects::TouchWindowMove<Arc<Window>>>,
     #[cfg(target_os = "linux")]
     shown_sample: PresentationStats,
     #[cfg(target_os = "linux")]
