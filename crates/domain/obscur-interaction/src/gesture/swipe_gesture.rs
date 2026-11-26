@@ -29,6 +29,7 @@ pub struct SwipeGesture {
     native_finger_count: Option<Option<NonZeroUsize>>,
     wheel_distance: Option<(f32, f32)>,
     required_finger_count: Option<NonZeroUsize>,
+    required_touchpad_finger_count: Option<NonZeroUsize>,
     contacts: Vec<(PointerId, Point)>,
     touch_origin: Option<Point>,
     offset: Option<f32>,
@@ -49,6 +50,15 @@ impl SwipeGesture {
     pub fn with_finger_count(mut self, count: NonZeroUsize) -> Self {
         self.cancel();
         self.required_finger_count = Some(count);
+        self
+    }
+
+    /// Requires a native touchpad swipe to report this exact finger count at the start.
+    /// Overrides the native count from `with_finger_count` and leaves touch and pixel-scroll recognition unchanged.
+    #[must_use]
+    pub fn with_touchpad_finger_count(mut self, count: NonZeroUsize) -> Self {
+        self.cancel();
+        self.required_touchpad_finger_count = Some(count);
         self
     }
 
@@ -208,9 +218,17 @@ impl SwipeGesture {
             return None;
         }
         if event.phase == GesturePhase::Started {
+            if self
+                .required_touchpad_finger_count
+                .is_some_and(|count| event.finger_count != Some(count))
+            {
+                return self.native_finger_count.and_then(|_| self.cancel());
+            }
             let interrupted = self.cancel();
-            if self.required_finger_count.is_none()
-                || self.required_finger_count == event.finger_count
+            if self.required_touchpad_finger_count.is_some()
+                || self
+                    .required_finger_count
+                    .is_none_or(|count| event.finger_count == Some(count))
             {
                 self.native_finger_count = Some(event.finger_count);
                 self.wheel_distance = Some((0.0, 0.0));

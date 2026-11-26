@@ -1,11 +1,13 @@
 //! Recognizer for a semantic back swipe.
 
+use std::num::NonZeroUsize;
+
 use crate::event::UiEvent;
 use crate::pointer::{PointerEvent, WheelEvent};
 
 use super::{BackGestureUpdate, SwipeGesture, SwipeUpdate};
 
-/// Tracks a trusted left-edge touch swipe or a trusted pixel-scroll swipe from a touchpad.
+/// Tracks a trusted left-edge touch swipe, native touchpad swipe or phased pixel scroll.
 #[derive(Debug)]
 pub struct BackGesture(SwipeGesture);
 
@@ -16,6 +18,13 @@ impl Default for BackGesture {
 }
 
 impl BackGesture {
+    /// Requires a native touchpad swipe to report this exact finger count at the start.
+    /// Touchscreen swipes and phased pixel scroll keep their usual recognition rules.
+    #[must_use]
+    pub fn with_touchpad_finger_count(self, count: NonZeroUsize) -> Self {
+        Self(self.0.with_touchpad_finger_count(count))
+    }
+
     /// Feed a dispatched UI event. Scale converts physical wheel deltas into logical pixels. Pointer positions in dispatched UI events are already logical.
     pub fn update(&mut self, event: &UiEvent, scale: f32) -> Option<BackGestureUpdate> {
         self.0.update(event, scale).map(back_update)
@@ -52,78 +61,5 @@ fn back_update(update: SwipeUpdate) -> BackGestureUpdate {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::super::{BackGesturePhase, GestureSource};
-    use super::*;
-    use crate::pointer::{PointerDevice, PointerEventKind, PointerId};
-    use obscur_geometry::Point;
-
-    fn touch(kind: PointerEventKind, x: f32) -> PointerEvent {
-        PointerEvent::new(
-            PointerId::touch(1),
-            PointerDevice::Touch,
-            kind,
-            Point::new(x, 40.0),
-        )
-        .as_trusted()
-    }
-
-    #[test]
-    fn a_touch_reports_ordered_phases_and_releases_its_offset() {
-        let mut gesture = BackGesture::default();
-        assert_eq!(
-            gesture.update_touch(touch(PointerEventKind::Down, 12.0)),
-            None
-        );
-        for (kind, x, phase, offset) in [
-            (
-                PointerEventKind::Move,
-                24.0,
-                BackGesturePhase::Started,
-                12.0,
-            ),
-            (
-                PointerEventKind::Move,
-                50.0,
-                BackGesturePhase::Updated,
-                38.0,
-            ),
-            (
-                PointerEventKind::Up,
-                100.0,
-                BackGesturePhase::Completed,
-                88.0,
-            ),
-        ] {
-            assert_eq!(
-                gesture.update_touch(touch(kind, x)),
-                Some(BackGestureUpdate {
-                    source: GestureSource::Touchscreen,
-                    phase,
-                    offset
-                })
-            );
-        }
-        assert_eq!(gesture.offset(), None);
-        assert_eq!(gesture.cancel(), None);
-    }
-
-    #[test]
-    fn native_cancellation_ends_a_recognized_contact_without_completing_it() {
-        let mut gesture = BackGesture::default();
-        gesture.update_touch(touch(PointerEventKind::Down, 4.0));
-        gesture.update_touch(touch(PointerEventKind::Move, 100.0));
-        assert_eq!(
-            gesture.update_touch(touch(PointerEventKind::Cancel, 110.0)),
-            Some(BackGestureUpdate {
-                source: GestureSource::Touchscreen,
-                phase: BackGesturePhase::Cancelled,
-                offset: 96.0
-            }),
-        );
-        assert_eq!(
-            gesture.update_touch(touch(PointerEventKind::Up, 120.0)),
-            None
-        );
-    }
-}
+#[path = "back_gesture.tests.rs"]
+mod tests;
