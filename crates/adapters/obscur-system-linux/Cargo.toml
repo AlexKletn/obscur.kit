@@ -8,6 +8,7 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+freedesktop-icons = "0.4"
 obscur-system = { workspace = true }
 obscur-capability = { workspace = true }
 # `Color` — a palette read off the desktop arrives in the kit's own colour type.
